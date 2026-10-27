@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\Core;
 
 use App\Http\Controllers\Controller;
 use App\Models\DataSource;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
 use App\Services\Connectors\ConnectorRegistry;
@@ -24,8 +25,7 @@ final class DataSourceController extends Controller
         private readonly TenantContext $context,
         private readonly AuditLogger $audit,
         private readonly PlanLimitService $plans,
-    ) {
-    }
+    ) {}
 
     public function connectors(): JsonResponse
     {
@@ -35,7 +35,7 @@ final class DataSourceController extends Controller
     public function index(): JsonResponse
     {
         $sources = DataSource::query()->orderBy('name')->get();
-        $tokens = \App\Models\PersonalAccessToken::query()->where('tenant_id', $this->context->id())
+        $tokens = PersonalAccessToken::query()->where('tenant_id', $this->context->id())
             ->where('name', 'like', 'datasource:%')->get(['id', 'name', 'last_used_at', 'expires_at', 'created_at'])
             ->groupBy(fn ($t) => (int) substr($t->name, strlen('datasource:')));
 
@@ -45,7 +45,7 @@ final class DataSourceController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $this->validated($request);
-        $source = new DataSource();
+        $source = new DataSource;
         $source->fill([
             'type' => $data['type'],
             'connector_key' => $data['connector_key'] ?? $this->defaultConnector($data['type']),
@@ -60,6 +60,7 @@ final class DataSourceController extends Controller
             $source->last_error = $connector->test($source)->message;
         }
         $source->save();
+        $source->refresh();
         $this->audit->log('datasource.created', $source, ['type' => $source->type, 'connector_key' => $source->connector_key]);
 
         return response()->json(['data' => $this->present($source)], 201);
@@ -80,7 +81,7 @@ final class DataSourceController extends Controller
 
     public function destroy(DataSource $dataSource): Response
     {
-        \App\Models\PersonalAccessToken::query()->where('tenant_id', $this->context->id())->where('name', 'datasource:'.$dataSource->id)->delete();
+        PersonalAccessToken::query()->where('tenant_id', $this->context->id())->where('name', 'datasource:'.$dataSource->id)->delete();
         $dataSource->delete();
         $this->audit->log('datasource.deleted', $dataSource);
 
@@ -110,7 +111,7 @@ final class DataSourceController extends Controller
 
     public function revokeToken(DataSource $dataSource, int $tokenId): Response
     {
-        \App\Models\PersonalAccessToken::query()->where('tenant_id', $this->context->id())->where('name', 'datasource:'.$dataSource->id)->whereKey($tokenId)->delete();
+        PersonalAccessToken::query()->where('tenant_id', $this->context->id())->where('name', 'datasource:'.$dataSource->id)->whereKey($tokenId)->delete();
         $this->audit->log('datasource.token_revoked', $dataSource, ['token_id' => $tokenId]);
 
         return response()->noContent();
@@ -148,7 +149,7 @@ final class DataSourceController extends Controller
         };
     }
 
-    /** @param list<\App\Models\PersonalAccessToken> $tokens */
+    /** @param list<PersonalAccessToken> $tokens */
     private function present(DataSource $s, array $tokens = []): array
     {
         $connector = $this->connectors->get((string) $s->connector_key);

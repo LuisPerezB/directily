@@ -7,6 +7,7 @@ namespace App\Console\Commands\Analytics;
 use App\Jobs\Forecasting\EvaluateActuals;
 use App\Models\Tenant;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 
 /** Encola la evaluación de pronósticos pasados contra ventas reales (detección de drift). */
 class EvaluateActualsCommand extends Command
@@ -22,6 +23,11 @@ class EvaluateActualsCommand extends Command
                 ->whereColumn('forecast_runs.tenant_id', 'tenants.id')
                 ->where('forecast_runs.status', 'completed'));
         if ($uuid = $this->argument('tenant')) {
+            if (! Str::isUuid((string) $uuid)) {
+                $this->error('UUID de empresa inválido.');
+
+                return self::FAILURE;
+            }
             $query->where('uuid', (string) $uuid);
         }
 

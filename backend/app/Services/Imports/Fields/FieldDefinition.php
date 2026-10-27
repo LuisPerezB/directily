@@ -15,8 +15,7 @@ final readonly class FieldDefinition
         public string $type, // string, date, datetime, number, integer, boolean
         public string $description,
         public array $synonyms = [],
-    ) {
-    }
+    ) {}
 
     /** @return array<string, mixed> */
     public function toArray(): array

@@ -18,16 +18,15 @@ final class ExportTenantData implements ShouldQueue
     use Queueable;
 
     public int $timeout = 3600;
+
     public int $tries = 1;
 
-    public function __construct(public int $tenantId, public int $exportId)
-    {
-    }
+    public function __construct(public int $tenantId, public int $exportId) {}
 
     /** @return list<object> */
     public function middleware(): array
     {
-        return [new SetTenantContext()];
+        return [new SetTenantContext];
     }
 
     public function handle(TenantDataExporter $exporter, AuditLogger $audit): void

@@ -52,8 +52,8 @@ const option = computed<EChartsCoreOption>(() => {
       itemWidth: 14,
       textStyle: { color: p.muted },
       data: [
-        t('chart.history'),
-        t('chart.forecast'),
+        ...(d.history.some((v) => v !== null) ? [t('chart.history')] : []),
+        ...(d.yhat.some((v) => v !== null) ? [t('chart.forecast')] : []),
         ...(d.hasIntervals ? [t('chart.interval80'), t('chart.interval95')] : []),
         ...(stockoutPoints.some((v) => v !== null) ? [t('chart.stockout')] : []),
       ],

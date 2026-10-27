@@ -21,7 +21,7 @@ final class SalesDocumentWriter
     /**
      * Clasifica documentos contra la base de datos.
      *
-     * @param list<array<string, mixed>> $documents
+     * @param  list<array<string, mixed>>  $documents
      * @return array<string, array{state: string, id: ?int}> doc_key => estado (new|updated|unchanged)
      */
     public function classify(Tenant $tenant, array $documents): array
@@ -59,8 +59,8 @@ final class SalesDocumentWriter
     /**
      * Escribe un lote de documentos ya validados.
      *
-     * @param list<array<string, mixed>> $documents
-     * @param array{import_job_id?: ?int, data_source_id?: ?int} $context
+     * @param  list<array<string, mixed>>  $documents
+     * @param  array{import_job_id?: ?int, data_source_id?: ?int}  $context
      * @return array{new: int, updated: int, unchanged: int, products_created: int, branches_created: int, lines_written: int}
      */
     public function write(Tenant $tenant, array $documents, CatalogResolver $catalog, array $context = []): array

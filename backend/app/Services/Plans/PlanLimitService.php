@@ -27,10 +27,32 @@ final class PlanLimitService
 
         $plan = $tenant->plan_id ? Plan::query()->find($tenant->plan_id) : null;
         if ($plan !== null) {
-            $base = array_replace_recursive($base, $plan->limits ?? []);
+            $base = self::mergeLimits($base, $plan->limits ?? []);
         }
 
-        return array_replace_recursive($base, $tenant->plan_overrides ?? []);
+        return self::mergeLimits($base, $tenant->plan_overrides ?? []);
+    }
+
+    /**
+     * Combina límites: los mapas (p. ej. features) se combinan clave a clave, pero las
+     * listas (p. ej. horizons) se REEMPLAZAN completas. array_replace_recursive fusionaría
+     * [7, 30, 90] con [7, 30] dejando [7, 30, 90].
+     *
+     * @param  array<string, mixed>  $base
+     * @param  array<string, mixed>  $override
+     * @return array<string, mixed>
+     */
+    public static function mergeLimits(array $base, array $override): array
+    {
+        foreach ($override as $key => $value) {
+            if (is_array($value) && ! array_is_list($value) && isset($base[$key]) && is_array($base[$key]) && ! array_is_list($base[$key])) {
+                $base[$key] = self::mergeLimits($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+
+        return $base;
     }
 
     public function allows(Tenant $tenant, string $feature): bool

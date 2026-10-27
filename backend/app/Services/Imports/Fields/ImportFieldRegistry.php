@@ -18,6 +18,8 @@ final class ImportFieldRegistry
             ImportEntity::Inventory => $this->inventory(),
             ImportEntity::LeadTimes => $this->leadTimes(),
             ImportEntity::Branches => $this->branches(),
+            ImportEntity::Suppliers => $this->suppliers(),
+            ImportEntity::Promotions => $this->promotions(),
         };
     }
 
@@ -116,6 +118,33 @@ final class ImportFieldRegistry
             new FieldDefinition('canton', 'Cantón', false, 'string', 'Cantón o ciudad.', ['canton', 'ciudad', 'city']),
             new FieldDefinition('commercial_zone', 'Zona comercial', false, 'string', 'Zona o sector comercial.', ['zona', 'zona_comercial', 'sector', 'commercial_zone']),
             new FieldDefinition('address', 'Dirección', false, 'string', 'Dirección del local (dato de la empresa).', ['direccion', 'address']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function suppliers(): array
+    {
+        return [
+            new FieldDefinition('code', 'Código', true, 'string', 'Código del proveedor.', ['codigo', 'codigo_proveedor', 'cod_proveedor', 'code', 'supplier_code']),
+            new FieldDefinition('name', 'Nombre', true, 'string', 'Razón social o nombre comercial.', ['nombre', 'proveedor', 'razon_social', 'name', 'supplier_name']),
+            new FieldDefinition('tax_id', 'RUC', false, 'string', 'RUC del proveedor (persona jurídica).', ['ruc', 'tax_id', 'identificacion']),
+            new FieldDefinition('country', 'País', false, 'string', 'Código ISO de 2 letras (EC, CN, US...).', ['pais', 'country']),
+            new FieldDefinition('default_lead_time_days', 'Plazo habitual (días)', false, 'integer', 'Plazo de entrega habitual.', ['plazo', 'plazo_dias', 'default_lead_time_days', 'dias_entrega']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function promotions(): array
+    {
+        return [
+            new FieldDefinition('name', 'Nombre', true, 'string', 'Nombre de la promoción.', ['nombre', 'promocion', 'name', 'campana']),
+            new FieldDefinition('promo_type', 'Tipo', false, 'string', 'percentage, fixed_amount, bundle u other.', ['tipo', 'promo_type', 'tipo_promocion']),
+            new FieldDefinition('discount_pct', 'Descuento', false, 'number', 'Fracción (0.15) o porcentaje (15 o 15%).', ['descuento', 'discount_pct', 'porcentaje', 'dscto']),
+            new FieldDefinition('starts_on', 'Desde', true, 'date', 'Fecha de inicio.', ['desde', 'inicio', 'fecha_inicio', 'starts_on']),
+            new FieldDefinition('ends_on', 'Hasta', true, 'date', 'Fecha de fin (incluida).', ['hasta', 'fin', 'fecha_fin', 'ends_on']),
+            new FieldDefinition('branch_code', 'Sucursal', false, 'string', 'Vacío = todas las sucursales.', ['sucursal', 'branch_code', 'establecimiento']),
+            new FieldDefinition('product_sku', 'Producto', false, 'string', 'Producto específico (opcional).', ['codigo', 'sku', 'product_sku', 'codigo_producto']),
+            new FieldDefinition('category', 'Categoría', false, 'string', 'Categoría completa (opcional).', ['categoria', 'category', 'linea', 'familia']),
         ];
     }
 }

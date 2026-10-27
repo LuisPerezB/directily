@@ -24,8 +24,7 @@ final class TenantController extends Controller
         private readonly TenantService $tenants,
         private readonly TenantContext $context,
         private readonly PlanLimitService $plans,
-    ) {
-    }
+    ) {}
 
     /** GET /tenants — empresas del usuario autenticado. */
     public function index(Request $request): AnonymousResourceCollection

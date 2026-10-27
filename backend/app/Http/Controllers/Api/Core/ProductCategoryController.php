@@ -26,7 +26,7 @@ final class ProductCategoryController extends Controller
             'code' => ['sometimes', 'nullable', 'string', 'max:50'],
             'parent_id' => ['sometimes', 'nullable', 'integer', TenantRule::exists('product_categories')],
         ]);
-        $category = ProductCategory::query()->create($data);
+        $category = ProductCategory::query()->create($data)->refresh();
         $category->products_count = 0;
 
         return response()->json(['data' => $this->present($category)], 201);

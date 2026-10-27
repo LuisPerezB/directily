@@ -27,8 +27,7 @@ final class ImportController extends Controller
         private readonly ImportService $imports,
         private readonly ImportFieldRegistry $fields,
         private readonly TenantContext $context,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -117,11 +116,15 @@ final class ImportController extends Controller
     {
         $filename = 'errores-importacion-'.$import->id.'.csv';
 
-        return response()->streamDownload(function () use ($import): void {
+        // El callback corre DESPUÉS de los middleware (el TenantContext ya se limpió):
+        // se filtra explícitamente por la empresa del import ya autorizado.
+        $tenantId = $import->tenant_id;
+
+        return response()->streamDownload(function () use ($import, $tenantId): void {
             $out = fopen('php://output', 'wb');
             fwrite($out, "\xEF\xBB\xBF");
             fputcsv($out, ['fila', 'columna', 'codigo', 'severidad', 'mensaje', 'valor'], ',', '"', '');
-            ImportError::query()->where('import_job_id', $import->id)->orderBy('row_number')->orderBy('id')
+            ImportError::withoutTenantScope()->where('tenant_id', $tenantId)->where('import_job_id', $import->id)->orderBy('row_number')->orderBy('id')
                 ->lazyById(1000)->each(function (ImportError $e) use ($out): void {
                     fputcsv($out, [$e->row_number, $e->column, $e->error_code, $e->severity, $e->message, $e->raw_value], ',', '"', '');
                 });

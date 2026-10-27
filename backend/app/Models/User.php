@@ -20,6 +20,9 @@ class User extends Authenticatable
 
     protected $fillable = ['name', 'email', 'password', 'locale'];
 
+    /** Valores por defecto en memoria (coinciden con los defaults de la BD). */
+    protected $attributes = ['locale' => 'es', 'is_superadmin' => false];
+
     protected $hidden = ['password', 'remember_token'];
 
     protected function casts(): array

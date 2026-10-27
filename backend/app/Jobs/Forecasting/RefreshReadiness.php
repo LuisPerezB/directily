@@ -52,7 +52,7 @@ class RefreshReadiness implements ShouldBeUnique, ShouldQueue
     /** @return list<object> */
     public function middleware(): array
     {
-        return [new SetTenantContext()];
+        return [new SetTenantContext];
     }
 
     public function handle(EngineClient $engine, TrainingJobRecorder $recorder): void

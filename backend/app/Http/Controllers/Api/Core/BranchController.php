@@ -22,8 +22,7 @@ final class BranchController extends Controller
         private readonly TenantContext $context,
         private readonly PlanLimitService $plans,
         private readonly AuditLogger $audit,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -38,7 +37,7 @@ final class BranchController extends Controller
     public function store(BranchRequest $request): JsonResponse
     {
         $this->plans->assertCan($this->context->require(), 'max_branches');
-        $branch = Branch::query()->create($request->validated());
+        $branch = Branch::query()->create($request->validated())->refresh();
         $this->audit->log('branch.created', $branch, ['code' => $branch->code]);
 
         return (new BranchResource($branch))->response()->setStatusCode(201);

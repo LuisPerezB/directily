@@ -26,7 +26,7 @@ final class ScenarioSimulator
     ];
 
     /**
-     * @param array<string, mixed> $assumptions
+     * @param  array<string, mixed>  $assumptions
      * @return array<string, mixed>
      */
     public function simulate(ScenarioBaseline $baseline, array $assumptions): array
@@ -143,7 +143,7 @@ final class ScenarioSimulator
      * la demanda en el plazo y el stock de seguridad. Conserva la estructura de cálculo del
      * motor aplicando la variación del punto de reorden.
      *
-     * @param array<string, mixed> $rec
+     * @param  array<string, mixed>  $rec
      */
     public function scenarioSuggestedQty(array $rec, float $demandFactor, ?int $leadTimeOverride): float
     {
@@ -171,7 +171,7 @@ final class ScenarioSimulator
     }
 
     /**
-     * @param array<string, float> $t
+     * @param  array<string, float>  $t
      * @return array<string, float|null>
      */
     private function finalize(array $t): array
@@ -190,10 +190,10 @@ final class ScenarioSimulator
     }
 
     /**
-     * @param array<string, mixed> $a
-     * @param array<string, float|null> $base
-     * @param array<string, float|null> $scenario
-     * @param array<string, float>|null $budget
+     * @param  array<string, mixed>  $a
+     * @param  array<string, float|null>  $base
+     * @param  array<string, float|null>  $scenario
+     * @param  array<string, float>|null  $budget
      * @return list<array{code: string, severity: string, message: string}>
      */
     private function risks(ScenarioBaseline $baseline, array $a, array $base, array $scenario, ?array $budget, int $productsWithoutCost, ?float $costCoverage): array

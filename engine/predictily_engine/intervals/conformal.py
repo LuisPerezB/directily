@@ -2,7 +2,10 @@
 
 Para cada grupo (clase de demanda o nivel jerárquico) y tramo de horizonte se calculan
 cuantiles empíricos del error normalizado e = (real − pred) / escala. El intervalo es
-pred + q·escala (80 %: q10–q90; 95 %: q2.5–q97.5), truncado en 0. Más allá del horizonte
+pred + q·escala (80 %: q10–q90; 95 %: q2.5–q97.5), truncado en 0 (modo "quantile",
+asimétrico, adecuado para conteos sesgados a la derecha a nivel serie). En modo "absolute"
+el intervalo es simétrico: pred ± cuantil(|e|) (más robusto en niveles agregados cuando
+las pocas ventanas comparten un sesgo estacional). Más allá del horizonte
 evaluado, el último tramo se ensancha con √(paso / paso_máximo). La cobertura se mide con
 validación "dejando una ventana fuera" (los cuantiles nunca usan la ventana evaluada).
 """
@@ -33,8 +36,9 @@ def identity_bucket(step: np.ndarray) -> np.ndarray:
 
 class ConformalCalibrator:
     def __init__(self, rows: pd.DataFrame, group_col: str = "group",
-                 bucketer: Callable[[np.ndarray], np.ndarray] = day_bucket) -> None:
+                 bucketer: Callable[[np.ndarray], np.ndarray] = day_bucket, mode: str = "quantile") -> None:
         self.bucketer = bucketer
+        self.mode = mode
         self.group_col = group_col
         rows = rows[np.isfinite(rows["actual"]) & np.isfinite(rows["yhat"]) & (rows["scale"] > 0)]
         e = (rows["actual"].to_numpy() - rows["yhat"].to_numpy()) / rows["scale"].to_numpy()
@@ -44,10 +48,16 @@ class ConformalCalibrator:
         self.table: dict[tuple, np.ndarray] = {}
         for (g, b), sub in frame.groupby(["group", "bucket"]):
             if len(sub) >= MIN_POINTS:
-                self.table[(g, b)] = np.quantile(sub["e"], QUANTILES)
+                self.table[(g, b)] = self._quantiles(sub["e"].to_numpy())
         for b, sub in frame.groupby("bucket"):
             if len(sub) >= MIN_POINTS:
-                self.table[("__all__", b)] = np.quantile(sub["e"], QUANTILES)
+                self.table[("__all__", b)] = self._quantiles(sub["e"].to_numpy())
+
+    def _quantiles(self, e: np.ndarray) -> np.ndarray:
+        if self.mode == "absolute":
+            q80, q95 = np.quantile(np.abs(e), [0.80, 0.95])
+            return np.array([-q95, -q80, q80, q95])
+        return np.quantile(e, QUANTILES)
 
     @property
     def empty(self) -> bool:
@@ -92,11 +102,12 @@ class ConformalCalibrator:
 
 
 def loo_coverage(rows: pd.DataFrame, group_col: str = "group",
-                 bucketer: Callable[[np.ndarray], np.ndarray] = day_bucket) -> tuple[float | None, float | None]:
+                 bucketer: Callable[[np.ndarray], np.ndarray] = day_bucket,
+                 mode: str = "quantile") -> tuple[float | None, float | None]:
     """Cobertura 80/95 dejando cada ventana fuera de la calibración."""
     hits80, hits95, total = 0, 0, 0
     for w in sorted(rows["window"].unique()):
-        cal = ConformalCalibrator(rows[rows["window"] != w], group_col, bucketer)
+        cal = ConformalCalibrator(rows[rows["window"] != w], group_col, bucketer, mode)
         if cal.empty:
             continue
         test = cal.apply(rows[rows["window"] == w])

@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Services\Forecasting\ForecastRunService;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 use Throwable;
 
 /** Solicita (o ejecuta en primer plano con --sync) un pronóstico para una empresa. */
@@ -24,7 +25,8 @@ class ForecastCommand extends Command
 
     public function handle(ForecastRunService $service, TenantContext $context): int
     {
-        $tenant = Tenant::query()->where('uuid', (string) $this->argument('tenant'))->first();
+        $uuid = (string) $this->argument('tenant');
+        $tenant = Str::isUuid($uuid) ? Tenant::query()->where('uuid', $uuid)->first() : null;
         if ($tenant === null) {
             $this->error('Empresa no encontrada.');
 

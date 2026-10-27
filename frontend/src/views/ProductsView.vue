@@ -150,7 +150,7 @@ async function exportCsv(): Promise<void> {
       </template>
       <template v-else>
         <DataTable v-model:sort="sort" :columns="productColumns" :rows="products.data.value?.data ?? []" :row-key="(r) => r.product.id" :loading="products.loading.value" :caption="t('products.tabProducts')">
-          <template #cell-product.name="{ row }">
+          <template #cell-product_name="{ row }">
             <span class="font-medium block">{{ row.product.name }}</span>
             <span class="text-xs text-fg-muted">{{ row.product.sku }}</span>
           </template>

@@ -15,14 +15,13 @@ namespace App\Services\Scenarios;
 final class ScenarioBaseline
 {
     /**
-     * @param list<array{product_id: int, units: float, revenue: float|null, unit_cost: float|null}> $products
-     * @param list<array<string, mixed>> $replenishment
+     * @param  list<array{product_id: int, units: float, revenue: float|null, unit_cost: float|null}>  $products
+     * @param  list<array<string, mixed>>  $replenishment
      */
     public function __construct(
         public readonly int $horizonDays,
         public readonly array $products,
         public readonly array $replenishment = [],
         public readonly ?float $dataQualityScore = null,
-    ) {
-    }
+    ) {}
 }

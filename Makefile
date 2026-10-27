@@ -63,7 +63,7 @@ seed: ## Carga planes y datos base (seeders)
 
 .PHONY: demo
 demo: ## Crea las 2 empresas DEMO (datos ficticios), importa sus datos y solicita pronósticos
-	$(COMPOSE) exec backend php artisan predictily:demo
+	$(COMPOSE) exec backend php artisan predictily:demo --forecast
 
 .PHONY: shell
 shell: ## Shell en el contenedor backend
@@ -82,7 +82,7 @@ restore-verify: ## Prueba de restauración del último respaldo en una base temp
 native-setup: ## Instala dependencias de backend, motor y frontend en modo nativo
 	cd backend && composer install && (test -f .env || cp .env.example .env) && $(PHP) artisan key:generate --no-interaction && $(PHP) artisan migrate --force && $(PHP) artisan db:seed --force
 	test -d $(ENGINE_VENV) || $(PYTHON) -m venv $(ENGINE_VENV)
-	$(ENGINE_PY) -m pip install --upgrade pip && $(ENGINE_PY) -m pip install -e 'engine[dev]'
+	$(ENGINE_PY) -m pip install --upgrade pip && $(ENGINE_PY) -m pip install -e './engine[dev]'
 	cd frontend && npm ci
 
 .PHONY: dev-backend
@@ -107,7 +107,7 @@ dev-frontend: ## SPA Vite en :5173 (proxy /api → :8000)
 
 .PHONY: demo-native
 demo-native: ## Datos DEMO ficticios en modo nativo
-	cd backend && $(PHP) artisan predictily:demo
+	cd backend && $(PHP) artisan predictily:demo --forecast
 
 .PHONY: demo-data
 demo-data: ## Regenera los CSV ficticios de data/demo (semilla fija)

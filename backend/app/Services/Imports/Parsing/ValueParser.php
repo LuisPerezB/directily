@@ -22,9 +22,7 @@ final class ValueParser
     ];
 
     /** @param array<string, mixed> $options */
-    public function __construct(private readonly string $timezone = 'America/Guayaquil', private readonly array $options = [])
-    {
-    }
+    public function __construct(private readonly string $timezone = 'America/Guayaquil', private readonly array $options = []) {}
 
     public static function isBlank(mixed $value): bool
     {

@@ -6,9 +6,7 @@ namespace App\Services\Connectors;
 
 final readonly class ConnectorTestResult
 {
-    public function __construct(public bool $ok, public string $message, public array $details = [])
-    {
-    }
+    public function __construct(public bool $ok, public string $message, public array $details = []) {}
 
     /** @return array<string, mixed> */
     public function toArray(): array

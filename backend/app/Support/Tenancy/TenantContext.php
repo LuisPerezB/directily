@@ -41,14 +41,15 @@ final class TenantContext
     /** @throws TenantNotResolvedException */
     public function require(): Tenant
     {
-        return $this->tenant ?? throw new TenantNotResolvedException();
+        return $this->tenant ?? throw new TenantNotResolvedException;
     }
 
     /**
      * Ejecuta un callback con un tenant concreto y restaura el anterior.
      *
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     public function runAs(Tenant $tenant, callable $callback): mixed

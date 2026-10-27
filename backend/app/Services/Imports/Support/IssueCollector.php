@@ -16,18 +16,20 @@ final class IssueCollector
 {
     /** @var list<array<string, mixed>> */
     private array $buffer = [];
+
     /** @var array<string, array{code: string, severity: string, count: int, message: string}> */
     private array $counts = [];
+
     /** @var array<int, string> fila => peor severidad */
     private array $rows = [];
+
     private int $stored = 0;
 
     public function __construct(
         private readonly ?int $tenantId = null,
         private readonly ?int $importJobId = null,
         private readonly int $maxStored = 10_000,
-    ) {
-    }
+    ) {}
 
     public function add(int $rowNumber, Issue $issue): void
     {

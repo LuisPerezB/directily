@@ -103,7 +103,10 @@ function reset(): void {
   result.value = null
 }
 
-const noForecast = computed(() => isApiError(simError.value) && (simError.value.status === 404 || simError.value.code === 'no_forecast'))
+// Sin pronóstico vigente la API responde 404 o un resultado sin escenario base (base_run nulo).
+const noForecast = computed(
+  () => (isApiError(simError.value) && (simError.value.status === 404 || simError.value.code === 'no_forecast')) || (result.value !== null && !result.value.base_run),
+)
 const sliders = computed(() => [
   { key: 'price_change' as const, label: t('scenarios.priceChange'), hint: t('scenarios.priceChangeHint'), ...LIMITS.price_change },
   { key: 'discount' as const, label: t('scenarios.discount'), hint: t('scenarios.discountHint'), ...LIMITS.discount },

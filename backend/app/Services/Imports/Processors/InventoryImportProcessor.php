@@ -50,6 +50,7 @@ final class InventoryImportProcessor implements ImportProcessor
                         $issues[] = Issue::error('required', 'Falta la existencia.', $field);
                     }
                     $values[$field] = $field === 'unit_cost' ? null : 0.0;
+
                     continue;
                 }
                 $number = $p->number($rawValue);

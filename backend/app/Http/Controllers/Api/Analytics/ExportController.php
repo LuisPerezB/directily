@@ -8,6 +8,7 @@ use App\Http\Requests\Analytics\AccuracyRequest;
 use App\Http\Requests\Analytics\ForecastListRequest;
 use App\Http\Requests\Analytics\RecommendationIndexRequest;
 use App\Http\Requests\Analytics\SalesSummaryExportRequest;
+use App\Models\ForecastRun;
 use App\Models\ModelEvaluation;
 use App\Models\Recommendation;
 use App\Services\Analytics\HistoryQuery;
@@ -31,8 +32,7 @@ class ExportController extends AnalyticsController
     public function __construct(
         private readonly RunResolver $runs,
         private readonly CsvExporter $csv,
-    ) {
-    }
+    ) {}
 
     public function forecasts(ForecastListRequest $request, ProductForecastQuery $products): StreamedResponse
     {
@@ -187,7 +187,7 @@ class ExportController extends AnalyticsController
         );
     }
 
-    private function requireRun(?int $runId): \App\Models\ForecastRun
+    private function requireRun(?int $runId): ForecastRun
     {
         return $this->runs->resolveCompleted($runId)
             ?? throw new NotFoundHttpException('Aún no hay un pronóstico generado para exportar.');

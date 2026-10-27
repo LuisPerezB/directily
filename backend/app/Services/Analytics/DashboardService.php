@@ -27,8 +27,7 @@ class DashboardService
         private readonly ProductForecastQuery $products,
         private readonly AccuracyService $accuracy,
         private readonly InventoryQuery $inventory,
-    ) {
-    }
+    ) {}
 
     /** @return array<string, mixed> */
     public function summary(Tenant $tenant, int $horizon, ?int $branchId): array

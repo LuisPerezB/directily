@@ -11,9 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 final class AuthService
 {
-    public function __construct(private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(private readonly AuditLogger $audit) {}
 
     /** @param array{name: string, email: string, password: string} $data */
     public function register(array $data): User

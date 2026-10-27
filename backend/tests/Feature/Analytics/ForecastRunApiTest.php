@@ -95,14 +95,28 @@ class ForecastRunApiTest extends TestCase
     {
         Queue::fake();
         $planId = DB::table('plans')->insertGetId([
-            'code' => 'basico-test', 'name' => 'Básico', 'limits' => json_encode(['horizons' => [7, 30]]), 'is_active' => true,
+            // Nota: PlanLimitService (core) fusiona listas por índice; ver docs/00 [backend-analytics].
+            'code' => 'basico-test', 'name' => 'Básico', 'limits' => json_encode(['horizons' => [30, 90]]), 'is_active' => true,
             'created_at' => now(), 'updated_at' => now(),
         ]);
         [$tenant, $user] = $this->createTenantWithUser(TenantRole::Owner, ['plan_id' => $planId]);
 
-        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs', ['horizon_days' => 90])
-            ->assertStatus(422)->assertJsonValidationErrors('horizon_days');
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs', ['horizon_days' => 7])
+            ->assertStatus(402)->assertJsonPath('code', 'plan_limit_exceeded')->assertJsonPath('limit', 'horizons');
         $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs', ['horizon_days' => 30])->assertStatus(202);
+        $this->assertDatabaseHas('tenant_usage', ['tenant_id' => $tenant->id, 'metric' => 'forecast_runs', 'value' => 1]);
+        $this->assertDatabaseHas('audit_logs', ['tenant_id' => $tenant->id, 'action' => 'forecast.requested']);
+    }
+
+    public function test_daily_run_limit_of_plan_returns_402(): void
+    {
+        Queue::fake();
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Owner, ['plan_overrides' => ['max_forecast_runs_per_day' => 1]]);
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(202);
+        DB::table('forecast_runs')->update(['status' => 'completed']);
+
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')
+            ->assertStatus(402)->assertJsonPath('limit', 'max_forecast_runs_per_day');
     }
 
     public function test_list_show_and_job_status(): void

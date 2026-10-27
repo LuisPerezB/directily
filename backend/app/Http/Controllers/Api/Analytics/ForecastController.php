@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\Analytics;
 
 use App\Http\Requests\Analytics\ForecastListRequest;
 use App\Http\Requests\Analytics\ForecastSeriesRequest;
+use App\Models\ForecastRun;
 use App\Services\Analytics\ForecastQuery;
 use App\Services\Analytics\HistoryQuery;
 use App\Services\Analytics\NodeLabeler;
@@ -28,8 +29,7 @@ class ForecastController extends AnalyticsController
         private readonly HistoryQuery $history,
         private readonly ProductForecastQuery $products,
         private readonly NodeLabeler $labels,
-    ) {
-    }
+    ) {}
 
     public function series(ForecastSeriesRequest $request): JsonResponse
     {
@@ -122,7 +122,7 @@ class ForecastController extends AnalyticsController
     }
 
     /** @return array<string, mixed> */
-    private function runSummary(\App\Models\ForecastRun $run): array
+    private function runSummary(ForecastRun $run): array
     {
         return [
             'id' => $run->id,

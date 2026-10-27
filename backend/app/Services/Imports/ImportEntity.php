@@ -11,6 +11,8 @@ enum ImportEntity: string
     case Inventory = 'inventory';
     case LeadTimes = 'lead_times';
     case Branches = 'branches';
+    case Suppliers = 'suppliers';
+    case Promotions = 'promotions';
 
     public function label(): string
     {
@@ -20,6 +22,8 @@ enum ImportEntity: string
             self::Inventory => 'Inventario (existencias por fecha)',
             self::LeadTimes => 'Plazos de abastecimiento',
             self::Branches => 'Sucursales',
+            self::Suppliers => 'Proveedores',
+            self::Promotions => 'Promociones',
         };
     }
 

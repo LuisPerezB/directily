@@ -19,7 +19,7 @@ final class ConnectorRegistry
 
     public function __construct()
     {
-        foreach ([new GenericCsvConnector(), new GenericExcelConnector(), new GenericRestConnector(), new ContificoConnector(), new GenericOdbcConnector()] as $connector) {
+        foreach ([new GenericCsvConnector, new GenericExcelConnector, new GenericRestConnector, new ContificoConnector, new GenericOdbcConnector] as $connector) {
             $this->connectors[$connector->key()] = $connector;
         }
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Core;
 
+use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -11,7 +12,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * Producto. Las estadísticas vienen de columnas agregadas units_90d / revenue_90d /
  * last_sale_date (consulta con JOIN o adjuntadas por el controlador).
  *
- * @mixin \App\Models\Product
+ * @mixin Product
  */
 final class ProductResource extends JsonResource
 {

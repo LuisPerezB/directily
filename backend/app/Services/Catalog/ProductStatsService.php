@@ -39,7 +39,7 @@ final class ProductStatsService
     }
 
     /**
-     * @param list<int> $productIds
+     * @param  list<int>  $productIds
      * @return array<int, array{units_90d: float, revenue_90d: float, last_sale_date: ?string}>
      */
     public function forProducts(Tenant $tenant, array $productIds): array

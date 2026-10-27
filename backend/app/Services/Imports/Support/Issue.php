@@ -13,8 +13,7 @@ final readonly class Issue
         public string $message,
         public ?string $column = null,
         public mixed $rawValue = null,
-    ) {
-    }
+    ) {}
 
     public static function error(string $code, string $message, ?string $column = null, mixed $raw = null): self
     {

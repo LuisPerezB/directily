@@ -1,0 +1,8 @@
+{
+    "Too Many Attempts.": "Demasiadas solicitudes. Intente nuevamente en unos momentos.",
+    "Unauthenticated.": "No autenticado.",
+    "This action is unauthorized.": "No tiene permisos para realizar esta acción.",
+    "The given data was invalid.": "Los datos enviados no son válidos.",
+    "Server Error": "Error interno del servidor.",
+    "Not Found": "No encontrado."
+}

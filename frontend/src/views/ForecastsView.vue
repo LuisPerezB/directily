@@ -59,7 +59,10 @@ watch(categoryId, () => {
 
 const noForecast = computed(() => {
   const e = series.error.value
-  return (isApiError(e) && e.status === 404) || (series.data.value && !series.data.value.meta && series.data.value.forecast.length === 0)
+  if (isApiError(e) && e.status === 404) return true
+  const d = series.data.value
+  if (!d) return false
+  return d.meta?.has_forecast === false || (d.forecast.length === 0 && !d.meta?.run_id)
 })
 const data = computed(() => series.data.value)
 const totals = computed(() => {
@@ -163,11 +166,15 @@ function onFinished(): void {
 
     <section class="card p-4 sm:p-6">
       <LoadingState v-if="series.loading.value && !data" :lines="5" />
-      <div v-else-if="noForecast">
+      <ErrorState v-else-if="series.error.value && !noForecast" :error="series.error.value" @retry="series.execute" />
+      <div v-else-if="noForecast" class="flex flex-col gap-4">
         <EmptyState icon="chart" :title="t('forecasts.noForecastTitle')" :description="t('forecasts.noForecastText')" compact />
-        <div class="max-w-xl mx-auto"><RunForecastPanel @finished="onFinished" /></div>
+        <div class="max-w-xl mx-auto w-full"><RunForecastPanel @finished="onFinished" /></div>
+        <template v-if="data && data.history.length">
+          <h2 class="section-title mt-2">{{ t('forecasts.historyOnly', { label: data.node.label || t(`levels.${data.node.level}`) }) }}</h2>
+          <ForecastChart :history="data.history" :forecast="[]" :metric="metric" :granularity="granularity" :currency="tenant.currency" :title="data.node.label || t('forecasts.title')" :height="320" />
+        </template>
       </div>
-      <ErrorState v-else-if="series.error.value" :error="series.error.value" @retry="series.execute" />
       <template v-else-if="data">
         <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div>
@@ -184,10 +191,10 @@ function onFinished(): void {
           </dl>
         </div>
         <InlineNotice v-if="data.history.length === 0" kind="info" class="mb-3">{{ t('forecasts.noHistory') }}</InlineNotice>
-        <InlineNotice v-if="data.meta && !data.meta.intervals_available" kind="info" class="mb-3">{{ t('forecasts.noIntervals') }}</InlineNotice>
+        <InlineNotice v-if="data.meta && !data.meta.intervals_available && data.forecast.length" kind="info" class="mb-3">{{ t('forecasts.noIntervals') }}</InlineNotice>
         <ForecastChart :history="data.history" :forecast="data.forecast" :metric="metric" :granularity="granularity" :currency="tenant.currency" :title="data.node.label || t('forecasts.title')" :height="380" />
         <dl v-if="data.meta" class="mt-5 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4 text-sm border-t border-line pt-4">
-          <div><dt class="text-fg-muted">{{ t('forecasts.version') }}</dt><dd class="m-0 font-semibold">v{{ data.meta.run_version }}</dd></div>
+          <div><dt class="text-fg-muted">{{ t('forecasts.version') }}</dt><dd class="m-0 font-semibold">{{ data.meta.run_version ? `v${data.meta.run_version}` : '—' }}</dd></div>
           <div><dt class="text-fg-muted">{{ t('forecasts.generatedAt') }}</dt><dd class="m-0 font-semibold">{{ formatDateTime(data.meta.generated_at, tenant.timezone) }}</dd></div>
           <div><dt class="text-fg-muted">{{ t('forecasts.cutoff') }}</dt><dd class="m-0 font-semibold">{{ formatDate(data.meta.cutoff_date) }}</dd></div>
           <div>
@@ -206,13 +213,14 @@ function onFinished(): void {
           </div>
         </dl>
         <p class="hint mt-3">{{ t('forecasts.howToRead') }}</p>
+        <p v-for="(note, i) in data.meta?.notes ?? []" :key="i" class="hint mt-1">{{ note }}</p>
       </template>
     </section>
 
     <section class="card p-4 sm:p-6">
       <h2 class="section-title mb-1">{{ t('forecasts.runsTitle') }}</h2>
       <p class="text-sm text-fg-muted mb-4">{{ t('forecasts.runsText') }}</p>
-      <RunForecastPanel class="mb-4" @finished="onFinished" />
+      <RunForecastPanel v-if="!noForecast" class="mb-4" @finished="onFinished" />
       <LoadingState v-if="runs.loading.value && !runs.data.value" />
       <ErrorState v-else-if="runs.error.value" :error="runs.error.value" compact @retry="runs.execute" />
       <div v-else-if="runs.data.value?.data.length" class="table-wrap">

@@ -33,8 +33,7 @@ class EngineClient
         private readonly int $connectTimeout,
         private readonly int $connectionRetries,
         private readonly int $retrySleepMs,
-    ) {
-    }
+    ) {}
 
     public static function fromConfig(): self
     {
@@ -64,8 +63,8 @@ class EngineClient
     /**
      * Ejecuta el pipeline completo de una ejecución (síncrono, timeout largo).
      *
-     * @param list<int> $horizons
-     * @param array<string, mixed> $options
+     * @param  list<int>  $horizons
+     * @param  array<string, mixed>  $options
      * @return array<string, mixed>
      */
     public function executeRun(
@@ -103,7 +102,7 @@ class EngineClient
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function send(string $method, string $path, array $payload, int $timeout, bool $authenticated = true): array

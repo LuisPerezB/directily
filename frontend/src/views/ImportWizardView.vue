@@ -32,7 +32,7 @@ const catalog = useCatalogStore()
 const tenant = useTenantStore()
 const ui = useUiStore()
 
-const ENTITIES: ImportEntityType[] = ['sales', 'products', 'inventory', 'lead_times']
+const ENTITIES: ImportEntityType[] = ['sales', 'products', 'inventory', 'lead_times', 'branches', 'suppliers', 'promotions']
 const initialEntity = ENTITIES.includes(route.query.entity as ImportEntityType) ? (route.query.entity as ImportEntityType) : 'sales'
 const entity = ref<ImportEntityType>(initialEntity)
 const job = ref<ImportJob | null>(null)

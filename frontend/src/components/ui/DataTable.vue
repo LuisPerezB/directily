@@ -2,7 +2,8 @@
 /**
  * Tabla semántica reutilizable.
  * - Orden en servidor (v-model:sort con 'campo' o '-campo') o en cliente (clientSide).
- * - Celdas personalizables con slots #cell-<key>="{ row }".
+ * - Celdas personalizables con slots #cell-<key>="{ row }" (los puntos de la clave se
+ *   reemplazan por guion bajo: product.name → #cell-product_name).
  * - Estados de carga y vacío.
  */
 import { computed } from 'vue'
@@ -34,6 +35,10 @@ const props = withDefaults(
 )
 const sort = defineModel<string | null>('sort', { default: null })
 const { t } = useI18n()
+
+function slotName(col: Column<R>): string {
+  return `cell-${col.key.replace(/\./g, '_')}`
+}
 
 function sortKeyOf(col: Column<R>): string {
   return col.sortKey ?? col.key
@@ -108,7 +113,7 @@ const sortedRows = computed(() => {
         </tr>
         <tr v-for="row in sortedRows" v-else :key="rowKey(row)" :class="loading ? 'opacity-60' : ''">
           <td v-for="col in columns" :key="col.key" :class="[col.align === 'right' ? 'num' : col.align === 'center' ? 'text-center' : '', col.class]">
-            <slot :name="`cell-${col.key}`" :row="row">{{ display(row, col) }}</slot>
+            <slot :name="slotName(col)" :row="row">{{ display(row, col) }}</slot>
           </td>
         </tr>
       </tbody>

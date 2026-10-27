@@ -18,9 +18,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class CsvExporter
 {
     /**
-     * @param list<string> $header
-     * @param callable(): iterable<array<int, mixed>> $rows
-     * @param array<string, mixed> $auditMetadata
+     * @param  list<string>  $header
+     * @param  callable(): iterable<array<int, mixed>>  $rows
+     * @param  array<string, mixed>  $auditMetadata
      */
     public function stream(string $filename, array $header, callable $rows, string $delimiter = ',', array $auditMetadata = []): StreamedResponse
     {

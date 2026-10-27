@@ -14,7 +14,7 @@ use App\Services\Analytics\Support\ModelCatalog;
 class AccuracyExplainer
 {
     /**
-     * @param array<string, mixed> $context  backtest, realized, data (ver AccuracyService)
+     * @param  array<string, mixed>  $context  backtest, realized, data (ver AccuracyService)
      * @return list<string>
      */
     public function explain(array $context): array

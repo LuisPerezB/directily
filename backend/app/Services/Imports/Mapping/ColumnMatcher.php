@@ -22,8 +22,8 @@ final class ColumnMatcher
     }
 
     /**
-     * @param list<FieldDefinition> $fields
-     * @param list<string> $headers
+     * @param  list<FieldDefinition>  $fields
+     * @param  list<string>  $headers
      * @return array<string, string|null> campo => encabezado original (o null)
      */
     public function suggest(array $fields, array $headers): array
@@ -60,9 +60,10 @@ final class ColumnMatcher
                 }
                 foreach (array_merge([$field->key], $field->synonyms) as $synonym) {
                     $syn = self::normalize($synonym);
-                    if (strlen($syn) >= 4 && preg_match('/(^|_)'.preg_quote($syn, '/').'(_|$)/', $normalized) === 1) {
+                    if (strlen($syn) >= 3 && preg_match('/(^|_)'.preg_quote($syn, '/').'(_|$)/', $normalized) === 1) {
                         $mapping[$field->key] = (string) $header;
                         $used[$header] = true;
+
                         continue 3;
                     }
                 }

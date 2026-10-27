@@ -14,12 +14,11 @@ class ScenarioService
         private readonly RunResolver $runs,
         private readonly ScenarioBaselineLoader $loader,
         private readonly ScenarioSimulator $simulator,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, int|null> $filters
-     * @param array<string, mixed> $assumptions
+     * @param  array<string, int|null>  $filters
+     * @param  array<string, mixed>  $assumptions
      * @return array<string, mixed>
      */
     public function simulate(int $horizon, array $filters, array $assumptions, ?int $runId = null): array

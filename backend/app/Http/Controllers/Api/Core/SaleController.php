@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Core;
 
 use App\Http\Controllers\Controller;
-use App\Http\Middleware\ResolveTenant;
 use App\Http\Requests\Core\SalesBatchRequest;
 use App\Models\PersonalAccessToken;
 use App\Models\Sale;
@@ -16,13 +15,12 @@ use App\Services\Sales\SalesQuery;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 final class SaleController extends Controller
 {
-    public function __construct(private readonly TenantContext $context, private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(private readonly TenantContext $context, private readonly AuditLogger $audit) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -139,7 +137,7 @@ final class SaleController extends Controller
         $result = $service->ingest($this->context->require(), $request->validated('documents'), $dataSourceId, $request->validated('options', []));
         $this->audit->log('sales.batch', null, ['documents' => count($request->validated('documents')), 'created' => $result['created'], 'updated' => $result['updated'], 'rejected' => $result['rejected']]);
         if ($dataSourceId !== null) {
-            \Illuminate\Support\Facades\DB::table('data_sources')->where('tenant_id', $this->context->id())->where('id', $dataSourceId)
+            DB::table('data_sources')->where('tenant_id', $this->context->id())->where('id', $dataSourceId)
                 ->update(['last_synced_at' => now(), 'status' => 'active', 'last_error' => null]);
         }
 

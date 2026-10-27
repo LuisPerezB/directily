@@ -1,0 +1,706 @@
+openapi: 3.1.0
+info:
+  title: Predictily API — módulo analítico
+  version: 1.0.0
+  description: |
+    Pronósticos, dashboard, precisión, inventario, alertas, escenarios y exportaciones
+    (docs/06-contratos-integracion.md §3.8–3.12). Todas las rutas requieren autenticación
+    (sesión SPA de Sanctum o token Bearer) y el encabezado `X-Tenant-ID` con el uuid de la
+    empresa activa. Los ids de recursos de otra empresa responden 404; los filtros con ids de
+    otra empresa responden 422.
+
+    Reglas de negocio relevantes:
+    - El entrenamiento nunca ocurre dentro de la petición: `POST /forecast-runs` responde 202 y
+      el progreso se consulta en `GET /jobs/{id}`.
+    - Los intervalos de semanas/meses solo se devuelven si el motor los precalculó; sumar
+      cuantiles diarios no produce un intervalo válido (`intervals_available: false`).
+    - El simulador es un cálculo determinista sobre supuestos explícitos, no una estimación causal.
+    - Las recomendaciones de compra son sugerencias: Predictily no ejecuta pedidos.
+servers:
+  - url: /api/v1
+security:
+  - sanctumSession: []
+  - bearerToken: []
+tags:
+  - name: Pronósticos
+  - name: Dashboard
+  - name: Precisión
+  - name: Inventario
+  - name: Alertas
+  - name: Escenarios
+  - name: Exportaciones
+paths:
+  /forecast-runs:
+    post:
+      tags: [Pronósticos]
+      summary: Solicitar una ejecución de pronóstico (asíncrona)
+      description: Requiere la habilidad `forecast.run` (propietario, administrador, analista).
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                horizon_days: { type: integer, enum: [7, 30, 90], default: 90 }
+                cutoff_date:
+                  type: string
+                  format: date
+                  description: Fecha de corte pasada; crea una ejecución `historical` (nunca vigente).
+      responses:
+        '202':
+          description: Ejecución creada en cola
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ForecastRun' } } } } }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Ya hay una ejecución en cola o en proceso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  code: { type: string, const: forecast_run_in_progress }
+                  active_run: { type: object, properties: { id: { type: integer }, version: { type: integer }, status: { type: string }, created_at: { type: string, format: date-time } } }
+        '422': { $ref: '#/components/responses/Validation' }
+    get:
+      tags: [Pronósticos]
+      summary: Listar ejecuciones (más reciente primero)
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: status, in: query, schema: { type: string, enum: [queued, running, completed, failed, cancelled] } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada
+          content: { application/json: { schema: { $ref: '#/components/schemas/PaginatedForecastRuns' } } }
+  /forecast-runs/{id}:
+    get:
+      tags: [Pronósticos]
+      summary: Detalle de una ejecución
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ForecastRun' } } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /jobs/{id}:
+    get:
+      tags: [Pronósticos]
+      summary: Estado y progreso de un trabajo asíncrono
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/TrainingJob' } } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /forecasts/series:
+    get:
+      tags: [Pronósticos]
+      summary: Historia y pronóstico de un nodo de la jerarquía
+      description: |
+        Nodo: sin filtros → `total`; branch → `branch:{b}`; category → `category:{c}`;
+        branch+category → `branch_category:{b}:{c}`; product → `product:{p}`; product+branch → `series:{b}:{p}`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/Granularity'
+        - $ref: '#/components/parameters/Horizon'
+        - { name: history_days, in: query, schema: { type: integer, minimum: 7, maximum: 730, default: 90 } }
+      responses:
+        '200':
+          description: Serie
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/SeriesResponse' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /forecasts/products:
+    get:
+      tags: [Pronósticos]
+      summary: Ranking de productos (pronóstico vs período histórico equivalente)
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/Horizon'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/CategoryId'
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: sort, in: query, schema: { type: string, enum: [change_pct, -change_pct, forecast_units, -forecast_units, revenue, -revenue, name], default: -forecast_units } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: 'Lista paginada (o data vacía y run null si no hay pronóstico)'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/ProductForecast' } }
+                      run: { $ref: '#/components/schemas/RunRef' }
+                      horizon: { type: integer }
+  /forecasts/categories:
+    get:
+      tags: [Pronósticos]
+      summary: Pronóstico por categoría
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/Horizon'
+        - $ref: '#/components/parameters/BranchId'
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Categorías
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category: { type: object, properties: { id: { type: [integer, 'null'] }, name: { type: string } } }
+                        history_units: { type: number }
+                        forecast_units: { type: number }
+                        change_pct: { type: [number, 'null'] }
+                        trend: { type: string, enum: [up, down, flat] }
+                        forecast_revenue: { type: [number, 'null'] }
+                  run: { $ref: '#/components/schemas/RunRef' }
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Resumen comercial (cuánto venderé, qué sube/baja, qué podría agotarse, inversión, confiabilidad)
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Horizon'
+        - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200':
+          description: Resumen (KPIs de pronóstico en null si no hay ejecución vigente)
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/DashboardSummary' } } } } }
+  /reports/forecast-summary:
+    get:
+      tags: [Dashboard]
+      summary: Resumen ejecutivo imprimible
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Horizon' }, { $ref: '#/components/parameters/BranchId' }]
+      responses:
+        '200': { description: Reporte JSON con highlights, KPIs, riesgos, precisión y advertencias }
+  /accuracy/summary:
+    get:
+      tags: [Precisión]
+      summary: Métricas de backtesting, precisión realizada y explicación en lenguaje sencillo
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/AccuracySummary' } } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /accuracy/comparison:
+    get:
+      tags: [Precisión]
+      summary: Pronóstico de una ejecución pasada frente a ventas reales
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: run_id, in: query, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Puntos diarios; días censurados por quiebre de stock se excluyen de las métricas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      points:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date: { type: string, format: date }
+                            yhat: { type: number }
+                            lo_80: { type: [number, 'null'] }
+                            hi_80: { type: [number, 'null'] }
+                            actual: { type: [number, 'null'] }
+                            censored: { type: boolean }
+                      metrics: { $ref: '#/components/schemas/Metrics' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /model-evaluations:
+    get:
+      tags: [Precisión]
+      summary: Filas de model_evaluations de una ejecución
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: run_id, in: query, required: true, schema: { type: integer } }
+        - { name: evaluation_type, in: query, schema: { type: string, enum: [backtest, realized] } }
+        - { name: level, in: query, schema: { type: string, enum: [overall, demand_class, horizon, branch, category, product, series] } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200': { description: Lista paginada }
+  /models:
+    get:
+      tags: [Precisión]
+      summary: Registro de modelos de la empresa
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { name: status, in: query, schema: { type: string } }]
+      responses:
+        '200': { description: Lista paginada de model_registry }
+  /inventory/recommendations:
+    get:
+      tags: [Inventario]
+      summary: Recomendaciones de abastecimiento
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/CategoryId'
+        - { name: risk_level, in: query, description: 'Uno o varios separados por coma', schema: { type: string, example: 'high,critical' } }
+        - { name: type, in: query, schema: { type: string, enum: [reorder, stockout_risk, overstock, no_action] } }
+        - { name: status, in: query, schema: { type: string, enum: [open, acknowledged, dismissed, ordered] } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [-stockout_probability, stockout_probability, days_of_cover, -days_of_cover, -estimated_investment, -suggested_qty] } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada con `run` y `disclaimer`
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Recommendation' } }
+                      run: { $ref: '#/components/schemas/RunRef' }
+                      disclaimer: { type: string }
+  /inventory/recommendations/{id}:
+    patch:
+      tags: [Inventario]
+      summary: Registrar el estado de una recomendación (no ejecuta pedidos)
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [open, acknowledged, dismissed, ordered] } } } } }
+      responses:
+        '200': { description: Actualizada }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /inventory/summary:
+    get:
+      tags: [Inventario]
+      summary: Resumen de inventario y riesgos
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/BranchId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      snapshot_date: { type: [string, 'null'], format: date }
+                      has_inventory: { type: boolean }
+                      products_with_stock: { type: integer }
+                      series_out_of_stock: { type: integer }
+                      total_on_hand_value: { type: number }
+                      series_without_cost: { type: integer }
+                      risk_counts: { type: object, properties: { low: { type: integer }, medium: { type: integer }, high: { type: integer }, critical: { type: integer } } }
+                      purchase_investment: { type: [number, 'null'] }
+                      coverage_days_median: { type: [number, 'null'] }
+  /alerts:
+    get:
+      tags: [Alertas]
+      summary: Listar alertas
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: status, in: query, schema: { type: string, enum: [open, acknowledged, resolved] } }
+        - { name: type, in: query, schema: { type: string } }
+        - { name: severity, in: query, schema: { type: string, enum: [info, warning, critical] } }
+      responses:
+        '200': { description: Lista paginada de alertas }
+  /alerts/{id}:
+    patch:
+      tags: [Alertas]
+      summary: Reconocer o resolver una alerta
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [open, acknowledged, resolved] } } } } }
+      responses:
+        '200': { description: Actualizada }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /scenarios/simulate:
+    post:
+      tags: [Escenarios]
+      summary: Simulación determinista (no persiste)
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ScenarioRequest' } } }
+      responses:
+        '200': { description: Resultado, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ScenarioResult' } } } } } }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /scenarios:
+    get:
+      tags: [Escenarios]
+      summary: Escenarios guardados
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }]
+      responses:
+        '200': { description: Lista paginada }
+    post:
+      tags: [Escenarios]
+      summary: Simular y guardar un escenario
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ScenarioRequest'
+                - type: object
+                  required: [name]
+                  properties: { name: { type: string, maxLength: 150 } }
+      responses:
+        '201': { description: Guardado (incluye `results`) }
+  /scenarios/{id}:
+    get:
+      tags: [Escenarios]
+      summary: Ver escenario guardado
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/NotFound' } }
+    delete:
+      tags: [Escenarios]
+      summary: Eliminar escenario
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Id' }]
+      responses: { '204': { description: Eliminado }, '404': { $ref: '#/components/responses/NotFound' } }
+  /exports/forecasts.csv:
+    get:
+      tags: [Exportaciones]
+      summary: Pronóstico por producto (resumen o por período si se indica granularity)
+      description: Requiere `data.export`. UTF-8 con BOM. Queda auditado (`data.exported`).
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/Horizon'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/Granularity'
+        - $ref: '#/components/parameters/Delimiter'
+      responses:
+        '200': { description: CSV, content: { text/csv: { schema: { type: string } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /exports/recommendations.csv:
+    get:
+      tags: [Exportaciones]
+      summary: Recomendaciones de abastecimiento
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/RunId' }, { $ref: '#/components/parameters/Delimiter' }]
+      responses: { '200': { description: CSV, content: { text/csv: { schema: { type: string } } } } }
+  /exports/accuracy.csv:
+    get:
+      tags: [Exportaciones]
+      summary: Evaluaciones de modelos
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/RunId' }, { $ref: '#/components/parameters/Delimiter' }]
+      responses: { '200': { description: CSV, content: { text/csv: { schema: { type: string } } } } }
+  /exports/sales-summary.csv:
+    get:
+      tags: [Exportaciones]
+      summary: Resumen de ventas válidas por período
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/Granularity'
+        - $ref: '#/components/parameters/Delimiter'
+      responses: { '200': { description: CSV, content: { text/csv: { schema: { type: string } } } } }
+components:
+  securitySchemes:
+    sanctumSession: { type: apiKey, in: cookie, name: predictily_session, description: 'Sesión SPA (GET /sanctum/csrf-cookie + X-XSRF-TOKEN)' }
+    bearerToken: { type: http, scheme: bearer, description: Token personal ligado a una empresa }
+  parameters:
+    TenantHeader: { name: X-Tenant-ID, in: header, required: true, schema: { type: string, format: uuid } }
+    Id: { name: id, in: path, required: true, schema: { type: integer } }
+    RunId: { name: run_id, in: query, description: 'Por defecto, la ejecución vigente', schema: { type: integer } }
+    BranchId: { name: branch_id, in: query, schema: { type: integer } }
+    CategoryId: { name: category_id, in: query, schema: { type: integer } }
+    ProductId: { name: product_id, in: query, schema: { type: integer } }
+    Granularity: { name: granularity, in: query, schema: { type: string, enum: [day, week, month] } }
+    Horizon: { name: horizon, in: query, description: 'Por defecto settings.default_horizon_days de la empresa', schema: { type: integer, enum: [7, 30, 90] } }
+    Delimiter: { name: delimiter, in: query, schema: { type: string, enum: [',', ';'], default: ',' } }
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1 } }
+    PerPage: { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+  responses:
+    NotFound: { description: No existe o pertenece a otra empresa, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: Sin permiso para la acción (code forbidden), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Validation: { description: Error de validación, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    PlanLimit:
+      description: Límite del plan
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              code: { type: string, const: plan_limit_exceeded }
+              limit: { type: string }
+              current: { type: [number, 'null'] }
+              max: { type: [number, 'null'] }
+  schemas:
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        code: { type: string }
+        errors: { type: object, additionalProperties: { type: array, items: { type: string } } }
+    PaginationEnvelope:
+      type: object
+      properties:
+        meta: { type: object, properties: { current_page: { type: integer }, per_page: { type: integer }, total: { type: integer }, last_page: { type: integer } } }
+        links: { type: object }
+    RunRef:
+      type: [object, 'null']
+      properties:
+        id: { type: integer }
+        version: { type: integer }
+        generated_at: { type: [string, 'null'], format: date-time }
+        cutoff_date: { type: [string, 'null'], format: date }
+    TrainingJob:
+      type: object
+      properties:
+        id: { type: integer }
+        job_type: { type: string, enum: [forecast_pipeline, evaluate_actuals, readiness, retrain_check] }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        stage: { type: [string, 'null'] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        attempts: { type: integer }
+        error_message: { type: [string, 'null'] }
+        queued_at: { type: [string, 'null'], format: date-time }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        duration_ms: { type: [integer, 'null'] }
+        result: { type: [object, 'null'] }
+        forecast_run_id: { type: [integer, 'null'] }
+    ForecastRun:
+      type: object
+      properties:
+        id: { type: integer }
+        version: { type: integer }
+        run_type: { type: string, enum: [production, historical] }
+        status: { type: string, enum: [queued, running, completed, failed, cancelled] }
+        triggered_by: { type: string }
+        horizon_days: { type: integer }
+        cutoff_date: { type: [string, 'null'], format: date }
+        data_from: { type: [string, 'null'], format: date }
+        data_to: { type: [string, 'null'], format: date }
+        feature_set_version: { type: [string, 'null'] }
+        is_current: { type: boolean }
+        options: { type: object }
+        selection: { type: [object, 'null'] }
+        summary: { type: [object, 'null'] }
+        error_message: { type: [string, 'null'] }
+        started_at: { type: [string, 'null'], format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        training_job: { $ref: '#/components/schemas/TrainingJob' }
+    PaginatedForecastRuns:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/ForecastRun' } }
+    SeriesResponse:
+      type: object
+      properties:
+        node: { type: object, properties: { key: { type: string }, level: { type: string }, label: { type: string } } }
+        granularity: { type: string }
+        horizon: { type: integer }
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              units: { type: number }
+              revenue: { type: number }
+              stockout: { type: boolean, description: 'Serie/producto: hubo existencias <= 0' }
+              stockout_share: { type: [number, 'null'], description: 'Niveles agregados: proporción de series sin stock' }
+        forecast:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              yhat: { type: number }
+              lo_80: { type: [number, 'null'] }
+              hi_80: { type: [number, 'null'] }
+              lo_95: { type: [number, 'null'] }
+              hi_95: { type: [number, 'null'] }
+              revenue: { type: [number, 'null'] }
+              period_days: { type: integer }
+        meta:
+          type: object
+          properties:
+            run_id: { type: [integer, 'null'] }
+            run_version: { type: [integer, 'null'] }
+            generated_at: { type: [string, 'null'] }
+            cutoff_date: { type: [string, 'null'], format: date }
+            model_family: { type: [string, 'null'] }
+            models: { type: object, additionalProperties: { type: integer } }
+            price_assumption: { type: string }
+            intervals_available: { type: boolean }
+            has_forecast: { type: boolean }
+            notes: { type: array, items: { type: string } }
+    ProductForecast:
+      type: object
+      properties:
+        product: { type: object, properties: { id: { type: integer }, sku: { type: string }, name: { type: string }, category: { type: [object, 'null'] } } }
+        history_units: { type: number }
+        forecast_units: { type: number }
+        change_pct: { type: [number, 'null'] }
+        trend: { type: string, enum: [up, down, flat] }
+        forecast_revenue: { type: [number, 'null'] }
+        lo_80: { type: 'null', description: 'Reservado: el total del horizonte no se deriva sumando cuantiles diarios' }
+        hi_80: { type: 'null' }
+        model_family: { type: [string, 'null'] }
+        demand_class: { type: [string, 'null'] }
+        wape: { type: [number, 'null'] }
+    Metrics:
+      type: object
+      properties:
+        wape: { type: [number, 'null'] }
+        mae: { type: [number, 'null'] }
+        bias: { type: [number, 'null'] }
+        n_obs: { type: integer }
+    DashboardSummary:
+      type: object
+      properties:
+        horizon: { type: integer }
+        run: { $ref: '#/components/schemas/RunRef' }
+        kpis:
+          type: object
+          properties:
+            forecast_units: { type: [number, 'null'] }
+            forecast_units_lo_80: { type: [number, 'null'] }
+            forecast_units_hi_80: { type: [number, 'null'] }
+            forecast_revenue: { type: [number, 'null'] }
+            previous_period_units: { type: [number, 'null'] }
+            previous_period_revenue: { type: [number, 'null'] }
+            change_pct: { type: [number, 'null'] }
+            stockout_risk_products: { type: [integer, 'null'] }
+            purchase_investment: { type: [number, 'null'] }
+            backtest_wape: { type: [number, 'null'] }
+            baseline_wape: { type: [number, 'null'] }
+            realized_wape: { type: [number, 'null'] }
+        top_increasing: { type: array, items: { type: object } }
+        top_decreasing: { type: array, items: { type: object } }
+        stockout_risks: { type: array, items: { type: object } }
+        alerts: { type: array, items: { type: object } }
+        data_status:
+          type: object
+          properties:
+            has_sales: { type: boolean }
+            has_inventory: { type: boolean }
+            has_forecast: { type: boolean }
+            last_sale_date: { type: [string, 'null'], format: date }
+            readiness_score: { type: [number, 'null'] }
+            warnings: { type: array, items: { type: string } }
+    AccuracySummary:
+      type: object
+      properties:
+        run: { type: [object, 'null'] }
+        backtest:
+          type: [object, 'null']
+          properties:
+            selected: { type: [object, 'null'] }
+            baseline: { type: [object, 'null'] }
+            n_windows: { type: integer }
+            by_horizon: { type: array, items: { type: object } }
+            by_demand_class: { type: array, items: { type: object } }
+            by_branch: { type: array, items: { type: object } }
+            models: { type: array, items: { type: object } }
+        realized: { type: [object, 'null'] }
+        explanation: { type: array, items: { type: string }, description: 'Plantillas deterministas sobre métricas calculadas (sin LLM)' }
+    Recommendation:
+      type: object
+      properties:
+        id: { type: integer }
+        type: { type: string }
+        product: { type: object }
+        branch: { type: object }
+        available: { type: [number, 'null'] }
+        lead_time_days: { type: integer }
+        demand_lead_time: { type: number }
+        safety_stock: { type: number }
+        reorder_point: { type: number }
+        suggested_qty: { type: number }
+        estimated_investment: { type: [number, 'null'] }
+        days_of_cover: { type: [number, 'null'] }
+        stockout_probability: { type: [number, 'null'] }
+        stockout_date_estimate: { type: [string, 'null'], format: date }
+        risk_level: { type: string, enum: [low, medium, high, critical] }
+        status: { type: string, enum: [open, acknowledged, dismissed, ordered] }
+        assumptions: { type: object }
+    ScenarioRequest:
+      type: object
+      required: [horizon_days]
+      properties:
+        run_id: { type: integer }
+        horizon_days: { type: integer, enum: [7, 30, 90] }
+        filters: { type: object, properties: { branch_id: { type: integer }, category_id: { type: integer }, product_id: { type: integer } } }
+        assumptions:
+          type: object
+          properties:
+            price_change_pct: { type: number, minimum: -0.5, maximum: 1 }
+            discount_pct: { type: number, minimum: 0, maximum: 0.9 }
+            cost_change_pct: { type: number, minimum: -0.5, maximum: 1 }
+            demand_change_pct: { type: number, minimum: -0.9, maximum: 2 }
+            lead_time_days: { type: integer, minimum: 1, maximum: 180 }
+            purchase_budget: { type: number, minimum: 0 }
+            macro_note: { type: string, maxLength: 500 }
+    ScenarioTotals:
+      type: object
+      properties:
+        units: { type: number }
+        revenue: { type: number }
+        cost: { type: number }
+        gross_margin: { type: number }
+        gross_margin_pct: { type: [number, 'null'] }
+        purchase_need_units: { type: number }
+        purchase_need_cost: { type: number }
+    ScenarioResult:
+      type: object
+      properties:
+        type: { type: string, const: simulation }
+        disclaimer: { type: string }
+        base: { $ref: '#/components/schemas/ScenarioTotals' }
+        scenario: { $ref: '#/components/schemas/ScenarioTotals' }
+        delta: { type: object }
+        budget: { type: [object, 'null'], properties: { purchase_budget: { type: number }, coverage_pct: { type: number }, shortfall: { type: number } } }
+        cost_coverage: { type: [number, 'null'] }
+        risks:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string, enum: [negative_margin, margin_drop, budget_shortfall, stockout_risk, cost_unknown, low_data_quality, price_without_demand_assumption] }
+              severity: { type: string, enum: [info, warning, critical] }
+              message: { type: string }
+        assumptions_used: { type: object }
+        base_run: { $ref: '#/components/schemas/RunRef' }

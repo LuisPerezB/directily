@@ -7,6 +7,7 @@ namespace Tests\Feature\Analytics;
 use App\Jobs\Forecasting\EvaluateActuals;
 use App\Jobs\Forecasting\RefreshReadiness;
 use App\Jobs\Forecasting\RunForecastPipeline;
+use App\Jobs\Middleware\SetTenantContext;
 use App\Models\Alert;
 use App\Models\ForecastRun;
 use App\Models\Tenant;
@@ -17,6 +18,7 @@ use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
 use App\Services\Forecasting\ForecastRunService;
+use App\Services\Forecasting\TrainingJobRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -55,9 +57,9 @@ class EngineJobsTest extends TestCase
     {
         $pipeline = new RunForecastPipeline($tenant->id, $run->id, $job->id);
         $pipeline->withFakeQueueInteractions();
-        app(\App\Jobs\Middleware\SetTenantContext::class)->handle(
+        app(SetTenantContext::class)->handle(
             $pipeline,
-            fn ($j) => $j->handle(app(EngineClient::class), app(\App\Services\Forecasting\TrainingJobRecorder::class)),
+            fn ($j) => $j->handle(app(EngineClient::class), app(TrainingJobRecorder::class)),
         );
 
         return $pipeline;
@@ -239,7 +241,7 @@ class EngineJobsTest extends TestCase
         Http::fake(['engine.test/*' => Http::response(['tenant_id' => $tenant->id, 'score' => 78.5])]);
 
         $job = new RefreshReadiness($tenant->id);
-        app(\App\Jobs\Middleware\SetTenantContext::class)->handle($job, fn ($j) => $j->handle(app(EngineClient::class), app(\App\Services\Forecasting\TrainingJobRecorder::class)));
+        app(SetTenantContext::class)->handle($job, fn ($j) => $j->handle(app(EngineClient::class), app(TrainingJobRecorder::class)));
 
         $this->withinTenant($tenant, function () {
             $training = TrainingJob::query()->where('job_type', 'readiness')->firstOrFail();
@@ -256,7 +258,7 @@ class EngineJobsTest extends TestCase
 
         $job = new EvaluateActuals($tenant->id);
         try {
-            app(\App\Jobs\Middleware\SetTenantContext::class)->handle($job, fn ($j) => $j->handle(app(EngineClient::class), app(\App\Services\Forecasting\TrainingJobRecorder::class)));
+            app(SetTenantContext::class)->handle($job, fn ($j) => $j->handle(app(EngineClient::class), app(TrainingJobRecorder::class)));
             $this->fail('Se esperaba EngineServerException');
         } catch (EngineServerException) {
         }
@@ -271,7 +273,7 @@ class EngineJobsTest extends TestCase
     {
         foreach ([new RunForecastPipeline(7, 1, 1), new RefreshReadiness(7), new EvaluateActuals(7)] as $job) {
             $this->assertSame(7, $job->tenantId);
-            $this->assertInstanceOf(\App\Jobs\Middleware\SetTenantContext::class, $job->middleware()[0]);
+            $this->assertInstanceOf(SetTenantContext::class, $job->middleware()[0]);
         }
     }
 }

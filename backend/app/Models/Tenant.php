@@ -24,6 +24,12 @@ class Tenant extends Model
         'plan_id', 'plan_overrides', 'settings', 'data_retention_months', 'status',
     ];
 
+    /** Valores por defecto en memoria (coinciden con los defaults de la BD). */
+    protected $attributes = [
+        'country' => 'EC', 'currency' => 'USD', 'timezone' => 'America/Guayaquil', 'locale' => 'es-EC',
+        'status' => 'active', 'sector' => 'otro', 'allow_shared_training' => false, 'data_retention_months' => 60,
+    ];
+
     /** Valores por defecto de settings; se combinan con los guardados. */
     public const DEFAULT_SETTINGS = [
         'default_horizon_days' => 30,

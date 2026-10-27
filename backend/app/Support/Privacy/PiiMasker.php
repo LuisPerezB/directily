@@ -6,6 +6,7 @@ namespace App\Support\Privacy;
 
 /**
  * Enmascara datos personales en texto libre (logs, metadatos de auditoría).
+ *
  * - Correos: j***@e***.com
  * - Cédula (10 dígitos) / RUC (13 dígitos) ecuatorianos: [ID]
  * - Tokens Bearer, tokens Sanctum "id|secreto" y cadenas hex/base64 largas: [TOKEN]
@@ -37,7 +38,7 @@ final class PiiMasker
     /**
      * Limpia recursivamente un arreglo: elimina claves sensibles y enmascara strings.
      *
-     * @param array<mixed> $data
+     * @param  array<mixed>  $data
      * @return array<mixed>
      */
     public static function sanitize(array $data, int $depth = 0): array
@@ -49,6 +50,7 @@ final class PiiMasker
         foreach ($data as $key => $value) {
             if (is_string($key) && in_array(strtolower($key), self::SENSITIVE_KEYS, true)) {
                 $clean[$key] = '[REDACTED]';
+
                 continue;
             }
             $clean[$key] = match (true) {

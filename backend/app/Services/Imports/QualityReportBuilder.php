@@ -15,8 +15,8 @@ use Illuminate\Support\Facades\DB;
 final class QualityReportBuilder
 {
     /**
-     * @param array<string, mixed> $stats
-     * @param list<array<string, mixed>> $issues
+     * @param  array<string, mixed>  $stats
+     * @param  list<array<string, mixed>>  $issues
      * @return array{score: float, issues: list<array<string, mixed>>, summary: array<string, mixed>}
      */
     public function build(array $stats, array $issues): array

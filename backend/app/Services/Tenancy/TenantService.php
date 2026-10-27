@@ -18,9 +18,7 @@ final class TenantService
 {
     public const MAX_TENANTS_PER_OWNER = 10;
 
-    public function __construct(private readonly AuditLogger $audit, private readonly TenantContext $context)
-    {
-    }
+    public function __construct(private readonly AuditLogger $audit, private readonly TenantContext $context) {}
 
     /** @param array<string, mixed> $data */
     public function create(User $owner, array $data): Tenant
@@ -32,7 +30,7 @@ final class TenantService
 
         return DB::transaction(function () use ($owner, $data): Tenant {
             $plan = Plan::query()->where('code', config('predictily.default_plan', 'trial'))->first();
-            $tenant = new Tenant();
+            $tenant = new Tenant;
             $tenant->fill([
                 'name' => $data['name'],
                 'legal_name' => $data['legal_name'] ?? null,

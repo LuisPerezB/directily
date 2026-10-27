@@ -16,16 +16,15 @@ final class CommitImport implements ShouldQueue
     use Queueable;
 
     public int $timeout = 3600;
+
     public int $tries = 1;
 
-    public function __construct(public int $tenantId, public int $importJobId)
-    {
-    }
+    public function __construct(public int $tenantId, public int $importJobId) {}
 
     /** @return list<object> */
     public function middleware(): array
     {
-        return [new SetTenantContext()];
+        return [new SetTenantContext];
     }
 
     public function handle(ImportService $imports): void

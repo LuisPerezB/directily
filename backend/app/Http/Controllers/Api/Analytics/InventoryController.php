@@ -24,8 +24,7 @@ class InventoryController extends AnalyticsController
     public function __construct(
         private readonly RunResolver $runs,
         private readonly InventoryQuery $inventory,
-    ) {
-    }
+    ) {}
 
     public function recommendations(RecommendationIndexRequest $request): AnonymousResourceCollection|JsonResponse
     {

@@ -18,9 +18,7 @@ use Illuminate\Http\Response;
 /** Simulador de escenarios (cálculo determinista sobre supuestos explícitos). */
 class ScenarioController extends AnalyticsController
 {
-    public function __construct(private readonly ScenarioService $scenarios)
-    {
-    }
+    public function __construct(private readonly ScenarioService $scenarios) {}
 
     public function simulate(SimulateScenarioRequest $request): JsonResponse
     {
@@ -79,12 +77,6 @@ class ScenarioController extends AnalyticsController
 
     private function assertFeature(): void
     {
-        if (! CoreServices::planAllows($this->tenant(), 'scenarios')) {
-            abort(response()->json([
-                'message' => 'Su plan no incluye el simulador de escenarios.',
-                'code' => 'plan_limit_exceeded',
-                'limit' => 'scenarios',
-            ], 402));
-        }
+        CoreServices::assertFeature($this->tenant(), 'scenarios');
     }
 }

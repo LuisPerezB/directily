@@ -169,11 +169,11 @@ function leadSource(s: string): string {
       </EmptyState>
       <template v-else>
         <DataTable v-model:sort="sort" :columns="columns" :rows="recs.data.value?.data ?? []" :row-key="(r) => r.id" :loading="recs.loading.value" :caption="t('inventory.title')">
-          <template #cell-product.name="{ row }">
+          <template #cell-product_name="{ row }">
             <button type="button" class="text-left font-medium hover:text-brand-strong underline-offset-2 hover:underline" @click="detail = row">{{ row.product?.name ?? `#${row.product_id}` }}</button>
             <span class="block text-xs text-fg-muted">{{ row.product?.sku }} · {{ t(`inventory.types.${row.type}`) }}</span>
           </template>
-          <template #cell-branch.name="{ row }">{{ row.branch?.name ?? catalog.branchName(row.branch_id) }}</template>
+          <template #cell-branch_name="{ row }">{{ row.branch?.name ?? catalog.branchName(row.branch_id) }}</template>
           <template #cell-risk_level="{ row }"><StatusBadge domain="risk" :value="row.risk_level" /></template>
           <template #cell-status="{ row }"><StatusBadge domain="recommendation" :value="row.status" /></template>
           <template #cell-actions="{ row }">

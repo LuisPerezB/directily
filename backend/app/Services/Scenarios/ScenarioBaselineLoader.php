@@ -85,7 +85,7 @@ class ScenarioBaselineLoader
      * Último costo unitario conocido por producto: costo histórico de la venta más reciente,
      * luego costo actual del catálogo y, por último, el costo del inventario más reciente.
      *
-     * @param list<int> $productIds
+     * @param  list<int>  $productIds
      * @return array<int, float>
      */
     public function latestUnitCosts(int $tenantId, array $productIds): array

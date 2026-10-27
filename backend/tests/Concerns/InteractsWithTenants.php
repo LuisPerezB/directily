@@ -40,7 +40,9 @@ trait InteractsWithTenants
     /** Autentica (Sanctum) y fija el header X-Tenant-ID para las siguientes peticiones. */
     protected function actingAsTenantUser(User $user, Tenant $tenant): static
     {
-        Sanctum::actingAs($user, ['*']);
+        // refresh(): Sanctum marca al usuario como no recién creado y el modo estricto exige
+        // que todos los atributos estén cargados (como ocurre con un usuario real de la BD).
+        Sanctum::actingAs($user->refresh(), ['*']);
 
         return $this->withHeader('X-Tenant-ID', $tenant->uuid);
     }

@@ -47,7 +47,7 @@ final class TenantDataExporter
         $disk->makeDirectory(dirname($relative));
         $zipPath = $disk->path($relative);
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
             throw new RuntimeException('No se pudo crear el archivo de exportación.');
         }

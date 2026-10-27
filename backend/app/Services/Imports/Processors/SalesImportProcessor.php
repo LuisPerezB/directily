@@ -18,16 +18,14 @@ use Carbon\CarbonImmutable;
  */
 final class SalesImportProcessor implements ImportProcessor
 {
-    public function __construct(private readonly SalesDocumentWriter $writer)
-    {
-    }
+    public function __construct(private readonly SalesDocumentWriter $writer) {}
 
     public function run(ImportRunContext $ctx): array
     {
         $tenant = $ctx->tenant;
         $normalizer = new SalesLineNormalizer($ctx->parser, $tenant->currency ?: 'USD', $tenant->timezone ?: 'America/Guayaquil');
         $catalog = new CatalogResolver($tenant, $ctx->options);
-        $assembler = new SalesDocumentAssembler();
+        $assembler = new SalesDocumentAssembler;
         $batchSize = (int) config('predictily.imports.batch_documents', 1000);
 
         // Pasada A

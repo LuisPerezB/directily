@@ -116,7 +116,8 @@ php artisan migrate && php artisan db:seed
 
 # Motor
 cd engine && python3.12 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-cp .env.example .env    # si existe; si no, definir ENGINE_DATABASE_URL y ENGINE_API_TOKEN
+export ENGINE_DATABASE_URL=postgresql+psycopg://predictily:secret@127.0.0.1:5432/predictily
+export ENGINE_API_TOKEN=<mismo valor que backend/.env>   # ver engine/README.md
 
 # Frontend
 cd frontend && npm ci
@@ -145,6 +146,7 @@ feriados de Ecuador, décimos, promociones, quiebres de stock, devoluciones y fa
 
 ```bash
 make demo           # Docker   (o: make demo-native)
+# equivalente: php artisan predictily:demo --forecast   (--fresh recrea, --only=ferreteria_andina)
 ```
 
 Crea ambas empresas con su usuario demo (ver `backend/config/predictily.php`), importa los

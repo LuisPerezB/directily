@@ -136,6 +136,7 @@
   --color-info-soft: var(--p-info-soft);
 }
 
+@layer base {
 html {
   -webkit-text-size-adjust: 100%;
 }
@@ -166,6 +167,11 @@ body {
   white-space: nowrap;
 }
 
+}
+
+/* Las clases de componentes van en @layer components para que las utilidades de
+   Tailwind (hidden, lg:hidden, w-full, etc.) puedan sobrescribirlas. */
+@layer components {
 /* ─── Componentes base ─────────────────────────────────────────────────── */
 
 .card {
@@ -342,6 +348,8 @@ body {
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
 }
 
 @media (prefers-reduced-motion: reduce) {

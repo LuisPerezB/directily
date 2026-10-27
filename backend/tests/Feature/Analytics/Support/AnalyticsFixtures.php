@@ -153,7 +153,7 @@ trait AnalyticsFixtures
      * Ejecución completada con valores de todos los niveles (día) y, opcionalmente,
      * semanas precalculadas con intervalos para el total.
      *
-     * @param array{version?: int, run_type?: string, is_current?: bool, horizon?: int, weekly_total?: bool, with_evaluations?: bool, with_recommendations?: bool} $opts
+     * @param  array{version?: int, run_type?: string, is_current?: bool, horizon?: int, weekly_total?: bool, with_evaluations?: bool, with_recommendations?: bool}  $opts
      */
     protected function seedForecastRun(Tenant $tenant, array $cat, string $cutoff, array $opts = []): ForecastRun
     {

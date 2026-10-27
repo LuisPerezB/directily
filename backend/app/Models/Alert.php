@@ -34,15 +34,16 @@ class Alert extends Model
         return $this->belongsTo(User::class, 'acknowledged_by');
     }
 
-
     public const STATUS_OPEN = 'open';
+
     public const STATUS_ACKNOWLEDGED = 'acknowledged';
+
     public const STATUS_RESOLVED = 'resolved';
 
     /**
      * Crea una alerta abierta salvo que ya exista otra abierta con el mismo dedup_key.
      *
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public static function raise(array $attributes): self
     {

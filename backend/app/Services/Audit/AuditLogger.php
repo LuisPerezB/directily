@@ -23,9 +23,7 @@ use Throwable;
  */
 final class AuditLogger
 {
-    public function __construct(private readonly TenantContext $context)
-    {
-    }
+    public function __construct(private readonly TenantContext $context) {}
 
     /** @param array<string, mixed> $metadata */
     public function log(string $action, ?Model $auditable = null, array $metadata = [], ?int $tenantId = null, ?int $userId = null): void
@@ -33,7 +31,7 @@ final class AuditLogger
         try {
             $request = app()->runningInConsole() && ! app()->runningUnitTests() ? null : request();
             $tenantId ??= $this->context->id()
-                ?? ($auditable !== null && $auditable->getAttribute('tenant_id') !== null ? (int) $auditable->getAttribute('tenant_id') : null);
+                ?? (($auditable?->getAttributes()['tenant_id'] ?? null) !== null ? (int) $auditable->getAttributes()['tenant_id'] : null);
 
             AuditLog::query()->forceCreate([
                 'tenant_id' => $tenantId,

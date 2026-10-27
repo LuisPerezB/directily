@@ -25,9 +25,7 @@ use Illuminate\Support\Facades\Auth;
  */
 final class AuthController extends Controller
 {
-    public function __construct(private readonly AuthService $auth, private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(private readonly AuthService $auth, private readonly AuditLogger $audit) {}
 
     public function register(RegisterRequest $request): JsonResponse
     {

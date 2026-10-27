@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Core;
 
-use App\Http\Middleware\ResolveTenant;
+use App\Models\Tenant;
 use App\Services\Plans\PlanLimitService;
 use App\Services\Tenancy\OnboardingStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \App\Models\Tenant */
+/** @mixin Tenant */
 final class TenantResource extends JsonResource
 {
     /** @return array<string, mixed> */

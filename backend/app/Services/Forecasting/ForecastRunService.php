@@ -23,9 +23,7 @@ use Illuminate\Validation\ValidationException;
  */
 class ForecastRunService
 {
-    public function __construct(private readonly TenantContext $context)
-    {
-    }
+    public function __construct(private readonly TenantContext $context) {}
 
     public function request(
         Tenant $tenant,
@@ -90,6 +88,7 @@ class ForecastRunService
             return $run;
         }));
 
+        CoreServices::recordUsage($tenant, 'forecast_runs');
         $this->context->runAs($tenant, fn () => CoreServices::audit('forecast.requested', $run, [
             'version' => $run->version,
             'horizon_days' => $horizonDays,
@@ -120,11 +119,7 @@ class ForecastRunService
                 'horizon_days' => 'El horizonte debe ser uno de: '.implode(', ', $supported).' días.',
             ]);
         }
-        if (! in_array($horizonDays, CoreServices::allowedHorizons($tenant), true)) {
-            throw ValidationException::withMessages([
-                'horizon_days' => "Su plan no incluye pronósticos a {$horizonDays} días.",
-            ]);
-        }
+        CoreServices::assertHorizon($tenant, $horizonDays);
     }
 
     private function validateCutoff(Tenant $tenant, ?string $cutoffDate): ?string

@@ -18,9 +18,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 /** Exportación completa de datos (LOPDP: acceso y portabilidad). */
 final class TenantExportController extends Controller
 {
-    public function __construct(private readonly TenantContext $context, private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(private readonly TenantContext $context, private readonly AuditLogger $audit) {}
 
     public function store(Request $request): JsonResponse
     {

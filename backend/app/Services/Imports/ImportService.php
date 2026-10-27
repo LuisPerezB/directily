@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Imports;
 
 use App\Exceptions\DomainStateException;
+use App\Jobs\Forecasting\RefreshReadiness;
 use App\Jobs\Imports\CommitImport;
 use App\Jobs\Imports\ValidateImport;
 use App\Models\Alert;
@@ -17,11 +18,13 @@ use App\Services\Imports\Mapping\ColumnMatcher;
 use App\Services\Imports\Processors\ImportRunContext;
 use App\Services\Imports\Reading\ReaderFactory;
 use App\Services\Plans\PlanLimitService;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
@@ -39,10 +42,9 @@ final class ImportService
         private readonly QualityReportBuilder $quality,
         private readonly PlanLimitService $plans,
         private readonly AuditLogger $audit,
-    ) {
-    }
+    ) {}
 
-    public function disk(): \Illuminate\Contracts\Filesystem\Filesystem
+    public function disk(): Filesystem
     {
         return Storage::disk((string) config('predictily.imports.disk', 'local'));
     }
@@ -67,7 +69,7 @@ final class ImportService
 
         $previous = ImportJob::query()->where('file_hash', $hash)->where('entity_type', $entity->value)->where('status', ImportStatus::COMPLETED)->latest('id')->first(['id', 'created_at']);
 
-        $job = new ImportJob();
+        $job = new ImportJob;
         $job->forceFill([
             'tenant_id' => $tenant->id,
             'user_id' => $user?->id,
@@ -126,8 +128,8 @@ final class ImportService
     /**
      * Guarda el mapeo/opciones y lanza la validación asíncrona.
      *
-     * @param array<string, string|null> $mapping
-     * @param array<string, mixed> $options
+     * @param  array<string, string|null>  $mapping
+     * @param  array<string, mixed>  $options
      */
     public function setMapping(ImportJob $job, array $mapping, array $options = []): ImportJob
     {
@@ -244,8 +246,8 @@ final class ImportService
     /**
      * Ejecuta validación+importación de forma síncrona (datos demo, comandos).
      *
-     * @param array<string, string|null> $mapping
-     * @param array<string, mixed> $options
+     * @param  array<string, string|null>  $mapping
+     * @param  array<string, mixed>  $options
      */
     public function importNow(ImportJob $job, ?array $mapping = null, array $options = []): ImportJob
     {
@@ -296,9 +298,9 @@ final class ImportService
     private function afterCommit(ImportJob $job): void
     {
         if (in_array($job->entity_type, [ImportEntity::Sales->value, ImportEntity::Inventory->value], true)
-            && class_exists(\App\Jobs\Forecasting\RefreshReadiness::class)) {
+            && class_exists(RefreshReadiness::class)) {
             try {
-                \App\Jobs\Forecasting\RefreshReadiness::dispatch($job->tenant_id)->onQueue('forecasting');
+                RefreshReadiness::dispatch($job->tenant_id)->onQueue('forecasting');
             } catch (Throwable $e) {
                 Log::warning('No se pudo programar la evaluación de preparación de datos', ['error' => $e->getMessage()]);
             }
@@ -331,9 +333,9 @@ final class ImportService
     }
 
     /**
-     * @param array<string, string|null> $mapping
-     * @param list<string> $columns
-     * @param array<string, mixed> $options
+     * @param  array<string, string|null>  $mapping
+     * @param  list<string>  $columns
+     * @param  array<string, mixed>  $options
      */
     private function assertMappingValid(ImportEntity $entity, array $mapping, array $columns, array $options): void
     {
@@ -343,6 +345,7 @@ final class ImportService
         foreach ($mapping as $field => $column) {
             if (! isset($fields[$field])) {
                 $errors["mapping.{$field}"][] = "Campo desconocido: {$field}.";
+
                 continue;
             }
             if ($column === null || $column === '') {
@@ -365,7 +368,7 @@ final class ImportService
             $errors['mapping.product_sku'][] = 'Mapee al menos el producto o el proveedor.';
         }
         if ($errors !== []) {
-            throw \Illuminate\Validation\ValidationException::withMessages($errors);
+            throw ValidationException::withMessages($errors);
         }
     }
 }

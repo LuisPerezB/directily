@@ -11,10 +11,15 @@ namespace App\Services\Analytics\Support;
 final class ForecastNode
 {
     public const LEVEL_TOTAL = 'total';
+
     public const LEVEL_BRANCH = 'branch';
+
     public const LEVEL_CATEGORY = 'category';
+
     public const LEVEL_BRANCH_CATEGORY = 'branch_category';
+
     public const LEVEL_PRODUCT = 'product';
+
     public const LEVEL_SERIES = 'series';
 
     private function __construct(
@@ -23,8 +28,7 @@ final class ForecastNode
         public readonly ?int $branchId = null,
         public readonly ?int $categoryId = null,
         public readonly ?int $productId = null,
-    ) {
-    }
+    ) {}
 
     /** El producto prevalece sobre la categoría (un producto pertenece a una sola categoría). */
     public static function fromFilters(?int $branchId, ?int $categoryId, ?int $productId): self

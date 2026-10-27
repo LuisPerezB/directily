@@ -22,8 +22,7 @@ class AccuracyController extends AnalyticsController
     public function __construct(
         private readonly RunResolver $runs,
         private readonly AccuracyService $accuracy,
-    ) {
-    }
+    ) {}
 
     public function summary(AccuracyRequest $request): JsonResponse
     {

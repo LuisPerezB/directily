@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Schedule;
 */
 
 // ── backend-core: retención, eliminación diferida de empresas, limpieza de archivos ──
-// (por definir por backend-core)
+Schedule::command('predictily:purge')->dailyAt('03:30')->timezone('America/Guayaquil')->withoutOverlapping()->onOneServer();
 
 // ── backend-analytics: evaluación vs reales, pronósticos programados ──
 // El entrenamiento NO se dispara por cada factura: solo por programación, por el usuario

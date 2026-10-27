@@ -39,7 +39,7 @@ final class SalesLineNormalizer
     }
 
     /**
-     * @param array<string, mixed> $raw campo canónico => valor crudo
+     * @param  array<string, mixed>  $raw  campo canónico => valor crudo
      * @return array{0: array<string, mixed>|null, 1: list<Issue>}
      */
     public function normalize(array $raw): array

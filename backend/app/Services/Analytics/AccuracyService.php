@@ -9,6 +9,7 @@ use App\Services\Analytics\Support\ForecastNode;
 use App\Services\Analytics\Support\ModelCatalog;
 use App\Services\Analytics\Support\Num;
 use App\Services\Analytics\Support\SalesQuery;
+use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,14 +24,13 @@ class AccuracyService
         private readonly AccuracyExplainer $explainer,
         private readonly ForecastQuery $forecasts,
         private readonly HistoryQuery $history,
-    ) {
-    }
+    ) {}
 
     /** @return array<string, mixed> */
     public function summary(?ForecastRun $run): array
     {
         $backtest = $run ? $this->backtest($run) : null;
-        $realized = $this->realized((int) ($run?->tenant_id ?? app(\App\Support\Tenancy\TenantContext::class)->id()));
+        $realized = $this->realized((int) ($run?->tenant_id ?? app(TenantContext::class)->id()));
         $data = $run ? $this->dataContext((int) $run->tenant_id) : ['has_inventory' => false, 'censored_days' => 0, 'censored_series' => 0];
 
         return [

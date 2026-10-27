@@ -41,7 +41,7 @@ class ProductForecastQuery
     }
 
     /**
-     * @param array{branch_id?: int|null, category_id?: int|null, search?: string|null, min_history_units?: float|null} $filters
+     * @param  array{branch_id?: int|null, category_id?: int|null, search?: string|null, min_history_units?: float|null}  $filters
      */
     public function productsQuery(ForecastRun $run, int $horizon, array $filters, string $sort = '-forecast_units'): Builder
     {
@@ -123,7 +123,7 @@ class ProductForecastQuery
     }
 
     /**
-     * @param array{branch_id?: int|null, search?: string|null} $filters
+     * @param  array{branch_id?: int|null, search?: string|null}  $filters
      * @return list<array<string, mixed>>
      */
     public function categories(ForecastRun $run, int $horizon, array $filters, string $sort = '-forecast_units'): array
@@ -214,7 +214,7 @@ class ProductForecastQuery
     }
 
     /**
-     * @param Collection<int, object> $items
+     * @param  Collection<int, object>  $items
      * @return Collection<int, array<string, mixed>>
      */
     private function enrichProducts(ForecastRun $run, Collection $items, ?int $branchId): Collection

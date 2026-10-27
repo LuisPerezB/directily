@@ -24,7 +24,7 @@ final class SalesDocumentAssembler
     }
 
     /**
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      * @return list<Issue>
      */
     public function add(array $line): array
@@ -135,8 +135,8 @@ final class SalesDocumentAssembler
     /**
      * Calcula totales y huella (source_hash) del documento.
      *
-     * @param array<string, mixed> $header
-     * @param list<array<string, mixed>> $lines
+     * @param  array<string, mixed>  $header
+     * @param  list<array<string, mixed>>  $lines
      * @return array<string, mixed>
      */
     public static function withTotals(array $header, array $lines): array

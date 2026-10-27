@@ -15,13 +15,11 @@ use App\Services\Plans\PlanLimitService;
  */
 final class SalesBatchService
 {
-    public function __construct(private readonly SalesDocumentWriter $writer, private readonly PlanLimitService $plans)
-    {
-    }
+    public function __construct(private readonly SalesDocumentWriter $writer, private readonly PlanLimitService $plans) {}
 
     /**
-     * @param list<array<string, mixed>> $documents
-     * @param array<string, mixed> $options
+     * @param  list<array<string, mixed>>  $documents
+     * @param  array<string, mixed>  $options
      * @return array{created: int, updated: int, unchanged: int, rejected: int, errors: list<array<string, mixed>>, warnings: list<array<string, mixed>>}
      */
     public function ingest(Tenant $tenant, array $documents, ?int $dataSourceId = null, array $options = []): array
@@ -37,7 +35,7 @@ final class SalesBatchService
         $lines = 0;
 
         foreach ($documents as $index => $document) {
-            $assembler = new SalesDocumentAssembler();
+            $assembler = new SalesDocumentAssembler;
             $docErrors = [];
             $header = array_intersect_key($document, array_flip([
                 'document_number', 'document_type', 'status', 'issued_at', 'branch_code', 'currency', 'channel',
@@ -72,11 +70,13 @@ final class SalesBatchService
             }
             if ($docErrors !== []) {
                 $errors = array_merge($errors, $docErrors);
+
                 continue;
             }
             $docs = $assembler->drain();
             if ($docs === []) {
                 $warnings[] = ['index' => $index, 'code' => 'empty_document', 'severity' => 'warning', 'message' => 'El documento no tiene líneas válidas.'];
+
                 continue;
             }
             $seen[$key] = true;

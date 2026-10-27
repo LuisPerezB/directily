@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Core;
 
+use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \App\Models\Branch */
+/** @mixin Branch */
 final class BranchResource extends JsonResource
 {
     /** @return array<string, mixed> */

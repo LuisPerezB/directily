@@ -63,11 +63,38 @@ export const FALLBACK_FIELDS: Record<ImportEntityType, ImportField[]> = {
     f('lead_time_days', 'Plazo de entrega (días)', true, 'integer'),
     f('lead_time_std_days', 'Variabilidad del plazo (días)', false, 'number'),
   ],
+  branches: [
+    f('code', 'Código', true, 'text', 'Código del establecimiento (p. ej. 001).'),
+    f('name', 'Nombre', true, 'text'),
+    f('province', 'Provincia', false, 'text'),
+    f('canton', 'Cantón', false, 'text'),
+    f('commercial_zone', 'Zona comercial', false, 'text'),
+    f('address', 'Dirección', false, 'text'),
+  ],
+  suppliers: [
+    f('code', 'Código', true, 'text'),
+    f('name', 'Nombre', true, 'text'),
+    f('tax_id', 'RUC', false, 'text'),
+    f('country', 'País', false, 'text'),
+    f('default_lead_time_days', 'Plazo habitual (días)', false, 'integer'),
+  ],
+  promotions: [
+    f('name', 'Nombre', true, 'text'),
+    f('promo_type', 'Tipo', false, 'text', 'percentage, fixed_amount, bundle u other.'),
+    f('discount_pct', 'Descuento', false, 'number'),
+    f('starts_on', 'Desde', true, 'date'),
+    f('ends_on', 'Hasta', true, 'date'),
+    f('branch_code', 'Sucursal', false, 'text'),
+    f('product_sku', 'Producto', false, 'text'),
+    f('category', 'Categoría', false, 'text'),
+  ],
 }
 
 /** Mapeo inicial: el guardado por el usuario o el sugerido por la API, limitado a columnas detectadas. */
 export function initialMapping(fields: ImportField[], job: Pick<ImportJob, 'column_mapping' | 'suggested_mapping' | 'detected_columns'>): ColumnMapping {
-  const source = job.column_mapping ?? job.suggested_mapping ?? {}
+  // Un mapeo guardado vacío ({}) no cuenta: en ese caso se usa la sugerencia de la API.
+  const saved = job.column_mapping && Object.values(job.column_mapping).some(Boolean) ? job.column_mapping : null
+  const source = saved ?? job.suggested_mapping ?? {}
   const columns = new Set(job.detected_columns ?? [])
   const mapping: ColumnMapping = {}
   for (const field of fields) {

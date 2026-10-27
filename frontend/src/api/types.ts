@@ -199,8 +199,10 @@ export interface TenantUser {
 
 export interface TenantExport {
   export_id: string | number
-  status?: 'queued' | 'processing' | 'completed' | 'failed'
+  status?: 'queued' | 'processing' | 'completed' | 'failed' | 'expired'
   download_url?: string | null
+  error_message?: string | null
+  expires_at?: ISODateTime | null
 }
 
 // ─── Catálogos ──────────────────────────────────────────────────────────────
@@ -295,7 +297,7 @@ export interface SalesSummary {
 
 // ─── Importaciones ─────────────────────────────────────────────────────────
 
-export type ImportEntityType = 'sales' | 'products' | 'inventory' | 'lead_times'
+export type ImportEntityType = 'sales' | 'products' | 'inventory' | 'lead_times' | 'branches' | 'suppliers' | 'promotions'
 
 export type ImportStatus =
   | 'uploaded'
@@ -309,7 +311,7 @@ export type ImportStatus =
 
 export interface ImportOptions {
   date_format?: 'auto' | 'Y-m-d' | 'd/m/Y' | 'm/d/Y' | 'd-m-Y'
-  decimal_separator?: '.' | ','
+  decimal_separator?: 'auto' | '.' | ','
   thousands_separator?: string | null
   csv_delimiter?: 'auto' | ',' | ';' | '\t'
   default_branch_code?: string | null
@@ -478,6 +480,8 @@ export interface HistoryPoint {
   units: number
   revenue: number
   stockout: boolean
+  /** En niveles agregados: proporción de productos sin existencias ese período. */
+  stockout_share?: number | null
 }
 
 export interface ForecastPoint {
@@ -491,8 +495,12 @@ export interface ForecastPoint {
 }
 
 export interface ForecastSeriesMeta {
-  run_id: number
-  run_version: number
+  run_id: number | null
+  run_version: number | null
+  run_type?: 'production' | 'historical' | null
+  has_forecast?: boolean
+  interval_levels?: number[]
+  notes?: string[]
   generated_at: ISODateTime | null
   cutoff_date: ISODate | null
   model_family: string | null
@@ -883,7 +891,7 @@ export interface AdminTenant {
 }
 
 export interface AdminPlan {
-  id: number
+  id?: number
   code: string
   name: string
   limits: PlanLimits

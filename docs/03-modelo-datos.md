@@ -458,13 +458,14 @@ erDiagram
 
 ---
 
-## 8. Decisiones, escenarios y alertas
+## 8. Decisiones, escenarios, alertas y exportaciones
 
 | Tabla | Escribe | Propósito | Índices (consulta) |
 |---|---|---|---|
 | `recommendations` | motor | Recomendación por (ejecución, sucursal, producto): disponible (on_hand − reservado + en tránsito), plazo y su fuente, período de revisión, nivel de servicio, demanda en plazo y su desviación, stock de seguridad, punto de reorden, cantidad sugerida, costo, inversión estimada, días de cobertura, probabilidad y fecha estimada de quiebre, `risk_level`, `status` (open/acknowledged/dismissed/ordered) y `assumptions` | UK `(forecast_run_id, branch_id, product_id)`; `(tenant_id, forecast_run_id, risk_level)` (tabla de riesgos del dashboard) |
 | `alerts` | Laravel y motor | Alertas tipadas con severidad, `payload`, entidad relacionada y `dedup_key` (evita repetir alertas abiertas del mismo hecho) | `(tenant_id, status, created_at)` (bandeja de alertas); `(tenant_id, dedup_key)` (deduplicación) |
 | `scenarios` | Laravel | Escenarios guardados: supuestos explícitos, filtros y resultados | `(tenant_id, created_at)` |
+| `tenant_exports` | Laravel | Exportaciones completas de la empresa (portabilidad LOPDP): estado (queued/running/completed/failed/expired), ruta privada, tamaño, hash SHA-256, resumen de filas por tabla y `expires_at` | `(tenant_id, created_at)` (historial de exportaciones) |
 
 **Regla:** las recomendaciones son sugerencias con supuestos explícitos; Predictily nunca ejecuta
 pedidos ni compromete fondos.

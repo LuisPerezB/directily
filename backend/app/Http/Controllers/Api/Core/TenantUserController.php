@@ -19,9 +19,7 @@ use Illuminate\Http\Response;
 
 final class TenantUserController extends Controller
 {
-    public function __construct(private readonly MembershipService $members, private readonly TenantContext $context)
-    {
-    }
+    public function __construct(private readonly MembershipService $members, private readonly TenantContext $context) {}
 
     public function index(): AnonymousResourceCollection
     {

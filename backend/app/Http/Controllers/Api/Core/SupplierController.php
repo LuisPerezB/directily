@@ -30,7 +30,7 @@ final class SupplierController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $supplier = Supplier::query()->create($this->validated($request));
+        $supplier = Supplier::query()->create($this->validated($request))->refresh();
 
         return response()->json(['data' => $this->present($supplier)], 201);
     }

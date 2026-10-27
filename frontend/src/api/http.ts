@@ -111,13 +111,23 @@ async function parseBody(data: unknown): Promise<ApiErrorBody | null> {
   if (!data) return null
   if (typeof Blob !== 'undefined' && data instanceof Blob) {
     try {
-      return JSON.parse(await data.text()) as ApiErrorBody
+      return JSON.parse(await readBlobText(data)) as ApiErrorBody
     } catch {
       return null
     }
   }
   if (typeof data === 'object') return data as ApiErrorBody
   return null
+}
+
+function readBlobText(blob: Blob): Promise<string> {
+  if (typeof blob.text === 'function') return blob.text()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
 }
 
 export const http = createHttp()

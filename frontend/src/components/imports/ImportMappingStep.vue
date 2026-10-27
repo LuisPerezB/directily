@@ -18,7 +18,7 @@ watch(
 
 const defaults: ImportOptions = {
   date_format: 'auto',
-  decimal_separator: '.',
+  decimal_separator: 'auto',
   csv_delimiter: 'auto',
   default_branch_code: props.branches.length === 1 ? props.branches[0]!.code : null,
   create_missing_products: true,
@@ -112,6 +112,7 @@ function submit(): void {
         <div>
           <label class="label" for="opt-dec">{{ t('imports.options.decimal') }}</label>
           <select id="opt-dec" v-model="options.decimal_separator" class="select">
+            <option value="auto">{{ t('imports.options.auto') }}</option>
             <option value=".">{{ t('imports.options.dot') }}</option>
             <option value=",">{{ t('imports.options.comma') }}</option>
           </select>

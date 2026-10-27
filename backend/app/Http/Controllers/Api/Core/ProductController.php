@@ -32,8 +32,7 @@ final class ProductController extends Controller
         private readonly ProductStatsService $stats,
         private readonly PlanLimitService $plans,
         private readonly AuditLogger $audit,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -103,7 +102,7 @@ final class ProductController extends Controller
         if ($data['is_active'] ?? true) {
             $this->plans->assertCan($this->context->require(), 'max_active_products');
         }
-        $product = Product::query()->create($data);
+        $product = Product::query()->create($data)->refresh();
         $this->audit->log('product.created', $product, ['sku' => $product->sku]);
         $product->load('category:id,name');
 

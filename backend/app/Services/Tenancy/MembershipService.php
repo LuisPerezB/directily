@@ -22,9 +22,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 final class MembershipService
 {
-    public function __construct(private readonly AuditLogger $audit, private readonly PlanLimitService $plans)
-    {
-    }
+    public function __construct(private readonly AuditLogger $audit, private readonly PlanLimitService $plans) {}
 
     /** @return array{user: User, temporary_password: ?string, created: bool} */
     public function add(Tenant $tenant, TenantRole $actorRole, string $email, TenantRole $role, ?string $name = null): array

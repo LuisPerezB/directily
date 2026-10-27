@@ -37,7 +37,7 @@ final class PromotionController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $promotion = Promotion::query()->create($this->validated($request));
+        $promotion = Promotion::query()->create($this->validated($request))->refresh();
 
         return response()->json(['data' => $this->present($promotion)], 201);
     }
@@ -64,7 +64,7 @@ final class PromotionController extends Controller
         return $request->validate([
             'name' => [$req, 'string', 'max:150'],
             'promo_type' => ['sometimes', Rule::in(['percentage', 'fixed_amount', 'bundle', 'other'])],
-            'discount_pct' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'discount_pct' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'], // fracción: 0.15 = 15 %
             'starts_on' => [$req, 'date'],
             'ends_on' => [$req, 'date', 'after_or_equal:starts_on'],
             'branch_id' => ['sometimes', 'nullable', 'integer', TenantRule::exists('branches')],

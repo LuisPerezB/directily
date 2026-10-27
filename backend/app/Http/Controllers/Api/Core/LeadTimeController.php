@@ -48,7 +48,7 @@ final class LeadTimeController extends Controller
             ['product_id' => $data['product_id'] ?? null, 'supplier_id' => $data['supplier_id'] ?? null, 'branch_id' => $data['branch_id'] ?? null],
             ['lead_time_days' => $data['lead_time_days'], 'lead_time_std_days' => $data['lead_time_std_days'] ?? null, 'source' => 'manual', 'valid_from' => now()->toDateString()],
         );
-        $leadTime->load(['product:id,sku,name', 'supplier:id,code,name', 'branch:id,code,name']);
+        $leadTime->refresh()->load(['product:id,sku,name', 'supplier:id,code,name', 'branch:id,code,name']);
 
         return response()->json(['data' => $this->present($leadTime)], 201);
     }

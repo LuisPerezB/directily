@@ -16,9 +16,12 @@ use Illuminate\Support\Facades\DB;
 final class ImportRunContext
 {
     public readonly ValueParser $parser;
+
     public readonly IssueCollector $issues;
+
     /** @var array<string, mixed> */
     public readonly array $options;
+
     private int $lastProgress = -1;
 
     /** @param array<string, string|null> $mapping */

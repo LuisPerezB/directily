@@ -19,14 +19,19 @@ final class CatalogResolver
 {
     /** @var array<string, int> código normalizado => id */
     private array $branches;
+
     /** @var array<string, int> sku normalizado => id (incluye productos eliminados lógicamente) */
     private array $products;
+
     /** @var array<string, int> nombre normalizado => id */
     private array $categories;
+
     /** @var array<string, true> */
     private array $pendingProducts = [];
+
     /** @var array<string, true> */
     private array $pendingBranches = [];
+
     /** @var array<string, true> */
     private array $reported = [];
 
@@ -132,7 +137,7 @@ final class CatalogResolver
     /**
      * Crea las sucursales faltantes.
      *
-     * @param list<string> $codes
+     * @param  list<string>  $codes
      * @return int creadas
      */
     public function ensureBranches(array $codes): int
@@ -162,7 +167,7 @@ final class CatalogResolver
     }
 
     /**
-     * @param list<string> $names
+     * @param  list<string>  $names
      * @return int creadas
      */
     public function ensureCategories(array $names): int
@@ -200,7 +205,7 @@ final class CatalogResolver
     /**
      * Crea productos faltantes a partir de [sku => ['name' => ?, 'category' => ?, 'unit' => ?]].
      *
-     * @param array<string, array{name: ?string, category: ?string}> $products
+     * @param  array<string, array{name: ?string, category: ?string}>  $products
      * @return int creados
      */
     public function ensureProducts(array $products): int
@@ -246,7 +251,7 @@ final class CatalogResolver
     /**
      * Resuelve/crea clientes. Cédulas y RUC se convierten en huella HMAC (nunca en claro).
      *
-     * @param array<string, array{segment: ?string, province: ?string}> $customers código original => datos
+     * @param  array<string, array{segment: ?string, province: ?string}>  $customers  código original => datos
      * @return array<string, int> código original => customer_id
      */
     public function ensureCustomers(array $customers): array
@@ -306,7 +311,7 @@ final class CatalogResolver
     }
 
     /**
-     * @param array<string, mixed> $map
+     * @param  array<string, mixed>  $map
      * @return array<string, int>
      */
     private function normalizedMap(array $map): array

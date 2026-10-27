@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Core;
 
+use App\Models\ImportJob;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\DB;
 
-/** @mixin \App\Models\ImportJob */
+/** @mixin ImportJob */
 final class ImportJobResource extends JsonResource
 {
     public bool $withQuality = true;

@@ -11,7 +11,9 @@ use InvalidArgumentException;
 final class Granularity
 {
     public const DAY = 'day';
+
     public const WEEK = 'week';
+
     public const MONTH = 'month';
 
     public const ALL = [self::DAY, self::WEEK, self::MONTH];

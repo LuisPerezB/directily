@@ -13,11 +13,10 @@ final class XlsxReader implements TabularReader
 {
     /** @var list<string>|null */
     private ?array $headers = null;
+
     private ?string $sheetName = null;
 
-    public function __construct(private readonly string $path)
-    {
-    }
+    public function __construct(private readonly string $path) {}
 
     public function dialect(): array
     {
@@ -47,6 +46,7 @@ final class XlsxReader implements TabularReader
         foreach ($this->rawRows() as $row) {
             if ($first) {
                 $first = false;
+
                 continue;
             }
             yield ++$n => array_pad($row, $width, null);

@@ -14,7 +14,9 @@ use RuntimeException;
 final class CsvReader implements TabularReader
 {
     private string $delimiter;
+
     private string $encoding;
+
     /** @var list<string>|null */
     private ?array $headers = null;
 
@@ -54,6 +56,7 @@ final class CsvReader implements TabularReader
         foreach ($this->rawRows() as $row) {
             if ($first) {
                 $first = false;
+
                 continue;
             }
             yield ++$n => $row;
