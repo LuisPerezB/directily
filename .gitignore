@@ -1,0 +1,21 @@
+.DS_Store
+.idea/
+.vscode/
+*.log
+.env
+!.env.example
+# backend
+backend/vendor/
+backend/node_modules/
+backend/storage/*.key
+# engine
+engine/.venv/
+engine/**/__pycache__/
+engine/.pytest_cache/
+engine/storage/artifacts/
+engine/.ruff_cache/
+engine/.mypy_cache/
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
