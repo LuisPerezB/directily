@@ -1,0 +1,27 @@
+Metadata-Version: 2.4
+Name: predictily-engine
+Version: 0.1.0
+Summary: Motor predictivo interno de Predictily (pronóstico de demanda, inventario y precisión)
+License: Propietario
+Requires-Python: <3.13,>=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi==0.162.0
+Requires-Dist: uvicorn[standard]==0.54.0
+Requires-Dist: pydantic==2.14.1
+Requires-Dist: pydantic-settings==2.16.1
+Requires-Dist: SQLAlchemy==2.1.6
+Requires-Dist: psycopg[binary]==3.3.6
+Requires-Dist: pandas==2.3.3
+Requires-Dist: numpy==2.5.4
+Requires-Dist: scipy==1.18.1
+Requires-Dist: statsforecast==2.1.1
+Requires-Dist: mlforecast==1.1.0
+Requires-Dist: lightgbm==4.7.0
+Requires-Dist: scikit-learn==1.9.1
+Requires-Dist: holidays==0.107
+Requires-Dist: joblib==1.6.0
+Provides-Extra: dev
+Requires-Dist: pytest==9.1.1; extra == "dev"
+Requires-Dist: httpx==0.28.1; extra == "dev"
+
+# Predictily Engine

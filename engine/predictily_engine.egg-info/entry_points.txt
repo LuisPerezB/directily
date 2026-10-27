@@ -1,0 +1,2 @@
+[console_scripts]
+predictily-engine = predictily_engine.cli:main

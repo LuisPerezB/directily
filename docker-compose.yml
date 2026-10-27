@@ -1,0 +1,210 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Predictily · Docker Compose (desarrollo local y VPS económico, sin GPU)
+#
+#   cp .env.example .env   # y completar APP_KEY, contraseñas y ENGINE_API_TOKEN
+#   docker compose up -d --build
+#   abrir http://localhost:8080
+#
+# Producción con TLS: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Redes:
+#   edge     → web, backend, queue, scheduler (salida a Internet: correo, conectores)
+#   internal → postgres, redis, engine + servicios Laravel (sin salida a Internet)
+# El motor (engine), PostgreSQL y Redis NO publican puertos.
+# ─────────────────────────────────────────────────────────────────────────────
+name: predictily
+
+x-backend-env: &backend-env
+  APP_NAME: Predictily
+  APP_ENV: ${APP_ENV:-production}
+  APP_KEY: ${APP_KEY:?Defina APP_KEY en .env (php artisan key:generate --show)}
+  APP_DEBUG: ${APP_DEBUG:-false}
+  APP_URL: ${APP_URL:-http://localhost:8080}
+  APP_LOCALE: es
+  APP_FALLBACK_LOCALE: es
+  APP_TIMEZONE: UTC
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_DATABASE: ${DB_DATABASE:-predictily}
+  DB_USERNAME: ${DB_USERNAME:-predictily}
+  DB_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD en .env}
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Defina REDIS_PASSWORD en .env}
+  QUEUE_CONNECTION: redis
+  # Debe ser MAYOR que el --timeout del worker de pronósticos (1000 s) para no duplicar trabajos.
+  REDIS_QUEUE_RETRY_AFTER: "1100"
+  CACHE_STORE: redis
+  SESSION_DRIVER: redis
+  SESSION_LIFETIME: ${SESSION_LIFETIME:-120}
+  SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-false}
+  SESSION_SAME_SITE: lax
+  SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:-localhost:8080,127.0.0.1:8080}
+  FRONTEND_URL: ${APP_URL:-http://localhost:8080}
+  TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+  ENGINE_URL: http://engine:8100
+  ENGINE_API_TOKEN: ${ENGINE_API_TOKEN:?Defina ENGINE_API_TOKEN en .env}
+  ENGINE_TIMEOUT: ${ENGINE_TIMEOUT:-900}
+  FILESYSTEM_DISK: local
+  PREDICTILY_DEMO_PATH: /var/www/data/demo
+  SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
+  SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
+  MAIL_MAILER: ${MAIL_MAILER:-log}
+  MAIL_HOST: ${MAIL_HOST:-}
+  MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_USERNAME: ${MAIL_USERNAME:-}
+  MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+  MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-reply@predictily.local}
+  MAIL_FROM_NAME: Predictily
+
+x-backend-service: &backend-service
+  image: predictily/backend:${IMAGE_TAG:-latest}
+  environment: *backend-env
+  restart: unless-stopped
+  volumes:
+    - backend-storage:/var/www/html/storage
+    - ./data/demo:/var/www/data/demo:ro
+  networks: [edge, internal]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-predictily}
+      POSTGRES_USER: ${DB_USERNAME:-predictily}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD en .env}
+      POSTGRES_EXTRA_DATABASES: ${POSTGRES_EXTRA_DATABASES:-}
+      TZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    shm_size: 256mb
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Defina REDIS_PASSWORD en .env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  # API pública (php-fpm). Ejecuta las migraciones al arrancar.
+  backend:
+    <<: *backend-service
+    build:
+      context: ./backend
+      target: app
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "true"
+
+  # Worker de importaciones y tareas generales.
+  queue:
+    <<: *backend-service
+    command: ["php", "artisan", "queue:work", "redis", "--queue=imports,default", "--tries=2", "--timeout=600", "--max-time=3600", "--sleep=3"]
+    stop_grace_period: 60s
+    healthcheck:
+      disable: true
+    depends_on:
+      backend:
+        condition: service_started
+
+  # Worker de pronósticos (trabajos largos: llama al motor y espera su resultado).
+  queue-forecasting:
+    <<: *backend-service
+    command: ["php", "artisan", "queue:work", "redis", "--queue=forecasting", "--tries=2", "--timeout=1000", "--max-time=7200", "--sleep=3"]
+    stop_grace_period: 120s
+    healthcheck:
+      disable: true
+    depends_on:
+      backend:
+        condition: service_started
+      engine:
+        condition: service_healthy
+
+  # Programador (evaluación diaria vs reales, pronósticos programados, purgas).
+  scheduler:
+    <<: *backend-service
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      disable: true
+    depends_on:
+      backend:
+        condition: service_started
+
+  # Motor predictivo interno (FastAPI). Sin puertos publicados.
+  engine:
+    build:
+      context: ./engine
+    image: predictily/engine:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ENGINE_DATABASE_URL: postgresql+psycopg://${DB_USERNAME:-predictily}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE:-predictily}
+      ENGINE_API_TOKEN: ${ENGINE_API_TOKEN:?Defina ENGINE_API_TOKEN en .env}
+      ENGINE_ARTIFACTS_DIR: /data/artifacts
+      ENGINE_RANDOM_SEED: ${ENGINE_RANDOM_SEED:-42}
+      ENGINE_LOG_LEVEL: ${ENGINE_LOG_LEVEL:-INFO}
+      ENGINE_N_JOBS: ${ENGINE_N_JOBS:-2}
+      ENGINE_MAX_SERIES_LGBM: ${ENGINE_MAX_SERIES_LGBM:-5000}
+      ENGINE_WORKERS: ${ENGINE_WORKERS:-2}
+    volumes:
+      - engine-artifacts:/data/artifacts
+    expose:
+      - "8100"
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${ENGINE_MEMORY_LIMIT:-4g}
+
+  # SPA + proxy inverso hacia php-fpm. Único servicio con puerto publicado.
+  web:
+    build:
+      context: ./frontend
+      additional_contexts:
+        infra: ./infra
+    image: predictily/web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    networks: [edge]
+    depends_on:
+      backend:
+        condition: service_started
+
+networks:
+  edge: {}
+  internal:
+    internal: true
+
+volumes:
+  pgdata:
+  redisdata:
+  backend-storage:
+  engine-artifacts:

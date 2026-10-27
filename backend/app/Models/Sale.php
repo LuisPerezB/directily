@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -56,5 +57,10 @@ class Sale extends Model
     public function relatedSale(): BelongsTo
     {
         return $this->belongsTo(Sale::class, 'related_sale_id');
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(SaleItem::class, 'sale_id')->orderBy('line_number');
     }
 }

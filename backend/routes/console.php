@@ -13,4 +13,11 @@ use Illuminate\Support\Facades\Schedule;
 // (por definir por backend-core)
 
 // ── backend-analytics: evaluación vs reales, pronósticos programados ──
-// (por definir por backend-analytics)
+// El entrenamiento NO se dispara por cada factura: solo por programación, por el usuario
+// o al completar una importación inicial.
+Schedule::command('predictily:evaluate-actuals')
+    ->dailyAt('02:00')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();
+Schedule::command('predictily:schedule-forecasts')
+    ->dailyAt('03:00')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();

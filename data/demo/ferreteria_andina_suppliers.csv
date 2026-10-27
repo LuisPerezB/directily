@@ -1,0 +1,8 @@
+code,name,country,default_lead_time_days
+PROV-CEM,Cementos del Valle S.A. (ficticio),EC,3
+PROV-ACE,Aceros del Austro Cía. Ltda. (ficticio),EC,5
+PROV-PIN,Pinturas Cordillera S.A. (ficticio),EC,7
+PROV-HER,Importadora Herramientas Pacífico (ficticio),CN,21
+PROV-ELE,Distribuidora Eléctrica Central (ficticio),EC,10
+PROV-PLO,Plásticos y Tuberías Andinas (ficticio),EC,7
+PROV-GEN,Comercial Ferretera Mayorista (ficticio),EC,10

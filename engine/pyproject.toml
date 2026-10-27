@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predictily-engine"
+version = "0.1.0"
+description = "Motor predictivo interno de Predictily (pronóstico de demanda, inventario y precisión)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Propietario" }
+# Versiones verificadas en Python 3.12 (CPU, sin GPU). Actualizar solo tras correr las pruebas.
+dependencies = [
+    "fastapi==0.162.0",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.16.1",
+    "SQLAlchemy==2.1.6",
+    "psycopg[binary]==3.3.6",
+    "pandas==2.3.3",
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+    "statsforecast==2.1.1",
+    "mlforecast==1.1.0",
+    "lightgbm==4.7.0",
+    "scikit-learn==1.9.1",
+    "holidays==0.107",
+    "joblib==1.6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "httpx==0.28.1"]
+
+[project.scripts]
+predictily-engine = "predictily_engine.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["predictily_engine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requiere PostgreSQL con el esquema migrado (ENGINE_TEST_DATABASE_URL)"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]

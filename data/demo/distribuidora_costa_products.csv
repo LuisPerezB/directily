@@ -1,0 +1,41 @@
+sku,name,category,unit,brand,current_price,current_cost,is_active
+DC-ABA-001,Arroz blanco 2 kg,Abarrotes,funda,Genérica,2.51,2.1739,true
+DC-ABA-002,Azúcar blanca 2 kg,Abarrotes,funda,Genérica,2.22,1.9534,true
+DC-ABA-003,Aceite vegetal 1 litro,Abarrotes,botella,Genérica,2.77,2.3386,true
+DC-ABA-004,Fideo tallarín 400 g,Abarrotes,funda,Genérica,0.89,0.6907,true
+DC-ABA-005,Atún en aceite 180 g,Abarrotes,lata,Genérica,1.74,1.3051,true
+DC-ABA-006,Harina de trigo 1 kg,Abarrotes,funda,Genérica,1.27,1.0201,true
+DC-ABA-007,Sal yodada 1 kg,Abarrotes,funda,Genérica,0.60,0.4198,true
+DC-ABA-008,Avena en hojuelas 500 g,Abarrotes,funda,Genérica,1.56,1.1628,true
+DC-BEB-001,Agua sin gas 625 ml (pack 12),Bebidas,pack,Genérica,4.45,3.1440,true
+DC-BEB-002,Bebida gaseosa 3 litros,Bebidas,botella,Genérica,2.55,1.7808,true
+DC-BEB-003,Jugo de naranja 1 litro,Bebidas,botella,Genérica,1.87,1.2995,true
+DC-BEB-004,Bebida energizante 473 ml,Bebidas,lata,Genérica,1.31,0.8693,true
+DC-BEB-005,Bebida hidratante 500 ml,Bebidas,botella,Genérica,1.02,0.6853,true
+DC-LAC-001,Leche entera UHT 1 litro,Lácteos,caja,Genérica,1.14,0.9547,true
+DC-LAC-002,Yogur bebible 1 litro,Lácteos,botella,Genérica,2.55,1.8053,true
+DC-LAC-003,Queso fresco 500 g,Lácteos,unidad,Genérica,3.28,2.4716,true
+DC-LIM-001,Detergente en polvo 1 kg,Limpieza,funda,Genérica,3.69,2.6085,true
+DC-LIM-002,Cloro 1 litro,Limpieza,botella,Genérica,0.97,0.6054,true
+DC-LIM-003,Jabón de lavar en barra,Limpieza,unidad,Genérica,0.83,0.5216,true
+DC-LIM-004,Lavavajillas en crema 500 g,Limpieza,unidad,Genérica,1.75,1.1420,true
+DC-LIM-005,Desinfectante multiuso 1 litro,Limpieza,botella,Genérica,2.33,1.4244,true
+DC-CUI-001,Papel higiénico (paquete 4),Cuidado personal,paquete,Genérica,2.67,1.9029,true
+DC-CUI-002,Jabón de tocador 120 g,Cuidado personal,unidad,Genérica,0.92,0.5771,true
+DC-CUI-003,Shampoo 400 ml,Cuidado personal,botella,Genérica,4.71,2.8854,true
+DC-CUI-004,Pasta dental 100 ml,Cuidado personal,unidad,Genérica,2.06,1.2751,true
+DC-CUI-005,Toallas sanitarias (paquete 10),Cuidado personal,paquete,Genérica,1.95,1.2416,true
+DC-ESC-001,Cuaderno universitario 100 hojas,Útiles escolares,unidad,Genérica,1.72,0.9465,true
+DC-ESC-002,Lápices de grafito (caja 12),Útiles escolares,caja,Genérica,2.35,1.2130,true
+DC-ESC-003,Esferos azules (caja 12),Útiles escolares,caja,Genérica,3.20,1.6388,true
+DC-ESC-004,Mochila escolar básica,Útiles escolares,unidad,Genérica,15.18,8.8491,true
+DC-ESC-005,Goma blanca 250 g,Útiles escolares,unidad,Genérica,1.53,0.7604,true
+DC-SNA-001,Galletas surtidas (paquete 6),Snacks,paquete,Genérica,1.63,1.0606,true
+DC-SNA-002,Papas fritas 150 g,Snacks,funda,Genérica,1.39,0.8581,true
+DC-SNA-003,Chocolate en barra 100 g,Snacks,unidad,Genérica,1.94,1.2227,true
+DC-SNA-004,Caramelos surtidos (funda 1 kg),Snacks,funda,Genérica,5.19,3.0827,true
+DC-HOG-001,Fósforos (paquete 10 cajas),Hogar,paquete,Genérica,0.97,0.5394,true
+DC-HOG-002,Velas blancas (paquete 6),Hogar,paquete,Genérica,1.52,0.8397,true
+DC-HOG-003,Fundas de basura (paquete 10),Hogar,paquete,Genérica,1.27,0.7211,true
+DC-HOG-004,Esponja de cocina (paquete 3),Hogar,paquete,Genérica,1.17,0.5794,true
+DC-HOG-005,Ambientador en aerosol 400 ml,Hogar,unidad,Genérica,3.15,1.8252,true

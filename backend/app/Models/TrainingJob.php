@@ -46,4 +46,21 @@ class TrainingJob extends Model
     {
         return $this->belongsTo(User::class, 'user_id');
     }
+
+
+    public const TYPE_FORECAST_PIPELINE = 'forecast_pipeline';
+    public const TYPE_EVALUATE_ACTUALS = 'evaluate_actuals';
+    public const TYPE_READINESS = 'readiness';
+    public const TYPE_RETRAIN_CHECK = 'retrain_check';
+
+    public const STATUS_QUEUED = 'queued';
+    public const STATUS_RUNNING = 'running';
+    public const STATUS_SUCCEEDED = 'succeeded';
+    public const STATUS_FAILED = 'failed';
+    public const STATUS_CANCELLED = 'cancelled';
+
+    public function isFinished(): bool
+    {
+        return in_array($this->status, [self::STATUS_SUCCEEDED, self::STATUS_FAILED, self::STATUS_CANCELLED], true);
+    }
 }

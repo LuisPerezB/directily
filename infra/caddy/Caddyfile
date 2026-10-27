@@ -1,0 +1,25 @@
+# Predictily · proxy TLS frontal (docker-compose.prod.yml)
+# Caddy obtiene y renueva certificados de Let's Encrypt automáticamente.
+# Requiere que PREDICTILY_DOMAIN apunte (DNS A/AAAA) a la IP del VPS y puertos 80/443 abiertos.
+{
+	email {$ACME_EMAIL}
+}
+
+{$PREDICTILY_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# Importaciones de hasta 25 MB.
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy web:80 {
+		header_up X-Forwarded-Proto https
+	}
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Predictily · override de producción (VPS con dominio y TLS automático)
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# - Caddy termina TLS (Let's Encrypt) en 80/443 y reenvía a "web".
+# - "web" deja de publicar el puerto 8080.
+# - Cookies de sesión solo por HTTPS.
+# Ver infra/scripts/deploy.md
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PREDICTILY_DOMAIN: ${PREDICTILY_DOMAIN:?Defina PREDICTILY_DOMAIN (p. ej. app.predictily.com)}
+      ACME_EMAIL: ${ACME_EMAIL:?Defina ACME_EMAIL para Let's Encrypt}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    depends_on:
+      - web
+
+  web:
+    ports: !reset []
+
+  backend:
+    environment:
+      APP_URL: https://${PREDICTILY_DOMAIN}
+      FRONTEND_URL: https://${PREDICTILY_DOMAIN}
+      SANCTUM_STATEFUL_DOMAINS: ${PREDICTILY_DOMAIN}
+      SESSION_SECURE_COOKIE: "true"
+      SESSION_DOMAIN: ${PREDICTILY_DOMAIN}
+  queue:
+    environment:
+      APP_URL: https://${PREDICTILY_DOMAIN}
+  queue-forecasting:
+    environment:
+      APP_URL: https://${PREDICTILY_DOMAIN}
+  scheduler:
+    environment:
+      APP_URL: https://${PREDICTILY_DOMAIN}
+
+volumes:
+  caddy-data:
+  caddy-config:

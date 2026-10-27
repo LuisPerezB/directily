@@ -29,7 +29,7 @@ class DataSource extends Model
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'deleted_at' => 'datetime',
-            'credentials_encrypted' => 'encrypted',
+            'credentials_encrypted' => 'encrypted:array',
         ];
     }
 }

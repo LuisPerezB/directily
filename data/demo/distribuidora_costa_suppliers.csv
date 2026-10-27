@@ -1,0 +1,6 @@
+code,name,country,default_lead_time_days
+PROV-ABA,Alimentos del Litoral S.A. (ficticio),EC,3
+PROV-BEB,Embotelladora Costa Azul (ficticio),EC,2
+PROV-LAC,Lácteos Manabitas Cía. Ltda. (ficticio),EC,2
+PROV-LIM,Químicos del Hogar S.A. (ficticio),EC,5
+PROV-ESC,Papelería Escolar Pacífico (ficticio),EC,7

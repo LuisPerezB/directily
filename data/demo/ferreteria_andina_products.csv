@@ -1,0 +1,63 @@
+sku,name,category,unit,brand,current_price,current_cost,is_active
+FA-CEM-001,Cemento Portland tipo GU 50 kg,Cemento y agregados,saco,Genérica,9.53,7.7316,true
+FA-CEM-002,Cemento blanco 25 kg,Cemento y agregados,saco,Genérica,14.85,11.5319,true
+FA-CEM-003,Bloque de hormigón 15 cm,Cemento y agregados,unidad,Genérica,0.70,0.4848,true
+FA-CEM-004,Cal hidratada 25 kg,Cemento y agregados,saco,Genérica,6.12,4.4807,true
+FA-CEM-005,Pegamento para cerámica 25 kg,Cemento y agregados,saco,Genérica,8.85,6.2118,true
+FA-CEM-006,Porcelana para juntas 2 kg,Cemento y agregados,funda,Genérica,3.52,2.2011,true
+FA-CEM-007,Arena fina (saco 40 kg),Cemento y agregados,saco,Genérica,2.43,1.4379,true
+FA-CEM-008,Ripio triturado (saco 40 kg),Cemento y agregados,saco,Genérica,2.55,1.5134,true
+FA-HIE-001,Varilla corrugada 10 mm x 12 m,Hierro y varillas,unidad,Genérica,10.93,9.3962,true
+FA-HIE-002,Varilla corrugada 12 mm x 12 m,Hierro y varillas,unidad,Genérica,16.04,13.5275,true
+FA-HIE-003,Varilla corrugada 8 mm x 12 m,Hierro y varillas,unidad,Genérica,6.81,5.7481,true
+FA-HIE-004,Alambre de amarre (kg),Hierro y varillas,kg,Genérica,2.63,1.9268,true
+FA-HIE-005,Malla electrosoldada 6 mm 2.4x6 m,Hierro y varillas,unidad,Genérica,50.11,41.9843,true
+FA-HIE-006,Clavos de 2 pulgadas (kg),Hierro y varillas,kg,Genérica,2.40,1.4910,true
+FA-HIE-007,Tubo estructural cuadrado 2 pulg. x 6 m,Hierro y varillas,unidad,Genérica,21.07,17.2055,true
+FA-PIN-001,Pintura látex interior blanco (galón),Pinturas,galón,Genérica,16.43,11.0265,true
+FA-PIN-002,Pintura látex interior colores (galón),Pinturas,galón,Genérica,17.66,11.7043,true
+FA-PIN-003,Esmalte sintético (galón),Pinturas,galón,Genérica,23.72,15.0688,true
+FA-PIN-004,Pintura exteriores (caneca 5 gal.),Pinturas,caneca,Genérica,72.91,49.4555,true
+FA-PIN-005,Diluyente thinner (litro),Pinturas,litro,Genérica,3.38,1.8301,true
+FA-PIN-006,Brocha 3 pulgadas,Pinturas,unidad,Genérica,2.73,1.3334,true
+FA-PIN-007,Rodillo de 9 pulgadas,Pinturas,unidad,Genérica,5.35,2.7643,true
+FA-PIN-008,Empaste para paredes (galón),Pinturas,galón,Genérica,9.95,6.3069,true
+FA-HMA-001,Martillo de uña 16 oz,Herramientas manuales,unidad,Genérica,8.90,4.9886,true
+FA-HMA-002,Juego de destornilladores 6 piezas,Herramientas manuales,juego,Genérica,10.90,5.7113,true
+FA-HMA-003,Flexómetro 5 m,Herramientas manuales,unidad,Genérica,4.80,2.3831,true
+FA-HMA-004,Nivel de aluminio 24 pulgadas,Herramientas manuales,unidad,Genérica,11.99,6.7751,true
+FA-HMA-005,Pala cuadrada con mango,Herramientas manuales,unidad,Genérica,14.29,8.6038,true
+FA-HMA-006,Carretilla 5 pies cúbicos,Herramientas manuales,unidad,Genérica,75.43,49.9266,true
+FA-HMA-007,Llave inglesa 10 pulgadas,Herramientas manuales,unidad,Genérica,8.96,4.7539,true
+FA-HMA-008,Serrucho 20 pulgadas,Herramientas manuales,unidad,Genérica,11.22,6.0306,true
+FA-HEL-001,Taladro percutor 1/2 pulg. 650 W,Herramientas eléctricas,unidad,Genérica,59.02,39.4738,true
+FA-HEL-002,Amoladora 4 1/2 pulg. 850 W,Herramientas eléctricas,unidad,Genérica,53.59,36.0455,true
+FA-HEL-003,Sierra circular 7 1/4 pulg.,Herramientas eléctricas,unidad,Genérica,99.35,70.1608,true
+FA-HEL-004,Disco de corte metal 4 1/2 pulg.,Herramientas eléctricas,unidad,Genérica,1.84,0.8364,true
+FA-HEL-005,Broca para concreto 3/8 pulg.,Herramientas eléctricas,unidad,Genérica,3.11,1.4301,true
+FA-HEL-006,Lijadora orbital 1/4 hoja,Herramientas eléctricas,unidad,Genérica,49.64,33.8777,true
+FA-ELE-001,Cable flexible #12 AWG (metro),Material eléctrico,metro,Genérica,0.73,0.5161,true
+FA-ELE-002,Cable flexible #14 AWG (metro),Material eléctrico,metro,Genérica,0.53,0.3698,true
+FA-ELE-003,Foco LED 9 W luz blanca,Material eléctrico,unidad,Genérica,2.13,0.9937,true
+FA-ELE-004,Tomacorriente doble polarizado,Material eléctrico,unidad,Genérica,2.53,1.2715,true
+FA-ELE-005,Interruptor simple,Material eléctrico,unidad,Genérica,2.22,1.1171,true
+FA-ELE-006,Cinta aislante 20 m,Material eléctrico,unidad,Genérica,1.05,0.4699,true
+FA-ELE-007,Breaker termomagnético 20 A,Material eléctrico,unidad,Genérica,7.15,4.1530,true
+FA-ELE-008,Luces navideñas 100 LED,Material eléctrico,unidad,Genérica,8.06,3.5045,true
+FA-ELE-009,Foco LED inteligente WiFi 10 W,Material eléctrico,unidad,Genérica,10.17,5.7151,true
+FA-ELE-010,Foco ahorrador fluorescente 20 W,Material eléctrico,unidad,Genérica,3.03,1.5021,false
+FA-PLO-001,Tubo PVC presión 1/2 pulg. x 6 m,Plomería y grifería,unidad,Genérica,3.77,2.3210,true
+FA-PLO-002,Tubo PVC desagüe 4 pulg. x 3 m,Plomería y grifería,unidad,Genérica,9.98,6.4714,true
+FA-PLO-003,Codo PVC 1/2 pulg. 90°,Plomería y grifería,unidad,Genérica,0.41,0.1859,true
+FA-PLO-004,Llave de paso 1/2 pulg.,Plomería y grifería,unidad,Genérica,5.13,2.8118,true
+FA-PLO-005,Grifería para lavamanos,Plomería y grifería,unidad,Genérica,25.34,15.5967,true
+FA-PLO-006,Cinta teflón 1/2 pulg.,Plomería y grifería,unidad,Genérica,0.47,0.1926,true
+FA-PLO-007,Pegamento para PVC 1/4 galón,Plomería y grifería,unidad,Genérica,7.92,4.6008,true
+FA-PLO-008,Inodoro estándar blanco,Plomería y grifería,unidad,Genérica,87.26,55.2488,true
+FA-GEN-001,Tornillo autoperforante (caja 100),Ferretería general,caja,Genérica,5.47,2.7668,true
+FA-GEN-002,Taco fisher 3/8 (caja 50),Ferretería general,caja,Genérica,3.53,1.6983,true
+FA-GEN-003,Candado de acero 40 mm,Ferretería general,unidad,Genérica,8.10,4.1429,true
+FA-GEN-004,Bisagra 3 pulgadas (par),Ferretería general,par,Genérica,2.03,0.9817,true
+FA-GEN-005,Silicón transparente 280 ml,Ferretería general,unidad,Genérica,4.29,2.2280,true
+FA-GEN-006,Guantes de trabajo (par),Ferretería general,par,Genérica,2.42,1.1123,true
+FA-GEN-007,Lija de agua #120,Ferretería general,unidad,Genérica,0.51,0.2035,true

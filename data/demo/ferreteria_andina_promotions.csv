@@ -1,0 +1,8 @@
+name,promo_type,discount_pct,starts_on,ends_on,branch_code,product_sku,category
+Feria de la pintura 2025,percentage,0.15,2025-03-10,2025-03-23,,,Pinturas
+Black Friday ferretero 2025,percentage,0.12,2025-11-28,2025-12-01,,,Herramientas eléctricas
+Semana del constructor 2025,percentage,0.06,2025-07-07,2025-07-13,,FA-CEM-001,
+Feria de la pintura 2026,percentage,0.15,2026-03-09,2026-03-22,,,Pinturas
+Liquidación focos fluorescentes,percentage,0.3,2026-02-01,2026-03-31,,FA-ELE-010,
+Semana del constructor 2026,percentage,0.06,2026-07-06,2026-07-12,,FA-CEM-001,
+Black Friday ferretero 2026,percentage,0.12,2026-11-27,2026-11-30,,,Herramientas eléctricas

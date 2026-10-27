@@ -1,0 +1,7 @@
+name,promo_type,discount_pct,starts_on,ends_on,branch_code,product_sku,category
+Regreso a clases Costa 2026,percentage,0.1,2026-04-01,2026-04-30,,,Útiles escolares
+Semana del ahorro en limpieza,percentage,0.08,2025-10-13,2025-10-19,,,Limpieza
+Semana del ahorro en limpieza 2026,percentage,0.08,2026-06-08,2026-06-14,,,Limpieza
+Navidad dulce 2025,percentage,0.1,2025-12-10,2025-12-23,,,Snacks
+Promo bebidas verano 2026,percentage,0.07,2026-02-02,2026-02-15,,,Bebidas
+Navidad dulce 2026,percentage,0.1,2026-12-09,2026-12-23,,,Snacks
