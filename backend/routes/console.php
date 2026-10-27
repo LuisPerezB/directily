@@ -1,8 +1,16 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
+/*
+|--------------------------------------------------------------------------
+| Tareas programadas de Predictily (zona horaria America/Guayaquil)
+|--------------------------------------------------------------------------
+| Cada sección tiene un responsable; editar solo la propia.
+*/
+
+// ── backend-core: retención, eliminación diferida de empresas, limpieza de archivos ──
+// (por definir por backend-core)
+
+// ── backend-analytics: evaluación vs reales, pronósticos programados ──
+// (por definir por backend-analytics)
