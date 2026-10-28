@@ -135,6 +135,8 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             if cutoff is None or cutoff > last:
                 cutoff = last
             data = load_tenant_data(repo, cutoff)
+        load_s = time.perf_counter() - t0
+        log.info("run=%s tenant=%s datos cargados en %.1fs", run_id, tenant_id, load_s)
         seed = req.options.seed if req.options.seed is not None else settings.random_seed
         result = run_pipeline(
             data, horizon=max(req.horizons), seed=seed, n_jobs=settings.n_jobs,
@@ -144,9 +146,13 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             force_families=req.options.force_models, horizons=tuple(req.horizons),
         )
         progress("persisting", 92)
+        result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)
+        t_persist = time.perf_counter()
         duration_ms = int((time.perf_counter() - t0) * 1000)
         with engine.begin() as conn:
             persist_results(conn, tenant_id, run_id, job_id, result, seed, duration_ms)
+        log.info("run=%s tenant=%s pipeline %.1fs, persistencia %.1fs", run_id, tenant_id,
+                 result.timings.get("total", 0.0), time.perf_counter() - t_persist)
         with engine.connect() as conn:
             final = TenantRepository(conn, tenant_id).forecast_run(run_id)
         return _response(final, duration_ms)
