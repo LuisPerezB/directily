@@ -1,0 +1,98 @@
+{
+  "data_kind": "synthetic_generated_seed_42",
+  "company": "ferreteria_andina",
+  "sales_rows": 99334,
+  "cutoff": "2026-10-26",
+  "series": 186,
+  "summary": {
+    "series_count": 183,
+    "series_by_class": {
+      "intermittent": 94,
+      "smooth": 82,
+      "erratic": 7
+    },
+    "models": {
+      "lightgbm_global": 94,
+      "auto_ets": 89
+    },
+    "selection_reasons": {
+      "pooled": "Suavizamiento exponencial (ETS) con estacionalidad semanal: menor WAPE entre los estadísticos (0.487). LightGBM (0.488) no superó el margen mínimo de 3% de forma estable (2/3 ventanas).",
+      "smooth": "Suavizamiento exponencial (ETS) con estacionalidad semanal: menor WAPE entre los estadísticos (0.446). LightGBM (0.447) no superó el margen mínimo de 3% de forma estable (2/3 ventanas).",
+      "erratic": "Suavizamiento exponencial (ETS) con estacionalidad semanal: menor WAPE entre los estadísticos (0.544). LightGBM (0.529) no superó el margen mínimo de 3% de forma estable (3/3 ventanas).",
+      "intermittent": "LightGBM global mejora el WAPE de 0.900 (Croston SBA (demanda intermitente)) a 0.866 y gana en 3/3 ventanas."
+    },
+    "metrics": {
+      "selected_wape": 0.4877251883313424,
+      "baseline_wape": 0.6451167689697677,
+      "selected_bias": -0.07195317077489106,
+      "coverage_80": 0.7980236892604274,
+      "coverage_95": 0.9490482387453956,
+      "total_selected_wape": 0.1055017751355332,
+      "total_baseline_wape": 0.11317095650898558,
+      "metric_note": "WAPE diario por serie (sucursal×producto) en backtesting rolling-origin; los días con quiebre de stock se excluyen."
+    },
+    "backtest": {
+      "horizon_days": 90,
+      "windows": 3,
+      "step_days": 28,
+      "cutoffs": [
+        "2026-06-02",
+        "2026-06-30",
+        "2026-07-28"
+      ]
+    },
+    "horizon_totals": {
+      "7": {
+        "units": 5157.32,
+        "revenue": 18455.52
+      },
+      "30": {
+        "units": 22101.96,
+        "revenue": 79535.27
+      },
+      "90": {
+        "units": 66404.78,
+        "revenue": 239804.07
+      }
+    },
+    "price_assumption": "último precio neto promedio observado (28 días) hasta el corte",
+    "feature_set_version": "fs-2026.10-v1",
+    "readiness_score": 96.5,
+    "recommendations": {
+      "count": 183,
+      "risk_counts": {
+        "low": 105,
+        "medium": 36,
+        "critical": 25,
+        "high": 17
+      },
+      "purchase_investment": 5981.08
+    },
+    "feature_importance": {
+      "series_level": 0.4361,
+      "rolling_mean_lag1_window_size28": 0.3322,
+      "seasonal_rolling_mean_lag7_season_length7_window_size4": 0.1646,
+      "dayofweek": 0.0277,
+      "is_holiday": 0.0077,
+      "rolling_mean_lag1_window_size7": 0.0045,
+      "price_ratio": 0.0043,
+      "month": 0.0035,
+      "rolling_std_lag1_window_size28": 0.0035,
+      "lag7": 0.0026,
+      "lag28": 0.0025,
+      "lag14": 0.0024,
+      "day": 0.002,
+      "lag1": 0.002,
+      "is_carnival_window": 0.0012
+    },
+    "warnings": [],
+    "timings_seconds": {
+      "profiling": 0.3,
+      "backtesting": 12.2,
+      "training": 4.6,
+      "reconciling": 0.4,
+      "total": 19.7
+    }
+  },
+  "total_in_memory_seconds": 24.95
+}

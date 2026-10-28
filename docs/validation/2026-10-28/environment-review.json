@@ -1,0 +1,28 @@
+{
+  "review_date": "2026-10-28",
+  "timezone": "America/Guayaquil",
+  "cpu": {
+    "name": "Intel(R) Core(TM) Ultra 5 225",
+    "cores": 10,
+    "logical_processors": 10
+  },
+  "ram_gib": 31.4,
+  "free_c_gib": 226,
+  "docker_client": "29.7.2",
+  "docker_compose": "5.4.0",
+  "docker_server_available": false,
+  "docker_context": "desktop-linux",
+  "node_active": "16.20.2",
+  "npm_active": "8.19.4",
+  "php_found_in_path": false,
+  "composer_found_in_path": false,
+  "validation_python": "3.12.14",
+  "wsl_virtualization_and_allocated_resources_verified": false,
+  "full_stack_started_in_this_review": false,
+  "load_test_performed": false,
+  "notes": [
+    "PATH no prueba ausencia de otras instalaciones.",
+    "RAM y CPU se consultaron a Windows; recursos libres y versiones son una instantánea.",
+    "Las pruebas históricas corresponden a revisión del motor en memoria, no a arranque completo."
+  ]
+}

@@ -1,0 +1,160 @@
+{
+  "truncated_supplier_period": {
+    "forecast_7_days": {
+      "available": 0.0,
+      "lead_time_days": "30",
+      "review_period_days": "7",
+      "demand_lead_time": 70.0,
+      "safety_stock": 13.5826,
+      "suggested_qty": 84.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-02",
+      "risk_level": "critical",
+      "assumptions": {
+        "method": "normal_from_intervals",
+        "horizon_days_covered": 7,
+        "lead_time_std_days": null,
+        "service_level": 0.95,
+        "snapshot_stale": false,
+        "in_transit_source": "none",
+        "note": "Sugerencia basada en pronóstico; no ejecuta pedidos ni compromete fondos."
+      }
+    },
+    "forecast_90_days": {
+      "available": 0.0,
+      "lead_time_days": "30",
+      "review_period_days": "7",
+      "demand_lead_time": 370.0,
+      "safety_stock": 31.2274,
+      "suggested_qty": 402.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-02",
+      "risk_level": "critical",
+      "assumptions": {
+        "method": "normal_from_intervals",
+        "horizon_days_covered": 37,
+        "lead_time_std_days": null,
+        "service_level": 0.95,
+        "snapshot_stale": false,
+        "in_transit_source": "none",
+        "note": "Sugerencia basada en pronóstico; no ejecuta pedidos ni compromete fondos."
+      }
+    },
+    "expected_mean_demand_for_37_days": 370
+  },
+  "missing_uncertainty": {
+    "ample_stock": {
+      "available": 200.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "safety_stock": 0.0,
+      "suggested_qty": 0.0,
+      "stockout_probability": 0.0,
+      "stockout_date_estimate": "2026-10-22",
+      "risk_level": "low",
+      "assumptions": {
+        "method": "normal_from_intervals",
+        "horizon_days_covered": 14,
+        "lead_time_std_days": null,
+        "service_level": 0.95,
+        "snapshot_stale": false,
+        "in_transit_source": "none",
+        "note": "Sugerencia basada en pronóstico; no ejecuta pedidos ni compromete fondos."
+      }
+    },
+    "low_stock": {
+      "available": 100.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "safety_stock": 0.0,
+      "suggested_qty": 40.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-12",
+      "risk_level": "critical",
+      "assumptions": {
+        "method": "normal_from_intervals",
+        "horizon_days_covered": 14,
+        "lead_time_std_days": null,
+        "service_level": 0.95,
+        "snapshot_stale": false,
+        "in_transit_source": "none",
+        "note": "Sugerencia basada en pronóstico; no ejecuta pedidos ni compromete fondos."
+      }
+    }
+  },
+  "late_purchase_order": {
+    "arrival_day": 30,
+    "stock_units_now": 10,
+    "daily_demand": 10,
+    "with_late_order": {
+      "available": 1010.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "safety_stock": 19.2087,
+      "suggested_qty": 0.0,
+      "stockout_probability": 0.0,
+      "stockout_date_estimate": null,
+      "risk_level": "low",
+      "assumptions": {
+        "method": "normal_from_intervals",
+        "horizon_days_covered": 14,
+        "lead_time_std_days": null,
+        "service_level": 0.95,
+        "snapshot_stale": false,
+        "in_transit_source": "purchase_orders",
+        "note": "Sugerencia basada en pronóstico; no ejecuta pedidos ni compromete fondos."
+      }
+    },
+    "without_order": {
+      "available": 10.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "safety_stock": 19.2087,
+      "suggested_qty": 150.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-03",
+      "risk_level": "critical",
+      "assumptions": {
+        "method": "normal_from_intervals",
+        "horizon_days_covered": 14,
+        "lead_time_std_days": null,
+        "service_level": 0.95,
+        "snapshot_stale": false,
+        "in_transit_source": "none",
+        "note": "Sugerencia basada en pronóstico; no ejecuta pedidos ni compromete fondos."
+      }
+    }
+  },
+  "future_profile_leaks_into_backtest": {
+    "historical_cutoff": "2026-04-01",
+    "past_nonzero_days": 2,
+    "eligible_using_full_profile": [
+      "b1-p1"
+    ],
+    "eligible_using_only_past": [],
+    "full_class": "intermittent",
+    "past_class": "insufficient"
+  },
+  "promotion_known_after_cutoff": {
+    "forecast_cutoff": "2026-04-01",
+    "promotion_created_at": "2026-04-04",
+    "future_discounts_used": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ]
+  },
+  "overlap_between_backtest_windows": {
+    "horizon": 60,
+    "step": 21,
+    "same_target_dates_first_two_windows": 39
+  }
+}

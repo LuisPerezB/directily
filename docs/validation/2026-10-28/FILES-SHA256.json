@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-28",
+  "purpose": "Paquete documental de Predictily y evidencia de validación",
+  "file_count": 13,
+  "checks": {
+    "warnings": "Las reproducciones emitieron avisos de obsolescencia de NumPy; terminaron correctamente.",
+    "historical_results_preserved": true,
+    "python_scripts_syntax_checked": 4,
+    "full_stack_started": false,
+    "portable_probe_result_matches_historical": true
+  },
+  "files": [
+    {
+      "path": "docs/validation/2026-10-28/_validation_context.py",
+      "sha256": "969f50c7039ec3e70fae0295575b26741c34afe1ed57a1893533c83bbc6fc043"
+    },
+    {
+      "path": "docs/validation/2026-10-28/benchmark_in_memory.py",
+      "sha256": "411d33abfd4e708b67f38df7e8654a8f59b5605df787d19c6fc837895529a635"
+    },
+    {
+      "path": "docs/validation/2026-10-28/benchmark-results.json",
+      "sha256": "d2592c4479c6c418e8eefd61b4706e22456be0043a5d79b13c4879cb0f356a80"
+    },
+    {
+      "path": "docs/validation/2026-10-28/environment-review.json",
+      "sha256": "4af5a4e4ec4f256db7a7c4c5d0d35415d7039b51d2bb7b6712fb2e4aace9e508"
+    },
+    {
+      "path": "docs/validation/2026-10-28/probe_findings.py",
+      "sha256": "9f859a632a3fe54677e4c73cfa0aa523d212f50fbd3e8da3e01f7b85c2e89c8c"
+    },
+    {
+      "path": "docs/validation/2026-10-28/probe-results.json",
+      "sha256": "1fb77527403f9ddd6f4bf5ea0872dc823c5c6d97458dca9c92780db0eb77ba86"
+    },
+    {
+      "path": "docs/validation/2026-10-28/README.md",
+      "sha256": "c4aca4932fd266fdfec516cb0f0d389f19b953c3bdb8eb23945326d21acfa204"
+    },
+    {
+      "path": "docs/validation/2026-10-28/run_unit_suite.py",
+      "sha256": "bcb8fdd3850bc8f810eca70dd2bc20ffa1f938e3afce7f1d691bb16e154aa77b"
+    },
+    {
+      "path": "docs/validation/2026-10-28/unit-results.xml",
+      "sha256": "96ada051234593aa8b2e416d54826ffa2b60b41e2a7d18c45f91d3e97bcfdbb3"
+    },
+    {
+      "path": "EJECUCION-PREDICTILY.md",
+      "sha256": "1e77b84c1fbf064c9ccb295557e001f4904d6905b3aa18d33ac7af268ed5f968"
+    },
+    {
+      "path": "instrucctions.md",
+      "sha256": "46c665bf022da210925a20dce346cfa885ca3cc007f0651457d51d9bbfbb0af6"
+    },
+    {
+      "path": "PROMPT-ETAPA-2-ORIGINAL-RECUPERADO.md",
+      "sha256": "11a7af30e37becebfa3da1b167fa38fdf5c5605e393d6d6c209152a28a016af0"
+    },
+    {
+      "path": "VALIDACION-PREDICTILY-2026-10-28.md",
+      "sha256": "8f60d10ddc6dd235676de4441bff2ec0e9ae0cfded3cd02256eee3df67da9fe7"
+    }
+  ]
+}
