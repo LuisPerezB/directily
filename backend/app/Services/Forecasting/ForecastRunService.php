@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Forecasting;
 
+use App\Exceptions\PlanLimitExceededException;
 use App\Jobs\Forecasting\RunForecastPipeline;
 use App\Models\ForecastRun;
 use App\Models\Tenant;
@@ -25,14 +26,21 @@ class ForecastRunService
 {
     public function __construct(private readonly TenantContext $context) {}
 
+    /**
+     * @param  int|null  $horizonDays  null = el mayor horizonte que permite el plan de la empresa
+     *                                 (así la programación y las solicitudes sin horizonte explícito
+     *                                 no piden uno que el plan no incluye).
+     */
     public function request(
         Tenant $tenant,
         ?User $user,
-        int $horizonDays = 90,
+        ?int $horizonDays = null,
         ?string $cutoffDate = null,
         string $triggeredBy = 'user',
         bool $dispatch = true,
     ): ForecastRun {
+        $horizonDays ??= $this->maxAllowedHorizon($tenant)
+            ?? throw new PlanLimitExceededException('horizons', null, null, 'Su plan no incluye horizontes de pronóstico.');
         $this->validateHorizon($tenant, $horizonDays);
         $cutoff = $this->validateCutoff($tenant, $cutoffDate);
         CoreServices::assertPlanLimit($tenant, 'max_forecast_runs_per_day');
@@ -109,6 +117,15 @@ class ForecastRunService
             ->where('created_at', '>=', $staleBefore)
             ->latest('id')
             ->first();
+    }
+
+    /** Mayor horizonte soportado por el motor e incluido en el plan; null si el plan no incluye ninguno. */
+    public function maxAllowedHorizon(Tenant $tenant): ?int
+    {
+        $supported = array_map('intval', (array) config('engine.horizons', [7, 30, 90]));
+        $allowed = array_values(array_intersect($supported, CoreServices::allowedHorizons($tenant)));
+
+        return $allowed === [] ? null : max($allowed);
     }
 
     private function validateHorizon(Tenant $tenant, int $horizonDays): void

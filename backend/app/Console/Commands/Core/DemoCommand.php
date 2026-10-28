@@ -73,7 +73,7 @@ final class DemoCommand extends Command
             return;
         }
         try {
-            $run = app($service)->request($tenant, $user, 90, null, 'system');
+            $run = app($service)->request($tenant, $user, null, null, 'system'); // mayor horizonte del plan
             $this->line("Pronóstico solicitado (versión {$run->version}). Requiere el worker de cola 'forecasting' y el motor Python activos.");
         } catch (Throwable $e) {
             $this->warn('No se pudo solicitar el pronóstico: '.$e->getMessage());

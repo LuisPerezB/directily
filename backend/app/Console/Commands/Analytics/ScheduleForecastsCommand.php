@@ -40,10 +40,11 @@ class ScheduleForecastsCommand extends Command
                 return;
             }
             try {
-                // Horizonte máximo: una ejecución de 90 días sirve también a las vistas de 7 y 30.
-                $run = $service->request($tenant, null, 90, null, 'schedule');
+                // El mayor horizonte que permite el plan: una ejecución de 90 días sirve también a las
+                // vistas de 7 y 30, pero el plan Básico solo incluye 7 y 30 (validación F7, 28-oct-2026).
+                $run = $service->request($tenant, null, null, null, 'schedule');
                 $scheduled++;
-                $this->info("✓ {$tenant->name}: ejecución v{$run->version} encolada");
+                $this->info("✓ {$tenant->name}: ejecución v{$run->version} ({$run->horizon_days} días) encolada");
             } catch (Throwable $e) {
                 $this->warn("✗ {$tenant->name}: {$e->getMessage()}");
             }
@@ -58,6 +59,9 @@ class ScheduleForecastsCommand extends Command
         $schedule = (string) ($tenant->effectiveSettings()['forecast_schedule'] ?? 'weekly');
         if ($schedule === 'manual') {
             return 'programación manual';
+        }
+        if (app(ForecastRunService::class)->maxAllowedHorizon($tenant) === null) {
+            return 'el plan no incluye horizontes de pronóstico';
         }
         $lastSale = SalesQuery::lastSaleDate((int) $tenant->id);
         if ($lastSale === null) {
