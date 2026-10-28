@@ -126,6 +126,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
         progress("loading_data", 3)
         with engine.connect() as conn:
             repo = TenantRepository(conn, tenant_id)
+            repo.analytic_reads()
             run = repo.forecast_run(run_id) or {}
             options = _json(run.get("options")) or {}
             cutoff = req.cutoff_date or _as_date(options.get("cutoff_date")) or _as_date(run.get("cutoff_date"))

@@ -28,6 +28,12 @@ class TenantRepository:
         self.conn = conn
         self.tenant_id = tenant_id
 
+    def analytic_reads(self) -> None:
+        """Lecturas analíticas: evita nested loops (planes desastrosos con estadísticas
+        desactualizadas justo después de una importación masiva). Solo afecta a la
+        transacción actual (SET LOCAL)."""
+        self.conn.execute(text("SET LOCAL enable_nestloop = off"))
+
     # ── infraestructura ──
     def _read(self, sql: str, **params: Any) -> pd.DataFrame:
         if ":tenant_id" not in sql:

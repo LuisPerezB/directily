@@ -90,6 +90,7 @@ def evaluate_actuals(tenant_id: int, training_job_id: int | None = None, lookbac
                     "UPDATE training_jobs SET status = 'running', stage = 'evaluating', progress = 10, "
                     "started_at = COALESCE(started_at, now()), attempts = attempts + 1, updated_at = now() "
                     "WHERE id = :id AND tenant_id = :tenant_id"), {"id": training_job_id, "tenant_id": tenant_id})
+            repo.analytic_reads()
             result = _evaluate(conn, repo, lookback_runs)
             if training_job_id is not None:
                 conn.execute(text(

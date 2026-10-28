@@ -31,6 +31,7 @@ def run_readiness(tenant_id: int, training_job_id: int | None = None) -> dict[st
     try:
         with engine.connect() as conn:
             repo = TenantRepository(conn, tenant_id)
+            repo.analytic_reads()
             last = repo.last_sale_date()
             if last is None:
                 readiness = compute_readiness_empty()
