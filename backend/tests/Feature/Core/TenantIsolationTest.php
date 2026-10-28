@@ -34,7 +34,11 @@ final class TenantIsolationTest extends TestCase
     /** @return array<string, mixed> */
     private function seedTenantData(Tenant $tenant, string $prefix): array
     {
-        return $this->withinTenant($tenant, function () use ($tenant, $prefix) {
+        // sale_date es la fecha LOCAL de la empresa (así la calcula el importador); con now() en UTC
+        // la prueba fallaba entre 00:00 y 05:00 UTC frente al rango por defecto en America/Guayaquil.
+        $localToday = now($tenant->timezone)->toDateString();
+
+        return $this->withinTenant($tenant, function () use ($tenant, $prefix, $localToday) {
             $branch = $this->createBranch($tenant, $prefix.'01', "Sucursal {$prefix}");
             $category = ProductCategory::query()->create(['name' => "Cat {$prefix}"]);
             $product = Product::query()->create(['sku' => "{$prefix}-SKU", 'name' => "Producto {$prefix}", 'category_id' => $category->id]);
@@ -42,11 +46,11 @@ final class TenantIsolationTest extends TestCase
             $promotion = Promotion::query()->create(['name' => "Promo {$prefix}", 'starts_on' => '2026-01-01', 'ends_on' => '2026-01-10']);
             $sale = Sale::query()->create([
                 'branch_id' => $branch->id, 'document_type' => 'invoice', 'document_number' => "{$prefix}-001", 'status' => 'completed',
-                'issued_at' => now(), 'sale_date' => now()->toDateString(), 'source_hash' => str_repeat('a', 64), 'total' => 10,
+                'issued_at' => now(), 'sale_date' => $localToday, 'source_hash' => str_repeat('a', 64), 'total' => 10,
             ]);
             DB::table('sale_items')->insert([
                 'tenant_id' => $tenant->id, 'sale_id' => $sale->id, 'line_number' => 1, 'product_id' => $product->id, 'branch_id' => $branch->id,
-                'sale_date' => now()->toDateString(), 'quantity' => 3, 'unit_price' => 5, 'discount_amount' => 0, 'net_amount' => 15, 'tax_amount' => 0, 'is_return' => false,
+                'sale_date' => $localToday, 'quantity' => 3, 'unit_price' => 5, 'discount_amount' => 0, 'net_amount' => 15, 'tax_amount' => 0, 'is_return' => false,
             ]);
             $import = new ImportJob;
             $import->forceFill(['entity_type' => 'sales', 'original_filename' => 'x.csv', 'stored_path' => 'x', 'file_hash' => str_repeat('b', 64), 'file_size' => 1, 'file_format' => 'csv', 'status' => 'validated'])->save();

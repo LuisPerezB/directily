@@ -19,7 +19,7 @@ info:
 servers:
   - url: /api/v1
 security:
-  - sanctumSession: []
+  - sessionCookie: []
   - bearerToken: []
 tags:
   - name: Pronósticos
@@ -432,8 +432,8 @@ paths:
       responses: { '200': { description: CSV, content: { text/csv: { schema: { type: string } } } } }
 components:
   securitySchemes:
-    sanctumSession: { type: apiKey, in: cookie, name: predictily_session, description: 'Sesión SPA (GET /sanctum/csrf-cookie + X-XSRF-TOKEN)' }
-    bearerToken: { type: http, scheme: bearer, description: Token personal ligado a una empresa }
+    sessionCookie: {type: apiKey, in: cookie, name: predictily-session, description: 'SPA: GET /sanctum/csrf-cookie y luego enviar X-XSRF-TOKEN'}
+    bearerToken: {type: http, scheme: bearer}
   parameters:
     TenantHeader: { name: X-Tenant-ID, in: header, required: true, schema: { type: string, format: uuid } }
     Id: { name: id, in: path, required: true, schema: { type: integer } }

@@ -15,7 +15,7 @@ import type { Horizon } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
 import { useCatalogStore } from '@/stores/catalog'
-import { formatCurrencyCompact, formatDate, formatDateTime, formatNumber, formatPercent, formatChange } from '@/utils/format'
+import { formatCurrencyCompact, formatDate, formatDateTime, formatNumber, formatPercent, formatChange, formatProbability } from '@/utils/format'
 import { HORIZONS } from '@/utils/constants'
 
 const { t } = useI18n()
@@ -224,7 +224,7 @@ function reload(): void {
                   <td>{{ r.product_name }}</td>
                   <td>{{ r.branch_name }}</td>
                   <td class="num">{{ formatNumber(r.days_of_cover, 1) }}</td>
-                  <td class="num">{{ formatPercent(r.stockout_probability, 0) }}</td>
+                  <td class="num">{{ formatProbability(r.stockout_probability) }}</td>
                   <td class="num">{{ formatNumber(r.suggested_qty, 0) }}</td>
                   <td><StatusBadge domain="risk" :value="r.risk_level" /></td>
                 </tr>

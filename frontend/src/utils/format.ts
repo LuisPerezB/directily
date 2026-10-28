@@ -50,6 +50,17 @@ export function formatPercent(ratio: number | null | undefined, decimals = 1): s
   return numberFormat({ style: 'percent', minimumFractionDigits: 0, maximumFractionDigits: decimals }).format(ratio)
 }
 
+/**
+ * Probabilidad estimada: al redondear a enteros no se muestra "100 %" ni "0 %",
+ * porque una estimación sobre una muestra finita nunca es certeza ("> 99 %", "< 1 %").
+ */
+export function formatProbability(p: number | null | undefined): string {
+  if (!isNum(p)) return DASH
+  if (p >= 0.995) return `> ${formatPercent(0.99, 0)}`
+  if (p > 0 && p < 0.005) return `< ${formatPercent(0.01, 0)}`
+  return formatPercent(p, 0)
+}
+
 /** Variación con signo explícito (0.05 → "+5 %", -0.1 → "−10 %"). */
 export function formatChange(ratio: number | null | undefined, decimals = 1): string {
   if (!isNum(ratio)) return DASH

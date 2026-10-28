@@ -17,7 +17,7 @@ import { useAsync } from '@/composables/useAsync'
 import { useCatalogStore } from '@/stores/catalog'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
-import { formatCurrency, formatCurrencyCompact, formatDate, formatNumber, formatPercent } from '@/utils/format'
+import { formatCurrency, formatCurrencyCompact, formatDate, formatNumber, formatPercent, formatProbability } from '@/utils/format'
 
 const { t, te } = useI18n()
 const catalog = useCatalogStore()
@@ -57,15 +57,16 @@ const RISKS: RiskLevel[] = ['critical', 'high', 'medium', 'low']
 const TYPES: RecommendationType[] = ['reorder', 'stockout_risk', 'overstock', 'no_action']
 
 const columns = computed<Column<Recommendation>[]>(() => [
-  { key: 'product.name', label: t('common.product') },
-  { key: 'branch.name', label: t('common.branch') },
-  { key: 'available', label: t('inventory.available'), align: 'right', format: (r) => formatNumber(r.available, 0) },
+  // Lo decisivo primero (riesgo, probabilidad, cobertura); el detalle del cálculo después.
+  { key: 'product.name', label: t('common.product'), class: 'min-w-[13rem]' },
+  { key: 'branch.name', label: t('common.branch'), class: 'min-w-[9rem]' },
+  { key: 'risk_level', label: t('inventory.risk') },
+  { key: 'stockout_probability', label: t('inventory.stockoutProbability'), align: 'right', sortable: true, format: (r) => formatProbability(r.stockout_probability) },
   { key: 'days_of_cover', label: t('inventory.daysOfCover'), align: 'right', sortable: true, format: (r) => formatNumber(r.days_of_cover, 1) },
-  { key: 'stockout_probability', label: t('inventory.stockoutProbability'), align: 'right', sortable: true, format: (r) => formatPercent(r.stockout_probability, 0) },
-  { key: 'reorder_point', label: t('inventory.reorderPoint'), align: 'right', format: (r) => formatNumber(r.reorder_point, 0) },
   { key: 'suggested_qty', label: t('inventory.suggestedQty'), align: 'right', format: (r) => formatNumber(r.suggested_qty, 0) },
   { key: 'estimated_investment', label: t('inventory.investment'), align: 'right', sortable: true, format: (r) => formatCurrency(r.estimated_investment, tenant.currency, 0) },
-  { key: 'risk_level', label: t('inventory.risk') },
+  { key: 'available', label: t('inventory.available'), align: 'right', format: (r) => formatNumber(r.available, 0) },
+  { key: 'reorder_point', label: t('inventory.reorderPoint'), align: 'right', format: (r) => formatNumber(r.reorder_point, 0) },
   { key: 'status', label: t('common.status') },
   { key: 'actions', label: '' },
 ])

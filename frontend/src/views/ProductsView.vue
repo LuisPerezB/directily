@@ -158,7 +158,10 @@ async function exportCsv(): Promise<void> {
             <span class="font-semibold">{{ formatNumber(row.forecast_units, 0) }}</span>
             <span v-if="row.lo_80 != null && row.hi_80 != null" class="block text-xs text-fg-muted">{{ formatNumber(row.lo_80, 0) }}–{{ formatNumber(row.hi_80, 0) }}</span>
           </template>
-          <template #cell-change_pct="{ row }"><TrendIndicator :trend="row.trend" :change="row.change_pct" /></template>
+          <template #cell-change_pct="{ row }">
+            <TrendIndicator :trend="row.trend" :change="row.change_pct" />
+            <span v-if="row.low_base" class="block text-xs text-fg-muted" :title="t('products.lowBaseHint')">{{ t('products.lowBase') }}</span>
+          </template>
         </DataTable>
         <PaginationBar v-model:page="page" :meta="products.data.value?.meta ?? null" />
         <p class="hint px-2 pb-2">{{ t('products.tableNote') }}</p>

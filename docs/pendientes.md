@@ -20,7 +20,20 @@ en la aplicación: se entregan interfaces desacopladas y se indica su estado rea
 | Almacenamiento externo de respaldos | Respaldos locales con rotación | Bucket S3-compatible u otro proveedor; clave GPG | `infra/scripts/backup.sh` |
 | Asesoría legal LOPDP | Plan técnico en docs/07 | Contrato de encargo, política de privacidad, términos, EIPD, registro ante la autoridad si aplica | docs/07 |
 
-## 2. Funcionalidades de Fase 4 o posteriores
+## 2. Pendientes concretos del MVP entregado
+
+| Pendiente | Impacto | Notas |
+|---|---|---|
+| Invitaciones y recuperación de contraseña por correo | Medio | Hoy la contraseña temporal de un usuario agregado se muestra una sola vez; requiere SMTP |
+| Pantalla para cancelar una solicitud de eliminación de empresa | Bajo | El endpoint `POST /tenant/cancel-deletion` existe; falta la vista |
+| Reconstruir y probar la imagen `web` (frontend + nginx) | Medio | Falló antes de corregir errores de tipos del frontend; el build nativo ya pasa |
+| Descarga de la exportación completa detrás de nginx | Bajo | URL firmada absoluta basada en `APP_URL`: verificar en el despliegue |
+| Sesgo de −7 % en el backtest de la ferretería demo | Bajo | Las 3 ventanas caen en temporada alta; considerar ventanas repartidas en el año |
+| Intervalos de horizonte por sucursal-producto (nivel serie) | Bajo | El motor los publica para producto, categoría, sucursal y total |
+| Row Level Security en PostgreSQL | Medio | Endurecimiento adicional; el aislamiento actual tiene 9 capas (docs/07) |
+| Supervisor de procesos en instalación nativa | Bajo | Docker reinicia los workers; en nativo usar systemd/supervisord |
+
+## 3. Funcionalidades de Fase 4 o posteriores
 
 - Modelos personalizados por empresa (Nivel D) y sectoriales (Nivel C, requiere consentimiento).
 - Reentrenamiento automático por drift con publicación condicionada a evaluación.
@@ -33,7 +46,7 @@ en la aplicación: se entregan interfaces desacopladas y se indica su estado rea
 - Archivado WAL continuo (pgBackRest) para RPO < 24 h.
 - Internacionalización a otros países (feriados, monedas, idioma).
 
-## 3. Notas de infraestructura
+## 4. Notas de infraestructura
 
 - **Construcción de imágenes en CI:** `composer install` dentro de Docker descarga paquetes desde
   GitHub; con IPs compartidas puede alcanzar límites de tasa. Usar el secreto de build opcional

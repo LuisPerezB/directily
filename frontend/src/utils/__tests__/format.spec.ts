@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatChange, formatCurrency, formatDate, formatInteger, formatNumber, formatPercent, parseISODate, formatBytes } from '../format'
+import { formatChange, formatCurrency, formatDate, formatInteger, formatNumber, formatPercent, formatProbability, parseISODate, formatBytes } from '../format'
 
 // Según la versión de ICU puede haber (o no) un espacio antes de %: se compara sin espacios.
 const norm = (s: string) => s.replace(/\s/g, ' ')
@@ -41,5 +41,15 @@ describe('formateo es-EC', () => {
   it('formatea tamaños de archivo', () => {
     expect(formatBytes(512)).toBe('512 B')
     expect(formatBytes(2 * 1024 * 1024)).toMatch(/^2 MB$/)
+  })
+})
+
+describe('formatProbability', () => {
+  it('no presenta certeza absoluta al redondear', () => {
+    expect(tight(formatProbability(0.998))).toBe('>99%')
+    expect(tight(formatProbability(0.002))).toBe('<1%')
+    expect(tight(formatProbability(0.54))).toBe('54%')
+    expect(tight(formatProbability(0))).toBe('0%')
+    expect(formatProbability(null)).toBe('—')
   })
 })

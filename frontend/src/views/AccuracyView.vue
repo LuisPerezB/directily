@@ -44,6 +44,7 @@ function modelLabel(f: string | null | undefined): string {
   return te(`models.${f}`) ? t(`models.${f}`) : f
 }
 function groupLabel(g: AccuracyByGroup, kind: 'class' | 'branch'): string {
+  if (kind === 'branch' && typeof g.branch_name === 'string' && g.branch_name !== '') return g.branch_name
   const key = g.label ?? g.level_key ?? g.key ?? '—'
   if (kind === 'class') return te(`demandClass.${key}`) ? t(`demandClass.${key}`) : String(key)
   return String(key)

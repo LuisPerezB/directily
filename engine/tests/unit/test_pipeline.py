@@ -70,6 +70,10 @@ def test_recommendations_and_censoring(pipeline_result):
     assert (recs["reorder_point"] >= recs["demand_lead_time"] - 1e-6).all()
     assert recs["risk_level"].isin(["low", "medium", "high", "critical"]).all()
     assert (recs["stockout_probability"].between(0, 1)).all()
+    # Estimación empírica con muestra finita: nunca 0 % ni 100 % exactos (regla de Laplace).
+    empirical = recs[recs["assumptions"].map(lambda a: a.get("method") == "empirical_backtest")]
+    assert not empirical.empty
+    assert ((empirical["stockout_probability"] > 0) & (empirical["stockout_probability"] < 1)).all()
     prof = pipeline_result.panel.profile
     assert prof["stockout_days"].sum() > 0
 

@@ -17,6 +17,7 @@ final class ModelCatalog
         'tsb' => 'TSB (demanda intermitente)',
         'lightgbm_global' => 'LightGBM global (machine learning)',
         'timesfm' => 'TimesFM (experimental)',
+        'selection' => 'Selección por patrón de demanda',
     ];
 
     private const DEMAND_CLASSES = [

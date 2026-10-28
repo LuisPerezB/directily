@@ -69,6 +69,7 @@ export const tenantApi = {
   requestExport: () => postData<T.TenantExport>('/tenant/export'),
   exportStatus: (id: string | number) => getData<T.TenantExport>(`/tenant/export/${id}`),
   requestDeletion: (confirmName: string) => del('/tenant', { confirm_name: confirmName }),
+  cancelDeletion: () => postData<T.Tenant>('/tenant/cancel-deletion'),
   users: () => getData<T.TenantUser[]>('/tenant/users'),
   addUser: (payload: { email: string; role: T.TenantRole; name?: string }) => postData<T.TenantUser>('/tenant/users', payload),
   updateUser: (id: number, role: T.TenantRole) => patchData<T.TenantUser>(`/tenant/users/${id}`, { role }),

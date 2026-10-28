@@ -58,6 +58,8 @@ export interface TenantMembership {
   uuid: string
   name: string
   sector: string
+  /** pending_deletion: solo se puede cancelar la solicitud o exportar (la API responde 423 al resto). */
+  status?: 'active' | 'suspended' | 'pending_deletion'
   role: TenantRole
   onboarding_completed_at: ISODateTime | null
 }
@@ -534,6 +536,8 @@ export interface ProductForecastRow {
   history_units: number
   forecast_units: number
   change_pct: number | null
+  /** Base histórica < 10 unidades: el cambio porcentual no indica una tendencia. */
+  low_base?: boolean
   trend: Trend
   forecast_revenue: number | null
   lo_80: number | null
@@ -650,6 +654,8 @@ export interface AccuracyByGroup {
   bias?: number | null
   n_obs?: number
   model_family?: string | null
+  branch_id?: number | null
+  branch_name?: string | null
   [key: string]: unknown
 }
 

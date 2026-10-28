@@ -124,7 +124,7 @@ services:
   # Worker de importaciones y tareas generales.
   queue:
     <<: *backend-service
-    command: ["php", "artisan", "queue:work", "redis", "--queue=imports,default", "--tries=2", "--timeout=600", "--max-time=3600", "--sleep=3"]
+    command: ["php", "artisan", "queue:work", "redis", "--queue=imports,default", "--tries=2", "--timeout=600", "--memory=1024", "--max-time=3600", "--sleep=3"]
     stop_grace_period: 60s
     healthcheck:
       disable: true
@@ -135,7 +135,7 @@ services:
   # Worker de pronósticos (trabajos largos: llama al motor y espera su resultado).
   queue-forecasting:
     <<: *backend-service
-    command: ["php", "artisan", "queue:work", "redis", "--queue=forecasting", "--tries=2", "--timeout=1000", "--max-time=7200", "--sleep=3"]
+    command: ["php", "artisan", "queue:work", "redis", "--queue=forecasting", "--tries=2", "--timeout=1000", "--memory=512", "--max-time=7200", "--sleep=3"]
     stop_grace_period: 120s
     healthcheck:
       disable: true

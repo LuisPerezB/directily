@@ -145,7 +145,10 @@ def build_recommendations(
             errs = samples * scale
             safety = max(0.0, float(np.quantile(errs, service_level)))
             std_l = float(np.std(errs))
-            prob = float(np.mean(demand_l + errs > available))
+            # Regla de sucesión de Laplace: con una muestra finita de errores nunca se
+            # informa certeza absoluta (0 % o 100 %) de quiebre.
+            hits = int(np.sum(demand_l + errs > available))
+            prob = (hits + 1) / (len(errs) + 2)
             method = "empirical_backtest"
         else:
             sd = (fc["hi_80"].to_numpy(dtype=float)[:L] - fc["lo_80"].to_numpy(dtype=float)[:L]) / (2 * 1.2816)

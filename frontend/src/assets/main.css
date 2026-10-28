@@ -301,6 +301,9 @@ body {
 .badge-info { background: var(--p-info-soft); color: var(--p-info); }
 
 .table-wrap {
+  /* position: relative contiene a los descendientes absolutos (p. ej. textos .sr-only de las
+     cabeceras); sin esto escapan del recorte y ensanchan toda la página. */
+  position: relative;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }

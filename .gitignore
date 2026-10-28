@@ -19,3 +19,5 @@ engine/.mypy_cache/
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
+engine/build/
+engine/*.egg-info/

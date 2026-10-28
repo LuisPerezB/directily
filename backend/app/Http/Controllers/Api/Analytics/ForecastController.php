@@ -140,7 +140,7 @@ class ForecastController extends AnalyticsController
             $notes[] = 'Los rangos de incertidumbre están disponibles en la vista diaria; para semanas o meses se muestra solo el valor esperado.';
         }
         if (! $node->isItemLevel()) {
-            $notes[] = 'En niveles agregados, "stockout_share" indica la proporción de productos sin existencias ese período.';
+            $notes[] = 'En vistas agregadas (empresa, sucursal o categoría), los quiebres de stock se indican según la proporción de productos sin existencias en cada período.';
         }
 
         return $notes;

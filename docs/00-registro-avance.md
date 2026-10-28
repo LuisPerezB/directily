@@ -1,13 +1,68 @@
 # 00 · Registro de avance
 
-Estado por componente. Leyenda: ✅ implementado y probado · 🟡 implementado sin pruebas completas ·
-⏳ pendiente · 🔌 interfaz desacoplada (requiere credenciales/servicio externo).
+Estado por componente al 2026-10-28. Leyenda: ✅ implementado y probado · 🟡 implementado, pruebas
+parciales · ⏳ pendiente · 🔌 interfaz desacoplada (requiere credenciales o servicio externo; NO se
+presenta como activa).
 
-| Fecha | Componente | Estado | Notas |
-|---|---|---|---|
-| 2026-10-27 | Esquema de datos (49 tablas, migraciones Laravel) | ✅ | Migra en PostgreSQL 16; FKs compuestas por tenant |
-| 2026-10-27 | Núcleo multi-tenant (TenantContext, BelongsToTenant, ResolveTenant, roles) | 🟡 | Pruebas a cargo de backend-core |
-| 2026-10-27 | Contratos (docs/06) y arquitectura (docs/02) | ✅ | |
+## Verificación global
+
+| Verificación | Resultado |
+|---|---|
+| Prueba de aceptación MVP de extremo a extremo (`e2e/mvp_acceptance.py`, API real + cola + motor) | ✅ 32/32 verificaciones (criterios 1–13 del prompt maestro) |
+| Backend PHPUnit sobre PostgreSQL (`cd backend && php artisan test`) | ✅ 155 pruebas, 1 105 aserciones |
+| Motor pytest (`cd engine && .venv/bin/python -m pytest -q`) | ✅ 43 pruebas (34 unitarias + 9 de integración con PostgreSQL) |
+| Frontend (`npm run type-check && npm run lint && npm run test -- --run && npm run build`) | ✅ 68 pruebas, build 1,3 MB |
+| OpenAPI pública unificada (`docs/openapi/predictily-api.yaml`, 76 rutas) | ✅ generada con `infra/scripts/merge_openapi.py` |
+| `docker compose config` (base y producción) | ✅ |
+| Imágenes Docker backend y motor construidas y arrancadas | ✅ (imagen `web` no reconstruida tras corregir el frontend: ver pendientes) |
+| Respaldo y restauración (`infra/scripts/backup.sh`, `restore.sh --verify`) | ✅ probado contra PostgreSQL local |
+
+Resultados medidos en datos demo ficticios (no son promesas de precisión para empresas reales):
+WAPE diario por producto-sucursal en backtesting rolling-origin 0,487 (modelo seleccionado) vs 0,645
+(Seasonal Naive); cobertura empírica del intervalo 80 % = 0,798. Pronóstico completo de la empresa demo
+A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
+
+## Estado por componente
+
+| Componente | Estado | Notas |
+|---|---|---|
+| Esquema de datos (50 tablas, migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
+| Multi-tenancy (contexto, scope fail-closed, middleware, jobs, FKs) | ✅ | Pruebas de aislamiento en core, analytics, motor y E2E |
+| Autenticación (Sanctum SPA + tokens por empresa), roles y abilities | ✅ | Rate limit de login, auditoría |
+| Empresas, sucursales, usuarios, configuración, consentimiento | ✅ | |
+| Planes SaaS, límites (402) y consumo | ✅ | Asignación manual por superadmin; sin pasarela de pagos |
+| Importación CSV/XLSX (detección, mapeo, validación, calidad, idempotencia) | ✅ | 99 334 líneas en ~41 s; reimportación sin duplicados |
+| Ingesta REST (`/sales/batch`) | ✅ | Misma lógica que el importador |
+| Conectores ERP/POS específicos (Contífico, ODBC) | 🔌 | Declarados `requires_credentials` / `planned` |
+| Privacidad LOPDP (logs sin PII, HMAC de cédulas, exportación, eliminación diferida, retención) | ✅ | Revisión legal pendiente (docs/07) |
+| Motor: perfilado, censura por quiebre, feriados EC, características | ✅ | |
+| Motor: Nivel A (StatsForecast) y Nivel B (LightGBM global por empresa) | ✅ | Selección por clase de demanda contra baseline, con respaldo |
+| Motor: backtesting rolling-origin, métricas, intervalos conformales, reconciliación | ✅ | |
+| Motor: recomendaciones de inventario y alertas de quiebre | ✅ | Probabilidad empírica con regla de Laplace (nunca 0 %/100 %) |
+| Motor: evaluación vs reales y detección de drift | ✅ | |
+| Motor: Nivel C (sectorial), D (personalizado), E (TimesFM) | ⏳ / 🔌 | Diseño en registro de modelos; TimesFM desactivado hasta verificar licencia |
+| Indicadores macroeconómicos (INEC, BCE...) | 🔌 | Esquema y consultas as-of probadas; sin conectores |
+| Orquestación por colas, programación, reintentos | ✅ | |
+| API analítica: dashboard, pronósticos, precisión, inventario, alertas | ✅ | |
+| Simulador de escenarios (determinista, con supuestos explícitos) | ✅ | Elasticidad/causalidad: fase posterior |
+| Exportaciones CSV y reporte ejecutivo | ✅ | |
+| Frontend: 13 pantallas, i18n, modo oscuro, roles | ✅ | Prueba de humo con Playwright en 16 rutas |
+| Documentación (01–08, manual, entrenamiento, pendientes) | ✅ | |
+| Docker Compose, Dockerfiles, nginx, Caddy TLS, respaldos | ✅ / 🟡 | Producción con dominio real no probada |
+
+## Correcciones de la integración final (orquestador)
+
+- Límite de subida de PHP (8 MB por defecto) bloqueaba el histórico de 19 MB en instalación nativa:
+  documentado y respuesta 413 en español (`payload_too_large`). La imagen Docker ya usaba 25 MB.
+- Workers de cola con `--memory` explícito (el valor por defecto de 128 MB detenía el worker tras
+  importar 133 mil filas de inventario).
+- Rankings de productos: cambios porcentuales sobre bases < 10 unidades se marcan `low_base`, se
+  ordenan al final y no aparecen en "productos que suben/bajan" del dashboard.
+- Intervalo 80 % del total del horizonte por producto tomado de las filas `granularity='horizon'`.
+- `ANALYZE` de las tablas afectadas tras importaciones grandes (evita planes lentos en el motor).
+- Probabilidad de quiebre empírica con regla de sucesión de Laplace.
+- Prueba de aislamiento que dependía de la hora UTC (fecha local de la empresa).
+- Especificaciones OpenAPI core/analytics unificadas (esquema de cookie de sesión alineado).
 
 ## Notas de los agentes
 (Cada agente agrega aquí decisiones o cambios de contrato relevantes.)

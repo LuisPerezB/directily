@@ -133,7 +133,25 @@ make dev-frontend    # SPA Vite  → http://localhost:5173 (proxy /api y /sanctu
 make dev-scheduler   # opcional
 ```
 
-`ENGINE_API_TOKEN` debe ser el mismo en `backend/.env` y en el entorno del motor.
+`ENGINE_API_TOKEN` debe ser el mismo en `backend/.env` y en el entorno del motor
+(`engine/.env`, copiado de `engine/.env.example`).
+
+Requisitos de PHP en instalación nativa (la imagen Docker ya los trae en `backend/docker/php/`):
+
+- `upload_max_filesize = 25M` y `post_max_size = 26M`: el límite por defecto de PHP (2–8 MB)
+  rechaza historiales de ventas grandes (el demo de la ferretería pesa 19 MB) con HTTP 413. En
+  Ubuntu, por ejemplo: `printf 'upload_max_filesize = 25M\npost_max_size = 26M\n' | sudo tee
+  /etc/php/8.3/cli/conf.d/99-predictily.ini`.
+- El worker de colas se lanza con `--memory=1024` (`make dev-queue`): con el valor por defecto
+  (128 MB) se detiene después de importar archivos grandes y, sin supervisor, las siguientes
+  tareas quedan en espera.
+
+Prueba de aceptación del MVP de extremo a extremo (con backend, worker y motor levantados): crea
+dos empresas nuevas y recorre los 13 criterios del MVP por la API pública:
+
+```bash
+engine/.venv/bin/python e2e/mvp_acceptance.py --api http://127.0.0.1:8000/api/v1
+```
 
 ---
 

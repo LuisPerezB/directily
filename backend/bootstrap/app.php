@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\PostTooLargeException;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Log;
@@ -78,5 +79,14 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return null;
+        });
+
+        // Archivo de importación mayor que post_max_size/upload_max_filesize de PHP.
+        $exceptions->render(function (PostTooLargeException $e, Request $request) {
+            return response()->json([
+                'message' => 'El archivo supera el tamaño máximo permitido para importaciones ('
+                    .(int) round(config('predictily.imports.max_file_size_kb', 20480) / 1024).' MB).',
+                'code' => 'payload_too_large',
+            ], 413);
         });
     })->create();

@@ -1,0 +1,3538 @@
+openapi: 3.1.0
+info:
+  title: Predictily API pública v1
+  version: 1.0.0
+  description: 'API pública de Predictily (Laravel 13), rutas del núcleo: autenticación, empresas, usuarios,
+
+    catálogos, ventas, importaciones, fuentes de datos, privacidad y administración de plataforma.
+
+
+    Incluye las rutas del núcleo y las analíticas (pronósticos, dashboard, precisión, inventario, alertas, escenarios,
+    exportaciones). Archivo generado por `infra/scripts/merge_openapi.py`; editar `core.yaml` o `analytics.yaml`.
+
+    '
+servers:
+- url: /api/v1
+security:
+- sessionCookie: []
+- bearerToken: []
+tags:
+- name: Autenticación
+- name: Empresas
+- name: Usuarios
+- name: Catálogos
+- name: Ventas
+- name: Importaciones
+- name: Fuentes de datos
+- name: Privacidad
+- name: Plataforma
+- name: Pronósticos
+- name: Dashboard
+- name: Precisión
+- name: Inventario
+- name: Alertas
+- name: Escenarios
+- name: Exportaciones
+paths:
+  /accuracy/comparison:
+    get:
+      tags:
+      - Precisión
+      summary: Pronóstico de una ejecución pasada frente a ventas reales
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: run_id
+        in: query
+        required: true
+        schema:
+          type: integer
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Puntos diarios; días censurados por quiebre de stock se excluyen de las métricas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      points:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                              format: date
+                            yhat:
+                              type: number
+                            lo_80:
+                              type:
+                              - number
+                              - 'null'
+                            hi_80:
+                              type:
+                              - number
+                              - 'null'
+                            actual:
+                              type:
+                              - number
+                              - 'null'
+                            censored:
+                              type: boolean
+                      metrics:
+                        $ref: '#/components/schemas/Metrics'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /accuracy/summary:
+    get:
+      tags:
+      - Precisión
+      summary: Métricas de backtesting, precisión realizada y explicación en lenguaje sencillo
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AccuracySummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/plans:
+    get:
+      tags:
+      - Plataforma
+      summary: Planes
+      responses:
+        '200':
+          description: OK
+  /admin/tenants:
+    get:
+      tags:
+      - Plataforma
+      summary: Empresas (superadmin; sin datos de negocio)
+      responses:
+        '200':
+          description: OK
+        '403':
+          $ref: '#/components/responses/Error'
+  /admin/tenants/{uuid}:
+    parameters:
+    - name: uuid
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    patch:
+      tags:
+      - Plataforma
+      summary: Asignar plan, estado o límites específicos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan_code:
+                  type: string
+                  enum:
+                  - trial
+                  - basico
+                  - profesional
+                  - empresarial
+                status:
+                  type: string
+                  enum:
+                  - active
+                  - suspended
+                plan_overrides:
+                  type: object
+      responses:
+        '200':
+          description: OK
+  /admin/usage:
+    get:
+      tags:
+      - Plataforma
+      summary: Consumo mensual por empresa
+      responses:
+        '200':
+          description: OK
+  /alerts:
+    get:
+      tags:
+      - Alertas
+      summary: Listar alertas
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - open
+          - acknowledged
+          - resolved
+      - name: type
+        in: query
+        schema:
+          type: string
+      - name: severity
+        in: query
+        schema:
+          type: string
+          enum:
+          - info
+          - warning
+          - critical
+      responses:
+        '200':
+          description: Lista paginada de alertas
+  /alerts/{id}:
+    patch:
+      tags:
+      - Alertas
+      summary: Reconocer o resolver una alerta
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - open
+                  - acknowledged
+                  - resolved
+      responses:
+        '200':
+          description: Actualizada
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /audit-logs:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Privacidad
+      summary: Bitácora de auditoría (audit.view)
+      responses:
+        '200':
+          description: OK
+  /auth/login:
+    post:
+      tags:
+      - Autenticación
+      summary: Iniciar sesión (sesión SPA o token Bearer si no hay sesión)
+      description: 5 intentos por minuto por correo + IP. Éxitos y fallos se auditan.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                remember:
+                  type: boolean
+      responses:
+        '200':
+          $ref: '#/components/responses/LoginResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/Error'
+  /auth/logout:
+    post:
+      tags:
+      - Autenticación
+      summary: Cerrar sesión (revoca el token actual si aplica)
+      responses:
+        '204':
+          description: Sesión cerrada
+  /auth/me:
+    get:
+      tags:
+      - Autenticación
+      summary: Usuario actual y sus empresas
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+                      tenants:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TenantSummary'
+        '401':
+          $ref: '#/components/responses/Error'
+  /auth/password:
+    put:
+      tags:
+      - Autenticación
+      summary: Cambiar contraseña
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - current_password
+              - password
+              - password_confirmation
+              properties:
+                current_password:
+                  type: string
+                password:
+                  type: string
+                  minLength: 10
+                password_confirmation:
+                  type: string
+      responses:
+        '204':
+          description: Contraseña actualizada
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /auth/register:
+    post:
+      tags:
+      - Autenticación
+      summary: Registrar usuario
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - email
+              - password
+              - password_confirmation
+              - accept_terms
+              properties:
+                name:
+                  type: string
+                  maxLength: 150
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 10
+                  description: Debe contener letras y números
+                password_confirmation:
+                  type: string
+                accept_terms:
+                  type: boolean
+      responses:
+        '201':
+          $ref: '#/components/responses/LoginResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /branches:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Catálogos
+      summary: Sucursales
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Branch'
+    post:
+      tags:
+      - Catálogos
+      summary: Crear sucursal (branches.manage; límite max_branches)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BranchInput'
+      responses:
+        '201':
+          description: Creada
+        '402':
+          $ref: '#/components/responses/Error'
+  /branches/{branch}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: branch
+      in: path
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Catálogos
+      summary: Sucursal
+      responses:
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/Error'
+    patch:
+      tags:
+      - Catálogos
+      summary: Actualizar sucursal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BranchInput'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+      - Catálogos
+      summary: Eliminar (o desactivar si tiene ventas)
+      responses:
+        '200':
+          description: OK
+  /connectors:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Fuentes de datos
+      summary: 'Conectores [{key, name, description, status: available|requires_credentials|planned, entity_types}]'
+      responses:
+        '200':
+          description: OK
+  /dashboard/summary:
+    get:
+      tags:
+      - Dashboard
+      summary: Resumen comercial (cuánto venderé, qué sube/baja, qué podría agotarse, inversión, confiabilidad)
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Horizon'
+      - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200':
+          description: Resumen (KPIs de pronóstico en null si no hay ejecución vigente)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DashboardSummary'
+  /data-sources:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Fuentes de datos
+      summary: Fuentes (nunca devuelve credenciales)
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Fuentes de datos
+      summary: Crear fuente (datasources.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - type
+              - name
+              properties:
+                type:
+                  type: string
+                  enum:
+                  - file_upload
+                  - rest_api
+                  - connector
+                name:
+                  type: string
+                connector_key:
+                  type: string
+                config:
+                  type: object
+                credentials:
+                  type: object
+                  description: Se guardan cifradas; nunca se devuelven
+      responses:
+        '201':
+          description: Creada
+  /data-sources/{dataSource}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: dataSource
+      in: path
+      required: true
+      schema:
+        type: integer
+    patch:
+      tags:
+      - Fuentes de datos
+      summary: Actualizar
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+      - Fuentes de datos
+      summary: Eliminar (revoca sus tokens)
+      responses:
+        '204':
+          description: Eliminada
+  /data-sources/{dataSource}/test:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: dataSource
+      in: path
+      required: true
+      schema:
+        type: integer
+    post:
+      tags:
+      - Fuentes de datos
+      summary: Probar conector (sin efectos)
+      responses:
+        '200':
+          description: 'data: {ok, message, details}'
+  /data-sources/{dataSource}/tokens:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: dataSource
+      in: path
+      required: true
+      schema:
+        type: integer
+    post:
+      tags:
+      - Fuentes de datos
+      summary: Crear token Bearer ligado a la empresa (se muestra una sola vez)
+      responses:
+        '201':
+          description: 'data: {token, token_id, expires_at, abilities}'
+        '402':
+          $ref: '#/components/responses/Error'
+  /data-sources/{dataSource}/tokens/{tokenId}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: dataSource
+      in: path
+      required: true
+      schema:
+        type: integer
+    - name: tokenId
+      in: path
+      required: true
+      schema:
+        type: integer
+    delete:
+      tags:
+      - Fuentes de datos
+      summary: Revocar token
+      responses:
+        '204':
+          description: Revocado
+  /exports/accuracy.csv:
+    get:
+      tags:
+      - Exportaciones
+      summary: Evaluaciones de modelos
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/Delimiter'
+      responses:
+        '200':
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+  /exports/forecasts.csv:
+    get:
+      tags:
+      - Exportaciones
+      summary: Pronóstico por producto (resumen o por período si se indica granularity)
+      description: Requiere `data.export`. UTF-8 con BOM. Queda auditado (`data.exported`).
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/Horizon'
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/Granularity'
+      - $ref: '#/components/parameters/Delimiter'
+      responses:
+        '200':
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /exports/recommendations.csv:
+    get:
+      tags:
+      - Exportaciones
+      summary: Recomendaciones de abastecimiento
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/Delimiter'
+      responses:
+        '200':
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+  /exports/sales-summary.csv:
+    get:
+      tags:
+      - Exportaciones
+      summary: Resumen de ventas válidas por período
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: date_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/ProductId'
+      - $ref: '#/components/parameters/Granularity'
+      - $ref: '#/components/parameters/Delimiter'
+      responses:
+        '200':
+          description: CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+  /forecast-runs:
+    post:
+      tags:
+      - Pronósticos
+      summary: Solicitar una ejecución de pronóstico (asíncrona)
+      description: Requiere la habilidad `forecast.run` (propietario, administrador, analista).
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                horizon_days:
+                  type: integer
+                  enum:
+                  - 7
+                  - 30
+                  - 90
+                  default: 90
+                cutoff_date:
+                  type: string
+                  format: date
+                  description: Fecha de corte pasada; crea una ejecución `historical` (nunca vigente).
+      responses:
+        '202':
+          description: Ejecución creada en cola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ForecastRun'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Ya hay una ejecución en cola o en proceso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  code:
+                    type: string
+                    const: forecast_run_in_progress
+                  active_run:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      version:
+                        type: integer
+                      status:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+        '422':
+          $ref: '#/components/responses/Validation'
+    get:
+      tags:
+      - Pronósticos
+      summary: Listar ejecuciones (más reciente primero)
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - queued
+          - running
+          - completed
+          - failed
+          - cancelled
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedForecastRuns'
+  /forecast-runs/{id}:
+    get:
+      tags:
+      - Pronósticos
+      summary: Detalle de una ejecución
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ForecastRun'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /forecasts/categories:
+    get:
+      tags:
+      - Pronósticos
+      summary: Pronóstico por categoría
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/Horizon'
+      - $ref: '#/components/parameters/BranchId'
+      - name: search
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Categorías
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category:
+                          type: object
+                          properties:
+                            id:
+                              type:
+                              - integer
+                              - 'null'
+                            name:
+                              type: string
+                        history_units:
+                          type: number
+                        forecast_units:
+                          type: number
+                        change_pct:
+                          type:
+                          - number
+                          - 'null'
+                        trend:
+                          type: string
+                          enum:
+                          - up
+                          - down
+                          - flat
+                        forecast_revenue:
+                          type:
+                          - number
+                          - 'null'
+                  run:
+                    $ref: '#/components/schemas/RunRef'
+  /forecasts/products:
+    get:
+      tags:
+      - Pronósticos
+      summary: Ranking de productos (pronóstico vs período histórico equivalente)
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/Horizon'
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - name: search
+        in: query
+        schema:
+          type: string
+          maxLength: 100
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - change_pct
+          - -change_pct
+          - forecast_units
+          - -forecast_units
+          - revenue
+          - -revenue
+          - name
+          default: -forecast_units
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada (o data vacía y run null si no hay pronóstico)
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/PaginationEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ProductForecast'
+                    run:
+                      $ref: '#/components/schemas/RunRef'
+                    horizon:
+                      type: integer
+  /forecasts/series:
+    get:
+      tags:
+      - Pronósticos
+      summary: Historia y pronóstico de un nodo de la jerarquía
+      description: 'Nodo: sin filtros → `total`; branch → `branch:{b}`; category → `category:{c}`;
+
+        branch+category → `branch_category:{b}:{c}`; product → `product:{p}`; product+branch → `series:{b}:{p}`.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/ProductId'
+      - $ref: '#/components/parameters/Granularity'
+      - $ref: '#/components/parameters/Horizon'
+      - name: history_days
+        in: query
+        schema:
+          type: integer
+          minimum: 7
+          maximum: 730
+          default: 90
+      responses:
+        '200':
+          description: Serie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SeriesResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /import-fields/{entityType}:
+    parameters:
+    - name: entityType
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ImportEntity'
+    get:
+      tags:
+      - Importaciones
+      summary: Definición de campos [{key, label, required, type, description, synonyms}]
+      responses:
+        '200':
+          description: OK
+  /import-templates/{entityType}:
+    parameters:
+    - name: entityType
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ImportEntity'
+    get:
+      tags:
+      - Importaciones
+      summary: Plantilla CSV con encabezados canónicos
+      responses:
+        '200':
+          description: CSV
+  /imports:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Importaciones
+      summary: Importaciones
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: entity_type
+        in: query
+        schema:
+          $ref: '#/components/schemas/ImportEntity'
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Importaciones
+      summary: Subir archivo CSV/XLSX (máx. 20 MB) — detecta columnas y sugiere mapeo
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              - entity_type
+              properties:
+                file:
+                  type: string
+                  format: binary
+                entity_type:
+                  $ref: '#/components/schemas/ImportEntity'
+                data_source_id:
+                  type: integer
+      responses:
+        '201':
+          $ref: '#/components/responses/ImportJobResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /imports/{import}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - $ref: '#/components/parameters/ImportId'
+    get:
+      tags:
+      - Importaciones
+      summary: Detalle con estadísticas y reporte de calidad
+      responses:
+        '200':
+          $ref: '#/components/responses/ImportJobResponse'
+  /imports/{import}/confirm:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - $ref: '#/components/parameters/ImportId'
+    post:
+      tags:
+      - Importaciones
+      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows)
+      responses:
+        '202':
+          $ref: '#/components/responses/ImportJobResponse'
+        '402':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /imports/{import}/errors:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - $ref: '#/components/parameters/ImportId'
+    get:
+      tags:
+      - Importaciones
+      summary: Errores y advertencias por fila
+      parameters:
+      - name: severity
+        in: query
+        schema:
+          type: string
+          enum:
+          - error
+          - warning
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: 'data: [{row_number, column, error_code, severity, message, raw_value}]'
+  /imports/{import}/errors.csv:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - $ref: '#/components/parameters/ImportId'
+    get:
+      tags:
+      - Importaciones
+      summary: Descargar errores en CSV
+      responses:
+        '200':
+          description: CSV
+          content:
+            text/csv: {}
+  /imports/{import}/mapping:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - $ref: '#/components/parameters/ImportId'
+    put:
+      tags:
+      - Importaciones
+      summary: Guardar mapeo/opciones y validar (asíncrono). Repetible para corregir.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - mapping
+              properties:
+                mapping:
+                  type: object
+                  additionalProperties:
+                    type:
+                    - string
+                    - 'null'
+                  description: campo Predictily → columna del archivo
+                options:
+                  $ref: '#/components/schemas/ImportOptions'
+      responses:
+        '202':
+          $ref: '#/components/responses/ImportJobResponse'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /imports/{import}/reject:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - $ref: '#/components/parameters/ImportId'
+    post:
+      tags:
+      - Importaciones
+      summary: Rechazar (elimina el archivo; conserva la huella)
+      responses:
+        '200':
+          $ref: '#/components/responses/ImportJobResponse'
+  /inventory/recommendations:
+    get:
+      tags:
+      - Inventario
+      summary: Recomendaciones de abastecimiento
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - name: risk_level
+        in: query
+        description: Uno o varios separados por coma
+        schema:
+          type: string
+          example: high,critical
+      - name: type
+        in: query
+        schema:
+          type: string
+          enum:
+          - reorder
+          - stockout_risk
+          - overstock
+          - no_action
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - open
+          - acknowledged
+          - dismissed
+          - ordered
+      - name: search
+        in: query
+        schema:
+          type: string
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - -stockout_probability
+          - stockout_probability
+          - days_of_cover
+          - -days_of_cover
+          - -estimated_investment
+          - -suggested_qty
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada con `run` y `disclaimer`
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/PaginationEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Recommendation'
+                    run:
+                      $ref: '#/components/schemas/RunRef'
+                    disclaimer:
+                      type: string
+  /inventory/recommendations/{id}:
+    patch:
+      tags:
+      - Inventario
+      summary: Registrar el estado de una recomendación (no ejecuta pedidos)
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - open
+                  - acknowledged
+                  - dismissed
+                  - ordered
+      responses:
+        '200':
+          description: Actualizada
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /inventory/summary:
+    get:
+      tags:
+      - Inventario
+      summary: Resumen de inventario y riesgos
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      snapshot_date:
+                        type:
+                        - string
+                        - 'null'
+                        format: date
+                      has_inventory:
+                        type: boolean
+                      products_with_stock:
+                        type: integer
+                      series_out_of_stock:
+                        type: integer
+                      total_on_hand_value:
+                        type: number
+                      series_without_cost:
+                        type: integer
+                      risk_counts:
+                        type: object
+                        properties:
+                          low:
+                            type: integer
+                          medium:
+                            type: integer
+                          high:
+                            type: integer
+                          critical:
+                            type: integer
+                      purchase_investment:
+                        type:
+                        - number
+                        - 'null'
+                      coverage_days_median:
+                        type:
+                        - number
+                        - 'null'
+  /jobs/{id}:
+    get:
+      tags:
+      - Pronósticos
+      summary: Estado y progreso de un trabajo asíncrono
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TrainingJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /lead-times:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Catálogos
+      summary: Plazos de abastecimiento
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Catálogos
+      summary: Crear/actualizar plazo (uno vigente por producto+proveedor+sucursal)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - lead_time_days
+              properties:
+                product_id:
+                  type: integer
+                supplier_id:
+                  type: integer
+                branch_id:
+                  type: integer
+                lead_time_days:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+                lead_time_std_days:
+                  type: number
+      responses:
+        '201':
+          description: OK
+  /lead-times/{leadTime}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: leadTime
+      in: path
+      required: true
+      schema:
+        type: integer
+    delete:
+      tags:
+      - Catálogos
+      summary: Eliminar plazo
+      responses:
+        '204':
+          description: Eliminado
+  /model-evaluations:
+    get:
+      tags:
+      - Precisión
+      summary: Filas de model_evaluations de una ejecución
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: run_id
+        in: query
+        required: true
+        schema:
+          type: integer
+      - name: evaluation_type
+        in: query
+        schema:
+          type: string
+          enum:
+          - backtest
+          - realized
+      - name: level
+        in: query
+        schema:
+          type: string
+          enum:
+          - overall
+          - demand_class
+          - horizon
+          - branch
+          - category
+          - product
+          - series
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada
+  /models:
+    get:
+      tags:
+      - Precisión
+      summary: Registro de modelos de la empresa
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: status
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Lista paginada de model_registry
+  /product-categories:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Catálogos
+      summary: Categorías con número de productos
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Catálogos
+      summary: Crear categoría
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                code:
+                  type: string
+                parent_id:
+                  type: integer
+      responses:
+        '201':
+          description: Creada
+  /product-categories/{productCategory}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: productCategory
+      in: path
+      required: true
+      schema:
+        type: integer
+    patch:
+      tags:
+      - Catálogos
+      summary: Actualizar categoría
+      responses:
+        '200':
+          description: OK
+  /products:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Catálogos
+      summary: Productos con estadísticas de 90 días
+      parameters:
+      - name: search
+        in: query
+        schema:
+          type: string
+      - name: category_id
+        in: query
+        schema:
+          type: integer
+      - name: is_active
+        in: query
+        schema:
+          type: boolean
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - name
+          - -name
+          - sku
+          - -sku
+          - units_90d
+          - -units_90d
+          - revenue_90d
+          - -revenue_90d
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Paginated'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Product'
+    post:
+      tags:
+      - Catálogos
+      summary: Crear producto (catalog.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '201':
+          description: Creado
+        '402':
+          $ref: '#/components/responses/Error'
+  /products/{product}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: product
+      in: path
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Catálogos
+      summary: Producto
+      responses:
+        '200':
+          description: OK
+    patch:
+      tags:
+      - Catálogos
+      summary: Actualizar producto
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '200':
+          description: OK
+  /promotions:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Catálogos
+      summary: Promociones
+      parameters:
+      - name: active_on
+        in: query
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Catálogos
+      summary: Crear promoción (discount_pct como fracción 0–1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Promotion'
+      responses:
+        '201':
+          description: Creada
+  /promotions/{promotion}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: promotion
+      in: path
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Catálogos
+      summary: Promoción
+      responses:
+        '200':
+          description: OK
+    patch:
+      tags:
+      - Catálogos
+      summary: Actualizar
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+      - Catálogos
+      summary: Eliminar
+      responses:
+        '204':
+          description: Eliminada
+  /reports/forecast-summary:
+    get:
+      tags:
+      - Dashboard
+      summary: Resumen ejecutivo imprimible
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Horizon'
+      - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200':
+          description: Reporte JSON con highlights
+          KPIs: null
+          riesgos: null
+          precisión y advertencias: null
+  /sales:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Ventas
+      summary: Documentos de venta
+      parameters:
+      - name: date_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: branch_id
+        in: query
+        schema:
+          type: integer
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - completed
+          - voided
+          - pending
+      - name: document_type
+        in: query
+        schema:
+          type: string
+          enum:
+          - invoice
+          - sales_note
+          - credit_note
+          - other
+      - name: search
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: OK
+  /sales/batch:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    post:
+      tags:
+      - Ventas
+      summary: Ingesta por API REST (conector), idempotente por tipo+número de documento
+      description: Mismas reglas de normalización y validación que el importador de archivos. Máximo 500 documentos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - documents
+              properties:
+                documents:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required:
+                    - document_number
+                    - issued_at
+                    - items
+                    properties:
+                      document_number:
+                        type: string
+                      document_type:
+                        type: string
+                      status:
+                        type: string
+                      issued_at:
+                        type: string
+                      branch_code:
+                        type: string
+                      currency:
+                        type: string
+                      channel:
+                        type: string
+                      customer_code:
+                        type: string
+                      customer_segment:
+                        type: string
+                      customer_province:
+                        type: string
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required:
+                          - product_sku
+                          - quantity
+                          - unit_price
+                          properties:
+                            product_sku:
+                              type: string
+                            product_name:
+                              type: string
+                            category:
+                              type: string
+                            quantity:
+                              type: number
+                            unit_price:
+                              type: number
+                            discount:
+                              oneOf:
+                              - type: number
+                              - type: string
+                            tax:
+                              type: number
+                            net_amount:
+                              type: number
+                            unit_cost:
+                              type: number
+                            line_number:
+                              type: integer
+      responses:
+        '200':
+          description: 'data: {created, updated, unchanged, rejected, errors:[{index, item?, field, code, severity,
+            message}], warnings}'
+        '422':
+          description: Ningún documento válido o error estructural
+  /sales/summary:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Ventas
+      summary: Resumen agregado (excluye anuladas; devoluciones aparte)
+      parameters:
+      - name: date_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: branch_id
+        in: query
+        schema:
+          type: integer
+      - name: category_id
+        in: query
+        schema:
+          type: integer
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: granularity
+        in: query
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+      responses:
+        '200':
+          description: 'data: {series:[{period, units, revenue, documents}], totals:{units, revenue, documents,
+            returns_units}}'
+  /sales/{sale}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: sale
+      in: path
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Ventas
+      summary: Documento con líneas
+      responses:
+        '200':
+          description: OK
+  /scenarios:
+    get:
+      tags:
+      - Escenarios
+      summary: Escenarios guardados
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Lista paginada
+    post:
+      tags:
+      - Escenarios
+      summary: Simular y guardar un escenario
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/ScenarioRequest'
+              - type: object
+                required:
+                - name
+                properties:
+                  name:
+                    type: string
+                    maxLength: 150
+      responses:
+        '201':
+          description: Guardado (incluye `results`)
+  /scenarios/simulate:
+    post:
+      tags:
+      - Escenarios
+      summary: Simulación determinista (no persiste)
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioRequest'
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ScenarioResult'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /scenarios/{id}:
+    get:
+      tags:
+      - Escenarios
+      summary: Ver escenario guardado
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Escenarios
+      summary: Eliminar escenario
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Eliminado
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /suppliers:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Catálogos
+      summary: Proveedores
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Catálogos
+      summary: Crear proveedor
+      responses:
+        '201':
+          description: Creado
+  /suppliers/{supplier}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: supplier
+      in: path
+      required: true
+      schema:
+        type: integer
+    patch:
+      tags:
+      - Catálogos
+      summary: Actualizar proveedor
+      responses:
+        '200':
+          description: OK
+  /tenant:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Empresas
+      summary: Empresa activa con configuración efectiva, plan, rol y estado de incorporación
+      responses:
+        '200':
+          $ref: '#/components/responses/TenantResponse'
+    patch:
+      tags:
+      - Empresas
+      summary: Actualizar empresa (settings.manage)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                legal_name:
+                  type: string
+                tax_id:
+                  type: string
+                sector:
+                  $ref: '#/components/schemas/Sector'
+                timezone:
+                  type: string
+                data_retention_months:
+                  type: integer
+                  minimum: 12
+                  maximum: 120
+                settings:
+                  $ref: '#/components/schemas/TenantSettings'
+      responses:
+        '200':
+          $ref: '#/components/responses/TenantResponse'
+        '403':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Privacidad
+      summary: Solicitar eliminación de la empresa (gracia de 30 días, tenant.delete)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - confirm_name
+              properties:
+                confirm_name:
+                  type: string
+      responses:
+        '202':
+          description: Solicitud registrada
+        '409':
+          $ref: '#/components/responses/Error'
+  /tenant/cancel-deletion:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    post:
+      tags:
+      - Privacidad
+      summary: Cancelar la solicitud de eliminación
+      responses:
+        '200':
+          $ref: '#/components/responses/TenantResponse'
+  /tenant/complete-onboarding:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    post:
+      tags:
+      - Empresas
+      summary: Marcar la incorporación como completada
+      responses:
+        '200':
+          $ref: '#/components/responses/TenantResponse'
+  /tenant/demo-data:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    post:
+      tags:
+      - Empresas
+      summary: Cargar datos FICTICIOS de demostración (solo empresas sin ventas)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dataset:
+                  type: string
+                  enum:
+                  - ferreteria_andina
+                  - distribuidora_costa
+      responses:
+        '202':
+          description: Carga programada
+        '409':
+          $ref: '#/components/responses/Error'
+  /tenant/export:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    post:
+      tags:
+      - Privacidad
+      summary: Exportación completa de datos (ZIP de CSV) — tenant.export_all
+      responses:
+        '202':
+          description: Exportación programada
+        '409':
+          $ref: '#/components/responses/Error'
+  /tenant/export/{export}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: export
+      in: path
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Privacidad
+      summary: Estado de la exportación y enlace firmado temporal
+      responses:
+        '200':
+          description: OK
+  /tenant/shared-training-consent:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    put:
+      tags:
+      - Privacidad
+      summary: Consentimiento para entrenamiento compartido entre empresas (solo propietario)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - allow
+              properties:
+                allow:
+                  type: boolean
+      responses:
+        '200':
+          $ref: '#/components/responses/TenantResponse'
+  /tenant/usage:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Empresas
+      summary: Consumo del período y límites del plan
+      responses:
+        '200':
+          description: OK
+  /tenant/users:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    get:
+      tags:
+      - Usuarios
+      summary: Miembros (users.manage)
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Usuarios
+      summary: Agregar miembro (crea la cuenta si no existe; contraseña temporal mostrada una vez)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              - role
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+                role:
+                  $ref: '#/components/schemas/Role'
+      responses:
+        '201':
+          description: Agregado
+        '402':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /tenant/users/{user}:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: user
+      in: path
+      required: true
+      schema:
+        type: integer
+    patch:
+      tags:
+      - Usuarios
+      summary: Cambiar rol (solo un propietario asigna/quita owner; nunca sin propietario)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - role
+              properties:
+                role:
+                  $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: OK
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - Usuarios
+      summary: Quitar miembro
+      responses:
+        '204':
+          description: Eliminado
+  /tenants:
+    get:
+      tags:
+      - Empresas
+      summary: Empresas del usuario
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TenantSummary'
+    post:
+      tags:
+      - Empresas
+      summary: Crear empresa (el usuario queda como propietario, plan trial)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - sector
+              properties:
+                name:
+                  type: string
+                legal_name:
+                  type: string
+                tax_id:
+                  type: string
+                  pattern: ^\d{13}$
+                  description: RUC
+                sector:
+                  $ref: '#/components/schemas/Sector'
+                timezone:
+                  type: string
+                  default: America/Guayaquil
+                currency:
+                  type: string
+                  enum:
+                  - USD
+      responses:
+        '201':
+          $ref: '#/components/responses/TenantResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: predictily-session
+      description: 'SPA: GET /sanctum/csrf-cookie y luego enviar X-XSRF-TOKEN'
+    bearerToken:
+      type: http
+      scheme: bearer
+  parameters:
+    TenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Uuid de la empresa activa (ignorado con tokens ligados a empresa)
+    ImportId:
+      name: import
+      in: path
+      required: true
+      schema:
+        type: integer
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    TenantHeader:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    RunId:
+      name: run_id
+      in: query
+      description: Por defecto, la ejecución vigente
+      schema:
+        type: integer
+    BranchId:
+      name: branch_id
+      in: query
+      schema:
+        type: integer
+    CategoryId:
+      name: category_id
+      in: query
+      schema:
+        type: integer
+    ProductId:
+      name: product_id
+      in: query
+      schema:
+        type: integer
+    Granularity:
+      name: granularity
+      in: query
+      schema:
+        type: string
+        enum:
+        - day
+        - week
+        - month
+    Horizon:
+      name: horizon
+      in: query
+      description: Por defecto settings.default_horizon_days de la empresa
+      schema:
+        type: integer
+        enum:
+        - 7
+        - 30
+        - 90
+    Delimiter:
+      name: delimiter
+      in: query
+      schema:
+        type: string
+        enum:
+        - ','
+        - ;
+        default: ','
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Error de validación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    LoginResponse:
+      description: Usuario autenticado
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+                    description: Solo para clientes sin sesión (no SPA)
+                  token_type:
+                    type: string
+    TenantResponse:
+      description: Empresa
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/Tenant'
+    ImportJobResponse:
+      description: Trabajo de importación
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/ImportJob'
+    NotFound:
+      description: No existe o pertenece a otra empresa
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Sin permiso para la acción (code forbidden)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Validation:
+      description: Error de validación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PlanLimit:
+      description: Límite del plan
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                type: string
+                const: plan_limit_exceeded
+              limit:
+                type: string
+              current:
+                type:
+                - number
+                - 'null'
+              max:
+                type:
+                - number
+                - 'null'
+  schemas:
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    Paginated:
+      type: object
+      properties:
+        meta:
+          type: object
+          properties:
+            current_page:
+              type: integer
+            per_page:
+              type: integer
+            total:
+              type: integer
+            last_page:
+              type: integer
+        links:
+          type: object
+    Sector:
+      type: string
+      enum:
+      - ferreteria
+      - distribuidora
+      - repuestos_automotrices
+      - repuestos_agricolas
+      - retail_multisucursal
+      - importadora
+      - consumo_recurrente
+      - otro
+    Role:
+      type: string
+      enum:
+      - owner
+      - admin
+      - analyst
+      - viewer
+    ImportEntity:
+      type: string
+      enum:
+      - sales
+      - products
+      - inventory
+      - lead_times
+      - branches
+      - suppliers
+      - promotions
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        locale:
+          type: string
+        is_superadmin:
+          type: boolean
+        last_login_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    TenantSummary:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sector:
+          $ref: '#/components/schemas/Sector'
+        status:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        onboarding_completed_at:
+          type:
+          - string
+          - 'null'
+    TenantSettings:
+      type: object
+      properties:
+        default_horizon_days:
+          type: integer
+          enum:
+          - 7
+          - 30
+          - 90
+        service_level:
+          type: number
+          minimum: 0.5
+          maximum: 0.999
+        review_period_days:
+          type: integer
+        default_lead_time_days:
+          type: integer
+        forecast_schedule:
+          type: string
+          enum:
+          - daily
+          - weekly
+          - manual
+        stockout_risk_threshold:
+          type: number
+    Tenant:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+        legal_name:
+          type:
+          - string
+          - 'null'
+        tax_id:
+          type:
+          - string
+          - 'null'
+        sector:
+          $ref: '#/components/schemas/Sector'
+        country:
+          type: string
+        currency:
+          type: string
+        timezone:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          - pending_deletion
+        settings:
+          $ref: '#/components/schemas/TenantSettings'
+        allow_shared_training:
+          type: boolean
+        shared_training_consented_at:
+          type:
+          - string
+          - 'null'
+        data_retention_months:
+          type: integer
+        role:
+          $ref: '#/components/schemas/Role'
+        role_label:
+          type: string
+        abilities:
+          type: array
+          items:
+            type: string
+        plan:
+          type: object
+          properties:
+            code:
+              type: string
+            name:
+              type:
+              - string
+              - 'null'
+            limits:
+              type: object
+        onboarding:
+          type: object
+          properties:
+            has_branches:
+              type: boolean
+            has_products:
+              type: boolean
+            has_sales:
+              type: boolean
+            has_inventory:
+              type: boolean
+            has_forecast:
+              type: boolean
+            completed_at:
+              type:
+              - string
+              - 'null'
+    Branch:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        province:
+          type:
+          - string
+          - 'null'
+        canton:
+          type:
+          - string
+          - 'null'
+        commercial_zone:
+          type:
+          - string
+          - 'null'
+        address:
+          type:
+          - string
+          - 'null'
+        is_active:
+          type: boolean
+    BranchInput:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        province:
+          type: string
+        canton:
+          type: string
+        commercial_zone:
+          type: string
+        address:
+          type: string
+        is_active:
+          type: boolean
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        sku:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        brand:
+          type:
+          - string
+          - 'null'
+        category:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        current_price:
+          type:
+          - number
+          - 'null'
+        current_cost:
+          type:
+          - number
+          - 'null'
+        is_active:
+          type: boolean
+        stats:
+          type: object
+          properties:
+            units_90d:
+              type: number
+            revenue_90d:
+              type: number
+            last_sale_date:
+              type:
+              - string
+              - 'null'
+              format: date
+    ProductInput:
+      type: object
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        category_id:
+          type:
+          - integer
+          - 'null'
+        unit:
+          type: string
+        brand:
+          type: string
+        current_price:
+          type: number
+        current_cost:
+          type: number
+        is_active:
+          type: boolean
+    Promotion:
+      type: object
+      required:
+      - name
+      - starts_on
+      - ends_on
+      properties:
+        name:
+          type: string
+        promo_type:
+          type: string
+          enum:
+          - percentage
+          - fixed_amount
+          - bundle
+          - other
+        discount_pct:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          maximum: 1
+        starts_on:
+          type: string
+          format: date
+        ends_on:
+          type: string
+          format: date
+        branch_id:
+          type:
+          - integer
+          - 'null'
+        product_id:
+          type:
+          - integer
+          - 'null'
+        category_id:
+          type:
+          - integer
+          - 'null'
+    ImportOptions:
+      type: object
+      properties:
+        date_format:
+          type: string
+          enum:
+          - auto
+          - Y-m-d
+          - d/m/Y
+          - m/d/Y
+          - d-m-Y
+          - d.m.Y
+          - Y/m/d
+        decimal_separator:
+          type: string
+          enum:
+          - auto
+          - .
+          - ','
+        csv_delimiter:
+          type: string
+          enum:
+          - auto
+          - ','
+          - ;
+          - \t
+          - '|'
+        default_branch_code:
+          type:
+          - string
+          - 'null'
+        create_missing_products:
+          type: boolean
+          default: true
+        create_missing_branches:
+          type: boolean
+          default: false
+        create_missing_categories:
+          type: boolean
+          default: true
+        skip_invalid_rows:
+          type: boolean
+          default: false
+          description: Los documentos con alguna fila inválida se omiten completos
+    ImportJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        entity_type:
+          $ref: '#/components/schemas/ImportEntity'
+        original_filename:
+          type: string
+        file_format:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        file_size:
+          type: integer
+        file_hash:
+          type: string
+          description: SHA-256
+        status:
+          type: string
+          enum:
+          - uploaded
+          - awaiting_mapping
+          - validating
+          - validated
+          - importing
+          - completed
+          - failed
+          - rejected
+        progress:
+          type: integer
+        detected_columns:
+          type: array
+          items:
+            type: string
+        suggested_mapping:
+          type: object
+        column_mapping:
+          type: object
+        options:
+          $ref: '#/components/schemas/ImportOptions'
+        preview:
+          type: object
+          properties:
+            headers:
+              type: array
+              items:
+                type: string
+            rows:
+              type: array
+              items:
+                type: array
+            dialect:
+              type:
+              - object
+              - 'null'
+        normalized_preview:
+          type: array
+          items:
+            type: object
+        stats:
+          type: object
+          description: rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid,
+            documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes,
+            return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id
+        quality_report:
+          type:
+          - object
+          - 'null'
+          properties:
+            score:
+              type: number
+            issues:
+              type: array
+              items:
+                type: object
+            summary:
+              type: object
+        error_message:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+        validated_at:
+          type:
+          - string
+          - 'null'
+        finished_at:
+          type:
+          - string
+          - 'null'
+    PaginationEnvelope:
+      type: object
+      properties:
+        meta:
+          type: object
+          properties:
+            current_page:
+              type: integer
+            per_page:
+              type: integer
+            total:
+              type: integer
+            last_page:
+              type: integer
+        links:
+          type: object
+    RunRef:
+      type:
+      - object
+      - 'null'
+      properties:
+        id:
+          type: integer
+        version:
+          type: integer
+        generated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        cutoff_date:
+          type:
+          - string
+          - 'null'
+          format: date
+    TrainingJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        job_type:
+          type: string
+          enum:
+          - forecast_pipeline
+          - evaluate_actuals
+          - readiness
+          - retrain_check
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          - cancelled
+        stage:
+          type:
+          - string
+          - 'null'
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        attempts:
+          type: integer
+        error_message:
+          type:
+          - string
+          - 'null'
+        queued_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        duration_ms:
+          type:
+          - integer
+          - 'null'
+        result:
+          type:
+          - object
+          - 'null'
+        forecast_run_id:
+          type:
+          - integer
+          - 'null'
+    ForecastRun:
+      type: object
+      properties:
+        id:
+          type: integer
+        version:
+          type: integer
+        run_type:
+          type: string
+          enum:
+          - production
+          - historical
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - completed
+          - failed
+          - cancelled
+        triggered_by:
+          type: string
+        horizon_days:
+          type: integer
+        cutoff_date:
+          type:
+          - string
+          - 'null'
+          format: date
+        data_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        data_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        feature_set_version:
+          type:
+          - string
+          - 'null'
+        is_current:
+          type: boolean
+        options:
+          type: object
+        selection:
+          type:
+          - object
+          - 'null'
+        summary:
+          type:
+          - object
+          - 'null'
+        error_message:
+          type:
+          - string
+          - 'null'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        completed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        training_job:
+          $ref: '#/components/schemas/TrainingJob'
+    PaginatedForecastRuns:
+      allOf:
+      - $ref: '#/components/schemas/PaginationEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/ForecastRun'
+    SeriesResponse:
+      type: object
+      properties:
+        node:
+          type: object
+          properties:
+            key:
+              type: string
+            level:
+              type: string
+            label:
+              type: string
+        granularity:
+          type: string
+        horizon:
+          type: integer
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              units:
+                type: number
+              revenue:
+                type: number
+              stockout:
+                type: boolean
+                description: 'Serie/producto: hubo existencias <= 0'
+              stockout_share:
+                type:
+                - number
+                - 'null'
+                description: 'Niveles agregados: proporción de series sin stock'
+        forecast:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              yhat:
+                type: number
+              lo_80:
+                type:
+                - number
+                - 'null'
+              hi_80:
+                type:
+                - number
+                - 'null'
+              lo_95:
+                type:
+                - number
+                - 'null'
+              hi_95:
+                type:
+                - number
+                - 'null'
+              revenue:
+                type:
+                - number
+                - 'null'
+              period_days:
+                type: integer
+        meta:
+          type: object
+          properties:
+            run_id:
+              type:
+              - integer
+              - 'null'
+            run_version:
+              type:
+              - integer
+              - 'null'
+            generated_at:
+              type:
+              - string
+              - 'null'
+            cutoff_date:
+              type:
+              - string
+              - 'null'
+              format: date
+            model_family:
+              type:
+              - string
+              - 'null'
+            models:
+              type: object
+              additionalProperties:
+                type: integer
+            price_assumption:
+              type: string
+            intervals_available:
+              type: boolean
+            has_forecast:
+              type: boolean
+            notes:
+              type: array
+              items:
+                type: string
+    ProductForecast:
+      type: object
+      properties:
+        product:
+          type: object
+          properties:
+            id:
+              type: integer
+            sku:
+              type: string
+            name:
+              type: string
+            category:
+              type:
+              - object
+              - 'null'
+        history_units:
+          type: number
+        forecast_units:
+          type: number
+        change_pct:
+          type:
+          - number
+          - 'null'
+        trend:
+          type: string
+          enum:
+          - up
+          - down
+          - flat
+        forecast_revenue:
+          type:
+          - number
+          - 'null'
+        lo_80:
+          type: 'null'
+          description: 'Reservado: el total del horizonte no se deriva sumando cuantiles diarios'
+        hi_80:
+          type: 'null'
+        model_family:
+          type:
+          - string
+          - 'null'
+        demand_class:
+          type:
+          - string
+          - 'null'
+        wape:
+          type:
+          - number
+          - 'null'
+    Metrics:
+      type: object
+      properties:
+        wape:
+          type:
+          - number
+          - 'null'
+        mae:
+          type:
+          - number
+          - 'null'
+        bias:
+          type:
+          - number
+          - 'null'
+        n_obs:
+          type: integer
+    DashboardSummary:
+      type: object
+      properties:
+        horizon:
+          type: integer
+        run:
+          $ref: '#/components/schemas/RunRef'
+        kpis:
+          type: object
+          properties:
+            forecast_units:
+              type:
+              - number
+              - 'null'
+            forecast_units_lo_80:
+              type:
+              - number
+              - 'null'
+            forecast_units_hi_80:
+              type:
+              - number
+              - 'null'
+            forecast_revenue:
+              type:
+              - number
+              - 'null'
+            previous_period_units:
+              type:
+              - number
+              - 'null'
+            previous_period_revenue:
+              type:
+              - number
+              - 'null'
+            change_pct:
+              type:
+              - number
+              - 'null'
+            stockout_risk_products:
+              type:
+              - integer
+              - 'null'
+            purchase_investment:
+              type:
+              - number
+              - 'null'
+            backtest_wape:
+              type:
+              - number
+              - 'null'
+            baseline_wape:
+              type:
+              - number
+              - 'null'
+            realized_wape:
+              type:
+              - number
+              - 'null'
+        top_increasing:
+          type: array
+          items:
+            type: object
+        top_decreasing:
+          type: array
+          items:
+            type: object
+        stockout_risks:
+          type: array
+          items:
+            type: object
+        alerts:
+          type: array
+          items:
+            type: object
+        data_status:
+          type: object
+          properties:
+            has_sales:
+              type: boolean
+            has_inventory:
+              type: boolean
+            has_forecast:
+              type: boolean
+            last_sale_date:
+              type:
+              - string
+              - 'null'
+              format: date
+            readiness_score:
+              type:
+              - number
+              - 'null'
+            warnings:
+              type: array
+              items:
+                type: string
+    AccuracySummary:
+      type: object
+      properties:
+        run:
+          type:
+          - object
+          - 'null'
+        backtest:
+          type:
+          - object
+          - 'null'
+          properties:
+            selected:
+              type:
+              - object
+              - 'null'
+            baseline:
+              type:
+              - object
+              - 'null'
+            n_windows:
+              type: integer
+            by_horizon:
+              type: array
+              items:
+                type: object
+            by_demand_class:
+              type: array
+              items:
+                type: object
+            by_branch:
+              type: array
+              items:
+                type: object
+            models:
+              type: array
+              items:
+                type: object
+        realized:
+          type:
+          - object
+          - 'null'
+        explanation:
+          type: array
+          items:
+            type: string
+          description: Plantillas deterministas sobre métricas calculadas (sin LLM)
+    Recommendation:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+        product:
+          type: object
+        branch:
+          type: object
+        available:
+          type:
+          - number
+          - 'null'
+        lead_time_days:
+          type: integer
+        demand_lead_time:
+          type: number
+        safety_stock:
+          type: number
+        reorder_point:
+          type: number
+        suggested_qty:
+          type: number
+        estimated_investment:
+          type:
+          - number
+          - 'null'
+        days_of_cover:
+          type:
+          - number
+          - 'null'
+        stockout_probability:
+          type:
+          - number
+          - 'null'
+        stockout_date_estimate:
+          type:
+          - string
+          - 'null'
+          format: date
+        risk_level:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+        status:
+          type: string
+          enum:
+          - open
+          - acknowledged
+          - dismissed
+          - ordered
+        assumptions:
+          type: object
+    ScenarioRequest:
+      type: object
+      required:
+      - horizon_days
+      properties:
+        run_id:
+          type: integer
+        horizon_days:
+          type: integer
+          enum:
+          - 7
+          - 30
+          - 90
+        filters:
+          type: object
+          properties:
+            branch_id:
+              type: integer
+            category_id:
+              type: integer
+            product_id:
+              type: integer
+        assumptions:
+          type: object
+          properties:
+            price_change_pct:
+              type: number
+              minimum: -0.5
+              maximum: 1
+            discount_pct:
+              type: number
+              minimum: 0
+              maximum: 0.9
+            cost_change_pct:
+              type: number
+              minimum: -0.5
+              maximum: 1
+            demand_change_pct:
+              type: number
+              minimum: -0.9
+              maximum: 2
+            lead_time_days:
+              type: integer
+              minimum: 1
+              maximum: 180
+            purchase_budget:
+              type: number
+              minimum: 0
+            macro_note:
+              type: string
+              maxLength: 500
+    ScenarioTotals:
+      type: object
+      properties:
+        units:
+          type: number
+        revenue:
+          type: number
+        cost:
+          type: number
+        gross_margin:
+          type: number
+        gross_margin_pct:
+          type:
+          - number
+          - 'null'
+        purchase_need_units:
+          type: number
+        purchase_need_cost:
+          type: number
+    ScenarioResult:
+      type: object
+      properties:
+        type:
+          type: string
+          const: simulation
+        disclaimer:
+          type: string
+        base:
+          $ref: '#/components/schemas/ScenarioTotals'
+        scenario:
+          $ref: '#/components/schemas/ScenarioTotals'
+        delta:
+          type: object
+        budget:
+          type:
+          - object
+          - 'null'
+          properties:
+            purchase_budget:
+              type: number
+            coverage_pct:
+              type: number
+            shortfall:
+              type: number
+        cost_coverage:
+          type:
+          - number
+          - 'null'
+        risks:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                enum:
+                - negative_margin
+                - margin_drop
+                - budget_shortfall
+                - stockout_risk
+                - cost_unknown
+                - low_data_quality
+                - price_without_demand_assumption
+              severity:
+                type: string
+                enum:
+                - info
+                - warning
+                - critical
+              message:
+                type: string
+        assumptions_used:
+          type: object
+        base_run:
+          $ref: '#/components/schemas/RunRef'

@@ -295,8 +295,19 @@ final class ImportService
         return $result;
     }
 
+    /** A partir de cuántas filas escritas conviene refrescar las estadísticas del planificador. */
+    private const ANALYZE_MIN_ROWS = 5000;
+
+    /** @var array<string, list<string>> tablas afectadas por cada entidad importada */
+    private const ANALYZE_TABLES = [
+        'sales' => ['sales', 'sale_items', 'products'],
+        'inventory' => ['inventory_snapshots'],
+    ];
+
     private function afterCommit(ImportJob $job): void
     {
+        $this->refreshPlannerStatistics($job);
+
         if (in_array($job->entity_type, [ImportEntity::Sales->value, ImportEntity::Inventory->value], true)
             && class_exists(RefreshReadiness::class)) {
             try {
@@ -304,6 +315,25 @@ final class ImportService
             } catch (Throwable $e) {
                 Log::warning('No se pudo programar la evaluación de preparación de datos', ['error' => $e->getMessage()]);
             }
+        }
+    }
+
+    /**
+     * Tras una carga masiva, PostgreSQL puede conservar estadísticas desactualizadas y elegir
+     * planes muy lentos (nested loops) para las lecturas del motor hasta que actúe autovacuum.
+     * ANALYZE solo muestrea filas: es rápido y no bloquea lecturas ni escrituras.
+     */
+    private function refreshPlannerStatistics(ImportJob $job): void
+    {
+        $tables = self::ANALYZE_TABLES[$job->entity_type] ?? [];
+        if ($tables === [] || (int) (($job->stats ?? [])['rows_valid'] ?? 0) < self::ANALYZE_MIN_ROWS
+            || DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+        try {
+            DB::statement('ANALYZE '.implode(', ', $tables)); // nombres fijos de la constante
+        } catch (Throwable $e) {
+            Log::warning('No se pudieron actualizar las estadísticas tras la importación', ['error' => $e->getMessage()]);
         }
     }
 

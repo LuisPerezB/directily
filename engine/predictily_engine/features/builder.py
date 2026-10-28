@@ -130,7 +130,8 @@ class FeatureBuilder:
     def _exog(self, keys: pd.DataFrame) -> pd.DataFrame:
         df = keys.merge(self.calendar, on=["branch_id", "ds"], how="left")
         df = df.merge(self.promos, on=["unique_id", "ds"], how="left")
-        df["promo_discount"] = df["promo_discount"].fillna(0.0)
+        # Sin promociones el merge deja la columna como object (todo NaN): forzar numérico.
+        df["promo_discount"] = pd.to_numeric(df["promo_discount"], errors="coerce").fillna(0.0).astype(float)
         for c in CALENDAR_FEATURES:
             df[c] = df[c].fillna(0).astype(np.int8)
         return df

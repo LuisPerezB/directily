@@ -24,10 +24,18 @@ class ProductForecastQuery
     /** Umbral de variación para clasificar la tendencia como subida o bajada. */
     public const TREND_THRESHOLD = 0.05;
 
+    /**
+     * Base mínima (unidades del período histórico equivalente) para que un cambio
+     * porcentual se considere informativo. Con 1 unidad vendida, pasar a 4 es "+300 %"
+     * pero no indica una tendencia: esos productos se marcan como low_base, se ordenan
+     * al final por variación y no aparecen entre los que más suben/bajan del dashboard.
+     */
+    public const MIN_BASE_UNITS = 10;
+
     /** Ordenamientos permitidos (lista blanca) → expresión SQL. */
     private const SORTS = [
-        'change_pct' => 'change_pct ASC NULLS LAST',
-        '-change_pct' => 'change_pct DESC NULLS LAST',
+        'change_pct' => '(history_units < '.self::MIN_BASE_UNITS.') ASC, change_pct ASC NULLS LAST',
+        '-change_pct' => '(history_units < '.self::MIN_BASE_UNITS.') ASC, change_pct DESC NULLS LAST',
         'forecast_units' => 'forecast_units ASC',
         '-forecast_units' => 'forecast_units DESC',
         'revenue' => 'forecast_revenue ASC NULLS LAST',
@@ -96,7 +104,7 @@ class ProductForecastQuery
     {
         $paginator = $this->productsQuery($run, $horizon, $filters, $sort)->paginate($perPage, ['*'], 'page', $page);
         $items = collect($paginator->items());
-        $paginator->setCollection($this->enrichProducts($run, $items, $filters['branch_id'] ?? null));
+        $paginator->setCollection($this->enrichProducts($run, $items, $filters['branch_id'] ?? null, $horizon));
 
         return $paginator;
     }
@@ -105,7 +113,7 @@ class ProductForecastQuery
     public function top(ForecastRun $run, int $horizon, ?int $branchId, string $direction, int $limit = 5): Collection
     {
         $sort = $direction === 'up' ? '-change_pct' : 'change_pct';
-        $rows = $this->productsQuery($run, $horizon, ['branch_id' => $branchId, 'min_history_units' => 1], $sort)
+        $rows = $this->productsQuery($run, $horizon, ['branch_id' => $branchId, 'min_history_units' => self::MIN_BASE_UNITS], $sort)
             ->when($direction === 'up', fn ($q) => $q->where('change_pct', '>', self::TREND_THRESHOLD))
             ->when($direction === 'down', fn ($q) => $q->where('change_pct', '<', -self::TREND_THRESHOLD))
             ->limit($limit)
@@ -150,7 +158,7 @@ class ProductForecastQuery
             ->selectRaw('hp.category_id, SUM(si.quantity) AS history_units')
             ->groupBy('hp.category_id');
 
-        $rows = DB::query()
+        $inner = DB::query()
             ->fromSub($forecast, 'f')
             ->leftJoin('product_categories as c', function ($join) use ($tenantId) {
                 $join->on('c.id', '=', 'f.category_id')->where('c.tenant_id', '=', $tenantId);
@@ -164,7 +172,10 @@ class ProductForecastQuery
             SQL)
             ->when(($filters['search'] ?? '') !== '', function ($q) use ($filters) {
                 $q->where('c.name', 'ilike', '%'.addcslashes((string) $filters['search'], '%_\\').'%');
-            })
+            });
+
+        // Subconsulta para poder ordenar por expresiones sobre alias (p. ej. base mínima).
+        $rows = DB::query()->fromSub($inner, 'ranked')
             ->orderByRaw(self::SORTS[$sort] ?? self::SORTS['-forecast_units'])
             ->get();
 
@@ -217,7 +228,7 @@ class ProductForecastQuery
      * @param  Collection<int, object>  $items
      * @return Collection<int, array<string, mixed>>
      */
-    private function enrichProducts(ForecastRun $run, Collection $items, ?int $branchId): Collection
+    private function enrichProducts(ForecastRun $run, Collection $items, ?int $branchId, ?int $horizon = null): Collection
     {
         $productIds = $items->pluck('product_id')->map(fn ($id) => (int) $id)->all();
         if ($productIds === []) {
@@ -262,7 +273,21 @@ class ProductForecastQuery
             ->whereIn('level_key', $keys)
             ->pluck('wape', 'level_key');
 
-        return $items->map(function ($r) use ($models, $classes, $wapes, $branchId) {
+        // Intervalo del TOTAL del horizonte por producto: el motor lo publica (conformal sobre la
+        // suma) en filas granularity='horizon' del nivel product. Por sucursal (nivel serie) no existe.
+        $horizonIntervals = $branchId === null && $horizon !== null
+            ? DB::table('forecast_values')
+                ->where('tenant_id', $tenantId)
+                ->where('forecast_run_id', $run->id)
+                ->where('level', 'product')
+                ->where('granularity', 'horizon')
+                ->where('period_days', $horizon)
+                ->whereIn('product_id', $productIds)
+                ->get(['product_id', 'lo_80', 'hi_80'])
+                ->keyBy('product_id')
+            : collect();
+
+        return $items->map(function ($r) use ($models, $classes, $wapes, $branchId, $horizonIntervals) {
             $pid = (int) $r->product_id;
             $wape = null;
             foreach (self::evaluationKeys($pid, $branchId) as $key) {
@@ -280,11 +305,12 @@ class ProductForecastQuery
                 'history_units' => Num::units($r->history_units),
                 'forecast_units' => Num::units($r->forecast_units),
                 'change_pct' => Num::ratio($change),
+                'low_base' => (float) $r->history_units < self::MIN_BASE_UNITS,
                 'trend' => self::trend($change, (float) $r->history_units, (float) $r->forecast_units),
                 'forecast_revenue' => Num::money($r->forecast_revenue),
-                // Intervalos del total del horizonte: no derivables sumando cuantiles diarios.
-                'lo_80' => null,
-                'hi_80' => null,
+                // Intervalo del total del horizonte (no se deriva sumando cuantiles diarios).
+                'lo_80' => Num::units($horizonIntervals->get($pid)?->lo_80),
+                'hi_80' => Num::units($horizonIntervals->get($pid)?->hi_80),
                 'model_family' => $models[$pid] ?? null,
                 'demand_class' => $classes[$pid] ?? null,
                 'wape' => Num::ratio($wape),

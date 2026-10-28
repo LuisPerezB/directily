@@ -106,6 +106,7 @@ class AccuracyService
                     'branch_id' => $branchId ?: null,
                     'branch_name' => $branchNames[$branchId] ?? null,
                     'wape' => Num::ratio($sel?->wape),
+                    'mae' => Num::units($sel?->mae),
                     'bias' => Num::ratio($sel?->bias),
                     'n_obs' => (int) ($sel->n_obs ?? 0),
                 ];

@@ -199,7 +199,7 @@ function onFinished(): void {
           <div><dt class="text-fg-muted">{{ t('forecasts.cutoff') }}</dt><dd class="m-0 font-semibold">{{ formatDate(data.meta.cutoff_date) }}</dd></div>
           <div>
             <dt class="text-fg-muted">{{ t('forecasts.model') }}</dt>
-            <dd class="m-0 font-semibold">{{ modelLabel(data.meta.model_family) }}</dd>
+            <dd class="m-0 font-semibold">{{ data.meta.model_family || Object.keys(data.meta.models ?? {}).length <= 1 ? modelLabel(data.meta.model_family) : t('forecasts.mixedModels') }}</dd>
           </div>
           <div v-if="Object.keys(data.meta.models ?? {}).length > 1" class="sm:col-span-2 lg:col-span-4">
             <dt class="text-fg-muted">{{ t('forecasts.modelsUsed') }}</dt>

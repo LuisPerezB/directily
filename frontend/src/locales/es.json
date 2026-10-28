@@ -80,6 +80,10 @@
     }
   },
   "tenant": {
+    "pendingDeletion": "Eliminación solicitada: los datos se borrarán al terminar el período de gracia de 30 días.",
+    "suspended": "Empresa suspendida. Contacte al soporte de Predictily.",
+    "cancelDeletion": "Cancelar eliminación",
+    "deletionCancelled": "Se canceló la solicitud de eliminación. La empresa vuelve a estar activa.",
     "createTitle": "Cree su empresa",
     "createSubtitle": "Sus datos comerciales quedan aislados y solo visibles para los usuarios que usted autorice.",
     "name": "Nombre comercial",
@@ -197,6 +201,7 @@
     "adida": "ADIDA (demanda intermitente)",
     "tsb": "TSB (demanda intermitente)",
     "lightgbm_global": "Machine learning global (LightGBM)",
+    "selection": "Selección por patrón de demanda",
     "timesfm": "Modelo fundacional (experimental)"
   },
   "demandClass": {
@@ -505,6 +510,7 @@
     "generatedAt": "Generado",
     "cutoff": "Datos hasta",
     "model": "Modelo principal",
+    "mixedModels": "Combinación según el patrón de demanda",
     "modelsUsed": "Modelos utilizados",
     "seriesCount": "{n} series",
     "priceAssumption": "Supuesto de precio: {value}",
@@ -524,6 +530,8 @@
     "historyUnits": "Últimos {n} días",
     "forecastUnits": "Próximos {n} días",
     "change": "Cambio",
+    "lowBase": "Base baja",
+    "lowBaseHint": "Vendió menos de 10 unidades en el período anterior: el cambio porcentual no indica una tendencia.",
     "revenue": "Ingresos est.",
     "model": "Modelo",
     "demandClass": "Patrón de demanda",
