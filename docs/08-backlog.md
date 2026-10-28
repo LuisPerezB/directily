@@ -9,7 +9,7 @@ Prioridad: P0 imprescindible para el recorrido MVP · P1 importante · P2 deseab
 | ID | Historia | Criterios de aceptación | Pts | Prio | Depende |
 |---|---|---|---|---|---|
 | F1-01 | Como equipo, quiero un repositorio con backend, motor, frontend, docs e infra | Estructura `backend/ engine/ frontend/ docs/ infra/ data/`; README de instalación | 2 | P0 | — |
-| F1-02 | Esquema de datos multi-tenant versionado | Migraciones de las ~49 tablas aplican en PostgreSQL 16; FKs compuestas por tenant | 5 | P0 | F1-01 |
+| F1-02 | Esquema de datos multi-tenant versionado | Migraciones de las 48 tablas (39 de negocio) aplican en PostgreSQL 16; FKs compuestas por tenant | 5 | P0 | F1-01 |
 | F1-03 | Entorno con Docker Compose | `docker compose up` levanta postgres, redis, backend, colas, scheduler, engine y web; healthchecks | 3 | P0 | F1-01 |
 | F1-04 | Como empresario quiero registrarme e iniciar sesión | Registro/login/logout con Sanctum SPA; rate limiting; auditoría `auth.*` | 3 | P0 | F1-02 |
 | F1-05 | Como propietario quiero crear mi empresa | `POST /tenants` crea empresa (uuid, plan trial) y membresía owner | 2 | P0 | F1-04 |

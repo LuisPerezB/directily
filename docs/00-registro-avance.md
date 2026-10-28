@@ -14,7 +14,7 @@ presenta como activa).
 | Frontend (`npm run type-check && npm run lint && npm run test -- --run && npm run build`) | ✅ 68 pruebas, build 1,3 MB |
 | OpenAPI pública unificada (`docs/openapi/predictily-api.yaml`, 76 rutas) | ✅ generada con `infra/scripts/merge_openapi.py` |
 | `docker compose config` (base y producción) | ✅ |
-| Imágenes Docker backend y motor construidas y arrancadas | ✅ (imagen `web` no reconstruida tras corregir el frontend: ver pendientes) |
+| Imágenes Docker backend, motor y web construidas y arrancadas | ✅ (web: SPA, rutas internas, `/.env` → 403 y cabeceras de seguridad verificadas) |
 | Respaldo y restauración (`infra/scripts/backup.sh`, `restore.sh --verify`) | ✅ probado contra PostgreSQL local |
 
 Resultados medidos en datos demo ficticios (no son promesas de precisión para empresas reales):
@@ -26,7 +26,7 @@ A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
 
 | Componente | Estado | Notas |
 |---|---|---|
-| Esquema de datos (50 tablas, migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
+| Esquema de datos (48 tablas: 39 de negocio + 9 de infraestructura Laravel; migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
 | Multi-tenancy (contexto, scope fail-closed, middleware, jobs, FKs) | ✅ | Pruebas de aislamiento en core, analytics, motor y E2E |
 | Autenticación (Sanctum SPA + tokens por empresa), roles y abilities | ✅ | Rate limit de login, auditoría |
 | Empresas, sucursales, usuarios, configuración, consentimiento | ✅ | |
@@ -63,6 +63,10 @@ A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
 - Probabilidad de quiebre empírica con regla de sucesión de Laplace.
 - Prueba de aislamiento que dependía de la hora UTC (fecha local de la empresa).
 - Especificaciones OpenAPI core/analytics unificadas (esquema de cookie de sesión alineado).
+- Recorrido visual con Playwright (escritorio y móvil) con pronósticos reales: sin errores de JS/API;
+  corregidos desbordes de tabla, etiquetas internas visibles (`selection`, `stockout_share`) y nombres
+  de sucursal en la precisión por sucursal.
+- Selector de empresas: permite cancelar una solicitud de eliminación durante el período de gracia.
 
 ## Notas de los agentes
 (Cada agente agrega aquí decisiones o cambios de contrato relevantes.)

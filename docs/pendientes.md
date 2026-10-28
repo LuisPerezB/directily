@@ -25,8 +25,7 @@ en la aplicación: se entregan interfaces desacopladas y se indica su estado rea
 | Pendiente | Impacto | Notas |
 |---|---|---|
 | Invitaciones y recuperación de contraseña por correo | Medio | Hoy la contraseña temporal de un usuario agregado se muestra una sola vez; requiere SMTP |
-| Pantalla para cancelar una solicitud de eliminación de empresa | Bajo | El endpoint `POST /tenant/cancel-deletion` existe; falta la vista |
-| Reconstruir y probar la imagen `web` (frontend + nginx) | Medio | Falló antes de corregir errores de tipos del frontend; el build nativo ya pasa |
+| Probar el stack Docker completo de punta a punta | Medio | Imágenes probadas por separado; el stack completo con dominio y TLS reales queda para el VPS |
 | Descarga de la exportación completa detrás de nginx | Bajo | URL firmada absoluta basada en `APP_URL`: verificar en el despliegue |
 | Sesgo de −7 % en el backtest de la ferretería demo | Bajo | Las 3 ventanas caen en temporada alta; considerar ventanas repartidas en el año |
 | Intervalos de horizonte por sucursal-producto (nivel serie) | Bajo | El motor los publica para producto, categoría, sucursal y total |
