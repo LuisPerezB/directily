@@ -269,7 +269,12 @@ export interface Promotion {
   branch_id: number | null
   product_id: number | null
   category_id: number | null
+  /** Cuándo el negocio conocía la promoción (ISO 8601). El motor solo la usa a futuro desde esa fecha. */
+  known_at: string
 }
+
+/** Datos para crear una promoción; `known_at` es opcional (por defecto, el momento del alta). */
+export type PromotionInput = Omit<Promotion, 'id' | 'known_at'> & { known_at?: string | null }
 
 // ─── Ventas ────────────────────────────────────────────────────────────────
 
@@ -604,7 +609,8 @@ export interface StockoutRisk {
   days_of_cover: number | null
   stockout_probability: number | null
   risk_level: RiskLevel
-  suggested_qty: number
+  /** null cuando el pronóstico no cubre plazo + revisión (assumptions.coverage_insufficient). */
+  suggested_qty: number | null
 }
 
 export interface DataStatus {
@@ -671,6 +677,12 @@ export interface AccuracySummary {
   backtest: {
     selected: MetricSet | null
     baseline: MetricSet | null
+    n_windows?: number
+    /** 'holdout' = período final reservado (principal); 'selection_windows' = sin holdout independiente. */
+    evaluation_scope?: 'holdout' | 'selection_windows' | null
+    cutoffs?: ISODate[]
+    /** Métricas secundarias (optimistas) de las ventanas que eligieron el modelo. */
+    selection_windows?: { selected: MetricSet | null; baseline: MetricSet | null; n_windows: number; cutoffs: ISODate[] } | null
     by_horizon: AccuracyByHorizon[]
     by_demand_class: AccuracyByGroup[]
     by_branch: AccuracyByGroup[]
@@ -702,7 +714,7 @@ export interface AccuracyComparison {
 export interface ModelEvaluation {
   id: number
   model_family: string
-  evaluation_type: 'backtest' | 'realized'
+  evaluation_type: 'backtest' | 'selection_windows' | 'realized'
   level: string
   level_key: string | null
   horizon_days: number | null
@@ -751,11 +763,13 @@ export interface Recommendation {
   lead_time_source: string
   review_period_days: number
   service_level: number
-  demand_lead_time: number
+  /** Cantidades null si el pronóstico no cubre plazo + revisión (assumptions.coverage_insufficient). */
+  demand_lead_time: number | null
+  /** null si la incertidumbre es desconocida (assumptions.uncertainty = 'unknown'). */
   demand_lead_time_std: number | null
-  safety_stock: number
-  reorder_point: number
-  suggested_qty: number
+  safety_stock: number | null
+  reorder_point: number | null
+  suggested_qty: number | null
   unit_cost: number | null
   estimated_investment: number | null
   days_of_cover: number | null

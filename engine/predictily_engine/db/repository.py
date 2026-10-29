@@ -211,23 +211,72 @@ class TenantRepository:
             "FROM supplier_lead_times WHERE tenant_id = :tenant_id ORDER BY valid_from NULLS FIRST, id"
         )
 
-    def open_purchase_orders(self) -> pd.DataFrame:
+    def open_purchase_orders(self, as_of: date | None = None) -> pd.DataFrame:
+        """Pendiente por recibir de cada orden abierta y producto, con SU fecha prevista.
+
+        Una fila por orden (no se suman órdenes con fechas distintas): el inventario simula
+        la llegada de cada una en `expected_at` (NULL = sin fecha; ver inventory.recommendations).
+
+        `as_of` (ejecuciones con corte retroactivo): solo órdenes emitidas hasta ese día y no
+        recibidas antes de él, para no usar compras que todavía no existían. Las recepciones
+        parciales no tienen fecha propia: se asume que ocurrieron después del corte (la orden
+        cuenta completa como pendiente). Sin `as_of` se usa el estado actual.
+        """
+        if as_of is not None:
+            return self._read(
+                """
+                SELECT po.id AS purchase_order_id, po.branch_id, poi.product_id, po.supplier_id,
+                       po.ordered_at, po.expected_at,
+                       SUM(poi.quantity_ordered)::float8 AS qty_open
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id AND po.tenant_id = poi.tenant_id
+                WHERE poi.tenant_id = :tenant_id AND po.tenant_id = :tenant_id
+                  AND po.status NOT IN ('draft', 'cancelled')
+                  AND po.ordered_at <= :as_of
+                  AND (po.received_at IS NULL OR po.received_at > :as_of)
+                GROUP BY po.id, po.branch_id, poi.product_id, po.supplier_id, po.ordered_at, po.expected_at
+                HAVING SUM(poi.quantity_ordered) > 0
+                ORDER BY po.branch_id, poi.product_id, po.expected_at NULLS LAST, po.id
+                """,
+                as_of=as_of,
+            )
         return self._read(
             """
-            SELECT po.branch_id, poi.product_id, po.supplier_id,
-                   SUM(GREATEST(poi.quantity_ordered - poi.quantity_received, 0))::float8 AS qty_open,
-                   MIN(po.expected_at) AS expected_at
+            SELECT po.id AS purchase_order_id, po.branch_id, poi.product_id, po.supplier_id,
+                   po.ordered_at, po.expected_at,
+                   SUM(GREATEST(poi.quantity_ordered - poi.quantity_received, 0))::float8 AS qty_open
             FROM purchase_order_items poi
             JOIN purchase_orders po ON po.id = poi.purchase_order_id AND po.tenant_id = poi.tenant_id
-            WHERE poi.tenant_id = :tenant_id AND po.status IN ('ordered', 'partially_received')
-            GROUP BY po.branch_id, poi.product_id, po.supplier_id
+            WHERE poi.tenant_id = :tenant_id AND po.tenant_id = :tenant_id
+              AND po.status IN ('ordered', 'partially_received')
+            GROUP BY po.id, po.branch_id, poi.product_id, po.supplier_id, po.ordered_at, po.expected_at
+            HAVING SUM(GREATEST(poi.quantity_ordered - poi.quantity_received, 0)) > 0
+            ORDER BY po.branch_id, poi.product_id, po.expected_at NULLS LAST, po.id
             """
         )
 
+    # Zona horaria de la empresa: `known_at`, `deleted_at` y `recorded_at` se entregan en hora local
+    # (sin zona) para compararlos con los cortes, que son fechas locales.
+    _TENANT_TZ = ("JOIN (SELECT id, COALESCE(NULLIF(timezone, ''), 'America/Guayaquil') AS tz FROM tenants "
+                  "WHERE id = :tenant_id) tz ON tz.id = {alias}.tenant_id")
+
     def promotions(self) -> pd.DataFrame:
+        """Estado actual de las promociones, incluidas las dadas de baja (`deleted_at`), con su fecha de
+        disponibilidad `known_at` (cuándo el negocio la conocía/registró)."""
         return self._read(
-            "SELECT id AS promotion_id, discount_pct::float8, starts_on, ends_on, branch_id, product_id, category_id "
-            "FROM promotions WHERE tenant_id = :tenant_id"
+            "SELECT p.id AS promotion_id, p.discount_pct::float8 AS discount_pct, p.starts_on, p.ends_on, "
+            "p.branch_id, p.product_id, p.category_id, (p.known_at AT TIME ZONE tz.tz) AS known_at, "
+            "(p.deleted_at AT TIME ZONE tz.tz) AS deleted_at "
+            f"FROM promotions p {self._TENANT_TZ.format(alias='p')} WHERE p.tenant_id = :tenant_id ORDER BY p.id"
+        )
+
+    def promotion_revisions(self) -> pd.DataFrame:
+        """Versiones históricas de las promociones (alta, cada modificación y la baja)."""
+        return self._read(
+            "SELECT r.promotion_id, r.revision, r.discount_pct::float8 AS discount_pct, r.starts_on, r.ends_on, "
+            "r.branch_id, r.product_id, r.category_id, r.deleted, (r.recorded_at AT TIME ZONE tz.tz) AS recorded_at "
+            f"FROM promotion_revisions r {self._TENANT_TZ.format(alias='r')} WHERE r.tenant_id = :tenant_id "
+            "ORDER BY r.promotion_id, r.revision"
         )
 
     # ── resultados previos ──

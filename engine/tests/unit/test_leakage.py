@@ -50,3 +50,25 @@ def test_backtest_predictions_ignore_data_after_cutoff(small_data):
     np.testing.assert_allclose(m["yhat_orig"], m["yhat_pert"], rtol=1e-9, atol=1e-9)
     # Los reales sí cambian (prueba de que la perturbación ocurrió en el período evaluado).
     assert not np.allclose(m["actual_orig"], m["actual_pert"])
+
+
+def _panel_with_days(n_days: int) -> Panel:
+    cutoff = pd.Timestamp("2026-10-26")
+    ds = pd.date_range(cutoff - pd.Timedelta(days=n_days - 1), cutoff, freq="D")
+    return Panel(pd.DataFrame({"unique_id": "b1-p1", "ds": ds}), pd.DataFrame(), cutoff)
+
+
+def test_plan_reserves_disjoint_holdout_or_degrades():
+    from predictily_engine.backtest.rolling import plan_backtest
+
+    for n_days, horizon in ((730, 90), (390, 90), (389, 60), (150, 30), (84, 14)):
+        plan = plan_backtest(_panel_with_days(n_days))
+        assert plan.has_holdout and plan.horizon == horizon, n_days
+        cutoff = pd.Timestamp("2026-10-26")
+        assert plan.holdout_cutoff == cutoff - pd.Timedelta(days=horizon)
+        # Las ventanas de selección terminan sus fechas objetivo en o antes del origen del holdout.
+        assert max(plan.cutoffs) + pd.Timedelta(days=horizon) <= plan.holdout_cutoff
+        assert [k for k, _, h in plan.origins if h] == [plan.holdout_window]
+    plan = plan_backtest(_panel_with_days(80))  # alcanza para 2 ventanas de 14 días, no para el holdout
+    assert plan is not None and not plan.has_holdout and plan.horizon == 14
+    assert plan_backtest(_panel_with_days(60)) is None

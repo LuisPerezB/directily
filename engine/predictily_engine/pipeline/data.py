@@ -7,8 +7,9 @@ con datos sintéticos y garantizar que una ejecución solo ve los datos de una e
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import pandas as pd
@@ -37,11 +38,17 @@ class TenantData:
     returns: pd.DataFrame = field(default_factory=pd.DataFrame)
     inventory: pd.DataFrame = field(default_factory=pd.DataFrame)  # branch_id, product_id, ds, on_hand, reserved, in_transit, unit_cost
     latest_inventory: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # promotion_id, discount_pct, starts_on, ends_on, branch_id, product_id, category_id, known_at, deleted_at
     promotions: pd.DataFrame = field(default_factory=pd.DataFrame)
     lead_times: pd.DataFrame = field(default_factory=pd.DataFrame)
     suppliers: pd.DataFrame = field(default_factory=pd.DataFrame)
     open_purchase_orders: pd.DataFrame = field(default_factory=pd.DataFrame)
     sales_stats: dict[str, Any] = field(default_factory=dict)
+    # Versiones históricas: promotion_id, revision, alcance/descuento/fechas, deleted, recorded_at (hora local)
+    promotion_revisions: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Día (local) hasta el que se conocen las promociones en una ejecución vigente; None = el día de corte
+    # (ejecución histórica: solo lo que se conocía al corte).
+    promotions_known_on: date | None = None
 
     @property
     def effective_settings(self) -> dict[str, Any]:
@@ -60,11 +67,14 @@ def _normalize(data: TenantData) -> TenantData:
     for col in ("current_price", "current_cost"):
         if col in data.products:
             data.products[col] = pd.to_numeric(data.products[col], errors="coerce")
-    for df_name in ("promotions",):
+    for df_name in ("promotions", "promotion_revisions"):
         df = getattr(data, df_name)
         if not df.empty:
             df["starts_on"] = pd.to_datetime(df["starts_on"])
             df["ends_on"] = pd.to_datetime(df["ends_on"])
+            for col in ("known_at", "created_at", "deleted_at", "recorded_at"):
+                if col in df:
+                    df[col] = pd.to_datetime(df[col])
     return data
 
 
@@ -92,10 +102,23 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         promotions=repo.promotions(),
         lead_times=repo.lead_times(),
         suppliers=repo.suppliers(),
-        open_purchase_orders=repo.open_purchase_orders(),
+        # Corte retroactivo: solo órdenes que existían al corte (sin fuga de compras posteriores).
+        open_purchase_orders=repo.open_purchase_orders(cutoff if last is not None and cutoff < last else None),
         sales_stats=repo.sales_stats(),
+        promotion_revisions=repo.promotion_revisions(),
+        # Ejecución vigente (corte = último dato): vale lo conocido hoy. Ejecución histórica: lo
+        # conocido al corte (una promoción registrada después no puede usarse en ese pronóstico).
+        promotions_known_on=_local_today(tenant.get("timezone")) if last is not None and cutoff >= last else None,
     )
     return _normalize(data)
+
+
+def _local_today(timezone: str | None) -> date:
+    try:
+        tz = ZoneInfo(timezone or "America/Guayaquil")
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo("America/Guayaquil")
+    return datetime.now(tz).date()
 
 
 def tenant_data_from_synthetic(company, tenant_id: int = 1, cutoff: date | None = None) -> TenantData:
@@ -146,7 +169,10 @@ def tenant_data_from_synthetic(company, tenant_id: int = 1, cutoff: date | None 
     promos["branch_id"] = promos["branch_code"].map(b_map)
     promos["product_id"] = promos["product_sku"].map(p_map)
     promos["category_id"] = promos["category"].map(c_map)
-    promos = promos[["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id"]]
+    if "known_at" not in promos:  # CSV anterior a la fecha de disponibilidad: no se usan a futuro
+        promos["known_at"] = pd.NaT
+    promos = promos[["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id",
+                     "known_at"]]
 
     sup = company.suppliers.copy()
     sup.insert(0, "supplier_id", np.arange(1, len(sup) + 1))

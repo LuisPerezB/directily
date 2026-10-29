@@ -23,11 +23,12 @@ export function useForecastJob(onFinished?: (job: TrainingJob) => void) {
 
   const isRunning = computed(() => job.value !== null && !TERMINAL.has(job.value.status))
 
-  async function request(horizon: Horizon = 90, cutoffDate: string | null = null): Promise<void> {
+  /** Sin horizonte explícito el backend usa el mayor que permite el plan de la empresa. */
+  async function request(horizon: Horizon | null = null, cutoffDate: string | null = null): Promise<void> {
     requesting.value = true
     requestError.value = null
     try {
-      run.value = await forecastApi.createRun({ horizon_days: horizon, cutoff_date: cutoffDate })
+      run.value = await forecastApi.createRun({ ...(horizon !== null ? { horizon_days: horizon } : {}), cutoff_date: cutoffDate })
       if (run.value.training_job) {
         job.value = run.value.training_job
         polling.start(false)

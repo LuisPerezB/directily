@@ -68,6 +68,19 @@ class ScenarioSimulatorTest extends TestCase
         $this->assertContains('price_without_demand_assumption', array_column($onlyPrice['risks'], 'code'));
     }
 
+    public function test_recommendations_without_quantity_are_reported_not_silently_dropped(): void
+    {
+        $baseline = new ScenarioBaseline(30, [
+            ['product_id' => 1, 'units' => 100.0, 'revenue' => 1000.0, 'unit_cost' => 6.0],
+        ], [$this->rec()], 80.0, 3);
+
+        $r = $this->simulator->simulate($baseline, []);
+        $risk = collect($r['risks'])->firstWhere('code', 'coverage_insufficient');
+        $this->assertNotNull($risk);
+        $this->assertStringContainsString('3 recomendaciones', $risk['message']);
+        $this->assertNull(collect($this->simulator->simulate($this->baseline([$this->rec()]), [])['risks'])->firstWhere('code', 'coverage_insufficient'));
+    }
+
     public function test_negative_margin_is_flagged_as_critical(): void
     {
         $r = $this->simulator->simulate($this->baseline(), ['price_change_pct' => -0.5, 'cost_change_pct' => 0.5]);

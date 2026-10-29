@@ -62,6 +62,31 @@ class AccuracyExplainerTest extends TestCase
         }
     }
 
+    public function test_explains_holdout_and_degraded_scopes(): void
+    {
+        $holdout = (new AccuracyExplainer)->explain([
+            'backtest' => [
+                'selected' => $this->metrics(0.49, -0.04, 0.85),
+                'baseline' => $this->metrics(0.66, null, null, 'seasonal_naive'),
+                'n_windows' => 1,
+                'evaluation_scope' => 'holdout',
+                'selection_windows' => ['selected' => $this->metrics(0.50)],
+            ],
+            'data' => ['has_inventory' => true, 'censored_days' => 0],
+        ]);
+        $text = implode("\n", $holdout);
+        $this->assertStringContainsString('período final reservado, que no se usó para elegir el modelo', $text);
+        $this->assertStringNotContainsString('cortes sucesivos', $text);
+        $this->assertStringContainsString('ventanas usadas para elegir el modelo el error fue 50%', $text);
+
+        $degraded = implode("\n", (new AccuracyExplainer)->explain([
+            'backtest' => ['selected' => $this->metrics(0.3), 'n_windows' => 2, 'evaluation_scope' => 'selection_windows'],
+            'data' => ['has_inventory' => true, 'censored_days' => 0],
+        ]));
+        $this->assertStringContainsString('2 cortes sucesivos', $degraded);
+        $this->assertStringContainsString('no permitió reservar un período final independiente', $degraded);
+    }
+
     public function test_no_metrics_message(): void
     {
         $lines = (new AccuracyExplainer)->explain(['backtest' => [], 'data' => ['has_inventory' => true, 'censored_days' => 4, 'censored_series' => 2]]);

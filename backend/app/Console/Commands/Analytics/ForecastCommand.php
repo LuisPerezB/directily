@@ -17,7 +17,7 @@ use Throwable;
 class ForecastCommand extends Command
 {
     protected $signature = 'predictily:forecast {tenant : UUID de la empresa}
-        {--horizon=90 : Horizonte en días (7, 30 o 90)}
+        {--horizon= : Horizonte en días (7, 30 o 90); por defecto, el mayor que permita el plan}
         {--cutoff= : Fecha de corte AAAA-MM-DD (crea una ejecución histórica)}
         {--sync : Ejecuta el pipeline en este proceso en lugar de encolarlo}';
 
@@ -35,7 +35,7 @@ class ForecastCommand extends Command
 
         $sync = (bool) $this->option('sync');
         try {
-            $run = $service->request($tenant, null, (int) $this->option('horizon'), $this->option('cutoff') ?: null, 'system', dispatch: ! $sync);
+            $run = $service->request($tenant, null, $this->option('horizon') !== null ? (int) $this->option('horizon') : null, $this->option('cutoff') ?: null, 'system', dispatch: ! $sync);
         } catch (Throwable $e) {
             $this->error($e->getMessage());
 

@@ -87,6 +87,7 @@ export const FALLBACK_FIELDS: Record<ImportEntityType, ImportField[]> = {
     f('branch_code', 'Sucursal', false, 'text'),
     f('product_sku', 'Producto', false, 'text'),
     f('category', 'Categoría', false, 'text'),
+    f('known_at', 'Registrada el', false, 'date', 'Cuándo el negocio aprobó o registró la promoción (no futura). Si falta, el momento de la importación.'),
   ],
 }
 

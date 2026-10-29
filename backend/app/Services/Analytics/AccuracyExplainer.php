@@ -23,12 +23,17 @@ class AccuracyExplainer
         $selected = $context['backtest']['selected'] ?? null;
         $baseline = $context['backtest']['baseline'] ?? null;
         $windows = (int) ($context['backtest']['n_windows'] ?? 0);
+        $scope = $context['backtest']['evaluation_scope'] ?? null;
 
         if ($selected === null || $selected['wape'] === null) {
             $lines[] = 'Todavía no hay métricas de validación histórica para esta ejecución.';
         } else {
             $sel = $this->pct($selected['wape']);
-            $windowText = $windows > 0 ? " con {$windows} cortes sucesivos" : '';
+            $windowText = match (true) {
+                $scope === 'holdout' => ' en un período final reservado, que no se usó para elegir el modelo ni para calibrar sus rangos',
+                $windows > 0 => " con {$windows} cortes sucesivos",
+                default => '',
+            };
             if ($baseline !== null && $baseline['wape'] !== null) {
                 $base = $this->pct($baseline['wape']);
                 $baseName = ModelCatalog::label($baseline['model_family'] ?? null);
@@ -42,6 +47,13 @@ class AccuracyExplainer
                 $lines[] = "En la validación histórica (backtesting temporal{$windowText}), el modelo seleccionado tuvo un error WAPE de {$sel}.";
             }
             $lines[] = "El WAPE mide el error total relativo a lo vendido: un WAPE de {$sel} significa que, por cada 100 unidades vendidas, el pronóstico se desvió en total unas ".$this->num(round((float) $selected['wape'] * 100)).' unidades.';
+
+            $selectionWape = $context['backtest']['selection_windows']['selected']['wape'] ?? null;
+            if ($scope === 'holdout' && $selectionWape !== null) {
+                $lines[] = 'En las ventanas usadas para elegir el modelo el error fue '.$this->pct($selectionWape).'; esa cifra es solo una referencia, porque esas mismas ventanas decidieron qué modelo usar.';
+            } elseif ($scope === 'selection_windows') {
+                $lines[] = 'La historia disponible no permitió reservar un período final independiente: estas métricas provienen de las mismas ventanas que eligieron el modelo y pueden ser optimistas.';
+            }
 
             $bias = $selected['bias'] ?? null;
             if ($bias !== null) {

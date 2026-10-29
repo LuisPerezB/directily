@@ -63,3 +63,47 @@ def test_symmetric_mode_and_extrapolation():
     far = cal.apply(pd.DataFrame({"group": ["g"], "step": [90], "yhat": [10.0], "scale": [1.0]}))
     assert near["hi_80"].iat[0] - 10 == pytest.approx(10 - near["lo_80"].iat[0])
     assert far["hi_80"].iat[0] > near["hi_80"].iat[0], "más allá del horizonte evaluado el intervalo se ensancha"
+
+
+def test_selection_uses_class_at_each_window_cutoff():
+    """F4: cada fila se agrupa por la clase de su serie en el corte de SU ventana, no al corte final."""
+    from predictily_engine.selection.selector import selected_rows
+
+    bt = _bt(lgbm_factor=0.6)
+    bt["demand_class"] = np.where(bt["window"] == 0, "intermittent", "smooth")
+    final_profile = pd.DataFrame({"unique_id": PROFILE["unique_id"], "demand_class": "lumpy"})
+    sel = select_models(bt, final_profile)
+    assert "lumpy" not in sel.winners and {"smooth", "intermittent"} <= set(sel.winners)
+    rows = selected_rows(bt, final_profile, sel)
+    w0 = rows[rows["window"] == 0]
+    assert (w0["demand_class"] == "intermittent").all()
+    assert set(w0["family"]) == {sel.family_for("intermittent")}
+    # Sin columna de clase por ventana se mantiene el comportamiento anterior (clase del perfil).
+    legacy = select_models(bt.drop(columns=["demand_class"]), PROFILE)
+    assert legacy.winners["smooth"] == "lightgbm_global"
+
+
+def test_holdout_coverage_is_calibrated_only_with_earlier_residuals():
+    """F6: el intervalo evaluado en el holdout se calibra solo con residuos observables en su origen."""
+    from predictily_engine.intervals.conformal import holdout_coverage, score_intervals
+
+    rng = np.random.default_rng(5)
+
+    def rows(n, sd, window):
+        out = pd.DataFrame({"group": "g", "window": window, "step": rng.integers(1, 91, n), "yhat": 100.0,
+                            "scale": 10.0})
+        out["actual"] = out["yhat"] + rng.normal(0, sd, n)
+        return out
+
+    calib = rows(4000, 10, 0)
+    same = rows(4000, 10, 1)
+    c80, c95 = holdout_coverage(calib, same)
+    assert c80 == pytest.approx(0.80, abs=0.03) and c95 == pytest.approx(0.95, abs=0.02)
+    # Si el período evaluado es más volátil, la cobertura cae: sus residuos no se usaron para calibrar.
+    wild = rows(4000, 30, 1)
+    w80, _ = holdout_coverage(calib, wild)
+    assert w80 < 0.45
+    scored = score_intervals(calib, wild)
+    pd.testing.assert_series_equal(scored["hi_80"].reset_index(drop=True),
+                                   score_intervals(calib, wild.assign(actual=0.0))["hi_80"].reset_index(drop=True))
+    assert holdout_coverage(calib.iloc[0:0], wild) == (None, None)

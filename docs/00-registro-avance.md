@@ -26,7 +26,7 @@ A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
 
 | Componente | Estado | Notas |
 |---|---|---|
-| Esquema de datos (48 tablas: 39 de negocio + 9 de infraestructura Laravel; migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
+| Esquema de datos (49 tablas: 40 de negocio + 9 de infraestructura Laravel; migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
 | Multi-tenancy (contexto, scope fail-closed, middleware, jobs, FKs) | ✅ | Pruebas de aislamiento en core, analytics, motor y E2E |
 | Autenticación (Sanctum SPA + tokens por empresa), roles y abilities | ✅ | Rate limit de login, auditoría |
 | Empresas, sucursales, usuarios, configuración, consentimiento | ✅ | |
@@ -49,6 +49,15 @@ A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
 | Frontend: 13 pantallas, i18n, modo oscuro, roles | ✅ | Prueba de humo con Playwright en 16 rutas |
 | Documentación (01–08, manual, entrenamiento, pendientes) | ✅ | |
 | Docker Compose, Dockerfiles, nginx, Caddy TLS, respaldos | ✅ / 🟡 | Producción con dominio real no probada |
+
+## Validación externa del 28-oct-2026 (rama `fix/validacion-2026-10-28`)
+
+Hallazgos F1–F7 de `VALIDACION-PREDICTILY-2026-10-28.md` corregidos con pruebas de regresión; detalle,
+antes/después y métricas recalculadas en `docs/validation/2026-10-29/CORRECCIONES.md`. Verificación:
+motor 88 pruebas, backend 169, frontend 69, E2E 32/32, `probe_after_fixes.py` 6/6. Métricas de la demo
+ahora medidas en un período final reservado: WAPE por serie 0,493 (Seasonal Naive 0,663), sesgo −4,0 %,
+cobertura 80/95 % = 85/98 %. Pendientes del orden de trabajo: histórico real autorizado (Soyoda),
+simulación histórica de operación y modelo de recompra por cliente.
 
 ## Correcciones de la integración final (orquestador)
 

@@ -29,7 +29,7 @@ const tracker = useForecastJob((job) => {
 async function run(): Promise<void> {
   localError.value = null
   try {
-    await tracker.request(90)
+    await tracker.request()
   } catch (error) {
     localError.value = isApiError(error) && error.status === 409 ? t('jobs.alreadyRunning') : errorMessage(error, t)
   }

@@ -73,6 +73,16 @@ const columns = computed<Column<Recommendation>[]>(() => [
 
 const detail = ref<Recommendation | null>(null)
 const updating = ref<number | null>(null)
+/** Limitaciones que el motor declara (cobertura insuficiente, incertidumbre desconocida, recepciones sin fecha…). */
+const detailLimitations = computed<string[]>(() => {
+  const list = detail.value?.assumptions?.limitations
+  return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []
+})
+/** Posición de inventario = disponible + compras que llegan dentro de plazo + revisión. */
+const detailPosition = computed<number | null>(() => {
+  const position = detail.value?.assumptions?.inventory_position
+  return typeof position === 'number' ? position : (detail.value?.available ?? null)
+})
 
 async function setStatus(rec: Recommendation, status: RecommendationStatus): Promise<void> {
   updating.value = rec.id
@@ -191,11 +201,17 @@ function leadSource(s: string): string {
     <AppModal :open="detail !== null" :title="detail?.product?.name ?? t('inventory.detailTitle')" size="lg" @close="detail = null">
       <template v-if="detail">
         <p class="text-sm text-fg-muted mb-4">{{ detail.branch?.name ?? catalog.branchName(detail.branch_id) }} · {{ t('inventory.snapshotOn', { date: formatDate(detail.inventory_snapshot_date) }) }}</p>
+        <InlineNotice v-if="detailLimitations.length" kind="warning" :title="t('inventory.limitationsTitle')" class="mb-4">
+          <ul class="m-0 pl-5 list-disc flex flex-col gap-1">
+            <li v-for="(text, i) in detailLimitations" :key="i">{{ text }}</li>
+          </ul>
+        </InlineNotice>
         <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.onHand') }}</dt><dd class="m-0 tabular font-semibold">{{ formatNumber(detail.on_hand, 1) }}</dd></div>
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.reserved') }}</dt><dd class="m-0 tabular">{{ formatNumber(detail.reserved, 1) }}</dd></div>
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.inTransit') }}</dt><dd class="m-0 tabular">{{ formatNumber(detail.in_transit, 1) }}</dd></div>
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.available') }}</dt><dd class="m-0 tabular font-semibold">{{ formatNumber(detail.available, 1) }}</dd></div>
+          <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.inventoryPosition') }}</dt><dd class="m-0 tabular">{{ formatNumber(detailPosition, 1) }}</dd></div>
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.leadTime') }}</dt><dd class="m-0 tabular">{{ t('common.daysValue', { n: detail.lead_time_days }) }} ({{ leadSource(detail.lead_time_source) }})</dd></div>
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.reviewPeriod') }}</dt><dd class="m-0 tabular">{{ t('common.daysValue', { n: detail.review_period_days }) }}</dd></div>
           <div class="flex justify-between gap-2"><dt class="text-fg-muted">{{ t('inventory.demandLeadTime') }}</dt><dd class="m-0 tabular">{{ formatNumber(detail.demand_lead_time, 1) }}<template v-if="detail.demand_lead_time_std != null"> ± {{ formatNumber(detail.demand_lead_time_std, 1) }}</template></dd></div>
@@ -212,7 +228,7 @@ function leadSource(s: string): string {
           <ul class="list-disc pl-5 m-0 flex flex-col gap-1 text-fg-muted">
             <li>{{ t('inventory.explainDemand', { days: detail.lead_time_days + detail.review_period_days, value: formatNumber(detail.demand_lead_time, 1) }) }}</li>
             <li>{{ t('inventory.explainSafety', { level: formatPercent(detail.service_level, 0), value: formatNumber(detail.safety_stock, 1) }) }}</li>
-            <li>{{ t('inventory.explainSuggested', { rop: formatNumber(detail.reorder_point, 1), available: formatNumber(detail.available, 1), qty: formatNumber(detail.suggested_qty, 0) }) }}</li>
+            <li>{{ t('inventory.explainSuggested', { rop: formatNumber(detail.reorder_point, 1), available: formatNumber(detailPosition, 1), qty: formatNumber(detail.suggested_qty, 0) }) }}</li>
             <li>{{ t('inventory.explainProbability') }}</li>
           </ul>
         </div>

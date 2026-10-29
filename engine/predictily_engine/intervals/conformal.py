@@ -6,8 +6,15 @@ pred + q·escala (80 %: q10–q90; 95 %: q2.5–q97.5), truncado en 0 (modo "qua
 asimétrico, adecuado para conteos sesgados a la derecha a nivel serie). En modo "absolute"
 el intervalo es simétrico: pred ± cuantil(|e|) (más robusto en niveles agregados cuando
 las pocas ventanas comparten un sesgo estacional). Más allá del horizonte
-evaluado, el último tramo se ensancha con √(paso / paso_máximo). La cobertura se mide con
-validación "dejando una ventana fuera" (los cuantiles nunca usan la ventana evaluada).
+evaluado, el último tramo se ensancha con √(paso / paso_máximo).
+
+Cobertura (F6, validación del 28-oct-2026):
+- `holdout_coverage` es la medida principal: calibra SOLO con residuos ya observables en el
+  origen del período final reservado (ventanas cuyas fechas objetivo terminan en o antes de
+  ese origen) y mide en el holdout. Es una prueba prospectiva.
+- `loo_coverage` ("dejando una ventana fuera") se conserva como diagnóstico secundario de las
+  ventanas de selección: calibra con ventanas posteriores y solapadas a la evaluada, por lo
+  que NO es una evaluación prospectiva independiente.
 """
 
 from __future__ import annotations
@@ -119,3 +126,36 @@ def loo_coverage(rows: pd.DataFrame, group_col: str = "group",
     if total == 0:
         return None, None
     return hits80 / total, hits95 / total
+
+
+def score_intervals(calibration: pd.DataFrame, test: pd.DataFrame, group_col: str = "group",
+                    bucketer: Callable[[np.ndarray], np.ndarray] = day_bucket,
+                    mode: str = "quantile") -> pd.DataFrame:
+    """Calibra con `calibration`, aplica a `test` y marca aciertos (`hit_80`, `hit_95`).
+
+    Devuelve solo las filas de `test` que recibieron intervalo. El llamador garantiza que
+    `calibration` contiene únicamente residuos observables en el origen de `test`.
+    """
+    cal = ConformalCalibrator(calibration, group_col, bucketer, mode)
+    if cal.empty or test.empty:
+        return test.iloc[0:0].assign(lo_80=np.nan, hi_80=np.nan, lo_95=np.nan, hi_95=np.nan,
+                                     hit_80=False, hit_95=False)
+    out = cal.apply(test)
+    out = out[out["lo_80"].notna()].copy()
+    a = out["actual"].to_numpy(dtype=float)
+    out["hit_80"] = (a >= out["lo_80"].to_numpy() - 1e-9) & (a <= out["hi_80"].to_numpy() + 1e-9)
+    out["hit_95"] = (a >= out["lo_95"].to_numpy() - 1e-9) & (a <= out["hi_95"].to_numpy() + 1e-9)
+    return out
+
+
+def hit_rates(scored: pd.DataFrame) -> tuple[float | None, float | None]:
+    if scored.empty:
+        return None, None
+    return float(scored["hit_80"].mean()), float(scored["hit_95"].mean())
+
+
+def holdout_coverage(calibration: pd.DataFrame, test: pd.DataFrame, group_col: str = "group",
+                     bucketer: Callable[[np.ndarray], np.ndarray] = day_bucket,
+                     mode: str = "quantile") -> tuple[float | None, float | None]:
+    """Cobertura 80/95 en `test` con intervalos calibrados solo con `calibration`."""
+    return hit_rates(score_intervals(calibration, test, group_col, bucketer, mode))

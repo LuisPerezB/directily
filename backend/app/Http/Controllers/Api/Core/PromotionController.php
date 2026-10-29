@@ -6,15 +6,25 @@ namespace App\Http\Controllers\Api\Core;
 
 use App\Http\Controllers\Controller;
 use App\Models\Promotion;
+use App\Models\PromotionRevision;
+use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantRule;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Throwable;
 
-/** Promociones: el motor las usa como covariables conocidas a futuro. */
+/**
+ * Promociones: el motor las usa como covariables, a futuro solo desde `known_at` y con la
+ * versión vigente en cada corte. Alta, edición y baja (lógica) quedan en `promotion_revisions`.
+ */
 final class PromotionController extends Controller
 {
+    public function __construct(private readonly TenantContext $tenants) {}
+
     public function index(Request $request): JsonResponse
     {
         $request->validate(['active_on' => ['sometimes', 'date'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
@@ -37,31 +47,46 @@ final class PromotionController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $promotion = Promotion::query()->create($this->validated($request))->refresh();
+        $attributes = $this->validated($request);
+        $promotion = DB::transaction(fn () => Promotion::query()->create($attributes))->refresh();
 
         return response()->json(['data' => $this->present($promotion)], 201);
     }
 
     public function update(Request $request, Promotion $promotion): JsonResponse
     {
-        $promotion->fill($this->validated($request, $promotion))->save();
+        $attributes = $this->validated($request, $promotion);
+        DB::transaction(fn () => $promotion->fill($attributes)->save());
 
-        return response()->json(['data' => $this->present($promotion)]);
+        return response()->json(['data' => $this->present($promotion->refresh())]);
     }
 
     public function destroy(Promotion $promotion): Response
     {
-        $promotion->delete();
+        DB::transaction(fn () => $promotion->delete());
 
         return response()->noContent();
+    }
+
+    /** Historial de versiones (también de promociones dadas de baja). */
+    public function revisions(Promotion $promotion): JsonResponse
+    {
+        return response()->json(['data' => $promotion->revisions()->get()->map(fn (PromotionRevision $r) => [
+            'revision' => $r->revision, 'name' => $r->name, 'promo_type' => $r->promo_type, 'discount_pct' => $r->discount_pct,
+            'starts_on' => $r->starts_on?->toDateString(), 'ends_on' => $r->ends_on?->toDateString(),
+            'branch_id' => $r->branch_id, 'product_id' => $r->product_id, 'category_id' => $r->category_id,
+            'known_at' => $r->known_at?->toIso8601String(), 'deleted' => $r->deleted, 'source' => $r->source,
+            'recorded_at' => $r->recorded_at?->toIso8601String(),
+        ])]);
     }
 
     /** @return array<string, mixed> */
     private function validated(Request $request, ?Promotion $promotion = null): array
     {
         $req = $promotion === null ? 'required' : 'sometimes';
+        $timezone = $this->tenants->require()->timezone ?: 'America/Guayaquil';
 
-        return $request->validate([
+        $data = $request->validate([
             'name' => [$req, 'string', 'max:150'],
             'promo_type' => ['sometimes', Rule::in(['percentage', 'fixed_amount', 'bundle', 'other'])],
             'discount_pct' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'], // fracción: 0.15 = 15 %
@@ -70,7 +95,27 @@ final class PromotionController extends Controller
             'branch_id' => ['sometimes', 'nullable', 'integer', TenantRule::exists('branches')],
             'product_id' => ['sometimes', 'nullable', 'integer', TenantRule::exists('products')],
             'category_id' => ['sometimes', 'nullable', 'integer', TenantRule::exists('product_categories')],
+            // Cuándo la conocía el negocio (p. ej. fecha de aprobación de un histórico). Por defecto: el alta.
+            'known_at' => [$promotion === null ? 'nullable' : 'sometimes', 'date', function (string $attribute, mixed $value, Closure $fail) use ($timezone): void {
+                try {
+                    $future = Promotion::parseKnownAt((string) $value, $timezone)->isFuture();
+                } catch (Throwable) {
+                    return; // la regla `date` ya informa el formato inválido
+                }
+                if ($future) {
+                    $fail('La fecha de registro de la promoción (known_at) no puede ser futura.');
+                }
+            }],
         ]);
+        if (array_key_exists('known_at', $data)) {
+            if ($data['known_at'] === null) {
+                unset($data['known_at']);
+            } else {
+                $data['known_at'] = Promotion::parseKnownAt((string) $data['known_at'], $timezone);
+            }
+        }
+
+        return $data;
     }
 
     /** @return array<string, mixed> */
@@ -80,6 +125,7 @@ final class PromotionController extends Controller
             'id' => $p->id, 'name' => $p->name, 'promo_type' => $p->promo_type, 'discount_pct' => $p->discount_pct,
             'starts_on' => $p->starts_on?->toDateString(), 'ends_on' => $p->ends_on?->toDateString(),
             'branch_id' => $p->branch_id, 'product_id' => $p->product_id, 'category_id' => $p->category_id,
+            'known_at' => $p->known_at?->toIso8601String(),
         ];
     }
 }

@@ -124,6 +124,45 @@ class DashboardAndAccuracyApiTest extends TestCase
         $this->assertStringNotContainsString('confianza del', $text);
     }
 
+    public function test_accuracy_summary_uses_holdout_as_primary_and_selection_windows_as_secondary(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser();
+        $cat = $this->seedCatalog($tenant);
+        $this->seedSales($tenant, $cat, self::CUTOFF, 30);
+        $run = $this->seedForecastRun($tenant, $cat, self::CUTOFF);
+        // Así escribe el motor: 'backtest' = período final reservado; 'selection_windows' = ventanas que eligieron el modelo.
+        DB::table('model_evaluations')->where('forecast_run_id', $run->id)->update([
+            'extra' => json_encode(['composite' => false, 'evaluation_scope' => 'holdout', 'independent_holdout' => true]),
+            'n_windows' => 1, 'cutoffs' => json_encode(['2026-07-02']),
+        ]);
+        $base = ['tenant_id' => $tenant->id, 'forecast_run_id' => $run->id, 'evaluation_type' => 'selection_windows',
+            'level' => 'overall', 'mae' => 1.0, 'rmse' => 1.4, 'bias' => -0.08, 'coverage_80' => 0.79, 'coverage_95' => 0.94,
+            'n_obs' => 900, 'n_windows' => 3, 'cutoffs' => json_encode(['2026-02-05', '2026-03-05', '2026-04-02']),
+            'extra' => json_encode(['evaluation_scope' => 'selection_windows']), 'created_at' => now()];
+        DB::table('model_evaluations')->insert([
+            $base + ['model_family' => 'selection', 'is_selected' => true, 'is_baseline' => false, 'wape' => 0.21],
+            $base + ['model_family' => 'seasonal_naive', 'is_selected' => false, 'is_baseline' => true, 'wape' => 0.30],
+        ]);
+
+        $response = $this->actingAsTenantUser($user, $tenant)->getJson('/api/v1/accuracy/summary');
+        $response->assertOk()
+            ->assertJsonPath('data.backtest.selected.wape', 0.23)
+            ->assertJsonPath('data.backtest.baseline.wape', 0.31)
+            ->assertJsonPath('data.backtest.evaluation_scope', 'holdout')
+            ->assertJsonPath('data.backtest.n_windows', 1)
+            ->assertJsonPath('data.backtest.cutoffs', ['2026-07-02'])
+            ->assertJsonPath('data.backtest.selection_windows.selected.wape', 0.21)
+            ->assertJsonPath('data.backtest.selection_windows.baseline.wape', 0.3)
+            ->assertJsonPath('data.backtest.selection_windows.n_windows', 3);
+        $text = implode(' ', $response->json('data.explanation'));
+        $this->assertStringContainsString('período final reservado', $text);
+        $this->assertStringContainsString('ventanas usadas para elegir el modelo el error fue 21%', $text);
+
+        $this->actingAsTenantUser($user, $tenant)
+            ->getJson("/api/v1/model-evaluations?run_id={$run->id}&evaluation_type=selection_windows")
+            ->assertOk()->assertJsonCount(2, 'data')->assertJsonPath('data.0.evaluation_type', 'selection_windows');
+    }
+
     public function test_accuracy_comparison_against_actual_sales_and_realized_metrics(): void
     {
         [$tenant, $user] = $this->createTenantWithUser();

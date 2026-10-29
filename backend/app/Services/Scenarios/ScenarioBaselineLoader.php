@@ -50,20 +50,27 @@ class ScenarioBaselineLoader
             'unit_cost' => $costs[(int) $r->product_id] ?? null,
         ])->values()->all();
 
-        $replenishment = DB::table('recommendations')
+        $recommendations = DB::table('recommendations')
             ->where('tenant_id', $tenantId)
             ->where('forecast_run_id', $run->id)
             ->when($branchId !== null, fn ($q) => $q->where('branch_id', $branchId))
             ->when($productId !== null, fn ($q) => $q->where('product_id', $productId))
-            ->when($productIdsInCategory !== null, fn ($q) => $q->whereIn('product_id', $productIdsInCategory))
+            ->when($productIdsInCategory !== null, fn ($q) => $q->whereIn('product_id', $productIdsInCategory));
+        // Sin cantidad (el pronóstico no cubre plazo + revisión): no hay base para simularlas, pero
+        // se cuentan para avisarlo en lugar de subestimar la compra en silencio.
+        $withoutQuantity = (clone $recommendations)->whereNull('suggested_qty')->count();
+        $replenishment = $recommendations
+            ->whereNotNull('suggested_qty')
             ->get(['product_id', 'branch_id', 'suggested_qty', 'reorder_point', 'available', 'demand_lead_time',
-                'safety_stock', 'lead_time_days', 'review_period_days', 'unit_cost', 'risk_level'])
+                'safety_stock', 'lead_time_days', 'review_period_days', 'unit_cost', 'risk_level', 'assumptions'])
             ->map(fn ($r) => [
                 'product_id' => (int) $r->product_id,
                 'branch_id' => (int) $r->branch_id,
                 'suggested_qty' => (float) $r->suggested_qty,
                 'reorder_point' => (float) $r->reorder_point,
-                'available' => $r->available !== null ? (float) $r->available : null,
+                // El motor compara el punto de reorden con la posición de inventario (existencias
+                // disponibles + compras que llegan dentro de la cobertura), no solo con `available`.
+                'available' => $this->inventoryPosition($r),
                 'demand_lead_time' => (float) $r->demand_lead_time,
                 'safety_stock' => (float) $r->safety_stock,
                 'lead_time_days' => (int) $r->lead_time_days,
@@ -78,7 +85,7 @@ class ScenarioBaselineLoader
             ->latest('id')
             ->value('score');
 
-        return new ScenarioBaseline($horizon, $products, $replenishment, $score !== null ? (float) $score : null);
+        return new ScenarioBaseline($horizon, $products, $replenishment, $score !== null ? (float) $score : null, $withoutQuantity);
     }
 
     /**
@@ -121,5 +128,17 @@ class ScenarioBaselineLoader
         }
 
         return $costs;
+    }
+
+    /** Posición de inventario del motor (assumptions.inventory_position) o, si falta, `available`. */
+    private function inventoryPosition(object $rec): ?float
+    {
+        $assumptions = is_string($rec->assumptions ?? null) ? json_decode($rec->assumptions, true) : ($rec->assumptions ?? null);
+        $position = is_array($assumptions) ? ($assumptions['inventory_position'] ?? null) : null;
+        if (is_numeric($position)) {
+            return (float) $position;
+        }
+
+        return $rec->available !== null ? (float) $rec->available : null;
     }
 }

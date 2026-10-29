@@ -168,6 +168,11 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
         raise
 
 
+def _known(v: Any) -> bool:
+    """Valor numérico presente (no None/NaN): las recomendaciones admiten nulos explícitos."""
+    return v is not None and not pd.isna(v)
+
+
 def _as_date(v: Any) -> date | None:
     if v in (None, ""):
         return None
@@ -252,10 +257,11 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
                 CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), now())
             """
         ), [{
-            **{k: none_if_nan(v) for k, v in e.items() if k not in ("cutoffs",)},
+            **{k: none_if_nan(v) for k, v in e.items() if k not in ("cutoffs", "extra")},
             "tenant_id": tenant_id, "run_id": run_id, "rid": registry_ids.get(e["model_family"]),
             "cutoffs": jdump(e.get("cutoffs", [])),
-            "extra": jdump({"composite": e["model_family"] == "selection"}),
+            # evaluation_scope: 'holdout' (período final reservado) o 'selection_windows'
+            "extra": jdump({"composite": e["model_family"] == "selection", **(e.get("extra") or {})}),
         } for e in result.evaluations])
 
     # ── Valores pronosticados ──
@@ -325,7 +331,10 @@ def _alerts(conn: Connection, tenant_id: int, run_id: int, version: int, result:
     recs = result.recommendations
     current_keys: set[str] = set()
     if recs is not None and not recs.empty:
-        risky = recs[recs["risk_level"].isin(["high", "critical"])].sort_values("stockout_probability", ascending=False)
+        risky = recs[recs["risk_level"].isin(["high", "critical"])]
+        # Críticas primero; la probabilidad puede ser nula (incertidumbre desconocida, F3).
+        risky = risky.assign(_critical=risky["risk_level"].eq("critical")).sort_values(
+            ["_critical", "stockout_probability"], ascending=[False, False], na_position="last")
         names = {}
         rows = conn.execute(text(
             "SELECT p.id, p.name, b.id AS bid, b.name AS bname FROM products p CROSS JOIN branches b "
@@ -341,13 +350,18 @@ def _alerts(conn: Connection, tenant_id: int, run_id: int, version: int, result:
             pname, bname = names.get((b, p), (f"Producto {p}", f"Sucursal {b}"))
             cover = r.get("days_of_cover")
             cover_txt = f"{cover:.1f} días de cobertura" if cover is not None and pd.notna(cover) else "sin cobertura"
+            prob, qty, when = r.get("stockout_probability"), r.get("suggested_qty"), r.get("stockout_date_estimate")
+            prob_txt = (f"Probabilidad estimada de agotarse antes de reponer: {prob:.0%}" if _known(prob) else
+                        "Probabilidad de quiebre no disponible (incertidumbre desconocida o pronóstico insuficiente)")
+            when_txt = f" Agotamiento estimado: {when}." if when is not None and pd.notna(when) else ""
+            qty_txt = (f"Compra sugerida: {qty:.0f} unidades." if _known(qty) else
+                       "Compra sugerida no calculada: el pronóstico no cubre plazo + revisión.")
             upsert_alert(
                 conn, tenant_id, type_="stockout_risk",
                 severity="critical" if r["risk_level"] == "critical" else "warning",
                 title=f"Riesgo de quiebre: {pname} ({bname})",
-                message=(f"Probabilidad estimada de agotarse antes de reponer: {r['stockout_probability']:.0%} "
-                         f"({cover_txt}; plazo {int(r['lead_time_days'])} días). Compra sugerida: "
-                         f"{r['suggested_qty']:.0f} unidades. Es una sugerencia: Predictily no emite pedidos."),
+                message=(f"{prob_txt} ({cover_txt}; plazo {int(r['lead_time_days'])} días).{when_txt} {qty_txt} "
+                         "Es una sugerencia: Predictily no emite pedidos."),
                 payload={"forecast_run_id": run_id, "branch_id": b, "product_id": p,
                          "stockout_probability": r["stockout_probability"], "suggested_qty": r["suggested_qty"],
                          "days_of_cover": cover, "risk_level": r["risk_level"]},

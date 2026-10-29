@@ -16,6 +16,7 @@ exporta como dato de negocio.
 from __future__ import annotations
 
 import math
+import zlib
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -308,9 +309,10 @@ def generate_company(
                              columns=["code", "name", "country", "default_lead_time_days"])
     promotions = pd.DataFrame([
         (pr.name, "percentage", pr.discount_pct, pr.starts_on, pr.ends_on, pr.branch_code or "", pr.sku or "",
-         pr.category or "")
+         pr.category or "", _promo_known_at(pr.name, pr.starts_on, end_d))
         for pr in spec.promotions
-    ], columns=["name", "promo_type", "discount_pct", "starts_on", "ends_on", "branch_code", "product_sku", "category"])
+    ], columns=["name", "promo_type", "discount_pct", "starts_on", "ends_on", "branch_code", "product_sku", "category",
+                "known_at"])
     true_demand = pd.DataFrame(truth_rows, columns=["branch_code", "product_sku", "ds", "demand", "sold", "on_hand"])
     errors = _sales_with_errors(rng, sales)
     return SyntheticCompany(spec, branches, products_df, sales, errors, inventory, lead_times, suppliers,
@@ -412,6 +414,14 @@ def _neighbor_provinces(province: str) -> list[str]:
         "Manabí": ["Esmeraldas", "Santo Domingo de los Tsáchilas", "Guayas"],
     }
     return neighbors.get(province, [province])
+
+
+def _promo_known_at(name: str, starts_on: str, today: date) -> str:
+    """Fecha en que el negocio registró la promoción: 7–21 días antes del inicio (determinista por
+    nombre, sin consumir la semilla, para no alterar los demás datasets). Una promoción futura se
+    registra, como mucho, el último día de datos («hoy» de la demo)."""
+    lead = 7 + zlib.crc32(name.encode("utf-8")) % 15
+    return min(date.fromisoformat(starts_on) - timedelta(days=lead), today).isoformat()
 
 
 def _promo_masks(spec: CompanySpec, dates: pd.DatetimeIndex):

@@ -7,7 +7,9 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-FEATURE_SET_VERSION = "fs-2026.10-v1"
+# v2 (validación 2026-10-28, F5): la variable promo_discount de fechas futuras solo usa promociones
+# conocidas al corte (known_at / promotion_revisions); v1 usaba toda promoción vigente en esas fechas.
+FEATURE_SET_VERSION = "fs-2026.10-v2"
 
 
 class Settings(BaseSettings):

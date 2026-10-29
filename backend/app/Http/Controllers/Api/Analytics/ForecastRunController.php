@@ -23,7 +23,8 @@ class ForecastRunController extends AnalyticsController
         $run = $service->request(
             tenant: $this->tenant(),
             user: $request->user(),
-            horizonDays: (int) ($request->validated('horizon_days') ?? 90),
+            // Sin horizonte explícito: el mayor que permita el plan (no siempre 90).
+            horizonDays: $request->validated('horizon_days') !== null ? (int) $request->validated('horizon_days') : null,
             cutoffDate: $request->validated('cutoff_date'),
             triggeredBy: $this->isApiToken($request) ? 'api' : 'user',
         );

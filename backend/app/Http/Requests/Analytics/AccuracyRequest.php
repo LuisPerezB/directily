@@ -17,7 +17,7 @@ class AccuracyRequest extends AnalyticsRequest
         return [
             ...$this->runRule($runRequired),
             ...$this->nodeRules(),
-            'evaluation_type' => ['nullable', Rule::in(['backtest', 'realized'])],
+            'evaluation_type' => ['nullable', Rule::in(['backtest', 'selection_windows', 'realized'])],
             'level' => ['nullable', Rule::in(['overall', 'demand_class', 'horizon', 'branch', 'category', 'product', 'series'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

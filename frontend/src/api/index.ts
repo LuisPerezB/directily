@@ -89,7 +89,7 @@ export const catalogApi = {
   leadTimes: (params?: { page?: number; product_id?: number }) => getPage<T.LeadTime>('/lead-times', params),
   createLeadTime: (payload: Omit<T.LeadTime, 'id' | 'source'>) => postData<T.LeadTime>('/lead-times', payload),
   promotions: (params?: { page?: number }) => getPage<T.Promotion>('/promotions', params),
-  createPromotion: (payload: Omit<T.Promotion, 'id'>) => postData<T.Promotion>('/promotions', payload),
+  createPromotion: (payload: T.PromotionInput) => postData<T.Promotion>('/promotions', payload),
   deletePromotion: (id: number) => del(`/promotions/${id}`),
 }
 

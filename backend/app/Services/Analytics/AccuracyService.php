@@ -128,11 +128,60 @@ class AccuracyService
             'selected' => $selected ? $this->metrics($selected) : null,
             'baseline' => $baseline ? $this->metrics($baseline) : null,
             'n_windows' => (int) ($selected->n_windows ?? $overall->max('n_windows') ?? 0),
+            // 'holdout' = período final reservado (no eligió el modelo ni calibró sus rangos);
+            // 'selection_windows' = mismas ventanas que eligieron el modelo (optimista); null = run antiguo.
+            'evaluation_scope' => $this->scope($selected ?? $baseline),
+            'cutoffs' => $this->jsonList($selected?->cutoffs ?? $baseline?->cutoffs ?? null),
             'by_horizon' => $byHorizon,
             'by_demand_class' => $byClass,
             'by_branch' => $byBranch,
             'models' => $models,
+            'selection_windows' => $this->selectionWindows($run),
         ];
+    }
+
+    /**
+     * Métricas secundarias de las ventanas que eligieron el modelo (evaluation_type =
+     * 'selection_windows'). Solo existen cuando el motor reservó un período final independiente.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function selectionWindows(ForecastRun $run): ?array
+    {
+        $overall = DB::table('model_evaluations')
+            ->where('tenant_id', $run->tenant_id)
+            ->where('forecast_run_id', $run->id)
+            ->where('evaluation_type', 'selection_windows')
+            ->where('level', 'overall')
+            ->get();
+        $selected = $this->pickSelected($overall);
+        $baseline = $this->pickBaseline($overall);
+        if ($selected === null && $baseline === null) {
+            return null;
+        }
+
+        return [
+            'selected' => $selected ? $this->metrics($selected) : null,
+            'baseline' => $baseline ? $this->metrics($baseline) : null,
+            'n_windows' => (int) (($selected ?? $baseline)->n_windows ?? 0),
+            'cutoffs' => $this->jsonList(($selected ?? $baseline)->cutoffs ?? null),
+        ];
+    }
+
+    private function scope(?object $row): ?string
+    {
+        $extra = is_string($row?->extra ?? null) ? json_decode($row->extra, true) : ($row?->extra ?? null);
+        $scope = is_array($extra) ? ($extra['evaluation_scope'] ?? null) : null;
+
+        return in_array($scope, ['holdout', 'selection_windows'], true) ? $scope : null;
+    }
+
+    /** @return list<string> */
+    private function jsonList(mixed $value): array
+    {
+        $list = is_string($value) ? json_decode($value, true) : $value;
+
+        return is_array($list) ? array_values(array_map('strval', $list)) : [];
     }
 
     /**
