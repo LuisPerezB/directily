@@ -50,6 +50,15 @@ A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
 | Documentación (01–08, manual, entrenamiento, pendientes) | ✅ | |
 | Docker Compose, Dockerfiles, nginx, Caddy TLS, respaldos | ✅ / 🟡 | Producción con dominio real no probada |
 
+## Validación externa del 28-oct-2026 (rama `fix/validacion-2026-10-28`)
+
+Hallazgos F1–F7 de `VALIDACION-PREDICTILY-2026-10-28.md` corregidos con pruebas de regresión; detalle,
+antes/después y métricas recalculadas en `docs/validation/2026-10-29/CORRECCIONES.md`. Verificación:
+motor 88 pruebas, backend 169, frontend 69, E2E 32/32, `probe_after_fixes.py` 6/6. Métricas de la demo
+ahora medidas en un período final reservado: WAPE por serie 0,493 (Seasonal Naive 0,663), sesgo −4,0 %,
+cobertura 80/95 % = 85/98 %. Pendientes del orden de trabajo: histórico real autorizado (Soyoda),
+simulación histórica de operación y modelo de recompra por cliente.
+
 ## Correcciones de la integración final (orquestador)
 
 - Límite de subida de PHP (8 MB por defecto) bloqueaba el histórico de 19 MB en instalación nativa:

@@ -1,0 +1,204 @@
+{
+  "F2_truncated_supplier_period": {
+    "forecast_7_days": {
+      "available": 0.0,
+      "in_transit": 0.0,
+      "lead_time_days": "30",
+      "review_period_days": "7",
+      "demand_lead_time": null,
+      "demand_lead_time_std": null,
+      "safety_stock": null,
+      "suggested_qty": null,
+      "stockout_probability": null,
+      "stockout_date_estimate": "2026-10-02",
+      "risk_level": "critical",
+      "assumptions": {
+        "uncertainty": "not_evaluated",
+        "safety_stock_policy": null,
+        "risk_rule": "projected_balance",
+        "coverage_days_needed": 37,
+        "coverage_days_available": 7,
+        "coverage_insufficient": true,
+        "suggested_qty_lower_bound": 70.0,
+        "inventory_position": 0.0,
+        "stockout_before_receipt": false,
+        "limitations": [
+          "El pronóstico disponible cubre 7 de los 37 días necesarios (plazo 30 + revisión 7); no se calcula la compra sugerida para no extrapolar la demanda. Con la demanda de los días cubiertos se necesitan al menos 70 unidades."
+        ]
+      }
+    },
+    "forecast_90_days": {
+      "available": 0.0,
+      "in_transit": 0.0,
+      "lead_time_days": "30",
+      "review_period_days": "7",
+      "demand_lead_time": 370.0,
+      "demand_lead_time_std": 18.9856,
+      "safety_stock": 31.2286,
+      "suggested_qty": 402.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-02",
+      "risk_level": "critical",
+      "assumptions": {
+        "uncertainty": "intervals",
+        "safety_stock_policy": "normal_z_sigma",
+        "risk_rule": "probability_with_projection_floor",
+        "coverage_days_needed": 37,
+        "coverage_days_available": 90,
+        "coverage_insufficient": false,
+        "suggested_qty_lower_bound": null,
+        "inventory_position": 0.0,
+        "stockout_before_receipt": false,
+        "limitations": []
+      }
+    }
+  },
+  "F3_missing_uncertainty": {
+    "ample_stock": {
+      "available": 200.0,
+      "in_transit": 0.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "demand_lead_time_std": null,
+      "safety_stock": 70.0,
+      "suggested_qty": 10.0,
+      "stockout_probability": null,
+      "stockout_date_estimate": "2026-10-22",
+      "risk_level": "medium",
+      "assumptions": {
+        "uncertainty": "unknown",
+        "safety_stock_policy": "fraction_of_coverage_demand",
+        "risk_rule": "projected_balance",
+        "coverage_days_needed": 14,
+        "coverage_days_available": 30,
+        "coverage_insufficient": false,
+        "suggested_qty_lower_bound": null,
+        "inventory_position": 200.0,
+        "stockout_before_receipt": false,
+        "limitations": [
+          "Sin errores históricos ni intervalos: la incertidumbre es desconocida. No se informa probabilidad de quiebre; stock de seguridad provisional = 50% de la demanda en la cobertura y riesgo según el saldo proyectado."
+        ]
+      }
+    },
+    "low_stock": {
+      "available": 100.0,
+      "in_transit": 0.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "demand_lead_time_std": null,
+      "safety_stock": 70.0,
+      "suggested_qty": 110.0,
+      "stockout_probability": null,
+      "stockout_date_estimate": "2026-10-12",
+      "risk_level": "high",
+      "assumptions": {
+        "uncertainty": "unknown",
+        "safety_stock_policy": "fraction_of_coverage_demand",
+        "risk_rule": "projected_balance",
+        "coverage_days_needed": 14,
+        "coverage_days_available": 30,
+        "coverage_insufficient": false,
+        "suggested_qty_lower_bound": null,
+        "inventory_position": 100.0,
+        "stockout_before_receipt": false,
+        "limitations": [
+          "Sin errores históricos ni intervalos: la incertidumbre es desconocida. No se informa probabilidad de quiebre; stock de seguridad provisional = 50% de la demanda en la cobertura y riesgo según el saldo proyectado."
+        ]
+      }
+    }
+  },
+  "F1_late_purchase_order": {
+    "with_late_order": {
+      "available": 10.0,
+      "in_transit": 1000.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "demand_lead_time_std": 11.6785,
+      "safety_stock": 19.2095,
+      "suggested_qty": 150.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-03",
+      "risk_level": "critical",
+      "assumptions": {
+        "uncertainty": "intervals",
+        "safety_stock_policy": "normal_z_sigma",
+        "risk_rule": "probability_with_projection_floor",
+        "coverage_days_needed": 14,
+        "coverage_days_available": 30,
+        "coverage_insufficient": false,
+        "suggested_qty_lower_bound": null,
+        "inventory_position": 10.0,
+        "stockout_before_receipt": true,
+        "limitations": [
+          "El saldo proyectado se agota el 2026-10-03, antes de la recepción prevista del 2026-10-31."
+        ]
+      }
+    },
+    "without_order": {
+      "available": 10.0,
+      "in_transit": 0.0,
+      "lead_time_days": "7",
+      "review_period_days": "7",
+      "demand_lead_time": 140.0,
+      "demand_lead_time_std": 11.6785,
+      "safety_stock": 19.2095,
+      "suggested_qty": 150.0,
+      "stockout_probability": 1.0,
+      "stockout_date_estimate": "2026-10-03",
+      "risk_level": "critical",
+      "assumptions": {
+        "uncertainty": "intervals",
+        "safety_stock_policy": "normal_z_sigma",
+        "risk_rule": "probability_with_projection_floor",
+        "coverage_days_needed": 14,
+        "coverage_days_available": 30,
+        "coverage_insufficient": false,
+        "suggested_qty_lower_bound": null,
+        "inventory_position": 10.0,
+        "stockout_before_receipt": false,
+        "limitations": []
+      }
+    }
+  },
+  "F4_profile_at_historical_cutoff": {
+    "historical_cutoff": "2026-04-01",
+    "eligible_using_full_panel": [],
+    "eligible_using_only_past": []
+  },
+  "F5_promotion_known_after_cutoff": {
+    "forecast_cutoff": "2026-04-01",
+    "promotion_created_at": "2026-04-04",
+    "future_discounts_used": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "if_known_before_cutoff": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ]
+  },
+  "F6_holdout_independent_of_selection": {
+    "horizon": 90,
+    "step": 28,
+    "selection_cutoffs": [
+      "2026-03-04",
+      "2026-04-01",
+      "2026-04-29"
+    ],
+    "holdout_cutoff": "2026-07-28",
+    "shared_target_dates_with_holdout": 0
+  }
+}

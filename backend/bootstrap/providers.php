@@ -1,8 +1,9 @@
 <?php
 
+use App\Providers\AnalyticsServiceProvider;
 use App\Providers\AppServiceProvider;
 
 return [
     AppServiceProvider::class,
-    App\Providers\AnalyticsServiceProvider::class, // backend-analytics
+    AnalyticsServiceProvider::class, // backend-analytics
 ];

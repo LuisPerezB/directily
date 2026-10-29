@@ -378,8 +378,12 @@ Comportamiento:
 6. Entrena el modelo final, pronostica `max(horizons)` días, calcula intervalos 80/95,
    reconcilia (bottom-up) y escribe `forecast_values` para niveles `series, product, category,
    branch, branch_category, total` en granularidad `day` (y `week`/`month` para niveles agregados).
-7. Escribe `model_registry`, `model_evaluations` (backtest), `recommendations` y `alerts`
+7. Escribe `model_registry`, `model_evaluations`, `recommendations` y `alerts`
    (`stockout_risk`), `data_quality_reports` (scope `forecasting_readiness`, con `forecast_run_id`).
+   En `model_evaluations`, `evaluation_type='backtest'` son las métricas principales: las del
+   período final reservado cuando existe (`extra.evaluation_scope='holdout'`);
+   `evaluation_type='selection_windows'` son las ventanas que eligieron el modelo (secundarias,
+   optimistas). Ver `docs/04` §4–§5.
 8. Marca run `completed` (y `is_current=true` si `run_type='production'`, desmarcando el anterior en
    la misma transacción) y job `succeeded` con `result`.
 

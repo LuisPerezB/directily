@@ -430,7 +430,7 @@ erDiagram
     }
     model_evaluations {
         bigint id PK
-        varchar evaluation_type "backtest|realized"
+        varchar evaluation_type "backtest|selection_windows|realized"
         varchar level
         numeric wape
         numeric mae
@@ -467,7 +467,7 @@ erDiagram
 | `forecast_runs` | Laravel crea (queued); motor completa | Ejecución versionada (`version` correlativo por empresa), corte, rango de datos, selección y resumen | UK `(tenant_id, version)`; `(tenant_id, status, created_at)` (historial y "en curso"); **único parcial `(tenant_id) WHERE is_current`** (una vigente por empresa) | `run_type='historical'` (corte retroactivo) nunca es vigente |
 | `training_jobs` | Laravel crea; motor actualiza | Estado, etapa, progreso, intentos, duración, error, resultado | `(tenant_id, created_at)` (consultas del usuario); `(status, created_at)` (supervisión de trabajos atascados) | — |
 | `model_registry` | motor | Modelo entrenado: familia, nivel A–E, alcance, estado (candidate/production/fallback/archived/rejected), hiperparámetros, rango y **huella** de datos, artefacto + SHA-256, versiones de librerías, semilla | UK `(tenant_id, version)`; `(tenant_id, status)` (modelo en producción/respaldo) | Nunca se reemplaza producción sin evaluación |
-| `model_evaluations` | motor | Métricas de backtest (rolling-origin) y realizadas, por nivel (overall, demand_class, horizon, branch, category, product, series) y baseline | `(tenant_id, forecast_run_id, evaluation_type, level)` (pantalla de precisión); `(tenant_id, model_registry_id)` | Inmutable |
+| `model_evaluations` | motor | Métricas de backtest (`backtest` = período final reservado; `selection_windows` = ventanas que eligieron el modelo; `extra.evaluation_scope`) y realizadas, por nivel (overall, demand_class, horizon, branch, category, product, series) y baseline | `(tenant_id, forecast_run_id, evaluation_type, level)` (pantalla de precisión); `(tenant_id, model_registry_id)` | Inmutable |
 | `forecast_values` | motor | Valores por nodo jerárquico (`node_key`), granularidad (day/week/month), fecha, paso de horizonte, `yhat` + intervalos 80/95, modelo y supuesto de precio/ingreso | UK `(forecast_run_id, node_key, granularity, target_date)` (gráfico de un nodo); `(forecast_run_id, level, granularity, target_date)` (rankings por producto/categoría) | Alto volumen: sin timestamps ni FKs a catálogos (los ids vienen del mismo tenant vía la ejecución, con FK compuesta). Retención por número de ejecuciones (docs/07) |
 | `forecast_actuals` | motor | Pronóstico vs real observado, error absoluto y marca de censura | UK `(forecast_run_id, node_key, target_date)`; `(tenant_id, target_date)` | Recalculable |
 

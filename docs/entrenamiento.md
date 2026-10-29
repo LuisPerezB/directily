@@ -60,21 +60,31 @@ horizonte (`horizon_step`), `model_registry_id` y feature set.
 ## Tiempos medidos (VPS de pruebas: 4 vCPU, 15 GB RAM, sin GPU)
 
 Empresa demo completa **Ferretería Andina (ficticia)**: 3 sucursales, 62 productos, 183 series
-activas, 99 334 líneas de venta (24 meses), inventario diario. Medición con
-`engine/scripts/benchmark_demo.py` vía HTTP (`/execute`):
+activas, 99 334 líneas de venta (24 meses), inventario diario. Medición del 29-oct-2026 con
+`engine/scripts/benchmark_demo.py` vía HTTP (`/execute`), con la máquina sin otras cargas:
 
 | Fase | Segundos |
 |---|---|
-| Carga de datos desde PostgreSQL | 1,7 |
-| Perfilado | 0,6 |
-| Backtesting (3 ventanas × 8 modelos, incl. LightGBM) | 15,5 |
-| Entrenamiento final + predicción 90 días | 5,6 |
-| Reconciliación + intervalos | 0,6 |
-| Persistencia (27 140 filas de `forecast_values` vía COPY + registro, evaluaciones, 183 recomendaciones) | 0,8 |
-| **Total de punta a punta (HTTP)** | **28,0** |
+| Carga de datos desde PostgreSQL | 2,6 |
+| Perfilado (corte final; cada ventana se reperfila dentro del backtesting) | 0,4 |
+| Backtesting (3 ventanas de selección + período final reservado × 8 modelos, incl. LightGBM) | 20,6 |
+| Entrenamiento final + predicción 90 días | 6,0 |
+| Reconciliación + intervalos | 0,7 |
+| Persistencia y respuesta (27 140 filas de `forecast_values` vía COPY, registro, 491 evaluaciones, recomendaciones) | ≈ 3,5 |
+| **Total de punta a punta (HTTP)** | **38,4** |
 
-Run histórico (corte −30 días): 26,8 s. `evaluate-actuals`: 0,5 s. Distribuidora Costa (80
-series, 15 meses): ~11 s en memoria. Resultados de precisión: ver `docs/04` §11.
+Run histórico (corte −30 días): 34,8 s. `evaluate-actuals`: 0,7 s; sus 30 días observados dieron
+WAPE realizado 0,511, sesgo +0,6 % y cobertura 80 % de 0,843.
+
+En memoria (`docs/validation/2026-10-28/benchmark_in_memory.py` adaptado; sin BD), medidos uno
+tras otro en la misma máquina: pipeline **32,6 s** (backtesting 19,3 s) y 40,4 s con la
+generación de datos, frente a 26,9 s (backtesting 16,0 s) y 34,5 s del código evaluado el
+28-oct. El aumento se debe a la ventana adicional del período final reservado (F6) y al
+reperfilado por ventana (F4, < 0,1 s por ventana). Resultados de precisión: ver `docs/04` §11.
+
+Con varios procesos del motor compitiendo por los 4 vCPU (p. ej. suites de pruebas en
+paralelo), LightGBM con `n_jobs = 4` puede quedar minutos en espera activa de OpenMP; en ese
+caso conviene `OMP_WAIT_POLICY=PASSIVE` o `ENGINE_N_JOBS=1` (un ajuste bajó de > 120 s a 1,1 s).
 
 Observación: en una primera medición sobre una BD con tablas recién cargadas el run tardó
 386 s fuera del pipeline, compatible con estadísticas de PostgreSQL desactualizadas (plan con
@@ -87,7 +97,7 @@ masivas (o dejar que autovacuum lo haga) en producción.
 
 ```bash
 cd backend && DB_DATABASE=predictily_engine_test php artisan migrate:fresh --force && cd ../engine
-.venv/bin/python -m pytest -q     # 43 pruebas: 34 unitarias + 9 de integración (~70 s)
+.venv/bin/python -m pytest -q     # 88 pruebas: 75 unitarias + 13 de integración (~110 s, 29-oct-2026)
 ```
 Las de integración se omiten si la BD de pruebas no está disponible. Cubren: escritura
 versionada, aislamiento entre dos empresas, idempotencia, 409 por concurrencia, cambio de run

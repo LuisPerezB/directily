@@ -24,6 +24,15 @@ entre ventas) y CV² (variabilidad de los tamaños no nulos) con umbrales 1,32 y
 `smooth`, `erratic`, `intermittent`, `lumpy`; `insufficient` si hay < 28 días o < 4 días
 con venta. La selección de modelos se hace **por clase**.
 
+**El perfil siempre es "a un corte" (F4).** `profile_at(panel, c)` calcula historia, días con
+venta, actividad (venta en los 180 días previos), clase y elegibilidad usando solo filas con
+fecha ≤ `c`. Producción usa el corte final; cada ventana de backtest usa su propio corte, de
+modo que ventas posteriores no cambian qué series se entrenan y evalúan en esa ventana ni su
+clase (antes se reutilizaba el perfil del corte final: una serie con 2 días de venta al 1-abr
+era elegible ese día si después vendía en mayo–julio). El estado del catálogo
+(`products.is_active`) solo se aplica en el corte final, porque su historia no está versionada.
+Cada fila del backtest guarda la clase de su serie en el corte de su ventana (`demand_class`).
+
 ## 3. Niveles estratégicos
 
 | Nivel | Estado en el MVP | Modelos |
@@ -54,17 +63,47 @@ la ejecución vigente usa lo conocido el día en que se ejecuta. Un histórico i
 `known_at` queda como conocido el día de la carga, de modo que el backtest lo trata como
 promoción no anunciada (`tests/unit/test_promotions_as_of.py`).
 
-| Historia disponible | Horizonte de backtest | Paso | Ventanas |
-|---|---|---|---|
-| ≥ 300 días | 90 | 28 | 3 |
-| ≥ 200 días | 60 | 21 | 3 |
-| ≥ 120 días | 30 | 14 | 3 |
-| ≥ 70 días | 14 | 7 | 2 |
-| < 70 días | sin backtest: promedio de la historia, intervalos no calibrados (warning) | | |
+**Período final reservado (holdout, F6).** Si la historia alcanza, el plan reserva una ventana
+final con origen `H = corte − h` y fechas objetivo `(H, corte]`. Las ventanas de **selección**
+terminan sus fechas objetivo en o antes de `H`: no comparten fechas con el holdout y sus residuos
+ya eran observables en `H`. Entre sí sí se solapan (con h = 90 y paso 28 comparten 62 fechas):
+sirven para comparar modelos desde varios orígenes, no como prueba independiente.
 
-Hay pruebas automáticas que perturban los datos posteriores al corte y verifican que las
-características y los pronósticos del backtest no cambian (`tests/unit/test_leakage.py`), y
-que los indicadores externos solo se usan desde su fecha real de publicación.
+| Historia disponible | Horizonte | Paso | Ventanas de selección | Holdout |
+|---|---|---|---|---|
+| ≥ 390 días | 90 | 28 | 3 | 90 días |
+| ≥ 260 días | 60 | 21 | 3 | 60 días |
+| ≥ 150 días | 30 | 14 | 3 | 30 días |
+| ≥ 84 días | 14 | 7 | 2 | 14 días |
+| 70–83 días | 14 | 7 | 2 | **no**: métricas de las ventanas de selección, con `warning` explícito |
+| < 70 días | sin backtest: promedio de la historia, intervalos no calibrados (warning) | | | |
+
+Se prefiere el mayor horizonte que admita un holdout independiente. Con 300–389 días ahora se
+usa h = 60 con holdout en vez de h = 90 sin holdout; los pasos 61–90 de producción se
+ensanchan con la regla de extrapolación (§7).
+
+Con período reservado, el procedimiento evaluado es el mismo que se usa en producción, pero
+ejecutado al origen `H`: (1) elegir modelos por clase solo con las ventanas de selección; (2)
+calibrar intervalos solo con los residuos de esas ventanas; (3) pronosticar `(H, corte]` y medir.
+El modelo de **producción** sí se elige y calibra con todas las ventanas (selección + holdout),
+porque para el pronóstico vigente conviene usar toda la evidencia. Las métricas que se anuncian
+salen del paso (3), no del ajuste de producción.
+
+Pruebas automáticas: perturbar datos posteriores al corte no cambia características ni pronósticos
+(`tests/unit/test_leakage.py`); el perfil al 1-abr del caso de la auditoría no cambia al perturbar
+el futuro (`test_profiling.py`); en el pipeline completo, alterar ventas posteriores al corte de
+la primera ventana (y añadir una serie que al corte tenía 2 días de venta) no cambia sus series,
+pronósticos ni clases; alterar el período reservado cambia sus métricas, pero no la selección
+usada para evaluarlo, ni sus pronósticos, ni las métricas de las ventanas de selección
+(`test_pipeline.py`). Los indicadores externos solo se usan desde su fecha real de publicación.
+
+**Pendiente documentado: evaluación anidada.** El holdout mide el procedimiento en un único
+origen (90 días, una temporada). Para estimar su variabilidad se puede repetir todo el
+procedimiento en varios orígenes externos `H₁ < H₂ < …` (p. ej. cada 28 días hacia atrás): en
+cada `Hᵢ`, perfilar, planificar las ventanas internas que terminan en o antes de `Hᵢ`, elegir y
+calibrar solo con ellas y medir en `(Hᵢ, Hᵢ + h]`; reportar la media y la dispersión entre
+orígenes. Cuesta unas 4 ventanas de backtest por origen externo (≈ 20 s cada uno en la demo de
+ferretería), por lo que conviene como tarea programada y no en cada ejecución.
 
 ## 5. Métricas
 
@@ -75,16 +114,29 @@ que los indicadores externos solo se usan desde su fecha real de publicación.
   (h1-7, h8-30, h31-90), sucursal, categoría, producto (`p{id}`) y serie (`b{id}-p{id}`).
 - Fila compuesta `model_family = 'selection'` (`is_selected = true`) = combinación de
   ganadores por clase; `seasonal_naive` con `is_baseline = true` es la referencia obligatoria.
+- **Qué métrica es la principal.** `evaluation_type = 'backtest'` (lo que leen Laravel, el
+  resumen `summary.metrics` y la alerta de deriva) contiene las métricas del **período final
+  reservado** cuando existe (`extra.evaluation_scope = 'holdout'`, `n_windows = 1`, `cutoffs` =
+  origen del holdout). Las ventanas que eligieron el modelo se guardan como
+  `evaluation_type = 'selection_windows'` (global, clase y horizonte): son **optimistas** por
+  construcción y la pantalla de precisión las muestra solo como referencia. Sin holdout posible,
+  `backtest` usa las ventanas de selección con `extra.evaluation_scope = 'selection_windows'` y el
+  run lleva el `warning` correspondiente. `summary.metrics` agrega `evaluation_scope`,
+  `independent_holdout`, `holdout` (fechas, selección por clase usada para evaluarlo, ventanas de
+  calibración) y `selection_windows` (métricas secundarias).
 - **No se anuncian "% de precisión"**: el WAPE diario por producto-sucursal es alto por
   naturaleza (demanda intermitente) y no se transforma en un porcentaje de confianza
   comercial; se muestra siempre junto al baseline y al error del total, que es mucho menor.
 
 ## 6. Selección automática y respaldo
 
-1. Por clase se evalúan los candidatos y el baseline.
+1. Por clase se evalúan los candidatos y el baseline. Cada fila del backtest cuenta en la clase
+   que su serie tenía **en el corte de su ventana**, no en el corte final (F4).
 2. Gana el estadístico de menor WAPE.
 3. LightGBM solo lo reemplaza si mejora su WAPE ≥ 3 % (relativo, `ENGINE_MIN_IMPROVEMENT`) **y**
    gana en ≥ 2/3 de las ventanas (estabilidad). Clases con poca evidencia usan la decisión agregada.
+   La regla se aplica dos veces: con todas las ventanas para el modelo de producción y solo con
+   las ventanas de selección para la evaluación en el período reservado (F6).
 4. Se registra un **modelo de respaldo** simple (mejor entre Seasonal Naive y Promedio móvil)
    que se usa si el ganador falla al entrenar o predecir.
 5. Un modelo de producción **nunca se reemplaza sin evaluación**: cada ejecución reevalúa a
@@ -97,9 +149,17 @@ Conformales a partir de los residuos del backtest del modelo elegido, normalizad
 escala de cada serie (media de 28 días). Nivel serie: cuantiles asimétricos por clase y tramo
 de horizonte (conteos sesgados). Niveles agregados: simétricos (|error|), más robustos cuando
 las ventanas comparten un sesgo estacional. Más allá del horizonte evaluado se ensanchan con
-√(paso/paso máximo). La cobertura se mide **dejando una ventana fuera** (honesta).
-Semanal/mensual y totales del horizonte (7/30/90) se calibran con sumas de errores del
-backtest (`granularity = 'week' | 'month' | 'horizon'`).
+√(paso/paso máximo). Semanal/mensual y totales del horizonte (7/30/90) se calibran con sumas de
+errores del backtest (`granularity = 'week' | 'month' | 'horizon'`).
+
+- **Producción:** residuos del modelo elegido en todas las ventanas (incluido el holdout),
+  agrupados por la clase de la serie en el corte de cada ventana.
+- **Cobertura anunciada (holdout):** el intervalo evaluado se calibra **solo** con los residuos de
+  las ventanas de selección, ya observables en el origen del holdout, y se mide en el holdout
+  (`holdout_coverage`). Es una prueba prospectiva.
+- **Cobertura secundaria (ventanas de selección):** "dejando una ventana fuera"; calibra con
+  ventanas posteriores y solapadas, por eso no es una prueba independiente (antes era la
+  cobertura anunciada).
 
 ## 8. Jerarquía
 
@@ -164,24 +224,48 @@ la variabilidad del plazo (`lead_time_std_days`) se registra pero no entra en el
 
 ## 11. Resultados medidos en los datos demo (ficticios)
 
-Backtest rolling-origin (3 ventanas × 90 días, cortes 2026-06-02, 06-30 y 07-28):
+Medición del 29-oct-2026 en memoria (semilla 42, datos **ficticios**, corte 2026-10-26).
+Período final reservado: 2026-07-29 a 2026-10-26 (origen 2026-07-28). Ventanas de selección y
+calibración de 90 días con cortes 2026-03-04, 04-01 y 04-29 (terminan el 2026-07-28).
 
-| Empresa demo | Series | WAPE diario serie: seleccionado vs Seasonal Naive | WAPE del total diario | Cobertura 80 % / 95 % |
-|---|---|---|---|---|
-| Ferretería Andina | 183 | **0,487** vs 0,645 | 0,107 vs 0,113 | 0,798 / 0,949 |
-| Distribuidora Costa | 80 | **0,457** vs 0,627 | 0,095 vs 0,135 | 0,796 / 0,941 |
+| Empresa demo | Series | WAPE diario serie: seleccionado vs Seasonal Naive | WAPE del total diario | Sesgo | Cobertura 80 % / 95 % |
+|---|---|---|---|---|---|
+| Ferretería Andina (holdout) | 183 | **0,493** vs 0,663 | 0,098 vs 0,116 | −4,0 % | 0,854 / 0,979 |
+| Distribuidora Costa (holdout) | 80 | **0,452** vs 0,602 | 0,100 vs 0,134 | +0,1 % | 0,797 / 0,953 |
+| Ferretería Andina (ventanas de selección, referencia optimista) | 183 | 0,504 vs 0,664 | 0,119 vs 0,130 | −8,1 % | 0,798 / 0,947 (dejando una fuera) |
 
-En Ferretería Andina ganó AutoETS en series suaves/erráticas (LightGBM no superó el margen
-del 3 %) y LightGBM en las intermitentes (0,866 vs 0,900 de Croston SBA, 3/3 ventanas). Un
-pronóstico con corte retroactivo de 30 días, comparado luego con las ventas reales, obtuvo
-WAPE realizado 0,511, sesgo +0,5 % y cobertura 80 % de 0,807.
+Ferretería, holdout por tramo: WAPE 0,480 / 0,493 / 0,494 y cobertura 80 % de 0,82 / 0,85 / 0,86
+en 1–7, 8–30 y 31–90 días. La cobertura del holdout queda **por encima** de la nominal: los
+intervalos se calibraron con residuos de marzo–julio, con más error que agosto–octubre, y
+resultaron conservadores en ese período. Se informa tal cual; con un solo origen no se sabe si
+es sistemático (ver evaluación anidada en §4).
+
+Modelos: en Ferretería, la selección usada para evaluar el holdout (solo ventanas anteriores) y
+la de producción (las 4 ventanas) coinciden: AutoETS en suaves/erráticas y LightGBM en
+intermitentes (0,878 vs 0,929 del promedio móvil de 28 días, 4/4 ventanas). Producción: LightGBM
+en 94 series y AutoETS en 89. En Costa la evaluación usó LightGBM en todas las clases salvo
+las suaves; producción: AutoETS 57 y LightGBM 23.
+
+**Qué cambió respecto a la evidencia del 28-oct** (`docs/validation/2026-10-28/`, conservada sin
+cambios): allí se anunciaron 0,4877 vs 0,6451 (total 0,1055 vs 0,1132), sesgo −7,2 % y
+cobertura 0,798 / 0,949, medidos en las mismas 3 ventanas que eligieron el modelo (cortes
+06-02, 06-30 y 07-28) y con el perfil del corte final. Ese procedimiento no medía una prueba
+independiente (F4 y F6). El WAPE por serie independiente es similar (0,493); el sesgo es menor
+porque el holdout cubre agosto–octubre; la cobertura 80 % sube a 0,854 porque ya no se calibra
+con el mismo período que se evalúa. El pronóstico retroactivo de 30 días comparado con ventas
+reales (WAPE realizado 0,511, sesgo +0,5 %, cobertura 80 % de 0,807) se midió antes de esta
+corrección y no se repitió.
 
 ## 12. Limitaciones conocidas (honestas)
 
-- Con < 1 año de historia la estacionalidad anual se estima con poca evidencia; las 3
-  ventanas de backtest pueden caer en la misma temporada (sesgo −7 % observado en la demo de
-  ferretería, cuyas ventanas coinciden con la temporada seca de construcción). Un lag anual
+- Con < 1 año de historia la estacionalidad anual se estima con poca evidencia; las ventanas
+  de backtest pueden caer en la misma temporada (sesgo −7 % en las ventanas del 28-oct, −8 % en
+  las ventanas de selección y −4 % en el holdout de la demo de ferretería). Un lag anual
   (364 días) se probó y apenas mejoró (0,4879 → 0,4869): se descartó por complejidad.
+- El holdout es **un solo período de 90 días**: es independiente de la selección, pero su
+  resultado depende de esa temporada. No hay intervalos de confianza de las métricas; la
+  evaluación anidada con varios orígenes (§4) queda pendiente.
+- Las métricas son de datos sintéticos; con un histórico real deben recalcularse.
 - Los indicadores macro (INEC/BCE) tienen interfaz as-of probada pero no están conectados.
 - Elasticidad precio-demanda y efectos causales no se estiman (el simulador usa supuestos).
 - Sin inventario no se detecta la demanda no atendida ni se generan recomendaciones.

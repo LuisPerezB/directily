@@ -391,6 +391,11 @@ def build_recommendations(
             limitations.append(
                 f"El saldo proyectado se agota el {(cutoff + pd.Timedelta(days=stockout_day)).date()}, antes de la "
                 f"recepción prevista del {(cutoff + pd.Timedelta(days=next_receipt)).date()}.")
+            if stockout_day is not None and stockout_day <= max(1, lt_days):
+                # Orientación de acción: comprar más no llega a tiempo para este faltante.
+                limitations.append(
+                    f"Un pedido nuevo tardaría unos {max(1, lt_days)} días y no evitaría este faltante: conviene "
+                    "acelerar la recepción pendiente o reasignar existencias entre sucursales.")
 
         avg30 = float(yhat[:30].mean()) if len(yhat) else 0.0
         days_cover = (max(physical, 0.0) / avg30) if avg30 > 1e-6 else None

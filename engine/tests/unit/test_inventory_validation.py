@@ -301,3 +301,13 @@ def test_supplier_lead_time_variability_widens_safety_stock():
     assert wide["suggested_qty"] > base["suggested_qty"]
     assert wide["assumptions"]["lead_time_variability_units"] == pytest.approx(30.0)
     assert base["assumptions"]["lead_time_variability_units"] is None
+
+
+def test_shortage_before_receipt_suggests_expediting_when_a_new_order_cannot_arrive_in_time():
+    r = _rec(days=30, lt=7, review=7, on_hand=10, orders=_orders(1000.0, 5))  # quiebre día 2, llegada día 5
+    texts = " ".join(r["assumptions"]["limitations"])
+    assert r["assumptions"]["stockout_before_receipt"] is True
+    assert "acelerar la recepción pendiente" in texts
+    calm = _rec(days=30, lt=7, review=7, on_hand=500)
+    assert "acelerar la recepción pendiente" not in " ".join(calm["assumptions"]["limitations"])
+
