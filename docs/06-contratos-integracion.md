@@ -97,8 +97,30 @@ Idempotente por (branch, product, snapshot_date) → upsert.
 `data/demo/` contiene datasets **ficticios** generados por `engine/predictily_engine/synthetic`
 (semilla fija). Cada CSV empieza con los mismos encabezados canónicos de arriba. Archivos:
 `{slug}_sales.csv`, `{slug}_products.csv`, `{slug}_inventory.csv`, `{slug}_lead_times.csv`,
-`{slug}_branches.csv` (`code,name,province,canton,commercial_zone`) y `{slug}_README.md`.
+`{slug}_branches.csv` (`code,name,province,canton,commercial_zone`),
+`{slug}_promotions.csv` (campos de §2.8, incluido `known_at`: 7–21 días antes del inicio; las
+promociones futuras, el último día de datos) y `{slug}_README.md`.
 Slugs: `ferreteria_andina` (empresa demo A) y `distribuidora_costa` (empresa demo B).
+
+### 2.8 `entity_type = promotions`
+| Campo | Req. | Tipo | Sinónimos típicos | Reglas |
+|---|---|---|---|---|
+| `name` | sí | texto | nombre, promocion, campana | |
+| `promo_type` | no | texto | tipo, tipo_promocion | percentage (defecto), fixed_amount, bundle, other |
+| `discount_pct` | no | número | descuento, porcentaje, dscto | fracción (0.15) o porcentaje (15 o 15 %) |
+| `starts_on` / `ends_on` | sí | fecha | desde, fecha_inicio / hasta, fecha_fin | fin ≥ inicio (ambos incluidos) |
+| `branch_code`, `product_sku`, `category` | no | texto | sucursal, sku, categoria | alcance; vacío = todos; deben existir |
+| `known_at` | no | fecha o fecha-hora | fecha_registro, fecha_de_registro, fecha_aprobacion, registrada_el, aprobada_el, fecha_planificacion | momento en que el negocio **aprobó o registró** la promoción, en la zona horaria de la empresa (solo fecha = medianoche local). Futura ⇒ error `future_date` (columna `known_at`). Si falta: una promoción nueva toma el momento de la importación; una existente conserva el suyo |
+
+Idempotente por (name, starts_on, ends_on, sucursal, producto, categoría): una fila existente se
+**actualiza** (no se borra y recrea) y conserva su historial; cambiar las fechas crea otra promoción.
+Estadísticas: `promotions_new`, `promotions_updated`, `promotions_unchanged`. Cada alta o cambio
+agrega una versión en `promotion_revisions` (`source = import`).
+
+**Por qué importa `known_at`:** el motor solo usa una promoción en el futuro de un corte si ya se
+conocía ese día (y con los valores vigentes entonces). Al cargar un histórico sin `known_at`, todas
+las promociones figuran como conocidas el día de la carga: el backtest las verá como hechos pasados,
+pero no como promociones planificadas, y medirá un pronóstico sin conocimiento previo de ellas.
 
 ---
 
@@ -157,7 +179,8 @@ Slugs: `ferreteria_andina` (empresa demo A) y `distribuidora_costa` (empresa dem
 | POST/PATCH | `/products`, `/products/{id}` [T] `catalog.manage` | |
 | GET | `/suppliers`, POST, PATCH [T] | |
 | GET/POST | `/lead-times` [T] | `{id, product_id, supplier_id, branch_id, lead_time_days, lead_time_std_days, source}` |
-| GET/POST/PATCH/DELETE | `/promotions` [T] | `{id,name,promo_type,discount_pct,starts_on,ends_on,branch_id,product_id,category_id}` |
+| GET/POST/PATCH/DELETE | `/promotions` [T] | `{id,name,promo_type,discount_pct,starts_on,ends_on,branch_id,product_id,category_id,known_at}`. `known_at` (ISO 8601, opcional al crear o editar): cuándo el negocio conocía la promoción; sin zona se interpreta en la de la empresa; no puede ser futura (422); por defecto = alta. POST/PATCH con cambios y DELETE (baja lógica) agregan una versión; PATCH sin cambios no |
+| GET | `/promotions/{id}/revisions` [T] | Historial (también de promociones dadas de baja): `[{revision, name, promo_type, discount_pct, starts_on, ends_on, branch_id, product_id, category_id, known_at, deleted, source(api\|import\|migration), recorded_at}]` |
 
 ### 3.5 Ventas e ingesta por API (conector REST)
 | Método | Ruta | Detalle |

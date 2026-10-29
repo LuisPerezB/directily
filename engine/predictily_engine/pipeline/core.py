@@ -29,8 +29,20 @@ from predictily_engine.backtest.rolling import (
 )
 from predictily_engine.config import FEATURE_SET_VERSION
 from predictily_engine.features.builder import PRICE_ASSUMPTION, FeatureBuilder, last_known_price
-from predictily_engine.intervals.conformal import ConformalCalibrator, day_bucket, identity_bucket, loo_coverage
-from predictily_engine.inventory.recommendations import LeadTimeErrorModel, build_recommendations
+from predictily_engine.intervals.conformal import (
+    ConformalCalibrator,
+    day_bucket,
+    hit_rates,
+    identity_bucket,
+    loo_coverage,
+    score_intervals,
+)
+from predictily_engine.inventory.recommendations import (
+    MAX_INTERNAL_HORIZON,
+    LeadTimeErrorModel,
+    build_recommendations,
+    required_coverage_days,
+)
 from predictily_engine.models.ml import LightGBMGlobal
 from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL
 from predictily_engine.models.statistical import forecast_statistical, window_average_short
@@ -69,6 +81,10 @@ class PipelineResult:
     training_data_hash: str
     lgbm: LightGBMGlobal | None = None
     timings: dict[str, float] = field(default_factory=dict)
+    # Filas del backtest (todas las ventanas; `is_holdout` marca el período final reservado) y
+    # selección usada SOLO para evaluar en ese período (elegida con las ventanas anteriores).
+    backtest: pd.DataFrame = field(default_factory=pd.DataFrame)
+    evaluation_selection: Selection | None = None
 
 
 def _noop(stage: str, pct: int) -> None:  # pragma: no cover
@@ -112,7 +128,14 @@ def run_pipeline(
     timings["profiling"] = time.perf_counter() - t0
 
     progress("building_features", 15)
-    features = FeatureBuilder(panel.df, data.branches, data.promotions, (cutoff + pd.Timedelta(days=horizon)).date())
+    # Horizonte interno (F2): las recomendaciones necesitan plazo + revisión aunque el horizonte
+    # pedido sea menor (tope MAX_INTERNAL_HORIZON). Solo se persiste hasta `horizon`.
+    fc_horizon = max(horizon, min(MAX_INTERNAL_HORIZON, required_coverage_days(
+        data.latest_inventory, data.lead_times, data.suppliers, data.effective_settings, active["unique_id"])))
+    # Promociones as-of (F5): a futuro de cada corte solo lo conocido ese día (known_at / revisiones).
+    features = FeatureBuilder(panel.df, data.branches, data.promotions, (cutoff + pd.Timedelta(days=fc_horizon)).date(),
+                              promotion_revisions=data.promotion_revisions,
+                              promotions_known_on=data.promotions_known_on)
     plan = plan_backtest(panel, max_windows)
     full_ids = eligible_ids(panel, cutoff)
     use_lgbm = 5 <= len(full_ids) <= max_series_lgbm
@@ -123,7 +146,8 @@ def run_pipeline(
     if force_families:
         families = [f for f in families if f in force_families] or families
 
-    # ── Backtesting rolling-origin ──
+    # ── Backtesting rolling-origin: ventanas de selección + período final reservado (holdout) ──
+    # Cada ventana se perfila con datos ≤ su corte (elegibilidad y clase sin fuga, F4).
     t1 = time.perf_counter()
     if plan is not None:
         progress("backtesting", 20)
@@ -136,11 +160,22 @@ def run_pipeline(
     timings["backtesting"] = time.perf_counter() - t1
 
     progress("selecting", 58)
+    eval_selection: Selection | None = None
     if bt.empty:
         selection = Selection({"pooled": "window_average"}, "seasonal_naive",
                               {"pooled": "Sin backtest posible: promedio móvil."}, pd.DataFrame(), pd.DataFrame())
     else:
+        # Producción: se elige con toda la evidencia (ventanas de selección + holdout).
         selection = select_models(bt, prof, min_improvement)
+        in_holdout = bt["is_holdout"].astype(bool)
+        if in_holdout.any() and (~in_holdout).any():
+            # Evaluación final (F6): la selección que se mide en el holdout solo ve ventanas anteriores.
+            eval_selection = select_models(bt[~in_holdout], prof, min_improvement)
+        else:
+            warnings.append(
+                "La historia no alcanza para reservar un período final independiente: las métricas de precisión "
+                "provienen de las mismas ventanas que eligieron el modelo y calibraron los intervalos, por lo que "
+                "son optimistas.")
 
     # ── Entrenamiento final y predicción ──
     t2 = time.perf_counter()
@@ -150,14 +185,14 @@ def run_pipeline(
     preds = []
     stat_needed = [f for f in needed if f in STATISTICAL]
     if full_ids:
-        preds.append(forecast_statistical(train[["unique_id", "ds", "y"]], horizon, stat_needed))
+        preds.append(forecast_statistical(train[["unique_id", "ds", "y"]], fc_horizon, stat_needed))
     lgbm: LightGBMGlobal | None = None
     if "lightgbm_global" in needed and full_ids:
         try:
             tr, ref = features.training_frame(cutoff, full_ids)
             lgbm = LightGBMGlobal(seed=seed, n_jobs=n_jobs).fit(tr)
             progress("predicting", 72)
-            preds.append(lgbm.predict(horizon, features.future_frame(cutoff, full_ids, horizon, ref)))
+            preds.append(lgbm.predict(fc_horizon, features.future_frame(cutoff, full_ids, fc_horizon, ref)))
         except Exception as exc:  # respaldo: el pipeline sigue con el modelo de respaldo
             log.exception("LightGBM final falló")
             warnings.append(f"LightGBM falló en el entrenamiento final ({type(exc).__name__}); "
@@ -166,7 +201,7 @@ def run_pipeline(
     short_ids = active.loc[~active["unique_id"].isin(full_ids), "unique_id"].tolist()
     if short_ids:
         short_train = panel.df[(panel.df["ds"] <= cutoff) & panel.df["unique_id"].isin(short_ids)]
-        preds.append(window_average_short(short_train, cutoff, horizon).assign(family="__short__"))
+        preds.append(window_average_short(short_train, cutoff, fc_horizon).assign(family="__short__"))
         warnings.append(f"{len(short_ids)} series con menos de 28 días de historia usan el promedio de su historia.")
     allp = pd.concat(preds, ignore_index=True) if preds else pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
     timings["training"] = time.perf_counter() - t2
@@ -199,9 +234,11 @@ def run_pipeline(
     # ── Intervalos (series) ──
     scales = series_scale(panel.df, cutoff)
     series_fc["scale"] = series_fc["unique_id"].map(scales).fillna(0.05)
+    # Producción: residuos del modelo elegido en TODAS las ventanas, agrupados por la clase que
+    # cada serie tenía en el corte de su ventana (la clase con la que se hizo ese pronóstico).
     sel_bt = selected_rows(bt, prof, selection) if not bt.empty else pd.DataFrame()
     if not sel_bt.empty:
-        cal_rows = sel_bt[~sel_bt["stockout"]].assign(group=lambda d: d["unique_id"].map(cls_map))
+        cal_rows = sel_bt[~sel_bt["stockout"]].assign(group=lambda d: d["demand_class"])
         calibrator = ConformalCalibrator(cal_rows, "group", day_bucket)
     else:
         calibrator = ConformalCalibrator(pd.DataFrame(columns=["group", "step", "actual", "yhat", "scale"]))
@@ -213,6 +250,10 @@ def run_pipeline(
     series_fc["unit_price_assumed"] = series_fc["unique_id"].map(price)
     series_fc["unit_price_assumed"] = series_fc["unit_price_assumed"].fillna(series_fc["product_id"].map(fallback_price))
     series_fc["revenue_yhat"] = series_fc["yhat"] * series_fc["unit_price_assumed"]
+
+    # Las recomendaciones usan el pronóstico interno completo (F2); se persiste solo el horizonte pedido.
+    rec_fc = series_fc
+    series_fc = series_fc[series_fc["step"] <= horizon].reset_index(drop=True)
 
     # ── Reconciliación jerárquica + intervalos agregados ──
     progress("reconciling", 80)
@@ -276,8 +317,8 @@ def run_pipeline(
     forecast_values = pd.concat([_finalize(v) for v in values], ignore_index=True)
     timings["reconciling"] = time.perf_counter() - t3
 
-    # ── Evaluaciones ──
-    evaluations = _evaluations(bt, sel_bt, agg_bt, prof, selection, plan, cat)
+    # ── Evaluaciones: holdout (principal) + ventanas de selección (secundaria, optimista) ──
+    evaluations = _evaluations(bt, selection, eval_selection, cat)
 
     # ── Recomendaciones ──
     progress("recommending", 86)
@@ -291,7 +332,7 @@ def run_pipeline(
         prod_cost = data.products.set_index("product_id")["current_cost"]
         error_model = LeadTimeErrorModel(sel_bt if not sel_bt.empty else pd.DataFrame(
             columns=["unique_id", "window", "step", "actual", "yhat", "stockout", "scale"]), cls_map)
-        recs = build_recommendations(series_fc, data.latest_inventory, data.lead_times, data.suppliers,
+        recs = build_recommendations(rec_fc, data.latest_inventory, data.lead_times, data.suppliers,
                                      data.open_purchase_orders, unit_costs.dropna(), error_model, prof, scales,
                                      data.effective_settings, cutoff)
         if not recs.empty:
@@ -299,13 +340,21 @@ def run_pipeline(
             recs.loc[missing_cost, "unit_cost"] = recs.loc[missing_cost, "product_id"].map(prod_cost)
             recs["estimated_investment"] = np.where(recs["unit_cost"].notna(),
                                                     recs["suggested_qty"] * recs["unit_cost"].fillna(0), np.nan)
+            n_short = int(recs["assumptions"].map(lambda a: bool(a.get("coverage_insufficient"))).sum())
+            if n_short:
+                warnings.append(f"{n_short} recomendaciones sin cantidad sugerida: plazo + revisión supera el "
+                                f"pronóstico interno ({fc_horizon} días).")
+            n_unknown = int(recs["assumptions"].map(lambda a: a.get("uncertainty") == "unknown").sum())
+            if n_unknown:
+                warnings.append(f"{n_unknown} recomendaciones con incertidumbre desconocida: sin probabilidad de "
+                                "quiebre y con stock de seguridad provisional.")
         no_inv = len(active) - (0 if recs.empty else len(recs))
         if no_inv > 0:
             warnings.append(f"{no_inv} series sin inventario registrado: sin recomendación de abastecimiento.")
 
     families_info = _families_info(selection, series_fc, bt, active)
     summary = _summary(series_fc, forecast_values, selection, evaluations, plan, readiness, recs, horizon,
-                       active, lgbm, warnings)
+                       active, lgbm, warnings, eval_selection)
     timings["total"] = time.perf_counter() - t0
     summary["timings_seconds"] = {k: round(v, 1) for k, v in timings.items()}
     return PipelineResult(
@@ -313,6 +362,7 @@ def run_pipeline(
         readiness=readiness, selection=selection, plan=plan, evaluations=evaluations, families=families_info,
         forecast_values=forecast_values, recommendations=recs, summary=summary, warnings=warnings,
         training_data_hash=training_data_hash(panel), lgbm=lgbm, timings=timings,
+        backtest=bt, evaluation_selection=eval_selection,
     )
 
 
@@ -391,88 +441,153 @@ def _finalize(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _metric_row(family: str, eval_level: str, key: str | None, row: pd.Series | dict, plan: BacktestPlan | None,
+# Contrato con Laravel: `evaluation_type='backtest'` son las métricas PRINCIPALES (las del período
+# final reservado cuando existe). Las ventanas que eligieron el modelo se guardan aparte como
+# diagnóstico secundario. `extra.evaluation_scope` indica de dónde viene cada fila.
+EVALUATION_PRIMARY = "backtest"
+EVALUATION_SELECTION_WINDOWS = "selection_windows"
+SCOPE_HOLDOUT = "holdout"
+SCOPE_SELECTION_WINDOWS = "selection_windows"
+_BUCKET_DAYS = {b[0]: b[3] for b in HORIZON_BUCKETS}
+
+
+def _iso_dates(values) -> list[str]:
+    return sorted({pd.Timestamp(v).date().isoformat() for v in values})
+
+
+def _metric_row(family: str, eval_level: str, key: str | None, row: pd.Series | dict, ctx: dict[str, Any],
                 horizon_days: int | None = None, is_selected: bool = False, cov=(None, None)) -> dict[str, Any]:
     g = (lambda k: None if pd.isna(row.get(k)) else float(row.get(k))) if isinstance(row, dict) else \
         (lambda k: None if pd.isna(row[k]) else float(row[k]))
     return {
-        "model_family": family, "evaluation_type": "backtest", "level": eval_level, "level_key": key,
+        "model_family": family, "evaluation_type": ctx["evaluation_type"], "level": eval_level, "level_key": key,
         "horizon_days": horizon_days, "is_baseline": family == BASELINE_FAMILY, "is_selected": is_selected,
         "wape": g("wape"), "mae": g("mae"), "rmse": g("rmse"), "bias": g("bias"),
         "coverage_80": cov[0], "coverage_95": cov[1], "n_obs": int(row["n_obs"]),
-        "n_windows": plan.windows if plan else 0,
-        "cutoffs": [c.date().isoformat() for c in plan.cutoffs] if plan else [],
+        "n_windows": len(ctx["cutoffs"]), "cutoffs": ctx["cutoffs"],
+        "extra": {"evaluation_scope": ctx["scope"], "independent_holdout": ctx["scope"] == SCOPE_HOLDOUT},
     }
 
 
-def _evaluations(bt, sel_bt, agg_bt, prof, selection: Selection, plan, cat) -> list[dict[str, Any]]:
-    if bt.empty:
-        return []
-    rows: list[dict[str, Any]] = []
-    cls_map = prof.set_index("unique_id")["demand_class"]
-    ids = bt["unique_id"].str.extract(r"b(\d+)-p(\d+)").astype(int)
-    clean = bt.assign(branch_id=ids[0], product_id=ids[1])
-    clean = clean[~clean["stockout"]].copy()
-    clean["demand_class"] = clean["unique_id"].map(cls_map)
-    clean["category_id"] = clean["product_id"].map(cat)
-    clean["hbucket"] = horizon_bucket(clean["step"])
-    winners_by_class = {c: selection.family_for(c) for c in clean["demand_class"].dropna().unique()}
+def _with_keys(rows: pd.DataFrame, cat: pd.Series) -> pd.DataFrame:
+    """Filas sin quiebre con sucursal, producto, categoría y tramo de horizonte."""
+    ids = rows["unique_id"].str.extract(r"b(\d+)-p(\d+)").astype(int)
+    out = rows.assign(branch_id=ids[0], product_id=ids[1])
+    out = out[~out["stockout"].astype(bool)].copy()
+    out["category_id"] = out["product_id"].map(cat)
+    out["hbucket"] = horizon_bucket(out["step"])
+    return out
 
-    def cov_for(rows_df):
-        r = rows_df[~rows_df["stockout"]].assign(group=rows_df["unique_id"].map(cls_map))
+
+def _daily_total(rows: pd.DataFrame) -> pd.DataFrame:
+    """Suma diaria de todas las series por ventana; los días censurados se anulan en ambos lados."""
+    b = rows[["window", "ds", "actual", "yhat", "stockout"]].copy()
+    b.loc[b["stockout"].astype(bool), ["actual", "yhat"]] = 0.0
+    return b.groupby(["window", "ds"], as_index=False)[["actual", "yhat"]].sum()
+
+
+def _coverage(test_rows: pd.DataFrame, calib_rows: pd.DataFrame | None) -> tuple[tuple, dict[str, tuple]]:
+    """Cobertura 80/95 de `test_rows` (global y por tramo de horizonte), agrupando por clase de ventana.
+
+    Con `calib_rows` (holdout): intervalos calibrados SOLO con esos residuos, ya observables en el
+    origen evaluado → prueba prospectiva. Sin `calib_rows`: dejando una ventana fuera dentro de
+    `test_rows` (diagnóstico de las ventanas de selección; usa ventanas posteriores y solapadas).
+    """
+    test = test_rows[~test_rows["stockout"].astype(bool)]
+    test = test.assign(group=test["demand_class"], hbucket=horizon_bucket(test["step"]))
+    buckets = list(pd.unique(test["hbucket"]))
+    if calib_rows is not None:
+        calib = calib_rows[~calib_rows["stockout"].astype(bool)]
+        scored = score_intervals(calib.assign(group=calib["demand_class"]), test, "group", day_bucket)
+        return hit_rates(scored), {b: hit_rates(scored[scored["hbucket"] == b]) for b in buckets}
+
+    def loo(r: pd.DataFrame) -> tuple:
         return loo_coverage(r, "group", day_bucket) if r["window"].nunique() > 1 else (None, None)
 
+    return loo(test), {b: loo(test[test["hbucket"] == b]) for b in buckets}
+
+
+def _scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, cat: pd.Series,
+                ctx: dict[str, Any], detail: bool) -> list[dict[str, Any]]:
+    """Métricas de las ventanas `test` para cada familia y para la selección `sel` (fila compuesta)."""
+    rows: list[dict[str, Any]] = []
+    if test.empty:
+        return rows
+    clean = _with_keys(test, cat)
+    winners_by_class = {c: sel.family_for(c) for c in clean["demand_class"].dropna().unique()}
     for fam, sub in clean.groupby("family"):
-        cov = cov_for(bt[bt["family"] == fam]) if fam == BASELINE_FAMILY else (None, None)
-        rows.append(_metric_row(fam, "overall", None, summarize(sub, ["family"]).iloc[0], plan, cov=cov))
+        cov = (None, None)
+        if fam == BASELINE_FAMILY:
+            cov, _ = _coverage(test[test["family"] == fam], None if calib is None else calib[calib["family"] == fam])
+        rows.append(_metric_row(fam, "overall", None, summarize(sub, ["family"]).iloc[0], ctx, cov=cov))
         for _, r in summarize(sub, ["demand_class"]).iterrows():
-            rows.append(_metric_row(fam, "demand_class", r["demand_class"], r, plan,
+            rows.append(_metric_row(fam, "demand_class", r["demand_class"], r, ctx,
                                     is_selected=winners_by_class.get(r["demand_class"]) == fam))
         for _, r in summarize(sub, ["hbucket"]).iterrows():
-            hd = {b[0]: b[3] for b in HORIZON_BUCKETS}[r["hbucket"]]
-            rows.append(_metric_row(fam, "horizon", r["hbucket"], r, plan, horizon_days=hd))
-        for _, r in summarize(sub, ["branch_id"]).iterrows():
-            rows.append(_metric_row(fam, "branch", f"b{int(r['branch_id'])}", r, plan))
-        for _, r in summarize(sub.dropna(subset=["category_id"]), ["category_id"]).iterrows():
-            rows.append(_metric_row(fam, "category", f"c{int(r['category_id'])}", r, plan))
-    if not sel_bt.empty:
-        ids = sel_bt["unique_id"].str.extract(r"b(\d+)-p(\d+)").astype(int)
-        s = sel_bt.assign(branch_id=ids[0], product_id=ids[1])
-        cov = cov_for(sel_bt)
-        s = s[~s["stockout"]].copy()
-        s["category_id"] = s["product_id"].map(cat)
-        s["demand_class"] = s["unique_id"].map(cls_map)
-        s["hbucket"] = horizon_bucket(s["step"])
-        s["fam"] = "selection"
-        rows.append(_metric_row("selection", "overall", None, summarize(s, ["fam"]).iloc[0], plan,
+            rows.append(_metric_row(fam, "horizon", r["hbucket"], r, ctx, horizon_days=_BUCKET_DAYS[r["hbucket"]]))
+        if detail:
+            for _, r in summarize(sub, ["branch_id"]).iterrows():
+                rows.append(_metric_row(fam, "branch", f"b{int(r['branch_id'])}", r, ctx))
+            for _, r in summarize(sub.dropna(subset=["category_id"]), ["category_id"]).iterrows():
+                rows.append(_metric_row(fam, "category", f"c{int(r['category_id'])}", r, ctx))
+
+    sel_test = selected_rows(test, None, sel)
+    if not sel_test.empty:
+        cov, cov_by_bucket = _coverage(sel_test, selected_rows(calib, None, sel) if calib is not None else None)
+        s = _with_keys(sel_test, cat).assign(fam="selection")
+        rows.append(_metric_row("selection", "overall", None, summarize(s, ["fam"]).iloc[0], ctx,
                                 is_selected=True, cov=cov))
-        sel_with_group = sel_bt[~sel_bt["stockout"]].assign(group=sel_bt["unique_id"].map(cls_map),
-                                                             hbucket=horizon_bucket(sel_bt["step"]))
         for _, r in summarize(s, ["hbucket"]).iterrows():
-            hd = {b[0]: b[3] for b in HORIZON_BUCKETS}[r["hbucket"]]
-            sub_cov = sel_with_group[sel_with_group["hbucket"] == r["hbucket"]]
-            c = loo_coverage(sub_cov, "group", day_bucket) if sub_cov["window"].nunique() > 1 else (None, None)
-            rows.append(_metric_row("selection", "horizon", r["hbucket"], r, plan, horizon_days=hd,
-                                    is_selected=True, cov=c))
-        for col, lvl, fmt in (("demand_class", "demand_class", "{}"), ("branch_id", "branch", "b{}"),
-                              ("category_id", "category", "c{}"), ("product_id", "product", "p{}")):
-            src = s.dropna(subset=[col])
-            for _, r in summarize(src, [col]).iterrows():
+            rows.append(_metric_row("selection", "horizon", r["hbucket"], r, ctx,
+                                    horizon_days=_BUCKET_DAYS[r["hbucket"]], is_selected=True,
+                                    cov=cov_by_bucket.get(r["hbucket"], (None, None))))
+        levels = [("demand_class", "demand_class", "{}")]
+        if detail:
+            levels += [("branch_id", "branch", "b{}"), ("category_id", "category", "c{}"),
+                       ("product_id", "product", "p{}")]
+        for col, lvl, fmt in levels:
+            for _, r in summarize(s.dropna(subset=[col]), [col]).iterrows():
                 key = fmt.format(r[col] if col == "demand_class" else int(r[col]))
-                rows.append(_metric_row("selection", lvl, key, r, plan, is_selected=True))
-        for _, r in summarize(s, ["branch_id", "product_id"]).iterrows():
-            rows.append(_metric_row("selection", "series", f"b{int(r['branch_id'])}-p{int(r['product_id'])}", r,
-                                    plan, is_selected=True))
-    # Nivel total (agregado): el error del total es mucho menor que el de cada producto.
-    if not agg_bt.empty:
-        tot = agg_bt[agg_bt["level"] == "total"].assign(fam="selection")
-        rows.append(_metric_row("selection", "total", "total", summarize(tot, ["fam"]).iloc[0], plan,
+                rows.append(_metric_row("selection", lvl, key, r, ctx, is_selected=True))
+        if detail:
+            for _, r in summarize(s, ["branch_id", "product_id"]).iterrows():
+                rows.append(_metric_row("selection", "series", f"b{int(r['branch_id'])}-p{int(r['product_id'])}",
+                                        r, ctx, is_selected=True))
+        # Nivel total (agregado): el error del total es mucho menor que el de cada producto.
+        tot = _daily_total(sel_test).assign(fam="selection")
+        rows.append(_metric_row("selection", "total", "total", summarize(tot, ["fam"]).iloc[0], ctx,
                                 is_selected=True))
-        base = bt[bt["family"] == BASELINE_FAMILY].copy()
-        base.loc[base["stockout"], ["actual", "yhat"]] = 0.0
-        btot = base.groupby(["window", "ds"], as_index=False)[["actual", "yhat"]].sum().assign(fam=BASELINE_FAMILY)
-        rows.append(_metric_row(BASELINE_FAMILY, "total", "total", summarize(btot, ["fam"]).iloc[0], plan))
+    base = test[test["family"] == BASELINE_FAMILY]
+    if not base.empty:
+        btot = _daily_total(base).assign(fam=BASELINE_FAMILY)
+        rows.append(_metric_row(BASELINE_FAMILY, "total", "total", summarize(btot, ["fam"]).iloc[0], ctx))
     return rows
+
+
+def _evaluations(bt: pd.DataFrame, selection: Selection, eval_selection: Selection | None,
+                 cat: pd.Series) -> list[dict[str, Any]]:
+    """Filas de `model_evaluations`.
+
+    Con período final reservado (`eval_selection` elegida solo con las ventanas anteriores):
+    - `backtest` (principal): métricas en el holdout de ese procedimiento; cobertura con intervalos
+      calibrados solo con residuos de las ventanas de selección (terminan en o antes del origen).
+    - `selection_windows` (secundaria): las ventanas que eligieron el modelo; optimistas por
+      construcción y con cobertura "dejando una ventana fuera".
+    Sin holdout independiente: `backtest` con todas las ventanas y la selección de producción
+    (`extra.evaluation_scope = 'selection_windows'`; el pipeline lo advierte en `warnings`).
+    """
+    if bt.empty:
+        return []
+    if eval_selection is not None:
+        in_holdout = bt["is_holdout"].astype(bool)
+        hold, windows = bt[in_holdout], bt[~in_holdout]
+        primary = {"evaluation_type": EVALUATION_PRIMARY, "scope": SCOPE_HOLDOUT, "cutoffs": _iso_dates(hold["cutoff"])}
+        secondary = {"evaluation_type": EVALUATION_SELECTION_WINDOWS, "scope": SCOPE_SELECTION_WINDOWS,
+                     "cutoffs": _iso_dates(windows["cutoff"])}
+        return (_scope_rows(hold, windows, eval_selection, cat, primary, detail=True)
+                + _scope_rows(windows, None, eval_selection, cat, secondary, detail=False))
+    ctx = {"evaluation_type": EVALUATION_PRIMARY, "scope": SCOPE_SELECTION_WINDOWS, "cutoffs": _iso_dates(bt["cutoff"])}
+    return _scope_rows(bt, None, selection, cat, ctx, detail=True)
 
 
 def _families_info(selection: Selection, series_fc: pd.DataFrame, bt: pd.DataFrame, active: pd.DataFrame) -> dict:
@@ -500,17 +615,73 @@ def _families_info(selection: Selection, series_fc: pd.DataFrame, bt: pd.DataFra
     return info
 
 
-def _summary(series_fc, fv, selection, evaluations, plan, readiness, recs, horizon, active, lgbm, warnings) -> dict:
+def _metrics_block(evaluations: list[dict[str, Any]], evaluation_type: str) -> dict[str, Any] | None:
     def ev(family, level, key=None):
         for e in evaluations:
-            if e["model_family"] == family and e["level"] == level and e["level_key"] == key:
+            if (e["evaluation_type"] == evaluation_type and e["model_family"] == family and e["level"] == level
+                    and e["level_key"] == key):
                 return e
         return None
 
-    sel = ev("selection", "overall")
-    base = ev(BASELINE_FAMILY, "overall")
-    sel_tot = ev("selection", "total", "total")
-    base_tot = ev(BASELINE_FAMILY, "total", "total")
+    sel, base = ev("selection", "overall"), ev(BASELINE_FAMILY, "overall")
+    if sel is None and base is None:
+        return None
+    sel_tot, base_tot = ev("selection", "total", "total"), ev(BASELINE_FAMILY, "total", "total")
+    return {
+        "selected_wape": sel["wape"] if sel else None,
+        "baseline_wape": base["wape"] if base else None,
+        "selected_bias": sel["bias"] if sel else None,
+        "coverage_80": sel["coverage_80"] if sel else None,
+        "coverage_95": sel["coverage_95"] if sel else None,
+        "total_selected_wape": sel_tot["wape"] if sel_tot else None,
+        "total_baseline_wape": base_tot["wape"] if base_tot else None,
+        "n_obs": sel["n_obs"] if sel else None,
+        "cutoffs": (sel or base)["cutoffs"],
+        "scope": (sel or base)["extra"]["evaluation_scope"],
+    }
+
+
+def _summary(series_fc, fv, selection, evaluations, plan, readiness, recs, horizon, active, lgbm, warnings,
+             eval_selection: Selection | None = None) -> dict:
+    primary = _metrics_block(evaluations, EVALUATION_PRIMARY) or {}
+    scope = primary.get("scope")
+    windows = _metrics_block(evaluations, EVALUATION_SELECTION_WINDOWS) if scope == SCOPE_HOLDOUT else None
+    keys = ("selected_wape", "baseline_wape", "selected_bias", "coverage_80", "coverage_95", "total_selected_wape",
+            "total_baseline_wape")
+    metrics: dict[str, Any] = {k: primary.get(k) for k in keys}
+    holdout = None
+    if scope == SCOPE_HOLDOUT and plan is not None and plan.holdout_cutoff is not None:
+        origin = plan.holdout_cutoff
+        holdout = {
+            "cutoff": origin.date().isoformat(), "horizon_days": plan.horizon,
+            "target_from": (origin + pd.Timedelta(days=1)).date().isoformat(),
+            "target_to": (origin + pd.Timedelta(days=plan.horizon)).date().isoformat(),
+            "n_obs": primary.get("n_obs"),
+            "selection_cutoffs": windows["cutoffs"] if windows else [],
+            "calibration_cutoffs": windows["cutoffs"] if windows else [],
+            "models_by_class": dict(eval_selection.winners) if eval_selection is not None else {},
+        }
+        note = (f"WAPE diario por serie (sucursal×producto) en el período final reservado "
+                f"({holdout['target_from']} a {holdout['target_to']}): el modelo se eligió y los intervalos se "
+                f"calibraron solo con ventanas cuyas fechas objetivo terminan en o antes de {holdout['cutoff']}; "
+                "los días con quiebre de stock se excluyen.")
+    elif primary:
+        note = ("WAPE diario por serie (sucursal×producto) en las mismas ventanas de backtesting que eligieron el "
+                "modelo (sin período final independiente: estimación optimista); los días con quiebre de stock se "
+                "excluyen.")
+    else:
+        note = "Sin backtesting: no hay métricas de validación."
+    metrics.update({
+        "evaluation_scope": scope,
+        "independent_holdout": scope == SCOPE_HOLDOUT,
+        "holdout": holdout,
+        "selection_windows": None if windows is None else {
+            **{k: windows[k] for k in keys}, "cutoffs": windows["cutoffs"],
+            "coverage_method": "leave_one_window_out", "optimistic": True,
+            "note": "Ventanas que eligieron el modelo (comparten fechas objetivo entre sí): no es una prueba "
+                    "independiente; cobertura dejando una ventana fuera."},
+        "metric_note": note,
+    })
     total = fv[(fv["level"] == "total") & (fv["granularity"] == "day")].sort_values("horizon_step")
     horizon_totals = {}
     for h in (7, 30, 90):
@@ -524,19 +695,11 @@ def _summary(series_fc, fv, selection, evaluations, plan, readiness, recs, horiz
         "series_by_class": {k: int(v) for k, v in active["demand_class"].value_counts().items()},
         "models": {k: int(v) for k, v in series_fc.drop_duplicates("unique_id")["model_family"].value_counts().items()},
         "selection_reasons": selection.reasons,
-        "metrics": {
-            "selected_wape": sel["wape"] if sel else None,
-            "baseline_wape": base["wape"] if base else None,
-            "selected_bias": sel["bias"] if sel else None,
-            "coverage_80": sel["coverage_80"] if sel else None,
-            "coverage_95": sel["coverage_95"] if sel else None,
-            "total_selected_wape": sel_tot["wape"] if sel_tot else None,
-            "total_baseline_wape": base_tot["wape"] if base_tot else None,
-            "metric_note": "WAPE diario por serie (sucursal×producto) en backtesting rolling-origin; "
-                           "los días con quiebre de stock se excluyen.",
-        },
+        "metrics": metrics,
         "backtest": {"horizon_days": plan.horizon, "windows": plan.windows, "step_days": plan.step,
-                     "cutoffs": [c.date().isoformat() for c in plan.cutoffs]} if plan else None,
+                     "cutoffs": [c.date().isoformat() for c in plan.cutoffs],
+                     "holdout_cutoff": plan.holdout_cutoff.date().isoformat() if plan.has_holdout else None}
+        if plan else None,
         "horizon_totals": horizon_totals,
         "price_assumption": PRICE_ASSUMPTION,
         "feature_set_version": FEATURE_SET_VERSION,

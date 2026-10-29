@@ -20,7 +20,7 @@ las resume; ante cualquier diferencia, mandan las migraciones.
 - **Valores enumerados** como `varchar` validado por enums de PHP (sin `CHECK` en BD, para evolucionar
   sin migraciones costosas). Los valores permitidos figuran en los comentarios de columna.
 - **Borrado lógico** (`deleted_at`) en catálogos y entidades editables (users, tenants, branches,
-  products, customers, suppliers, data_sources). Datos transaccionales y resultados del motor no
+  products, customers, suppliers, data_sources, promotions). Datos transaccionales y resultados del motor no
   se borran lógicamente: se versionan o se purgan por retención.
 - **Índices**: solo los justificados por consultas esperadas (ver cada tabla). Las PK y UNIQUE ya
   crean índice; no se duplican.
@@ -226,6 +226,7 @@ erDiagram
     sales ||--o{ sales : "nota de crédito → factura"
     products ||--o{ sale_items : "vendido"
     promotions ||--o{ sale_items : "aplica"
+    promotions ||--o{ promotion_revisions : "versiones"
     products ||--o{ product_price_history : ""
     products ||--o{ purchase_cost_history : ""
     suppliers ||--o{ purchase_cost_history : ""
@@ -262,6 +263,19 @@ erDiagram
         numeric discount_pct
         date starts_on
         date ends_on
+        timestamptz known_at "cuándo la conocía el negocio"
+        timestamptz deleted_at "baja lógica"
+    }
+    promotion_revisions {
+        bigint id PK
+        bigint promotion_id FK
+        int revision
+        numeric discount_pct
+        date starts_on
+        date ends_on
+        bool deleted
+        varchar source "api|import|migration"
+        timestamptz recorded_at
     }
 ```
 
@@ -269,7 +283,8 @@ erDiagram
 |---|---|---|---|---|
 | `sales` | Cabecera de documento comercial | `document_type`, `document_number` (p. ej. `001-001-000012345`), `status`, `issued_at`, `sale_date` (fecha local de la empresa), `channel`, `currency`, totales, `related_sale_id` (nota de crédito → factura), `source_hash` (hash del contenido normalizado), `import_job_id`, `data_source_id` | **UK `(tenant_id, document_type, document_number)`** = clave de idempotencia; `(tenant_id, sale_date)` (resúmenes por período); `(tenant_id, branch_id, sale_date)` (resumen por sucursal); `(tenant_id, customer_id)` (historial de cliente) | Reimportar: mismo hash → sin cambios; hash distinto → actualiza cabecera y reemplaza líneas; nunca duplica |
 | `sale_items` | Líneas con condiciones **históricas** | `quantity` (siempre positiva), `unit_price` (precio original antes de descuento), `discount_amount`, `net_amount` (sin impuestos), `tax_amount`, `unit_cost` (si el origen lo provee), `is_return`, `promotion_id`; `branch_id` y `sale_date` desnormalizados | UK `(sale_id, line_number)`; **`(tenant_id, sale_date, branch_id, product_id)`** → consulta principal del motor (series diarias); **`(tenant_id, product_id, sale_date)`** → histórico de un producto en el dashboard | FKs compuestas a venta, producto, sucursal y promoción. Las devoluciones no se restan de la demanda diaria: se reportan aparte |
-| `promotions` | Promociones planificadas o históricas (variables conocidas a futuro) | `promo_type`, `discount_pct`, `starts_on`, `ends_on`, alcance por sucursal/producto/categoría (NULL = todos) | `(tenant_id, starts_on, ends_on)` (promociones vigentes en una fecha) | — |
+| `promotions` | Promociones planificadas o históricas (covariables del motor) | `promo_type`, `discount_pct`, `starts_on`, `ends_on`, alcance por sucursal/producto/categoría (NULL = todos), **`known_at`** (timestamptz NOT NULL, defecto `CURRENT_TIMESTAMP`: momento en que el negocio conocía/registró la promoción; por defecto = `created_at`; importación y API aceptan la fecha real, nunca futura), `deleted_at` (baja lógica) | `(tenant_id, starts_on, ends_on)` (promociones vigentes en una fecha) | FKs compuestas a sucursal, producto y categoría. La baja es lógica para conservar el historial. Backfill de la migración `2026_01_03_000100`: `known_at = created_at` |
+| `promotion_revisions` | Versiones históricas de cada promoción (regla as-of del motor) | `revision` (1 = alta, +1 por cambio), copia de `name`, `promo_type`, `discount_pct`, `starts_on`, `ends_on`, alcance y `known_at`; `deleted` (versión de baja), `source` (`api`, `import`, `migration`), `recorded_at` (cuándo Predictily registró la versión) | UK `(tenant_id, promotion_id, revision)` (también sirve la lectura por empresa del motor) | **Solo inserción**, escrita por `PromotionObserver` / `PromotionRevisionRecorder` en la misma transacción que el alta, cambio de un campo versionado, baja o restauración. FK compuesta `(tenant_id, promotion_id)` → `promotions` (cascada solo con borrado definitivo) y a sucursal/producto/categoría. Backfill: una revisión 1 (`migration`) por promoción existente |
 | `product_price_history` | Historial de precios de lista | `price`, `valid_from`, `valid_to`, `branch_id` (NULL = general), `source` | `(tenant_id, product_id, valid_from)` (precio vigente en fecha) | Solo inserción |
 | `purchase_cost_history` | Historial de costos de compra | `unit_cost`, `supplier_id`, `valid_from`, `purchase_order_id`, `source` | `(tenant_id, product_id, valid_from)` (costo vigente en fecha) | Solo inserción |
 
@@ -478,6 +493,7 @@ pedidos ni compromete fondos.
 |---|---|
 | Esquema | Migraciones versionadas de Laravel; el motor no altera el esquema |
 | Documentos de venta | Idempotencia por clave natural + `source_hash`; `import_job_id` del último cambio |
+| Promociones | `known_at` (disponibilidad) + `promotion_revisions` de solo inserción; el motor reconstruye lo conocido en cada corte |
 | Archivos importados | Disco privado `tenants/{id}/imports/`, hash SHA-256; se eliminan al rechazar o al vencer la retención |
 | Pronósticos | `forecast_runs.version` por empresa; cada valor ligado a ejecución, modelo (`model_registry_id`/`model_family`), `horizon_step`, `feature_set_version` y fecha de generación |
 | Modelos | `model_registry` con huella de datos, artefacto SHA-256, semilla y versiones de librerías |

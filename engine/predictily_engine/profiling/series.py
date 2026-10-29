@@ -8,6 +8,10 @@
   estadísticos se imputa de forma conservadora: max(venta, media móvil de 28 días sin
   quiebre). Esos días se excluyen de la pérdida de LightGBM y de las métricas.
 - Clasificación Syntetos-Boylan sobre los últimos 365 días sin quiebre.
+- El perfil (actividad, clase, elegibilidad) se calcula SIEMPRE con información disponible
+  a un corte (`profile_at`): el del corte final para producción y uno propio para cada
+  ventana de backtest, de modo que ventas posteriores a una ventana no cambian qué series
+  entrenan/evalúan en ella ni su clase (hallazgo F4, validación del 28-oct-2026).
 """
 
 from __future__ import annotations
@@ -115,36 +119,78 @@ def build_panel(data: TenantData) -> Panel:
     cat_map = data.products.set_index("product_id")["category_id"] if not data.products.empty else pd.Series(dtype=float)
     df["category_id"] = df["product_id"].map(cat_map)
 
-    profile = _profile(df, data, cutoff)
+    active_products = set(data.products.loc[data.products["is_active"].astype(bool), "product_id"].astype(int)) \
+        if not data.products.empty else set()
+    profile = profile_at(df, cutoff, active_products)
     return Panel(df.drop(columns=["net_amount"]), profile, cutoff)
 
 
-def _profile(df: pd.DataFrame, data: TenantData, cutoff: pd.Timestamp) -> pd.DataFrame:
-    active_products = set(data.products.loc[data.products["is_active"].astype(bool), "product_id"].astype(int)) \
-        if not data.products.empty else set()
-    rows = []
-    window_start = cutoff - pd.Timedelta(days=364)
-    for uid, s in df.groupby("unique_id", sort=False):
-        b, p = int(s["branch_id"].iat[0]), int(s["product_id"].iat[0])
-        sold = s.loc[s["units"] > 0, "ds"]
-        history_days = len(s)
-        recent = s[(s["ds"] >= window_start) & ~s["stockout"]]
-        cls, adi, cv2 = classify_demand(recent["units"].to_numpy(), history_days)
-        last_sale = sold.max() if len(sold) else pd.NaT
-        inactive = pd.isna(last_sale) or (cutoff - last_sale).days > INACTIVE_AFTER_DAYS
-        if active_products and p not in active_products:
-            inactive = True
-        rows.append({
-            "unique_id": uid, "branch_id": b, "product_id": p,
-            "category_id": s["category_id"].iat[0],
-            "first_sale_date": s["ds"].iat[0].date(),
-            "last_sale_date": last_sale.date() if not pd.isna(last_sale) else None,
-            "history_days": history_days,
-            "nonzero_days": int((s["units"] > 0).sum()),
-            "total_units": float(s["units"].sum()),
-            "adi": adi, "cv2": cv2, "demand_class": cls,
-            "stockout_days": int(s["stockout"].sum()),
-            "censored_days": int((s["stockout"] & (s["units"] == 0)).sum()),
-            "is_active": not inactive,
-        })
-    return pd.DataFrame(rows)
+PROFILE_COLUMNS = ["unique_id", "branch_id", "product_id", "category_id", "first_sale_date", "last_sale_date",
+                   "history_days", "nonzero_days", "total_units", "adi", "cv2", "demand_class", "stockout_days",
+                   "censored_days", "is_active"]
+
+
+def profile_at(df: pd.DataFrame, cutoff: pd.Timestamp, active_products: set[int] | None = None) -> pd.DataFrame:
+    """Perfil por serie usando SOLO las filas del panel con `ds ≤ cutoff`.
+
+    Equivale a perfilar el panel que se habría construido con corte `cutoff`: historia,
+    días con venta, última venta, actividad (venta en los últimos 180 días) y clase
+    Syntetos-Boylan sobre los 365 días previos sin quiebre. Las series cuya primera venta es
+    posterior al corte no aparecen.
+
+    `active_products` (estado actual del catálogo) solo debe pasarse en el corte final: su
+    historia no está versionada y aplicarlo a un corte pasado usaría una decisión posterior
+    (p. ej. descontinuar un producto) para decidir qué series se evaluaban entonces.
+    """
+    cutoff = pd.Timestamp(cutoff)
+    d = df[df["ds"] <= cutoff]
+    if d.empty:
+        return pd.DataFrame(columns=PROFILE_COLUMNS)
+    units = d["units"]
+    sold = units > 0
+    g = d.groupby("unique_id", sort=False)
+    out = g.agg(branch_id=("branch_id", "first"), product_id=("product_id", "first"),
+                category_id=("category_id", "first"), first_ds=("ds", "min"), history_days=("ds", "size"),
+                total_units=("units", "sum"), stockout_days=("stockout", "sum"))
+    out["nonzero_days"] = sold.groupby(d["unique_id"], sort=False).sum().reindex(out.index).fillna(0)
+    out["last_ds"] = d.loc[sold].groupby("unique_id", sort=False)["ds"].max().reindex(out.index)
+    out["censored_days"] = (d["stockout"] & (units == 0)).groupby(d["unique_id"], sort=False).sum() \
+        .reindex(out.index).fillna(0)
+
+    # Clasificación sobre los 365 días previos al corte sin quiebre (misma regla que classify_demand)
+    recent = d[(d["ds"] >= cutoff - pd.Timedelta(days=364)) & ~d["stockout"]]
+    n_recent = recent.groupby("unique_id", sort=False).size().reindex(out.index).fillna(0).to_numpy(float)
+    nz = recent.loc[recent["units"] > 0].groupby("unique_id", sort=False)["units"]
+    nz_n = nz.size().reindex(out.index).fillna(0).to_numpy(float)
+    nz_mean = nz.mean().reindex(out.index).to_numpy(float)
+    nz_std = nz.std(ddof=0).reindex(out.index).to_numpy(float)
+    hist = out["history_days"].to_numpy()
+    insufficient = (hist < MIN_HISTORY_DAYS) | (nz_n < MIN_NONZERO_DAYS)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        adi = np.where(nz_n > 0, n_recent / np.where(nz_n > 0, nz_n, 1), np.nan)
+        cv2 = np.where(nz_mean > 0, (nz_std / np.where(nz_mean > 0, nz_mean, 1)) ** 2, 0.0)
+    cv2 = np.where(insufficient, np.nan, cv2)
+    cls = np.where(adi < ADI_THRESHOLD, np.where(cv2 < CV2_THRESHOLD, "smooth", "erratic"),
+                   np.where(cv2 < CV2_THRESHOLD, "intermittent", "lumpy"))
+    cls = np.where(insufficient, "insufficient", cls)
+
+    last = out["last_ds"]
+    inactive = last.isna().to_numpy() | ((cutoff - last).dt.days > INACTIVE_AFTER_DAYS).fillna(True).to_numpy()
+    if active_products:
+        inactive |= ~out["product_id"].astype(int).isin(active_products).to_numpy()
+    res = pd.DataFrame({
+        "unique_id": out.index.to_numpy(),
+        "branch_id": out["branch_id"].astype(int).to_numpy(),
+        "product_id": out["product_id"].astype(int).to_numpy(),
+        "category_id": out["category_id"].to_numpy(),
+        "first_sale_date": [ts.date() for ts in out["first_ds"]],
+        "last_sale_date": [None if pd.isna(ts) else ts.date() for ts in last],
+        "history_days": out["history_days"].astype(int).to_numpy(),
+        "nonzero_days": out["nonzero_days"].astype(int).to_numpy(),
+        "total_units": out["total_units"].astype(float).to_numpy(),
+        "adi": adi, "cv2": cv2, "demand_class": cls,
+        "stockout_days": out["stockout_days"].astype(int).to_numpy(),
+        "censored_days": out["censored_days"].astype(int).to_numpy(),
+        "is_active": ~inactive,
+    })
+    return res.reset_index(drop=True)

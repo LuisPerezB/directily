@@ -145,6 +145,7 @@ final class ImportFieldRegistry
             new FieldDefinition('branch_code', 'Sucursal', false, 'string', 'Vacío = todas las sucursales.', ['sucursal', 'branch_code', 'establecimiento']),
             new FieldDefinition('product_sku', 'Producto', false, 'string', 'Producto específico (opcional).', ['codigo', 'sku', 'product_sku', 'codigo_producto']),
             new FieldDefinition('category', 'Categoría', false, 'string', 'Categoría completa (opcional).', ['categoria', 'category', 'linea', 'familia']),
+            new FieldDefinition('known_at', 'Registrada el', false, 'datetime', 'Fecha (o fecha-hora) en que el negocio aprobó o registró la promoción; no puede ser futura. Si falta, se usa el momento de la importación. En históricos indique la fecha real de planificación: el pronóstico de un corte solo usa promociones ya conocidas ese día.', ['known_at', 'fecha_registro', 'fecha_de_registro', 'fecha_aprobacion', 'fecha_de_aprobacion', 'registrada_el', 'aprobada_el', 'fecha_planificacion']),
         ];
     }
 }

@@ -104,6 +104,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
 
         Route::get('promotions', [PromotionController::class, 'index'])->middleware('tenant.ability:data.view');
         Route::get('promotions/{promotion}', [PromotionController::class, 'show'])->middleware('tenant.ability:data.view');
+        Route::get('promotions/{promotion}/revisions', [PromotionController::class, 'revisions'])->middleware('tenant.ability:data.view')->withTrashed();
         Route::post('promotions', [PromotionController::class, 'store'])->middleware('tenant.ability:catalog.manage');
         Route::patch('promotions/{promotion}', [PromotionController::class, 'update'])->middleware('tenant.ability:catalog.manage');
         Route::delete('promotions/{promotion}', [PromotionController::class, 'destroy'])->middleware('tenant.ability:catalog.manage');

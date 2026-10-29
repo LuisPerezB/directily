@@ -588,6 +588,7 @@
     "onHand": "Existencias",
     "reserved": "Reservado",
     "inTransit": "En tránsito",
+    "inventoryPosition": "Posición de inventario",
     "leadTime": "Plazo de entrega",
     "reviewPeriod": "Período de revisión",
     "demandLeadTime": "Demanda esperada en el plazo",
@@ -603,8 +604,9 @@
     "howCalculated": "Cómo se calculó",
     "explainDemand": "Demanda pronosticada para los próximos {days} días (plazo de entrega + período de revisión): {value} unidades.",
     "explainSafety": "Stock de seguridad para un nivel de servicio de {level}: {value} unidades, según la incertidumbre del pronóstico.",
-    "explainSuggested": "Punto de reorden {rop} − disponible {available} ⇒ compra sugerida de {qty} unidades (nunca negativa).",
-    "explainProbability": "La probabilidad de quiebre es una aproximación estadística; si hubo días sin stock, la venta histórica pudo subestimar la demanda.",
+    "explainSuggested": "Punto de reorden {rop} − posición de inventario {available} (disponible + compras que llegan dentro del plazo + revisión) ⇒ compra sugerida de {qty} unidades (nunca negativa).",
+    "explainProbability": "La probabilidad de quiebre es una aproximación estadística que respeta la fecha de llegada de cada compra; si hubo días sin stock, la venta histórica pudo subestimar la demanda.",
+    "limitationsTitle": "Limitaciones de esta recomendación",
     "assumptions": "Supuestos utilizados"
   },
   "accuracy": {

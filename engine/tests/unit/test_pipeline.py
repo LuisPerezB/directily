@@ -66,10 +66,17 @@ def test_reproducible_with_same_seed(small_data, pipeline_result):
 def test_recommendations_and_censoring(pipeline_result):
     recs = pipeline_result.recommendations
     assert not recs.empty
+    # Horizonte de 90 días: plazo + revisión siempre cubiertos → todas las cantidades existen (F2).
+    assert not recs["assumptions"].map(lambda a: a["coverage_insufficient"]).any()
     assert (recs["suggested_qty"] >= 0).all()
     assert (recs["reorder_point"] >= recs["demand_lead_time"] - 1e-6).all()
     assert recs["risk_level"].isin(["low", "medium", "high", "critical"]).all()
-    assert (recs["stockout_probability"].between(0, 1)).all()
+    # Probabilidad nula solo si la incertidumbre es desconocida (F3); si no, en [0, 1].
+    unknown = recs["assumptions"].map(lambda a: a["uncertainty"] == "unknown")
+    assert (recs["stockout_probability"].isna() == unknown).all()
+    assert (recs.loc[~unknown, "stockout_probability"].between(0, 1)).all()
+    # Disponible = existencias − reservado; lo pendiente de recibir no cuenta como disponible hoy (F1).
+    np.testing.assert_allclose(recs["available"], recs["on_hand"] - recs["reserved"])
     # Estimación empírica con muestra finita: nunca 0 % ni 100 % exactos (regla de Laplace).
     empirical = recs[recs["assumptions"].map(lambda a: a.get("method") == "empirical_backtest")]
     assert not empirical.empty

@@ -39,8 +39,20 @@ con venta. La selección de modelos se hace **por clase**.
 
 Nunca se dividen los datos al azar. Para cada corte `c` se entrena solo con datos ≤ `c` y se
 pronostican los `h` días siguientes; las variables futuras se construyen igual que en
-producción (calendario y promociones registradas son conocidas; el **precio futuro se
-congela** en el último precio neto observado al corte).
+producción (el calendario es conocido; las promociones siguen la regla as-of de abajo; el
+**precio futuro se congela** en el último precio neto observado al corte).
+
+**Promociones as-of (F5).** Para las fechas ≤ `c` la promoción es un hecho observado y se usa
+tal como ocurrió (última versión registrada; una dada de baja no ocurrió). Para las fechas > `c`
+solo cuentan las promociones que el negocio ya conocía al cierre del día `c` (`promotions.known_at`
+≤ `c`, en hora local de la empresa) y con los valores de la versión vigente ese día: la última de
+`promotion_revisions` con `recorded_at` ≤ `c` (si ninguna es anterior, la primera versión, que se
+conocía desde `known_at`; sin revisiones, la fila actual salvo que ya estuviera dada de baja). Una
+promoción registrada, modificada o cancelada después de `c` no altera el pronóstico de `c`. Cada
+ventana del backtest, el período reservado y las ejecuciones históricas aplican su propio corte;
+la ejecución vigente usa lo conocido el día en que se ejecuta. Un histórico importado sin
+`known_at` queda como conocido el día de la carga, de modo que el backtest lo trata como
+promoción no anunciada (`tests/unit/test_promotions_as_of.py`).
 
 | Historia disponible | Horizonte de backtest | Paso | Ventanas |
 |---|---|---|---|
@@ -104,13 +116,51 @@ precios actuales: el precio y el costo históricos vienen de cada línea de vent
 
 ## 10. Inventario y abastecimiento
 
-Revisión periódica: `L` = plazo de proveedor (producto+sucursal > producto > proveedor >
-valor de la empresa) + período de revisión. Demanda en `L` = suma del pronóstico. Stock de
-seguridad = cuantil del nivel de servicio de la distribución **empírica** del error acumulado
-en `L` días del backtest (o aproximación normal desde los intervalos si falta evidencia).
-Punto de reorden, compra sugerida, inversión estimada, días de cobertura, probabilidad y fecha
-estimada de quiebre, nivel de riesgo. Disponible = existencias − reservado + en tránsito
-(snapshot u órdenes abiertas). **No se emiten pedidos ni se comprometen fondos.**
+Revisión periódica (order-up-to) con saldo diario proyectado
+(`engine/predictily_engine/inventory/recommendations.py`; corrige F1–F3 de la validación
+2026-10-28). **No se emiten pedidos ni se comprometen fondos.**
+
+**Cobertura.** `L` = plazo de proveedor (producto+sucursal > producto > proveedor > valor de
+la empresa) + período de revisión. La necesidad no depende del horizonte pedido: el pipeline
+pronostica internamente `max(horizonte, máx. L de las series con inventario)` días (tope 180)
+y persiste en `forecast_values` solo el horizonte solicitado; los primeros días no cambian. Si
+aun así el pronóstico es más corto que `L` (plazo + revisión > 180) **no se extrapola**: la
+recomendación se publica sin cantidades (`suggested_qty`, `demand_lead_time`, `safety_stock`,
+`reorder_point` y probabilidad en `null`), con `assumptions.coverage_insufficient = true`,
+días cubiertos frente a necesarios y una cota inferior (`suggested_qty_lower_bound`); el
+riesgo sale de los días cubiertos y es al menos «medio».
+
+**Existencias y recepciones.** `available` = existencias − reservado: lo único que atiende
+demanda hoy. Cada orden de compra abierta (una fila por orden, con su `expected_at`) llega en
+su fecha. Supuestos conservadores: una orden sin fecha o vencida sin recibir llega al final del
+plazo del proveedor (día = `lead_time_days`); el `in_transit` del inventario (sin fecha) se trata
+igual y solo se usa si la serie no tiene órdenes abiertas (si las tiene, se registra como no
+utilizado para no contarlo dos veces). Saldo del día `t` = disponible + recepciones hasta `t` −
+demanda pronosticada acumulada; la fecha estimada de quiebre es el primer día con saldo
+negativo **aunque después llegue una orden** (`assumptions.stockout_before_receipt`). Posición
+de inventario = disponible + recepciones que llegan dentro de `L`; las posteriores no reducen
+la compra de hoy. Compra sugerida = ⌈max(0, D_L + SS − posición)⌉ (con faltantes pendientes; en
+ventas perdidas es levemente conservadora).
+
+**Incertidumbre** (`assumptions.uncertainty`):
+
+| Caso | Stock de seguridad | Probabilidad de quiebre | Riesgo |
+|---|---|---|---|
+| `empirical`: ≥ 15 errores acumulados del backtest | cuantil del nivel de servicio (√ si `L` > días evaluados) | regla de Laplace, nunca 0 ni 1 | probabilidad, con piso del saldo |
+| `intervals`: σ diaria desde intervalos 80 % | z · σ_L | normal | probabilidad, con piso del saldo |
+| `zero_variability`: intervalos finitos de ancho 0 | 0 | 0 o 1 (legítimo) | probabilidad, con piso del saldo |
+| `unknown`: sin errores e intervalos NaN | `unknown_uncertainty_safety_factor` × D_L (0,5 por defecto, configurable) | `null` (también `demand_lead_time_std`) | reglas deterministas |
+
+La probabilidad se evalúa en los puntos de control del saldo (víspera de cada recepción dentro
+de `L` y el día `L`) y se toma el máximo (cota inferior de la unión; exacta si los errores son
+comonótonos). Reglas deterministas (`projected_risk_level`), que además son piso del riesgo
+probabilístico: **crítico** si el saldo proyectado se agota a más tardar el día en que llegaría
+una compra hecha hoy (día ≤ plazo); **alto** si se agota dentro de `L`; **medio** si cae bajo el
+stock de seguridad (solo sin probabilidad). Las limitaciones se listan en
+`assumptions.limitations` y la pantalla de inventario las muestra.
+
+Pendiente: las órdenes abiertas se leen en su estado actual también para cortes retroactivos;
+la variabilidad del plazo (`lead_time_std_days`) se registra pero no entra en el cálculo.
 
 ## 11. Resultados medidos en los datos demo (ficticios)
 

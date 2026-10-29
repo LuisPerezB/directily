@@ -1567,10 +1567,34 @@ paths:
     delete:
       tags:
       - Catálogos
-      summary: Eliminar
+      summary: Eliminar (baja lógica; queda una versión `deleted` en el historial)
       responses:
         '204':
           description: Eliminada
+  /promotions/{promotion}/revisions:
+    parameters:
+    - $ref: '#/components/parameters/TenantId'
+    - name: promotion
+      in: path
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Catálogos
+      summary: Historial de versiones de la promoción (incluye promociones dadas de baja)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PromotionRevision'
   /reports/forecast-summary:
     get:
       tags:
@@ -2718,6 +2742,58 @@ components:
           type:
           - integer
           - 'null'
+        known_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: Cuándo el negocio conocía/registró la promoción (no futura; sin zona = zona de la
+            empresa; por defecto, el alta). El motor solo la usa a futuro de un corte si known_at ≤ corte.
+    PromotionRevision:
+      type: object
+      properties:
+        revision:
+          type: integer
+        name:
+          type: string
+        promo_type:
+          type: string
+        discount_pct:
+          type:
+          - number
+          - 'null'
+        starts_on:
+          type: string
+          format: date
+        ends_on:
+          type: string
+          format: date
+        branch_id:
+          type:
+          - integer
+          - 'null'
+        product_id:
+          type:
+          - integer
+          - 'null'
+        category_id:
+          type:
+          - integer
+          - 'null'
+        known_at:
+          type: string
+          format: date-time
+        deleted:
+          type: boolean
+        source:
+          type: string
+          enum:
+          - api
+          - import
+          - migration
+        recorded_at:
+          type: string
+          format: date-time
     ImportOptions:
       type: object
       properties:

@@ -81,13 +81,23 @@ def load_company(conn: Connection, company: SyntheticCompany, name: str | None =
             "b": b_map.get(lt.branch_code) if lt.branch_code else None, "d": int(lt.lead_time_days),
             "sd": float(lt.lead_time_std_days)})
     for pr in company.promotions.itertuples(index=False):
-        conn.execute(text(
+        # Como el importador: known_at del archivo (fecha local de la empresa) o el momento de la carga,
+        # y la revisión 1 registrada ahora (histórico importado con su fecha real de planificación).
+        promo_id = conn.execute(text(
             "INSERT INTO promotions (tenant_id, name, promo_type, discount_pct, starts_on, ends_on, branch_id, "
-            "product_id, category_id, created_at, updated_at) VALUES (:t, :n, :ty, :d, :s, :e, :b, :p, :c, now(), now())"
+            "product_id, category_id, known_at, created_at, updated_at) VALUES (:t, :n, :ty, :d, :s, :e, :b, :p, :c, "
+            "COALESCE(CAST(:k AS timestamp) AT TIME ZONE 'America/Guayaquil', now()), now(), now()) RETURNING id"
         ), {"t": tenant_id, "n": pr.name, "ty": pr.promo_type, "d": float(pr.discount_pct), "s": pr.starts_on,
             "e": pr.ends_on, "b": b_map.get(pr.branch_code) if pr.branch_code else None,
             "p": p_map.get(pr.product_sku) if pr.product_sku else None,
-            "c": c_map.get(pr.category) if pr.category else None})
+            "c": c_map.get(pr.category) if pr.category else None,
+            "k": getattr(pr, "known_at", None) or None}).scalar_one()
+        conn.execute(text(
+            "INSERT INTO promotion_revisions (tenant_id, promotion_id, revision, name, promo_type, discount_pct, "
+            "starts_on, ends_on, branch_id, product_id, category_id, known_at, deleted, source, recorded_at) "
+            "SELECT tenant_id, id, 1, name, promo_type, discount_pct, starts_on, ends_on, branch_id, product_id, "
+            "category_id, known_at, false, 'import', now() FROM promotions WHERE tenant_id = :t AND id = :id"
+        ), {"t": tenant_id, "id": promo_id})
 
     s = company.sales.copy()
     s = s[s["product_sku"].isin(p_map)]

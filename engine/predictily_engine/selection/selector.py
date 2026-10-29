@@ -9,6 +9,15 @@ Reglas (docs/04-estrategia-modelado.md):
 4. Clases con poca evidencia (< 3 series o Σ ventas < 30) usan la decisión agregada.
 5. Se registra un modelo de respaldo simple (el mejor entre Seasonal Naive y Promedio móvil).
 6. Series con historia insuficiente usan el promedio de su historia disponible (sin evaluar).
+
+Cada fila del backtest se agrupa por la clase que su serie tenía en el corte de SU ventana
+(columna `demand_class` de `run_backtest`), no por la clase al corte final: así la selección
+de una ventana no depende de ventas posteriores (F4). Si la columna no existe (backtests
+externos o pruebas) se usa la clase del `profile` entregado.
+
+`select_models` no sabe qué ventanas recibe: el pipeline lo llama con TODAS las ventanas
+para el modelo de producción y SOLO con las ventanas de selección para la evaluación en el
+período final reservado (F6).
 """
 
 from __future__ import annotations
@@ -83,10 +92,18 @@ def _decide(sub: pd.DataFrame, candidates: list[str], min_improvement: float, la
     return winner, reason, table
 
 
+def row_classes(backtest: pd.DataFrame, profile: pd.DataFrame | None = None) -> pd.Series:
+    """Clase de demanda de cada fila: la de su ventana si existe; si no, la del perfil."""
+    if "demand_class" in backtest and backtest["demand_class"].notna().any():
+        return backtest["demand_class"]
+    if profile is None or profile.empty:
+        return pd.Series(None, index=backtest.index, dtype=object)
+    return backtest["unique_id"].map(profile.set_index("unique_id")["demand_class"])
+
+
 def select_models(backtest: pd.DataFrame, profile: pd.DataFrame, min_improvement: float = 0.03) -> Selection:
-    cls_map = profile.set_index("unique_id")["demand_class"]
-    bt = backtest[~backtest["stockout"]].copy()
-    bt["demand_class"] = bt["unique_id"].map(cls_map)
+    bt = backtest.assign(demand_class=row_classes(backtest, profile))
+    bt = bt[~bt["stockout"].astype(bool)].copy()
     all_families = sorted(bt["family"].unique())
 
     pooled_winner, pooled_reason, pooled_table = _decide(bt, all_families, min_improvement, POOLED)
@@ -116,7 +133,10 @@ def select_models(backtest: pd.DataFrame, profile: pd.DataFrame, min_improvement
 
 
 def selected_rows(backtest: pd.DataFrame, profile: pd.DataFrame, selection: Selection) -> pd.DataFrame:
-    """Filas del backtest correspondientes al modelo elegido para cada serie."""
-    cls_map = profile.set_index("unique_id")["demand_class"]
-    chosen = backtest["unique_id"].map(cls_map).map(selection.family_for)
-    return backtest[backtest["family"] == chosen].copy()
+    """Filas del backtest correspondientes al modelo elegido para cada serie (según la clase de
+    la serie en el corte de cada ventana)."""
+    if backtest.empty:
+        return backtest.copy()
+    classes = row_classes(backtest, profile)
+    chosen = classes.map(selection.family_for)  # clase desconocida → decisión agregada
+    return backtest[backtest["family"] == chosen].assign(demand_class=classes).copy()
