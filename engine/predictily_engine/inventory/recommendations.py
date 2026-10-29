@@ -301,6 +301,7 @@ def build_recommendations(
         demand_l = std_l = safety = reorder_point = suggested = prob = None
         lower_bound = None
         empirical_days = None
+        lt_variability = None
         limitations: list[str] = []
         if not coverage_ok:
             method, uncertainty, ss_policy = "coverage_insufficient", "not_evaluated", None
@@ -363,6 +364,14 @@ def build_recommendations(
                     "Sin errores históricos ni intervalos: la incertidumbre es desconocida. No se informa "
                     f"probabilidad de quiebre; stock de seguridad provisional = {unknown_factor:.0%} de la demanda "
                     "en la cobertura y riesgo según el saldo proyectado.")
+            # Variabilidad del plazo del proveedor (σ_L, días): suma independiente al error de la
+            # demanda, σ² = σ_demanda² + (d̄·σ_L)², con d̄ la demanda diaria media de la cobertura.
+            # La probabilidad de quiebre sigue reflejando solo la incertidumbre de la demanda.
+            if lt_std is not None and lt_std > 0 and L > 0:
+                lt_variability = (demand_l / L) * float(lt_std)
+                if std_l is not None:
+                    std_l = math.sqrt(std_l ** 2 + lt_variability ** 2)
+                safety = math.sqrt(safety ** 2 + (z * lt_variability) ** 2)
             reorder_point = demand_l + safety
             suggested = float(math.ceil(max(0.0, reorder_point - position) - 1e-9))
             if prob is None:
@@ -440,6 +449,7 @@ def build_recommendations(
                 "undated_arrival_assumption": "lead_time_end" if undated else None,
                 "stockout_before_receipt": next_receipt is not None,
                 "lead_time_std_days": lt_std,
+                "lead_time_variability_units": _r(lt_variability),
                 "service_level": service_level,
                 "snapshot_stale": bool((cutoff.date() - snap_date).days > 14),
                 "in_transit_source": transit_source,

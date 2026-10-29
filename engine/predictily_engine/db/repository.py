@@ -211,12 +211,35 @@ class TenantRepository:
             "FROM supplier_lead_times WHERE tenant_id = :tenant_id ORDER BY valid_from NULLS FIRST, id"
         )
 
-    def open_purchase_orders(self) -> pd.DataFrame:
+    def open_purchase_orders(self, as_of: date | None = None) -> pd.DataFrame:
         """Pendiente por recibir de cada orden abierta y producto, con SU fecha prevista.
 
         Una fila por orden (no se suman órdenes con fechas distintas): el inventario simula
         la llegada de cada una en `expected_at` (NULL = sin fecha; ver inventory.recommendations).
+
+        `as_of` (ejecuciones con corte retroactivo): solo órdenes emitidas hasta ese día y no
+        recibidas antes de él, para no usar compras que todavía no existían. Las recepciones
+        parciales no tienen fecha propia: se asume que ocurrieron después del corte (la orden
+        cuenta completa como pendiente). Sin `as_of` se usa el estado actual.
         """
+        if as_of is not None:
+            return self._read(
+                """
+                SELECT po.id AS purchase_order_id, po.branch_id, poi.product_id, po.supplier_id,
+                       po.ordered_at, po.expected_at,
+                       SUM(poi.quantity_ordered)::float8 AS qty_open
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id AND po.tenant_id = poi.tenant_id
+                WHERE poi.tenant_id = :tenant_id AND po.tenant_id = :tenant_id
+                  AND po.status NOT IN ('draft', 'cancelled')
+                  AND po.ordered_at <= :as_of
+                  AND (po.received_at IS NULL OR po.received_at > :as_of)
+                GROUP BY po.id, po.branch_id, poi.product_id, po.supplier_id, po.ordered_at, po.expected_at
+                HAVING SUM(poi.quantity_ordered) > 0
+                ORDER BY po.branch_id, poi.product_id, po.expected_at NULLS LAST, po.id
+                """,
+                as_of=as_of,
+            )
         return self._read(
             """
             SELECT po.id AS purchase_order_id, po.branch_id, poi.product_id, po.supplier_id,

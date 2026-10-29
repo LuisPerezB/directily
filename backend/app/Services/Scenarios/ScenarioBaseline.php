@@ -23,5 +23,7 @@ final class ScenarioBaseline
         public readonly array $products,
         public readonly array $replenishment = [],
         public readonly ?float $dataQualityScore = null,
+        /** Recomendaciones sin cantidad (cobertura insuficiente) que quedan fuera de la compra simulada. */
+        public readonly int $replenishmentWithoutQuantity = 0,
     ) {}
 }

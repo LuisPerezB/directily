@@ -102,7 +102,8 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         promotions=repo.promotions(),
         lead_times=repo.lead_times(),
         suppliers=repo.suppliers(),
-        open_purchase_orders=repo.open_purchase_orders(),
+        # Corte retroactivo: solo órdenes que existían al corte (sin fuga de compras posteriores).
+        open_purchase_orders=repo.open_purchase_orders(cutoff if last is not None and cutoff < last else None),
         sales_stats=repo.sales_stats(),
         promotion_revisions=repo.promotion_revisions(),
         # Ejecución vigente (corte = último dato): vale lo conocido hoy. Ejecución histórica: lo

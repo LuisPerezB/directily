@@ -26,7 +26,7 @@ A (183 series, 90 días): ~30 s en 4 vCPU sin GPU; empresa B (80 series): ~13 s.
 
 | Componente | Estado | Notas |
 |---|---|---|
-| Esquema de datos (48 tablas: 39 de negocio + 9 de infraestructura Laravel; migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
+| Esquema de datos (49 tablas: 40 de negocio + 9 de infraestructura Laravel; migraciones versionadas) | ✅ | FKs compuestas `(tenant_id, x_id)`; índices justificados en docs/03 |
 | Multi-tenancy (contexto, scope fail-closed, middleware, jobs, FKs) | ✅ | Pruebas de aislamiento en core, analytics, motor y E2E |
 | Autenticación (Sanctum SPA + tokens por empresa), roles y abilities | ✅ | Rate limit de login, auditoría |
 | Empresas, sucursales, usuarios, configuración, consentimiento | ✅ | |

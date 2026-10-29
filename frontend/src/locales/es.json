@@ -624,6 +624,9 @@
     "biasNone": "Sin sesgo relevante.",
     "coverage": "Cobertura del rango 80 %",
     "coverageHint": "Ideal cercano a 80 %. Rango 95 %: {c95}.",
+    "scopeHoldout": "Estas métricas se midieron en un período final reservado (desde {date}) que no se usó para elegir el modelo ni para calibrar sus rangos.",
+    "scopeSelection": "La historia no alcanzó para reservar un período final independiente: estas métricas vienen de las mismas ventanas que eligieron el modelo y pueden ser optimistas.",
+    "selectionWindows": "Referencia: en las {n} ventanas usadas para elegir el modelo el error fue {wape} (método de referencia: {base}) y el rango de 80 % cubrió {c80}. Es una cifra optimista, porque esas ventanas decidieron el modelo.",
     "explanationTitle": "En pocas palabras",
     "byHorizon": "Error según qué tan lejos se pronostica",
     "byHorizonText": "Pronosticar más lejos suele ser más difícil; compare con el método de referencia.",
@@ -677,6 +680,10 @@
       "backtest": {
         "term": "Backtesting",
         "text": "Prueba en la que el modelo pronostica fechas pasadas usando solo la información disponible en ese momento."
+      },
+      "holdout": {
+        "term": "Período final reservado",
+        "text": "Últimas semanas de la historia que se apartan antes de elegir el modelo: se pronostican con lo aprendido antes y se comparan con lo vendido. Es la medición principal del error."
       },
       "realized": {
         "term": "Error real",

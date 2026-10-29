@@ -60,8 +60,10 @@ def test_recommendation_math_normal_approximation():
     L = 5 + 7
     assert r["demand_lead_time"] == pytest.approx(10 * L)
     sigma_d = (14 - 6) / (2 * 1.2816)
-    assert r["demand_lead_time_std"] == pytest.approx(math.sqrt(L) * sigma_d, rel=1e-3)
-    assert r["safety_stock"] == pytest.approx(1.6449 * math.sqrt(L) * sigma_d, rel=1e-3)
+    # σ del plazo del producto = 1 día: σ² = L·σ_d² + (d̄·σ_L)², con d̄ = 10 u./día.
+    sigma_total = math.sqrt(L * sigma_d ** 2 + (10.0 * 1.0) ** 2)
+    assert r["demand_lead_time_std"] == pytest.approx(sigma_total, rel=1e-3)
+    assert r["safety_stock"] == pytest.approx(1.6449 * sigma_total, rel=1e-3)
     assert r["available"] == 45.0
     assert r["suggested_qty"] == math.ceil(r["reorder_point"] - 45.0)
     assert r["estimated_investment"] == pytest.approx(r["suggested_qty"] * 2.0)

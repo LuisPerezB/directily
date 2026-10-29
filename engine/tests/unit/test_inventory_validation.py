@@ -278,3 +278,26 @@ def test_projected_risk_rules():
     assert projected_risk_level(10, 7, 14) == "high"
     assert projected_risk_level(None, 7, 14, min_balance=5, safety_stock=10) == "medium"
     assert projected_risk_level(30, 7, 14, min_balance=50, safety_stock=10) == "low"
+
+
+def test_supplier_lead_time_variability_widens_safety_stock():
+    """σ del plazo del proveedor: σ² = σ_demanda² + (d̄·σ_L)² (antes se registraba sin usarse)."""
+    def rec(lt_std):
+        fc = pd.DataFrame({"unique_id": "b1-p1", "branch_id": 1, "product_id": 1, "step": range(1, 31),
+                           "ds": pd.date_range(CUTOFF + pd.Timedelta(days=1), periods=30), "yhat": 10.0,
+                           "lo_80": 6.0, "hi_80": 14.0})
+        inv = pd.DataFrame({"branch_id": [1], "product_id": [1], "ds": [CUTOFF], "on_hand": [0.0],
+                            "reserved": [0.0], "in_transit": [0.0], "unit_cost": [2.0]})
+        lts = pd.DataFrame({"supplier_id": [None], "product_id": [1], "branch_id": [1], "lead_time_days": [7],
+                            "lead_time_std_days": [lt_std], "valid_from": [None]})
+        return build_recommendations(fc, inv, lts, pd.DataFrame(), None, pd.Series(dtype=float), EMPTY_ERRORS,
+                                     PROFILE, pd.Series({"b1-p1": 10.0}),
+                                     {"review_period_days": 7, "service_level": 0.95}, CUTOFF).iloc[0]
+
+    base, wide = rec(None), rec(3.0)
+    z = 1.6448536269514722
+    expected = math.sqrt(base["safety_stock"] ** 2 + (z * 10.0 * 3.0) ** 2)
+    assert wide["safety_stock"] == pytest.approx(expected, rel=1e-3)
+    assert wide["suggested_qty"] > base["suggested_qty"]
+    assert wide["assumptions"]["lead_time_variability_units"] == pytest.approx(30.0)
+    assert base["assumptions"]["lead_time_variability_units"] is None

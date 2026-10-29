@@ -38,6 +38,11 @@ const improvement = computed(() => {
   return (selected.value.wape - baseline.value.wape) / baseline.value.wape
 })
 const byHorizon = computed(() => s.value?.backtest?.by_horizon ?? [])
+// Origen de las métricas principales: período final reservado (holdout) o, si la historia no
+// alcanzó, las mismas ventanas que eligieron el modelo (optimista).
+const scope = computed(() => s.value?.backtest?.evaluation_scope ?? null)
+const holdoutFrom = computed(() => s.value?.backtest?.cutoffs?.[0] ?? null)
+const selectionWindows = computed(() => s.value?.backtest?.selection_windows ?? null)
 
 function modelLabel(f: string | null | undefined): string {
   if (!f) return '—'
@@ -74,7 +79,7 @@ async function exportCsv(): Promise<void> {
   }
 }
 
-const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backtest', 'realized']
+const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backtest', 'holdout', 'realized']
 </script>
 
 <template>
@@ -113,6 +118,13 @@ const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backte
         <KpiCard :label="t('accuracy.bias')" :value="formatChange(selected?.bias ?? null)" :hint="(selected?.bias ?? 0) > 0 ? t('accuracy.biasOver') : (selected?.bias ?? 0) < 0 ? t('accuracy.biasUnder') : t('accuracy.biasNone')" icon="sliders" />
         <KpiCard :label="t('accuracy.coverage')" :value="formatPercent(selected?.coverage_80 ?? null, 0)" :hint="t('accuracy.coverageHint', { c95: formatPercent(selected?.coverage_95 ?? null, 0) })" icon="chart" />
       </section>
+      <p v-if="scope === 'holdout'" class="text-sm text-fg-muted -mt-2" data-test="accuracy-scope">
+        {{ t('accuracy.scopeHoldout', { date: holdoutFrom ? formatDate(holdoutFrom) : '—' }) }}
+        <template v-if="selectionWindows?.selected">
+          {{ t('accuracy.selectionWindows', { n: selectionWindows.n_windows, wape: formatPercent(selectionWindows.selected.wape), base: formatPercent(selectionWindows.baseline?.wape ?? null), c80: formatPercent(selectionWindows.selected.coverage_80 ?? null, 0) }) }}
+        </template>
+      </p>
+      <InlineNotice v-else-if="scope === 'selection_windows'" kind="warning" :title="t('accuracy.honestyTitle')">{{ t('accuracy.scopeSelection') }}</InlineNotice>
 
       <section v-if="s.explanation?.length" class="card p-4 sm:p-6">
         <h2 class="section-title mb-2">{{ t('accuracy.explanationTitle') }}</h2>

@@ -50,13 +50,16 @@ class ScenarioBaselineLoader
             'unit_cost' => $costs[(int) $r->product_id] ?? null,
         ])->values()->all();
 
-        $replenishment = DB::table('recommendations')
+        $recommendations = DB::table('recommendations')
             ->where('tenant_id', $tenantId)
             ->where('forecast_run_id', $run->id)
             ->when($branchId !== null, fn ($q) => $q->where('branch_id', $branchId))
             ->when($productId !== null, fn ($q) => $q->where('product_id', $productId))
-            ->when($productIdsInCategory !== null, fn ($q) => $q->whereIn('product_id', $productIdsInCategory))
-            // Sin cantidad (pronóstico que no cubre plazo + revisión): no hay base para simularla.
+            ->when($productIdsInCategory !== null, fn ($q) => $q->whereIn('product_id', $productIdsInCategory));
+        // Sin cantidad (el pronóstico no cubre plazo + revisión): no hay base para simularlas, pero
+        // se cuentan para avisarlo en lugar de subestimar la compra en silencio.
+        $withoutQuantity = (clone $recommendations)->whereNull('suggested_qty')->count();
+        $replenishment = $recommendations
             ->whereNotNull('suggested_qty')
             ->get(['product_id', 'branch_id', 'suggested_qty', 'reorder_point', 'available', 'demand_lead_time',
                 'safety_stock', 'lead_time_days', 'review_period_days', 'unit_cost', 'risk_level', 'assumptions'])
@@ -82,7 +85,7 @@ class ScenarioBaselineLoader
             ->latest('id')
             ->value('score');
 
-        return new ScenarioBaseline($horizon, $products, $replenishment, $score !== null ? (float) $score : null);
+        return new ScenarioBaseline($horizon, $products, $replenishment, $score !== null ? (float) $score : null, $withoutQuantity);
     }
 
     /**

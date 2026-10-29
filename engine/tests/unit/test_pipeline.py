@@ -145,7 +145,8 @@ def test_holdout_evaluation_is_independent_of_holdout_data(small_data, pipeline_
     m = ho.merge(hp, on=key, suffixes=("_o", "_p"), validate="one_to_one")
     assert len(m) == len(ho) == len(hp) > 0
     np.testing.assert_allclose(m["yhat_o"], m["yhat_p"], rtol=1e-9, atol=1e-9)
-    assert pert.summary["metrics"]["selected_wape"] != pytest.approx(pipeline_result.summary["metrics"]["selected_wape"])
+    before, after = pipeline_result.summary["metrics"], pert.summary["metrics"]
+    assert after["selected_wape"] != pytest.approx(before["selected_wape"]), "las métricas del holdout sí cambian"
 
 
 def test_short_history_degrades_without_faking_a_holdout():

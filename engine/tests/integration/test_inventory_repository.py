@@ -56,3 +56,44 @@ def test_open_purchase_orders_keep_each_order_and_its_date(db_engine, tenants):
             assert set(po["product_id"]) == {product}
         finally:
             trans.rollback()
+
+
+def test_open_purchase_orders_as_of_a_historical_cutoff(db_engine, tenants):
+    """Corte retroactivo: no se usan órdenes emitidas después ni recibidas antes del corte."""
+    a = tenants["A"]
+    with db_engine.connect() as conn:
+        trans = conn.begin()
+        try:
+            branch = conn.execute(text("SELECT id FROM branches WHERE tenant_id = :t ORDER BY id LIMIT 1"),
+                                  {"t": a}).scalar_one()
+            product = conn.execute(text("SELECT id FROM products WHERE tenant_id = :t ORDER BY id LIMIT 1"),
+                                   {"t": a}).scalar_one()
+
+            def po(ordered_at: str, received_at: str | None, status: str, qty: float, received: float) -> int:
+                po_id = conn.execute(text(
+                    "INSERT INTO purchase_orders (tenant_id, branch_id, status, ordered_at, expected_at, received_at, "
+                    "created_at, updated_at) VALUES (:t, :b, :s, CAST(:o AS date), DATE '2026-09-20', "
+                    "CAST(:r AS date), now(), now()) RETURNING id"
+                ), {"t": a, "b": branch, "s": status, "o": ordered_at, "r": received_at}).scalar_one()
+                conn.execute(text(
+                    "INSERT INTO purchase_order_items (tenant_id, purchase_order_id, product_id, quantity_ordered, "
+                    "quantity_received, created_at, updated_at) VALUES (:t, :po, :p, :q, :rq, now(), now())"
+                ), {"t": a, "po": po_id, "p": product, "q": qty, "rq": received})
+                return po_id
+
+            pending_then = po("2026-09-01", "2026-09-20", "received", 40, 40)   # recibida DESPUÉS del corte
+            po("2026-08-01", "2026-09-05", "received", 70, 70)                  # recibida ANTES del corte
+            po("2026-09-12", None, "ordered", 25, 0)                            # emitida DESPUÉS del corte
+            po("2026-09-02", None, "cancelled", 30, 0)                          # cancelada
+            still_open = po("2026-09-03", None, "partially_received", 60, 20)   # abierta (parcial sin fecha)
+
+            repo = TenantRepository(conn, a)
+            hist = repo.open_purchase_orders(as_of=pd.Timestamp("2026-09-10").date()).set_index("purchase_order_id")
+            assert set(hist.index) == {pending_then, still_open}
+            assert hist.loc[pending_then, "qty_open"] == pytest.approx(40.0)  # pendiente completa al corte
+            assert hist.loc[still_open, "qty_open"] == pytest.approx(60.0)    # recepción parcial sin fecha: tras el corte
+            current = repo.open_purchase_orders().set_index("purchase_order_id")
+            assert set(current.index) >= {still_open} and pending_then not in current.index
+            assert current.loc[still_open, "qty_open"] == pytest.approx(40.0)
+        finally:
+            trans.rollback()

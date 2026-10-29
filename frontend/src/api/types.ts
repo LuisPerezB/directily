@@ -677,6 +677,12 @@ export interface AccuracySummary {
   backtest: {
     selected: MetricSet | null
     baseline: MetricSet | null
+    n_windows?: number
+    /** 'holdout' = período final reservado (principal); 'selection_windows' = sin holdout independiente. */
+    evaluation_scope?: 'holdout' | 'selection_windows' | null
+    cutoffs?: ISODate[]
+    /** Métricas secundarias (optimistas) de las ventanas que eligieron el modelo. */
+    selection_windows?: { selected: MetricSet | null; baseline: MetricSet | null; n_windows: number; cutoffs: ISODate[] } | null
     by_horizon: AccuracyByHorizon[]
     by_demand_class: AccuracyByGroup[]
     by_branch: AccuracyByGroup[]
@@ -708,7 +714,7 @@ export interface AccuracyComparison {
 export interface ModelEvaluation {
   id: number
   model_family: string
-  evaluation_type: 'backtest' | 'realized'
+  evaluation_type: 'backtest' | 'selection_windows' | 'realized'
   level: string
   level_key: string | null
   horizon_days: number | null

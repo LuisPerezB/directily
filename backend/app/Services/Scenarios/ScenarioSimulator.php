@@ -219,6 +219,10 @@ final class ScenarioSimulator
             $risks[] = ['code' => 'stockout_risk', 'severity' => 'warning', 'message' => "{$atRisk} productos tienen riesgo alto de quiebre de stock en el escenario base.{$extra}"];
         }
 
+        if ($baseline->replenishmentWithoutQuantity > 0) {
+            $risks[] = ['code' => 'coverage_insufficient', 'severity' => 'warning', 'message' => "{$baseline->replenishmentWithoutQuantity} recomendaciones no tienen cantidad porque el pronóstico no cubre el plazo del proveedor más la revisión: la compra necesaria simulada no las incluye y puede estar subestimada."];
+        }
+
         if ($productsWithoutCost > 0) {
             $share = $costCoverage !== null ? ' ('.$pct(1 - $costCoverage).' de los ingresos)' : '';
             $risks[] = ['code' => 'cost_unknown', 'severity' => 'warning', 'message' => "No hay costo registrado para {$productsWithoutCost} productos{$share}: el margen se calcula solo sobre productos con costo conocido."];

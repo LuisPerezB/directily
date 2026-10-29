@@ -287,6 +287,20 @@ Si no hay pronóstico vigente: `run:null`, KPIs de pronóstico `null` y `data_st
 
 `Recommendation = {id, type, branch_id, product_id, inventory_snapshot_date, on_hand, reserved, in_transit, available, lead_time_days, lead_time_source, review_period_days, service_level, demand_lead_time, demand_lead_time_std, safety_stock, reorder_point, suggested_qty, unit_cost, estimated_investment, days_of_cover, stockout_probability, stockout_date_estimate, risk_level, status, assumptions}`.
 
+Semántica (validación 2026-10-28, F1–F3):
+- `available` = existencias físicas utilizables hoy (`on_hand − reserved`); **no** incluye compras
+  pendientes. `in_transit` = total pendiente de recibir (órdenes abiertas o, si no hay, el tránsito del
+  inventario). La posición de inventario y cada recepción con su fecha van en
+  `assumptions.inventory_position` y `assumptions.receipts[]`; el saldo se simula día a día, así que una
+  orden que llega tarde no oculta un quiebre previo (`assumptions.stockout_before_receipt`).
+- `demand_lead_time`, `safety_stock`, `reorder_point` y `suggested_qty` pueden ser `null` cuando el
+  pronóstico no cubre plazo + revisión (`assumptions.coverage_insufficient = true`,
+  `coverage_days_needed`, `coverage_days_available`, `suggested_qty_lower_bound`).
+- `stockout_probability` y `demand_lead_time_std` son `null` cuando la incertidumbre es desconocida
+  (`assumptions.uncertainty = "unknown"`); el stock de seguridad usa entonces una política conservadora
+  explícita (`assumptions.safety_stock_policy`) y el riesgo una regla determinista (`assumptions.risk_rule`).
+  Las limitaciones legibles para el usuario van en `assumptions.limitations[]`.
+
 ### 3.11 Simulador de escenarios
 | Método | Ruta | Detalle |
 |---|---|---|
@@ -304,7 +318,7 @@ Respuesta:
   "scenario":{...mismos campos...},
   "delta":{"units":..,"revenue":..,"gross_margin":..,"gross_margin_pct":..},
   "budget":{"purchase_budget":1000,"coverage_pct":0.64,"shortfall":560},
-  "risks":[{"code":"negative_margin|budget_shortfall|stockout_risk|low_data_quality|cost_unknown","severity":"warning","message":"..."}],
+  "risks":[{"code":"negative_margin|margin_drop|budget_shortfall|stockout_risk|coverage_insufficient|low_data_quality|cost_unknown|price_without_demand_assumption","severity":"warning","message":"..."}],
   "assumptions_used":{...}, "base_run":{"id":12,"version":5}
 }}
 ```
