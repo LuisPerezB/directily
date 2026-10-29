@@ -19,8 +19,21 @@ abstract class AbstractConnector implements ConnectorInterface
     {
         return match ($this->status()) {
             'available' => new ConnectorTestResult(true, 'Conector disponible.'),
-            'requires_credentials' => new ConnectorTestResult(false, 'Este conector requiere credenciales del proveedor y acceso de red al servicio externo. No está activo en este entorno.', ['required' => $this->credentialKeys()]),
+            'requires_credentials', 'implemented_untested' => new ConnectorTestResult(false, 'Este conector requiere credenciales del proveedor y acceso de red al servicio externo. No está activo en este entorno.', ['required' => $this->credentialKeys()]),
             default => new ConnectorTestResult(false, 'Conector planificado: aún no implementado. Mientras tanto use la importación CSV/Excel o la API REST.'),
+        };
+    }
+
+    /**
+     * Nivel de comprobación real del conector (etapa 2): tested (suite automatizada del repositorio),
+     * tested_with_test_database, implemented_untested o not_verified/planned. Nunca se infiere de `status`.
+     */
+    public function verification(): string
+    {
+        return match ($this->status()) {
+            'available' => 'tested',
+            'planned' => 'planned',
+            default => 'not_verified',
         };
     }
 
@@ -32,6 +45,7 @@ abstract class AbstractConnector implements ConnectorInterface
             'name' => $this->name(),
             'description' => $this->description(),
             'status' => $this->status(),
+            'verification' => $this->verification(),
             'entity_types' => $this->entityTypes(),
             'credential_keys' => $this->credentialKeys(),
         ];

@@ -22,6 +22,7 @@ import pandas as pd
 from sqlalchemy import Connection, text
 
 from predictily_engine.config import FEATURE_SET_VERSION, get_settings
+from predictily_engine.demand.coverage import SalesCoverage
 from predictily_engine.db.repository import TenantRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import (
@@ -42,6 +43,8 @@ from predictily_engine.pipeline.core import InsufficientDataError, PipelineResul
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import ConflictError, NotFoundError
 from predictily_engine.pipeline.schemas import ExecuteRequest
+from predictily_engine.platform.config import resolve_config
+from predictily_engine.platform.snapshot import persist_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +87,8 @@ def _response(run: dict[str, Any], duration_ms: int | None = None) -> dict[str, 
                     "total_baseline_wape": metrics.get("total_baseline_wape")},
         "warnings": summary.get("warnings", []),
         "duration_ms": int(duration_ms if duration_ms is not None else summary.get("duration_ms") or 0),
+        "quality_status": summary.get("quality_status"),
+        "horizon_support": {h: v.get("status") for h, v in (summary.get("horizon_support") or {}).items()},
     }
 
 
@@ -135,16 +140,34 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
                 raise InsufficientDataError("La empresa no tiene ventas válidas importadas.")
             if cutoff is None or cutoff > last:
                 cutoff = last
-            data = load_tenant_data(repo, cutoff)
+            # Configuración efectiva (core → perfil sectorial → empresa): se valida y se registra en el run.
+            tenant = repo.tenant()
+            try:
+                core_config, _, _ = resolve_config("demand", tenant.get("settings"), tenant.get("sector"))
+            except ValueError as exc:
+                raise InsufficientDataError(f"Configuración de demanda inválida: {exc}") from exc
+            # Cobertura declarada de la fuente de ventas: el corte no la supera y lo posterior es dato ausente.
+            branches = repo.branches()
+            active_branches = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
+                               if "is_active" in branches else None)
+            coverage = SalesCoverage.from_rows(repo.sales_coverage(), active_branches)
+            cutoff = coverage.limit_cutoff(cutoff)
+            data = coverage.apply(load_tenant_data(repo, cutoff))
+            data.coverage_limitations = coverage.limitations()
         load_s = time.perf_counter() - t0
         log.info("run=%s tenant=%s datos cargados en %.1fs", run_id, tenant_id, load_s)
         seed = req.options.seed if req.options.seed is not None else settings.random_seed
+        # Valores por defecto de la configuración; el entorno del operador y las opciones de la ejecución
+        # solo los sobrescriben si se indican, y quedan registrados en la configuración efectiva.
+        min_improvement = settings.min_improvement if settings.min_improvement is not None \
+            else core_config["min_improvement"]
+        max_windows = (req.options.max_backtest_windows or settings.max_backtest_windows
+                       or core_config["max_backtest_windows"])
         result = run_pipeline(
             data, horizon=max(req.horizons), seed=seed, n_jobs=settings.n_jobs,
-            min_improvement=settings.min_improvement,
-            max_windows=req.options.max_backtest_windows or settings.max_backtest_windows,
+            min_improvement=min_improvement, max_windows=max_windows,
             max_series_lgbm=settings.max_series_lgbm, progress=progress,
-            force_families=req.options.force_models, horizons=tuple(req.horizons),
+            force_families=req.options.force_models, horizons=tuple(req.horizons), core_config=core_config,
         )
         progress("persisting", 92)
         result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)
@@ -198,23 +221,30 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         "SELECT id, version, run_type FROM forecast_runs WHERE id = :id AND tenant_id = :tenant_id"
     ), {"id": run_id, "tenant_id": tenant_id}).mappings().one()
     production = run["run_type"] == "production"
-    upsert_series_profile(conn, tenant_id, result.panel.profile)
+    lifecycle = result.lifecycle
+    labels = {} if lifecycle is None else {**lifecycle.labels.to_dict(), **lifecycle.abstain}
+    upsert_series_profile(conn, tenant_id, result.panel.profile, labels)
     ensure_feature_registry(conn, feature_registry())
 
-    # ── Registro de modelos ──
+    # ── Registro de modelos (ADR-V2-07): estados candidate | validated | production | retired | failed + rol ──
     if production:
+        # Al completar una ejecución de producción, los modelos de producción anteriores pasan a `retired`
+        # (siguen disponibles para la reversión: POST /models/demand/rollback).
         conn.execute(text(
-            "UPDATE model_registry SET status = 'archived', retired_at = now(), updated_at = now() "
-            "WHERE tenant_id = :tenant_id AND status IN ('production', 'fallback')"
+            "UPDATE model_registry SET status = 'retired', retired_at = now(), updated_at = now() "
+            "WHERE tenant_id = :tenant_id AND core = 'demand' AND status IN ('production', 'fallback')"
         ), {"tenant_id": tenant_id})
     versions = library_versions()
     registry_ids: dict[str, int] = {}
     for fam, info in result.families.items():
-        status = info["status"]
+        status, role = info["status"], info.get("role", "primary")
         notes = None
         if not production:
             notes = "Ejecución histórica (corte retroactivo): no reemplaza modelos de producción."
-            status = "candidate" if status in ("production", "fallback") else status
+            if status == "production":
+                status = "candidate"
+        if status == "failed":
+            notes = (notes + " " if notes else "") + f"Falló el entrenamiento final: {info.get('error')}"
         artifact_path = artifact_sha = None
         if fam == "lightgbm_global" and result.lgbm is not None:
             artifact_path, artifact_sha = _save_artifact(tenant_id, run_id, fam, result.lgbm.mlf)
@@ -224,13 +254,20 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         if fam == "lightgbm_global" and result.lgbm is not None:
             hp = {k: v for k, v in result.lgbm.params.items()}
         classes = info.get("demand_classes") or []
+        compat = {"input_schema": "demand-panel-v1", "feature_set_version": FEATURE_SET_VERSION, "libraries": versions,
+                  "artifact_kind": "mlforecast_joblib" if artifact_path else "statistical_refit",
+                  "frequency": "D", "season_length": 7}
+        evaluated = status in ("production", "validated", "candidate") and info.get("evaluated", False)
         rid = conn.execute(text(
             """
             INSERT INTO model_registry (tenant_id, version, model_family, strategy_level, scope, demand_class, status,
+                core, role, validated_at, artifact_compat,
                 hyperparameters, feature_set_version, training_data_from, training_data_to, training_data_hash,
                 series_count, artifact_path, artifact_sha256, library_versions, random_seed, training_job_id,
                 forecast_run_id, trained_at, promoted_at, notes, created_at, updated_at)
-            VALUES (:tenant_id, :version, :family, :level, 'tenant', :demand_class, :status, CAST(:hp AS jsonb), :fsv,
+            VALUES (:tenant_id, :version, :family, :level, 'tenant', :demand_class, :status,
+                'demand', :role, CASE WHEN :evaluated THEN now() END, CAST(:compat AS jsonb),
+                CAST(:hp AS jsonb), :fsv,
                 :dfrom, :dto, :hash, :series_count, :apath, :asha, CAST(:libs AS jsonb), :seed, :job_id, :run_id, now(),
                 CASE WHEN :promoted THEN now() END, :notes, now(), now())
             RETURNING id
@@ -238,10 +275,11 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         ), {
             "tenant_id": tenant_id, "version": f"t{tenant_id}-r{run['version']}-{fam}", "family": fam,
             "level": info["level"], "demand_class": classes[0] if len(classes) == 1 else None, "status": status,
+            "role": role, "evaluated": bool(evaluated), "compat": jdump(compat),
             "hp": jdump(hp), "fsv": FEATURE_SET_VERSION, "dfrom": result.data_from, "dto": result.data_to,
             "hash": result.training_data_hash, "series_count": info["series_count"], "apath": artifact_path,
             "asha": artifact_sha, "libs": jdump(versions), "seed": seed, "job_id": job_id, "run_id": run_id,
-            "notes": notes, "promoted": status in ("production", "fallback"),
+            "notes": notes, "promoted": status == "production",
         }).scalar_one()
         registry_ids[fam] = int(rid)
 
@@ -251,15 +289,15 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
             """
             INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type,
                 level, level_key, horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80,
-                coverage_95, n_obs, n_windows, cutoffs, extra, created_at)
+                coverage_95, n_obs, n_windows, cutoffs, extra, core, metrics, created_at)
             VALUES (:tenant_id, :rid, :run_id, :model_family, :evaluation_type, :level, :level_key, :horizon_days,
                 :is_baseline, :is_selected, :wape, :mae, :rmse, :bias, :coverage_80, :coverage_95, :n_obs, :n_windows,
-                CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), now())
+                CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), 'demand', CAST(:metrics AS jsonb), now())
             """
         ), [{
-            **{k: none_if_nan(v) for k, v in e.items() if k not in ("cutoffs", "extra")},
+            **{k: none_if_nan(v) for k, v in e.items() if k not in ("cutoffs", "extra", "metrics")},
             "tenant_id": tenant_id, "run_id": run_id, "rid": registry_ids.get(e["model_family"]),
-            "cutoffs": jdump(e.get("cutoffs", [])),
+            "cutoffs": jdump(e.get("cutoffs", [])), "metrics": jdump(e.get("metrics") or {}),
             # evaluation_scope: 'holdout' (período final reservado) o 'selection_windows'
             "extra": jdump({"composite": e["model_family"] == "selection", **(e.get("extra") or {})}),
         } for e in result.evaluations])
@@ -299,7 +337,9 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
     summary["data_quality_report_id"] = dq_id
     summary["library_versions"] = versions
     summary["training_data_hash"] = result.training_data_hash
-    selection_json = result.selection.as_json(registry_ids)
+    snapshot_id = persist_snapshot(conn, tenant_id, result.snapshot) if result.snapshot is not None else None
+    summary["data_snapshot_id"] = snapshot_id
+    selection_json = result.selection.as_json(registry_ids, result.planned_selection)
     if production:
         conn.execute(text("UPDATE forecast_runs SET is_current = false, updated_at = now() "
                           "WHERE tenant_id = :tenant_id AND is_current"), {"tenant_id": tenant_id})
@@ -307,12 +347,16 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         """
         UPDATE forecast_runs SET status = 'completed', cutoff_date = :cutoff, data_from = :dfrom, data_to = :dto,
             feature_set_version = :fsv, selection = CAST(:selection AS jsonb), summary = CAST(:summary AS jsonb),
+            config_version = :config_version, effective_config = CAST(:effective_config AS jsonb),
+            data_snapshot_id = :snapshot_id, evaluation_manifest = CAST(:manifest AS jsonb),
             is_current = :current, completed_at = now(), error_message = NULL, updated_at = now()
         WHERE id = :run_id AND tenant_id = :tenant_id
         """
     ), {"cutoff": result.cutoff, "dfrom": result.data_from, "dto": result.data_to, "fsv": FEATURE_SET_VERSION,
         "selection": jdump(selection_json), "summary": jdump(summary), "current": production, "run_id": run_id,
-        "tenant_id": tenant_id})
+        "tenant_id": tenant_id, "config_version": result.config_version,
+        "effective_config": jdump(result.effective_config), "snapshot_id": snapshot_id,
+        "manifest": jdump(result.manifest)})
     if job_id is not None:
         main_family = max(result.families.items(), key=lambda kv: kv[1]["series_count"])[0] if result.families else None
         conn.execute(text(
@@ -389,6 +433,7 @@ def _alerts(conn: Connection, tenant_id: int, run_id: int, version: int, result:
               f"referencia." if sel is not None and base is not None else "")
     upsert_alert(conn, tenant_id, type_="run_completed", severity="info",
                  title=f"Pronóstico versión {version} generado",
-                 message=f"Se pronosticaron {result.summary['series_count']} series hasta 90 días.{detail}",
+                 message=(f"Se pronosticaron {result.summary['series_count']} series hasta "
+                          f"{result.summary.get('horizon_days', 90)} días.{detail}"),
                  payload={"forecast_run_id": run_id, "version": version}, dedup_key="run_completed",
                  related_type="forecast_run", related_id=run_id)

@@ -1,0 +1,129 @@
+"""Completitud declarada de la fuente de ventas (ADR-V2-05, instrucctions.md §6.C).
+
+`data_coverage` (entidad `sales`) declara hasta qué fecha (`complete_through`) y desde cuál (`complete_from`)
+la fuente está completa, por empresa o por sucursal. Reglas:
+
+- El corte NO supera la menor `complete_through` declarada (empresa o sucursales activas): un día posterior
+  no es un cero observado sino un dato AUSENTE, de modo que no se rellena con ceros ni se entrena con él.
+- Las ventas anteriores a `complete_from` se descartan: la serie empieza en la primera venta completa.
+- Sin ningún registro con fechas se conserva el comportamiento de la etapa 1 (ceros hasta la última venta)
+  y se añade la limitación `coverage_undeclared`: la completitud de la fuente no está verificada.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from typing import TYPE_CHECKING, Any
+
+import pandas as pd
+
+if TYPE_CHECKING:  # pragma: no cover
+    from predictily_engine.pipeline.data import TenantData
+
+LIMITATION_UNDECLARED = {
+    "code": "coverage_undeclared",
+    "message": ("No hay cobertura declarada de la fuente de ventas (data_coverage): los días sin venta hasta el corte se "
+                "tratan como cero observado, pero la completitud de la fuente no está verificada."),
+}
+
+
+def _d(v: Any) -> date | None:
+    if v is None or (isinstance(v, float) and pd.isna(v)) or v is pd.NaT:
+        return None
+    return pd.Timestamp(v).date()
+
+
+@dataclass
+class SalesCoverage:
+    declared: bool = False
+    through: date | None = None  # menor complete_through declarado (empresa y sucursales activas)
+    from_: date | None = None  # mayor complete_from de la empresa
+    branch_from: dict[int, date] = field(default_factory=dict)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    requested_cutoff: date | None = None
+    effective_cutoff: date | None = None
+    dropped_before_from: int = 0
+
+    @classmethod
+    def from_rows(cls, rows: pd.DataFrame | None, active_branches: set[int] | None = None) -> "SalesCoverage":
+        """`rows`: filas de data_coverage con entity='sales' (data_source_id, branch_id, complete_from, complete_through).
+        Las sucursales inactivas (cerradas declaradas) no fijan el corte."""
+        cov = cls()
+        if rows is None or rows.empty:
+            return cov
+        throughs: list[date] = []
+        for r in rows.to_dict("records"):
+            branch = r.get("branch_id")
+            branch = None if branch is None or pd.isna(branch) else int(branch)
+            t, f = _d(r.get("complete_through")), _d(r.get("complete_from"))
+            cov.sources.append({"data_source_id": None if pd.isna(r.get("data_source_id")) else int(r["data_source_id"]),
+                                "branch_id": branch, "complete_from": f.isoformat() if f else None,
+                                "complete_through": t.isoformat() if t else None, "basis": r.get("basis")})
+            if t is not None and (branch is None or active_branches is None or branch in active_branches):
+                throughs.append(t)
+            if f is not None:
+                if branch is None:
+                    cov.from_ = f if cov.from_ is None else max(cov.from_, f)
+                else:
+                    cov.branch_from[branch] = f
+        cov.declared = bool(throughs) or cov.from_ is not None or bool(cov.branch_from)
+        cov.through = min(throughs) if throughs else None
+        return cov
+
+    def limit_cutoff(self, cutoff: date) -> date:
+        self.requested_cutoff = cutoff
+        self.effective_cutoff = min(cutoff, self.through) if self.through is not None else cutoff
+        return self.effective_cutoff
+
+    @property
+    def cutoff_limited(self) -> bool:
+        return (self.requested_cutoff is not None and self.effective_cutoff is not None
+                and self.effective_cutoff < self.requested_cutoff)
+
+    def apply(self, data: "TenantData") -> "TenantData":
+        """Descarta ventas (y devoluciones) anteriores a `complete_from`: no son un histórico completo."""
+        dropped = 0
+        for name in ("sales", "returns"):
+            df = getattr(data, name)
+            if df is None or df.empty:
+                continue
+            keep = pd.Series(True, index=df.index)
+            if self.from_ is not None:
+                keep &= df["ds"] >= pd.Timestamp(self.from_)
+            for b, f in self.branch_from.items():
+                keep &= ~((df["branch_id"] == b) & (df["ds"] < pd.Timestamp(f)))
+            if not keep.all():
+                if name == "sales":
+                    dropped += int((~keep).sum())
+                setattr(data, name, df[keep].reset_index(drop=True))
+        self.dropped_before_from = dropped
+        data.coverage = self.as_dict()
+        return data
+
+    def limitations(self) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        if not self.declared or self.through is None:
+            out.append(LIMITATION_UNDECLARED)
+        if self.cutoff_limited:
+            out.append({"code": "cutoff_limited_by_coverage",
+                        "message": (f"El corte se limitó a {self.effective_cutoff} (cobertura completa declarada de la "
+                                    f"fuente de ventas): los días posteriores son datos ausentes, no ceros.")})
+        if self.dropped_before_from:
+            out.append({"code": "sales_before_complete_from_ignored",
+                        "message": f"Se ignoraron {self.dropped_before_from} filas de ventas anteriores a la cobertura completa."})
+        return out
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "sales": {
+                "declared": self.declared, "basis": "declared" if self.declared else "undeclared",
+                "complete_through": self.through.isoformat() if self.through else None,
+                "complete_from": self.from_.isoformat() if self.from_ else None,
+                "branch_complete_from": {str(k): v.isoformat() for k, v in sorted(self.branch_from.items())},
+                "requested_cutoff": self.requested_cutoff.isoformat() if self.requested_cutoff else None,
+                "effective_cutoff": self.effective_cutoff.isoformat() if self.effective_cutoff else None,
+                "cutoff_limited": self.cutoff_limited, "rows_dropped_before_complete_from": self.dropped_before_from,
+                "sources": self.sources,
+            }
+        }

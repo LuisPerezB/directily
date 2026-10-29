@@ -24,6 +24,7 @@ final class SalesBatchRequest extends FormRequest
             'documents.*.customer_code' => ['sometimes', 'nullable', 'string', 'max:100'],
             'documents.*.customer_segment' => ['sometimes', 'nullable', 'string', 'max:150'],
             'documents.*.customer_province' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'documents.*.source_recorded_at' => ['sometimes', 'nullable', 'string', 'max:40'],
             'documents.*.items' => ['required', 'array', 'min:1', 'max:1000'],
             'documents.*.items.*.product_sku' => ['required', 'string', 'max:100'],
             'documents.*.items.*.product_name' => ['sometimes', 'nullable', 'string', 'max:255'],

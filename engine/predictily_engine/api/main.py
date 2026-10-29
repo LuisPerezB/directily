@@ -16,7 +16,12 @@ from sqlalchemy import text  # noqa: E402
 
 from predictily_engine import __version__  # noqa: E402
 from predictily_engine.api.auth import require_token  # noqa: E402
+from predictily_engine.api.routers import customer as customer_router  # noqa: E402
+from predictily_engine.api.routers import data_core as data_core_router  # noqa: E402
+from predictily_engine.api.routers import platform as platform_router  # noqa: E402
+from predictily_engine.api.routers import supply as supply_router  # noqa: E402
 from predictily_engine.config import FEATURE_SET_VERSION, get_settings  # noqa: E402
+from predictily_engine.demand.horizons import SUPPORTED_HORIZONS  # noqa: E402
 from predictily_engine.db.session import get_engine  # noqa: E402
 from predictily_engine.models.foundation import TimesFMAdapter  # noqa: E402
 from predictily_engine.models.registry import FAMILIES  # noqa: E402
@@ -35,6 +40,9 @@ app = FastAPI(
     version=__version__,
     description="Motor predictivo interno de Predictily. Solo accesible desde la red interna (Bearer token).",
 )
+# Etapa 2: un router por core (docs/architecture/PREDICTILY_V2_GAP_ANALYSIS.md §5).
+for _router in (data_core_router.router, customer_router.router, supply_router.router, platform_router.router):
+    app.include_router(_router)
 
 
 @app.exception_handler(NotFoundError)
@@ -70,12 +78,17 @@ def health() -> dict:
 def capabilities() -> dict:
     return {
         "feature_set_version": FEATURE_SET_VERSION,
-        "horizons": [7, 30, 90],
+        "horizons": list(SUPPORTED_HORIZONS),
+        "horizon_rule": "un horizonte H exige historia ≥ 2×H y ventanas de backtest de ≥ H días; si no, insufficient_data",
         "frequency": "D",
         "models": [{"family": i.family, "level": i.level, "kind": i.kind, "label": i.label,
                     "enabled": i.kind != "foundation" or TimesFMAdapter.available()} for i in FAMILIES.values()],
         "foundation_models": {"timesfm": {"enabled": TimesFMAdapter.available(), "reason": TimesFMAdapter.reason}},
         "interval_levels": [80, 95],
+        "quantiles": {"P10": "lo_80", "P90": "hi_80", "P50": "p50 (solo si se evaluó con pinball; si no, null)"},
+        "metrics": ["wape", "mae", "rmse", "bias", "mase", "rmsse", "pinball_p10", "pinball_p50", "pinball_p90",
+                    "interval_width_80", "interval_width_95", "money"],
+        "model_states": ["candidate", "validated", "production", "retired", "failed"],
         "reconciliation": "bottom_up",
     }
 

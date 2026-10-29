@@ -13,6 +13,11 @@ enum ImportEntity: string
     case Branches = 'branches';
     case Suppliers = 'suppliers';
     case Promotions = 'promotions';
+    // Etapa 2 · P3: entidades canónicas nuevas.
+    case Commitments = 'commitments';
+    case CalendarEvents = 'calendar_events';
+    case UnitConversions = 'unit_conversions';
+    case Warehouses = 'warehouses';
 
     public function label(): string
     {
@@ -24,6 +29,10 @@ enum ImportEntity: string
             self::Branches => 'Sucursales',
             self::Suppliers => 'Proveedores',
             self::Promotions => 'Promociones',
+            self::Commitments => 'Compromisos comerciales (cotizaciones, pedidos, contratos)',
+            self::CalendarEvents => 'Calendario (eventos con alcance)',
+            self::UnitConversions => 'Conversiones de unidades',
+            self::Warehouses => 'Almacenes',
         };
     }
 

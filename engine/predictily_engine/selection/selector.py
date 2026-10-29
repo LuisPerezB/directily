@@ -53,10 +53,32 @@ class Selection:
             return "window_average"
         return self.winners.get(demand_class, self.winners.get(POOLED, self.fallback))
 
-    def as_json(self, registry_ids: dict[str, int] | None = None) -> dict:
+    def served(self, failed: set[str]) -> "Selection":
+        """Selección tal como se SIRVE cuando fallan familias en el entrenamiento final (E2-19).
+
+        Cada clase cuyo ganador falló pasa a su respaldo: las métricas, la calibración de los intervalos y las
+        etiquetas del resultado deben corresponder al modelo realmente usado, no al ganador del backtest.
+        Sin fallos devuelve la misma selección."""
+        if not failed:
+            return self
+        winners = {c: (self.fallback if f in failed else f) for c, f in self.winners.items()}
+        reasons = dict(self.reasons)
+        for c, f in self.winners.items():
+            if f in failed:
+                reasons[c] = (f"Falló el entrenamiento final de {FAMILIES[f].label}: se sirve el respaldo "
+                              f"({FAMILIES[self.fallback].label}). " + self.reasons.get(c, ""))
+        return Selection(winners, self.fallback, reasons, self.class_table, self.pooled_table, self.used_pooled)
+
+    def as_json(self, registry_ids: dict[str, int] | None = None, planned: "Selection | None" = None) -> dict:
+        """Selección servida por clase. Con `planned` (la elegida por el backtest), las clases donde se sirve el
+        respaldo en lugar del ganador lo indican (`planned_family`, `fallback_applied`)."""
         ids = registry_ids or {}
-        out = {cls: {"model_family": fam, "model_registry_id": ids.get(fam), "reason": self.reasons.get(cls)}
-               for cls, fam in self.winners.items()}
+        out = {}
+        for cls, fam in self.winners.items():
+            row = {"model_family": fam, "model_registry_id": ids.get(fam), "reason": self.reasons.get(cls)}
+            if planned is not None and planned.winners.get(cls) not in (None, fam):
+                row.update({"planned_family": planned.winners[cls], "fallback_applied": True})
+            out[cls] = row
         out["insufficient"] = {"model_family": "window_average", "model_registry_id": ids.get("window_average"),
                                "reason": "Historia menor a 28 días: promedio de la historia disponible (sin evaluación)."}
         out["fallback"] = {"model_family": self.fallback, "model_registry_id": ids.get(self.fallback)}

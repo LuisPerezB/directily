@@ -81,7 +81,7 @@ class TenantRepository:
     # ── catálogos ──
     def branches(self) -> pd.DataFrame:
         return self._read(
-            "SELECT id AS branch_id, code, name, province, canton FROM branches "
+            "SELECT id AS branch_id, code, name, province, canton, is_active FROM branches "
             "WHERE tenant_id = :tenant_id AND deleted_at IS NULL ORDER BY id"
         )
 
@@ -277,6 +277,33 @@ class TenantRepository:
             "r.branch_id, r.product_id, r.category_id, r.deleted, (r.recorded_at AT TIME ZONE tz.tz) AS recorded_at "
             f"FROM promotion_revisions r {self._TENANT_TZ.format(alias='r')} WHERE r.tenant_id = :tenant_id "
             "ORDER BY r.promotion_id, r.revision"
+        )
+
+    # ── cobertura de fuentes y calendario (etapa 2 · demanda) ──
+    def sales_coverage(self) -> pd.DataFrame:
+        """Completitud declarada de la fuente de ventas (`data_coverage`, entidad `sales`), por fuente y sucursal.
+        Vacío = nada declarado (el motor conserva el comportamiento anterior y lo informa)."""
+        return self._read(
+            "SELECT data_source_id, branch_id, complete_from, complete_through, basis FROM data_coverage "
+            "WHERE tenant_id = :tenant_id AND entity = 'sales' ORDER BY id"
+        )
+
+    def calendar_events(self) -> pd.DataFrame:
+        """Eventos EXTRAORDINARIOS del calendario (públicos y de la empresa) con su `known_at` en hora local.
+        `known_at` nulo = desconocido: el motor no los usa a futuro. El calendario lo administra el paquete de Datos;
+        el motor solo lee. Si la tabla no existe (esquema anterior) devuelve vacío."""
+        exists = self.conn.execute(text("SELECT to_regclass('calendar_events')")).scalar()
+        cols = ["id", "tenant_id", "scope", "scope_ref", "code", "name", "category", "starts_on", "ends_on", "status",
+                "known_at", "source", "revision"]
+        if exists is None:
+            return pd.DataFrame(columns=cols)
+        return self._read(
+            "SELECT e.id, e.tenant_id, e.scope, e.scope_ref, e.code, e.name, e.category, e.starts_on, e.ends_on, "
+            "e.status, (e.known_at AT TIME ZONE tz.tz) AS known_at, e.source, e.revision "
+            "FROM calendar_events e CROSS JOIN (SELECT COALESCE(NULLIF(timezone, ''), 'America/Guayaquil') AS tz "
+            "FROM tenants WHERE id = :tenant_id) tz "
+            "WHERE (e.tenant_id = :tenant_id OR e.tenant_id IS NULL) AND e.category = 'exceptional' "
+            "ORDER BY e.starts_on, e.id"
         )
 
     # ── resultados previos ──

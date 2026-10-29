@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from predictily_engine.features.builder import FeatureBuilder
+from predictily_engine.features.builder import FeatureBuilder, last_known_price
 from predictily_engine.models.ml import LightGBMGlobal
 from predictily_engine.models.registry import STATISTICAL
 from predictily_engine.models.statistical import forecast_statistical
@@ -105,6 +105,46 @@ def series_scale(panel_df: pd.DataFrame, cutoff: pd.Timestamp, ids: list[str] | 
     return scale.clip(lower=0.05)
 
 
+SEASON = 7  # estacionalidad semanal: naive estacional de la escala de MASE/RMSSE
+MIN_SCALE_PAIRS = 14  # pares (t, t−7) mínimos para que la escala sea confiable
+
+
+def seasonal_naive_scales(panel_df: pd.DataFrame, cutoff: pd.Timestamp, ids: list[str] | None = None,
+                          season: int = SEASON, min_pairs: int = MIN_SCALE_PAIRS) -> pd.DataFrame:
+    """Escala de MASE/RMSSE por serie con SOLO datos de entrenamiento (ds ≤ `cutoff`).
+
+    `mae_scale` = media de |y_t − y_{t−season}| y `mse_scale` = media de (y_t − y_{t−season})² sobre las
+    observaciones (no imputadas) hasta el corte; se descartan los pares en que alguno de los dos días tuvo
+    quiebre de stock (venta censurada). Con menos de `min_pairs` pares, o escala 0 (serie constante),
+    la escala queda NaN: la métrica escalada no está definida para esa serie y se informa como exclusión.
+    Usa solo filas anteriores al corte: ventas posteriores no pueden cambiar la escala de ese origen.
+    """
+    d = panel_df[panel_df["ds"] <= cutoff]
+    if ids is not None:
+        d = d[d["unique_id"].isin(ids)]
+    out = pd.DataFrame(columns=["n_pairs", "mae_scale", "mse_scale"], index=pd.Index([], name="unique_id"),
+                       dtype=float)
+    if len(d) <= season:
+        return out
+    d = d.sort_values(["unique_id", "ds"])
+    uid = d["unique_id"].to_numpy()
+    y = d["units"].to_numpy(float)
+    so = d["stockout"].to_numpy(bool)
+    n = len(d)
+    valid = np.zeros(n, dtype=bool)
+    valid[season:] = (uid[season:] == uid[:-season]) & ~so[season:] & ~so[:-season]
+    diff = np.zeros(n)
+    diff[season:] = y[season:] - y[:-season]
+    pairs = pd.DataFrame({"unique_id": uid[valid], "ad": np.abs(diff[valid]), "sq": diff[valid] ** 2})
+    if pairs.empty:
+        return out
+    g = pairs.groupby("unique_id").agg(n_pairs=("ad", "size"), mae_scale=("ad", "mean"), mse_scale=("sq", "mean"))
+    g = g.astype(float)
+    weak = (g["n_pairs"] < min_pairs) | (g["mae_scale"] <= 0) | (g["mse_scale"] <= 0)
+    g.loc[weak, ["mae_scale", "mse_scale"]] = np.nan
+    return g
+
+
 def eligible_ids(panel: Panel, cutoff: pd.Timestamp, profile: pd.DataFrame | None = None) -> list[str]:
     """Series que se entrenan/evalúan al corte: activas, no `insufficient` y con ≥ 28 días.
 
@@ -133,7 +173,12 @@ def run_backtest(
     progress: Callable[[float], None] | None = None,
 ) -> pd.DataFrame:
     """Devuelve filas: unique_id, window, cutoff, ds, step, family, yhat, actual, stockout, scale,
-    demand_class (clase de la serie en el corte de la ventana) e is_holdout."""
+    demand_class (clase de la serie en el corte de la ventana) e is_holdout.
+
+    Además, por fila: `scale_mae`/`scale_mse` (escala del naive estacional 7 calculada SOLO con datos ≤ corte
+    de la ventana; ver `seasonal_naive_scales`), `price_fc` (último precio neto conocido al corte, el supuesto
+    con que se valoraría el pronóstico) y `price_act` (precio neto observado ese día, para valorar lo vendido):
+    permiten métricas en dinero separadas de las de unidades."""
     stat_fams = [f for f in families if f in STATISTICAL]
     results = []
     origins = plan.origins
@@ -154,29 +199,39 @@ def run_backtest(
         fc = pd.concat(preds, ignore_index=True)
         end = cutoff + pd.Timedelta(days=plan.horizon)
         test = panel.df[(panel.df["ds"] > cutoff) & (panel.df["ds"] <= end) & panel.df["unique_id"].isin(ids)]
-        fc = fc.merge(test[["unique_id", "ds", "units", "stockout"]], on=["unique_id", "ds"], how="inner")
-        fc = fc.rename(columns={"units": "actual"})
+        fc = fc.merge(test[["unique_id", "ds", "units", "stockout", "price"]], on=["unique_id", "ds"], how="inner")
+        fc = fc.rename(columns={"units": "actual", "price": "price_act"})
         fc["step"] = (fc["ds"] - cutoff).dt.days.astype(int)
         fc["window"] = k
         fc["cutoff"] = cutoff
         fc["scale"] = fc["unique_id"].map(series_scale(panel.df, cutoff, ids))
         fc["demand_class"] = fc["unique_id"].map(prof_k.set_index("unique_id")["demand_class"])
+        scales = seasonal_naive_scales(panel.df, cutoff, ids)
+        fc["scale_mae"] = fc["unique_id"].map(scales["mae_scale"])
+        fc["scale_mse"] = fc["unique_id"].map(scales["mse_scale"])
+        fc["price_fc"] = fc["unique_id"].map(last_known_price(panel.df, cutoff, ids))
         fc["is_holdout"] = is_holdout
         results.append(fc)
         if progress:
             progress((n + 1) / len(origins))
     if not results:
         return pd.DataFrame(columns=["unique_id", "window", "cutoff", "ds", "step", "family", "yhat", "actual",
-                                     "stockout", "scale", "demand_class", "is_holdout"])
+                                     "stockout", "scale", "demand_class", "scale_mae", "scale_mse", "price_fc",
+                                     "price_act", "is_holdout"])
     out = pd.concat(results, ignore_index=True)
     out["yhat"] = out["yhat"].astype(float)
     out["is_holdout"] = out["is_holdout"].astype(bool)
     return out
 
 
-HORIZON_BUCKETS = [("h1-7", 1, 7, 7), ("h8-30", 8, 30, 30), ("h31-90", 31, 90, 90)]
+# Tramos del horizonte alineados con los cinco horizontes del dominio (7/14/30/60/90): (clave, desde, hasta,
+# horizon_days que la fila representa). Antes: h1-7, h8-30 y h31-90.
+HORIZON_BUCKETS = [("h1-7", 1, 7, 7), ("h8-14", 8, 14, 14), ("h15-30", 15, 30, 30), ("h31-60", 31, 60, 60),
+                   ("h61-90", 61, 90, 90)]
+BUCKET_DAYS = {b[0]: b[3] for b in HORIZON_BUCKETS}
 
 
 def horizon_bucket(step: pd.Series) -> pd.Series:
-    labels = np.select([step <= 7, step <= 30], ["h1-7", "h8-30"], default="h31-90")
+    conds = [step <= hi for _, _, hi, _ in HORIZON_BUCKETS[:-1]]
+    labels = np.select(conds, [b[0] for b in HORIZON_BUCKETS[:-1]], default=HORIZON_BUCKETS[-1][0])
     return pd.Series(labels, index=step.index)

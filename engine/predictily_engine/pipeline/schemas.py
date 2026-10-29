@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from predictily_engine.demand.horizons import SUPPORTED_HORIZONS
+
 
 class ExecuteOptions(BaseModel):
     force_models: list[str] | None = None
@@ -17,7 +19,7 @@ class ExecuteOptions(BaseModel):
 class ExecuteRequest(BaseModel):
     tenant_id: int = Field(gt=0)
     training_job_id: int | None = None
-    horizons: list[int] = Field(default_factory=lambda: [7, 30, 90])
+    horizons: list[int] = Field(default_factory=lambda: list(SUPPORTED_HORIZONS))
     cutoff_date: date | None = None
     options: ExecuteOptions = Field(default_factory=ExecuteOptions)
 
@@ -25,8 +27,8 @@ class ExecuteRequest(BaseModel):
     @classmethod
     def _horizons(cls, v: list[int]) -> list[int]:
         v = sorted({int(h) for h in v})
-        if not v or any(h < 1 or h > 90 for h in v):
-            raise ValueError("Los horizontes deben estar entre 1 y 90 días")
+        if not v or any(h not in SUPPORTED_HORIZONS for h in v):
+            raise ValueError("Los horizontes deben ser " + ", ".join(str(h) for h in SUPPORTED_HORIZONS) + " días")
         return v
 
 
@@ -39,6 +41,8 @@ class ExecuteResponse(BaseModel):
     metrics: dict[str, Any]
     warnings: list[str]
     duration_ms: int
+    quality_status: str | None = None
+    horizon_support: dict[str, Any] | None = None
 
 
 class ReadinessRequest(BaseModel):

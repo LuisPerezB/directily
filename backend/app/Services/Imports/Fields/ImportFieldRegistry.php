@@ -20,6 +20,10 @@ final class ImportFieldRegistry
             ImportEntity::Branches => $this->branches(),
             ImportEntity::Suppliers => $this->suppliers(),
             ImportEntity::Promotions => $this->promotions(),
+            ImportEntity::Commitments => $this->commitments(),
+            ImportEntity::CalendarEvents => $this->calendarEvents(),
+            ImportEntity::UnitConversions => $this->unitConversions(),
+            ImportEntity::Warehouses => $this->warehouses(),
         };
     }
 
@@ -64,6 +68,7 @@ final class ImportFieldRegistry
             new FieldDefinition('channel', 'Canal de venta', false, 'string', 'Local, mayoreo, web, teléfono, vendedor en campo.', ['canal', 'canal_venta', 'channel', 'medio']),
             new FieldDefinition('currency', 'Moneda', false, 'string', 'Debe coincidir con la moneda de la empresa (USD).', ['moneda', 'currency', 'divisa']),
             new FieldDefinition('line_number', 'Número de línea', false, 'integer', 'Posición de la línea dentro del documento. Si falta se usa el orden de aparición.', ['linea_numero', 'nro_linea', 'num_linea', 'item_no', 'line', 'line_number', 'secuencia_linea']),
+            new FieldDefinition('source_recorded_at', 'Registrado/modificado en la fuente', false, 'datetime', 'Cuándo el sistema de origen registró o modificó el documento (disponibilidad en la fuente). Si falta queda desconocido (NULL); nunca se sustituye por la fecha de la importación.', ['source_recorded_at', 'fecha_modificacion', 'fecha_registro_sistema', 'modificado_en', 'updated_at', 'modified_at', 'fecha_actualizacion', 'fecha_ultima_modificacion']),
         ];
     }
 
@@ -146,6 +151,75 @@ final class ImportFieldRegistry
             new FieldDefinition('product_sku', 'Producto', false, 'string', 'Producto específico (opcional).', ['codigo', 'sku', 'product_sku', 'codigo_producto']),
             new FieldDefinition('category', 'Categoría', false, 'string', 'Categoría completa (opcional).', ['categoria', 'category', 'linea', 'familia']),
             new FieldDefinition('known_at', 'Registrada el', false, 'datetime', 'Fecha (o fecha-hora) en que el negocio aprobó o registró la promoción; no puede ser futura. Si falta, se usa el momento de la importación. En históricos indique la fecha real de planificación: el pronóstico de un corte solo usa promociones ya conocidas ese día.', ['known_at', 'fecha_registro', 'fecha_de_registro', 'fecha_aprobacion', 'fecha_de_aprobacion', 'registrada_el', 'aprobada_el', 'fecha_planificacion']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function commitments(): array
+    {
+        return [
+            new FieldDefinition('commitment_type', 'Tipo de compromiso', true, 'string', 'quote (cotización/proforma), order (pedido confirmado) o contract (contrato). No son ventas realizadas.', ['tipo', 'tipo_compromiso', 'tipo_documento', 'commitment_type', 'type', 'clase']),
+            new FieldDefinition('external_id', 'Identificador externo', true, 'string', 'Número de la cotización, pedido o contrato en el sistema de origen. Junto con el tipo evita duplicados al reimportar.', ['numero', 'nro_pedido', 'numero_pedido', 'pedido', 'cotizacion', 'contrato', 'numero_contrato', 'id_externo', 'external_id', 'order_id', 'documento']),
+            new FieldDefinition('status', 'Estado', false, 'string', 'open, confirmed, partially_fulfilled, fulfilled, cancelled o expired (o sus equivalentes en español). Si falta se deriva de la fecha de cancelación y de las cantidades cumplidas.', ['estado', 'status', 'situacion']),
+            new FieldDefinition('issued_at', 'Fecha de emisión', true, 'datetime', 'Cuándo se emitió o se acordó el compromiso.', ['fecha', 'fecha_emision', 'fecha_pedido', 'fecha_cotizacion', 'issued_at', 'date', 'fecha_documento']),
+            new FieldDefinition('known_at', 'Conocido en la fuente desde', false, 'datetime', 'Cuándo la fuente conocía ESTA versión del compromiso (registro/aprobación). Vacío = desconocido: el pronóstico de un corte anterior no puede usarla como conocida.', ['known_at', 'fecha_registro', 'fecha_aprobacion', 'fecha_confirmacion', 'registrado_el', 'fecha_modificacion']),
+            new FieldDefinition('valid_from', 'Vigente desde', false, 'date', 'Inicio de vigencia (contratos/cotizaciones).', ['vigente_desde', 'valid_from', 'inicio_vigencia', 'fecha_inicio']),
+            new FieldDefinition('valid_to', 'Vigente hasta', false, 'date', 'Fin de vigencia.', ['vigente_hasta', 'valid_to', 'fin_vigencia', 'fecha_fin', 'vencimiento']),
+            new FieldDefinition('expected_delivery_date', 'Entrega prevista', false, 'date', 'Fecha de entrega acordada a nivel de documento.', ['entrega_prevista', 'fecha_entrega', 'fecha_entrega_prevista', 'expected_delivery_date']),
+            new FieldDefinition('cancelled_at', 'Cancelado el', false, 'datetime', 'Cuándo se canceló. Un compromiso cancelado sin fecha queda con cancelación de fecha desconocida.', ['cancelado_el', 'fecha_cancelacion', 'fecha_anulacion', 'cancelled_at']),
+            new FieldDefinition('branch_code', 'Código de sucursal', false, 'string', 'Sucursal que atiende el compromiso (opcional).', ['sucursal', 'codigo_sucursal', 'establecimiento', 'branch_code', 'bodega']),
+            new FieldDefinition('customer_code', 'Código de cliente', false, 'string', 'Cliente del compromiso. Las cédulas y RUC se guardan solo como huella (HMAC).', ['cliente', 'codigo_cliente', 'ruc_cliente', 'customer_code', 'customer']),
+            new FieldDefinition('currency', 'Moneda', false, 'string', 'Debe coincidir con la moneda de la empresa.', ['moneda', 'currency', 'divisa']),
+            new FieldDefinition('line_number', 'Número de línea', false, 'integer', 'Posición de la línea. Si falta se usa el orden de aparición.', ['linea', 'nro_linea', 'line_number', 'item_no']),
+            new FieldDefinition('product_sku', 'Código de producto (SKU)', true, 'string', 'Código interno del producto.', ['codigo', 'sku', 'codigo_producto', 'product_sku', 'item', 'referencia']),
+            new FieldDefinition('quantity', 'Cantidad comprometida', true, 'number', 'Cantidad total de la línea, en la unidad indicada (o la del producto).', ['cantidad', 'cantidad_pedida', 'quantity', 'cant']),
+            new FieldDefinition('quantity_fulfilled', 'Cantidad cumplida', false, 'number', 'Cantidad ya entregada/facturada. Pendiente = cantidad − cumplida (≥ 0).', ['cantidad_cumplida', 'cantidad_entregada', 'entregado', 'quantity_fulfilled', 'cumplido']),
+            new FieldDefinition('unit', 'Unidad', false, 'string', 'Unidad de la cantidad. Si difiere de la del producto debe existir una conversión declarada; si no, la fila es un error (no hay conversiones silenciosas).', ['unidad', 'unidad_medida', 'um', 'unit']),
+            new FieldDefinition('unit_price', 'Precio unitario', false, 'number', 'Precio unitario pactado en la unidad indicada.', ['precio', 'precio_unitario', 'unit_price', 'pvp']),
+            new FieldDefinition('delivery_date', 'Entrega de la línea', false, 'date', 'Fecha de entrega de la línea (si difiere de la del documento).', ['fecha_entrega_linea', 'delivery_date']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function calendarEvents(): array
+    {
+        return [
+            new FieldDefinition('scope', 'Alcance', true, 'string', 'country, region, tenant (toda la empresa), branch, category, product o sector.', ['alcance', 'ambito', 'scope']),
+            new FieldDefinition('scope_ref', 'Referencia del alcance', false, 'string', 'country: código ISO (EC); region: sierra/costa/...; branch: código de sucursal; product: SKU; category: nombre; sector: identificador. Vacío solo para «tenant».', ['referencia', 'scope_ref', 'ref', 'pais', 'region', 'sucursal', 'sku']),
+            new FieldDefinition('code', 'Código del evento', true, 'string', 'Identificador estable del evento (p. ej. carnaval, dia_madre).', ['codigo', 'code', 'id_evento']),
+            new FieldDefinition('name', 'Nombre', true, 'string', 'Nombre legible.', ['nombre', 'evento', 'name']),
+            new FieldDefinition('category', 'Categoría', true, 'string', 'holiday, local_holiday, commercial_season, campaign, promotion, sector_event, agricultural_season, international_peak o exceptional.', ['categoria', 'tipo', 'category']),
+            new FieldDefinition('starts_on', 'Desde', true, 'date', 'Primer día del evento.', ['desde', 'inicio', 'fecha_inicio', 'starts_on', 'fecha']),
+            new FieldDefinition('ends_on', 'Hasta', false, 'date', 'Último día (incluido). Si falta, es de un solo día.', ['hasta', 'fin', 'fecha_fin', 'ends_on']),
+            new FieldDefinition('status', 'Estado', false, 'string', 'planned, confirmed (por defecto) o cancelled.', ['estado', 'status']),
+            new FieldDefinition('known_at', 'Conocido desde', false, 'datetime', 'Desde cuándo se conocía el evento. Vacío = desconocido: no se usará a futuro en un backtest. Nunca se rellena con la fecha de la carga.', ['conocido_desde', 'known_at', 'fecha_anuncio', 'fecha_registro']),
+            new FieldDefinition('source', 'Fuente', false, 'string', 'Origen del dato (decreto, calendario comercial, planificación interna...).', ['fuente', 'source', 'origen']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function unitConversions(): array
+    {
+        return [
+            new FieldDefinition('product_sku', 'Producto (SKU)', false, 'string', 'Vacío = conversión general para todos los productos.', ['codigo', 'sku', 'product_sku', 'producto']),
+            new FieldDefinition('from_unit', 'Unidad origen', true, 'string', 'Unidad de la cantidad original (p. ej. caja).', ['desde', 'unidad_origen', 'from_unit', 'unidad']),
+            new FieldDefinition('to_unit', 'Unidad destino', true, 'string', 'Unidad a la que se convierte (p. ej. unidad).', ['hacia', 'unidad_destino', 'to_unit']),
+            new FieldDefinition('factor', 'Factor', true, 'number', 'cantidad_destino = cantidad_origen × factor. Debe ser mayor que cero. Se acepta el sentido inverso (1/factor); no hay cadenas A→B→C.', ['factor', 'equivalencia', 'multiplicador']),
+            new FieldDefinition('valid_from', 'Vigente desde', false, 'date', 'Vacío = siempre vigente.', ['vigente_desde', 'valid_from', 'desde_fecha']),
+            new FieldDefinition('source', 'Fuente', false, 'string', 'Origen de la equivalencia.', ['fuente', 'source']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function warehouses(): array
+    {
+        return [
+            new FieldDefinition('code', 'Código', true, 'string', 'Código del almacén (único por empresa).', ['codigo', 'code', 'codigo_almacen', 'bodega']),
+            new FieldDefinition('name', 'Nombre', true, 'string', 'Nombre del almacén.', ['nombre', 'name', 'almacen']),
+            new FieldDefinition('branch_code', 'Código de sucursal', true, 'string', 'Sucursal a la que pertenece el almacén.', ['sucursal', 'codigo_sucursal', 'branch_code', 'establecimiento']),
+            new FieldDefinition('storage_capacity', 'Capacidad', false, 'number', 'Capacidad física (con su unidad). Vacío = desconocida.', ['capacidad', 'capacidad_almacenamiento', 'storage_capacity']),
+            new FieldDefinition('capacity_unit', 'Unidad de capacidad', false, 'string', 'm3, pallets, kg... Obligatoria si se indica la capacidad.', ['unidad_capacidad', 'capacity_unit']),
+            new FieldDefinition('is_active', 'Activo', false, 'boolean', 'Sí/No. Por defecto: sí.', ['activo', 'is_active', 'estado']),
         ];
     }
 }

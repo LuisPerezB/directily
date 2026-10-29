@@ -15,6 +15,8 @@ use App\Models\DataSource;
  * - available: funciona sin configuración externa.
  * - requires_credentials: implementación desacoplada que necesita credenciales del cliente
  *   y un entorno con acceso al servicio externo; NO se activa sin ellas.
+ * - implemented_untested: implementado pero SIN comprobar contra un servidor real (p. ej. MySQL/SQL Server en
+ *   el entorno de desarrollo). Nunca se presenta como disponible.
  * - planned: definido en el catálogo, aún sin implementación de sincronización.
  */
 interface ConnectorInterface
@@ -25,7 +27,7 @@ interface ConnectorInterface
 
     public function description(): string;
 
-    /** available | requires_credentials | planned */
+    /** available | requires_credentials | implemented_untested | planned */
     public function status(): string;
 
     /** @return list<string> tipos de entidad soportados (sales, products, inventory, ...) */

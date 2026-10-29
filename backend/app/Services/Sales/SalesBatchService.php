@@ -39,7 +39,7 @@ final class SalesBatchService
             $docErrors = [];
             $header = array_intersect_key($document, array_flip([
                 'document_number', 'document_type', 'status', 'issued_at', 'branch_code', 'currency', 'channel',
-                'customer_code', 'customer_segment', 'customer_province',
+                'customer_code', 'customer_segment', 'customer_province', 'source_recorded_at',
             ]));
             foreach (($document['items'] ?? []) as $itemIndex => $item) {
                 $raw = $header + array_intersect_key($item, array_flip([

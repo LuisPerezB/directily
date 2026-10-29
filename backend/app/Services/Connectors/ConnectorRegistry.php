@@ -10,6 +10,9 @@ use App\Services\Connectors\Connectors\GenericCsvConnector;
 use App\Services\Connectors\Connectors\GenericExcelConnector;
 use App\Services\Connectors\Connectors\GenericOdbcConnector;
 use App\Services\Connectors\Connectors\GenericRestConnector;
+use App\Services\Connectors\Connectors\MySqlSqlConnector;
+use App\Services\Connectors\Connectors\PostgresSqlConnector;
+use App\Services\Connectors\Connectors\SqlServerSqlConnector;
 
 /** Catálogo de conectores. Para agregar uno: implementar ConnectorInterface y registrarlo aquí. */
 final class ConnectorRegistry
@@ -19,7 +22,9 @@ final class ConnectorRegistry
 
     public function __construct()
     {
-        foreach ([new GenericCsvConnector, new GenericExcelConnector, new GenericRestConnector, new ContificoConnector, new GenericOdbcConnector] as $connector) {
+        foreach ([new GenericCsvConnector, new GenericExcelConnector, new GenericRestConnector, new ContificoConnector, new GenericOdbcConnector,
+            // Etapa 2 · P3: conectores SQL de solo lectura (ADR-V2-13).
+            new PostgresSqlConnector, new MySqlSqlConnector, new SqlServerSqlConnector] as $connector) {
             $this->connectors[$connector->key()] = $connector;
         }
     }

@@ -18,7 +18,8 @@ def test_outputs_and_levels(pipeline_result):
     assert (day["lo_80"] <= day["yhat"] + 1e-6).all() and (day["yhat"] <= day["hi_80"] + 1e-6).all()
     assert not fv.duplicated(["node_key", "granularity", "target_date"]).any()
     hz = fv[fv["granularity"] == "horizon"]
-    assert set(hz["period_days"]) == {7, 30, 90} and hz["lo_80"].notna().all()
+    assert set(hz["period_days"]) == {7, 14, 30, 60, 90} and hz["lo_80"].notna().all()
+    assert (hz["quality_status"] == "ok").all(), "historia de ~575 días: los cinco horizontes están respaldados"
     assert {"week", "month"} <= set(fv["granularity"])
 
 
@@ -60,7 +61,7 @@ def test_compares_against_baseline(pipeline_result):
     sel_h, _ = picked["backtest"]
     assert sel_h["n_windows"] == 1 and sel_h["cutoffs"] == [pipeline_result.plan.holdout_cutoff.date().isoformat()]
     primary = ev[ev["evaluation_type"] == "backtest"]
-    assert set(primary[primary["level"] == "horizon"]["level_key"]) == {"h1-7", "h8-30", "h31-90"}
+    assert set(primary[primary["level"] == "horizon"]["level_key"]) == {"h1-7", "h8-14", "h15-30", "h31-60", "h61-90"}
     assert primary[primary["level"] == "series"]["level_key"].str.match(r"^b\d+-p\d+$").all()
     assert primary[primary["level"] == "product"]["level_key"].str.match(r"^p\d+$").all()
     m = pipeline_result.summary["metrics"]

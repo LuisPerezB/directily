@@ -5,7 +5,7 @@
   devoluciones). Se guarda en forecast_actuals (idempotente por run, nodo y fecha).
 - Métricas realizadas por run (nivel serie, sin días con quiebre de stock; y nivel total) en
   model_evaluations con evaluation_type='realized'.
-- Drift: si el WAPE realizado de un tramo de horizonte (h1-7 / h8-30 / h31-90), acumulado en
+- Drift: si el WAPE realizado de un tramo de horizonte (h1-7 / h8-14 / h15-30 / h31-60 / h61-90), acumulado en
   los runs de producción evaluados, supera max(1.3 × backtest, backtest + 0.10) con al menos 14
   días observados, se crea una alerta forecast_drift (deduplicada).
 """
@@ -21,7 +21,7 @@ import pandas as pd
 from sqlalchemy import Connection, text
 
 from predictily_engine.backtest.metrics import summarize
-from predictily_engine.backtest.rolling import horizon_bucket
+from predictily_engine.backtest.rolling import BUCKET_DAYS, horizon_bucket
 from predictily_engine.db.repository import TenantRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import jdump, mark_failed, none_if_nan, upsert_alert
@@ -218,7 +218,7 @@ def _write_realized(conn: Connection, tenant_id: int, run: dict, rows: pd.DataFr
     overall = add("overall", None, series, cov=cov)
     sb = series.assign(hbucket=horizon_bucket(series["horizon_step"]))
     for bucket, sub in sb.groupby("hbucket"):
-        add("horizon", bucket, sub, horizon_days={"h1-7": 7, "h8-30": 30, "h31-90": 90}[bucket])
+        add("horizon", bucket, sub, horizon_days=BUCKET_DAYS[bucket])
     add("total", "total", rows[rows["level"] == "total"])
     if out_rows:
         conn.execute(text(

@@ -285,6 +285,8 @@ final class CatalogResolver
                 'tenant_id' => $this->tenant->id,
                 'external_code' => $identity['external_code'],
                 'customer_type' => $identity['customer_type'],
+                // Código genérico (consumidor final): no representa un comprador recurrente (etapa 2, contrato canónico).
+                'is_generic' => $identity['customer_type'] === 'final_consumer',
                 'tax_id_hash' => $identity['tax_id_hash'],
                 'segment_id' => $segmentCode ? ($segmentIds[$segmentCode] ?? null) : null,
                 'province' => $info['province'] ?? null,
