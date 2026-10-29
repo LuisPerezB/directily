@@ -17,4 +17,9 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/core.php';
     require __DIR__.'/api/analytics.php';
+    // Etapa 2 (docs/architecture/PREDICTILY_V2_GAP_ANALYSIS.md §5): un archivo por paquete.
+    require __DIR__.'/api/datacore.php';
+    require __DIR__.'/api/customer.php';
+    require __DIR__.'/api/supply.php';
+    require __DIR__.'/api/platform.php';
 });

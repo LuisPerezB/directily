@@ -16,6 +16,10 @@ from sqlalchemy import text  # noqa: E402
 
 from predictily_engine import __version__  # noqa: E402
 from predictily_engine.api.auth import require_token  # noqa: E402
+from predictily_engine.api.routers import customer as customer_router  # noqa: E402
+from predictily_engine.api.routers import data_core as data_core_router  # noqa: E402
+from predictily_engine.api.routers import platform as platform_router  # noqa: E402
+from predictily_engine.api.routers import supply as supply_router  # noqa: E402
 from predictily_engine.config import FEATURE_SET_VERSION, get_settings  # noqa: E402
 from predictily_engine.db.session import get_engine  # noqa: E402
 from predictily_engine.models.foundation import TimesFMAdapter  # noqa: E402
@@ -35,6 +39,9 @@ app = FastAPI(
     version=__version__,
     description="Motor predictivo interno de Predictily. Solo accesible desde la red interna (Bearer token).",
 )
+# Etapa 2: un router por core (docs/architecture/PREDICTILY_V2_GAP_ANALYSIS.md §5).
+for _router in (data_core_router.router, customer_router.router, supply_router.router, platform_router.router):
+    app.include_router(_router)
 
 
 @app.exception_handler(NotFoundError)
