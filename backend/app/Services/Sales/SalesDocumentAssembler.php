@@ -38,7 +38,7 @@ final class SalesDocumentAssembler
             $doc['signature'] = $signature;
             $doc['header'] = array_intersect_key($line, array_flip([
                 'doc_key', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'branch_code',
-                'customer_code', 'customer_segment', 'customer_province', 'channel', 'currency',
+                'customer_code', 'customer_segment', 'customer_province', 'channel', 'currency', 'source_recorded_at',
             ]));
         } elseif ($doc['signature'] !== $signature) {
             $issues[] = Issue::error('document_conflict', 'El documento aparece con datos de cabecera distintos (fecha, sucursal, estado o cliente).', 'document_number', $line['document_number']);
@@ -46,6 +46,11 @@ final class SalesDocumentAssembler
             $this->open[$key] = $doc;
 
             return $issues;
+        }
+
+        // La fecha de registro en la fuente no forma parte de la firma ni de la huella: se conserva la más reciente.
+        if (($line['source_recorded_at'] ?? null) !== null && ($doc['header']['source_recorded_at'] ?? null) < $line['source_recorded_at']) {
+            $doc['header']['source_recorded_at'] = $line['source_recorded_at'];
         }
 
         $hash = md5(serialize([$line['product_sku'], $line['quantity'], $line['unit_price'], $line['discount'], $line['tax'], $line['net_amount'], $line['unit_cost'], $line['is_return'], $line['line_number']]));

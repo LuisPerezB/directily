@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     n_jobs: int = 4
     # Un run "running" más antiguo que esto se considera abandonado y puede retomarse.
     stale_run_seconds: int = 1800
-    # Mejora relativa mínima de WAPE que debe lograr un modelo complejo sobre el mejor estadístico.
-    min_improvement: float = 0.03
-    max_backtest_windows: int = 3
+    # Sobrescrituras del operador (None = usar la configuración del core/perfil/empresa, ver platform/config.py):
+    # mejora relativa mínima de WAPE que debe lograr un modelo complejo sobre el mejor estadístico y ventanas.
+    min_improvement: float | None = None
+    max_backtest_windows: int | None = None
 
 
 @lru_cache(maxsize=1)

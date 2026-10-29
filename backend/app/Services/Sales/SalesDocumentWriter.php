@@ -104,7 +104,7 @@ final class SalesDocumentWriter
             // 2) Cabeceras (upsert con RETURNING para obtener ids)
             $now = now()->format('Y-m-d H:i:sP');
             $columns = ['tenant_id', 'branch_id', 'data_source_id', 'import_job_id', 'document_type', 'document_number', 'status', 'issued_at',
-                'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'source_hash', 'created_at', 'updated_at'];
+                'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'source_hash', 'source_recorded_at', 'created_at', 'updated_at'];
             $ids = [];
             foreach (array_chunk($toWrite, 500) as $chunk) {
                 $bindings = [];
@@ -116,13 +116,13 @@ final class SalesDocumentWriter
                         $doc['document_type'], $doc['document_number'], $doc['status'], $doc['issued_at'], $doc['sale_date'],
                         $doc['customer_code'] !== null ? ($customerIds[$doc['customer_code']] ?? null) : null,
                         $doc['channel'], $doc['currency'], $doc['subtotal'], $doc['discount_total'], $doc['tax_total'], $doc['total'],
-                        $doc['source_hash'], $now, $now,
+                        $doc['source_hash'], $doc['source_recorded_at'] ?? null, $now, $now,
                     );
                     $placeholders[] = '('.implode(',', array_fill(0, count($columns), '?')).')';
                 }
                 $update = implode(', ', array_map(fn ($c) => "{$c} = EXCLUDED.{$c}", [
                     'branch_id', 'import_job_id', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency',
-                    'subtotal', 'discount_total', 'tax_total', 'total', 'source_hash', 'updated_at',
+                    'subtotal', 'discount_total', 'tax_total', 'total', 'source_hash', 'source_recorded_at', 'updated_at',
                 ]));
                 $sql = 'INSERT INTO sales ('.implode(',', $columns).') VALUES '.implode(',', $placeholders)
                     .' ON CONFLICT (tenant_id, document_type, document_number) DO UPDATE SET '.$update

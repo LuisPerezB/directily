@@ -49,6 +49,13 @@ class TenantData:
     # Día (local) hasta el que se conocen las promociones en una ejecución vigente; None = el día de corte
     # (ejecución histórica: solo lo que se conocía al corte).
     promotions_known_on: date | None = None
+    # Etapa 2 · demanda: moneda y sector de la empresa, eventos `calendar_events` de categoría 'exceptional'
+    # (con su `known_at` en hora local) y cobertura declarada de la fuente de ventas (ver demand.coverage).
+    currency: str | None = None
+    sector: str | None = None
+    exceptional_events: pd.DataFrame = field(default_factory=pd.DataFrame)
+    coverage: dict[str, Any] = field(default_factory=dict)
+    coverage_limitations: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def effective_settings(self) -> dict[str, Any]:
@@ -67,6 +74,12 @@ def _normalize(data: TenantData) -> TenantData:
     for col in ("current_price", "current_cost"):
         if col in data.products:
             data.products[col] = pd.to_numeric(data.products[col], errors="coerce")
+    if data.exceptional_events is not None and not data.exceptional_events.empty:
+        ev = data.exceptional_events.copy()
+        for col in ("starts_on", "ends_on", "known_at"):
+            if col in ev:
+                ev[col] = pd.to_datetime(ev[col])
+        data.exceptional_events = ev
     for df_name in ("promotions", "promotion_revisions"):
         df = getattr(data, df_name)
         if not df.empty:
@@ -109,6 +122,9 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         # Ejecución vigente (corte = último dato): vale lo conocido hoy. Ejecución histórica: lo
         # conocido al corte (una promoción registrada después no puede usarse en ese pronóstico).
         promotions_known_on=_local_today(tenant.get("timezone")) if last is not None and cutoff >= last else None,
+        currency=tenant.get("currency"),
+        sector=tenant.get("sector"),
+        exceptional_events=repo.calendar_events(),
     )
     return _normalize(data)
 

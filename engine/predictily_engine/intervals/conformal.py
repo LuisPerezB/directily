@@ -25,7 +25,10 @@ import numpy as np
 import pandas as pd
 
 DAY_BUCKETS = [(1, 7), (8, 14), (15, 30), (31, 60), (61, 90)]
-QUANTILES = (0.025, 0.10, 0.90, 0.975)
+# Cuantiles del error normalizado: límites del 95 % (2,5/97,5), del 80 % (P10/P90) y la mediana (P50).
+# La mediana solo existe en modo "quantile" (asimétrico); en modo "absolute" el intervalo es simétrico
+# alrededor del pronóstico y no define una mediana: p50 queda NaN.
+QUANTILES = (0.025, 0.10, 0.50, 0.90, 0.975)
 MIN_POINTS = 20
 
 
@@ -63,7 +66,7 @@ class ConformalCalibrator:
     def _quantiles(self, e: np.ndarray) -> np.ndarray:
         if self.mode == "absolute":
             q80, q95 = np.quantile(np.abs(e), [0.80, 0.95])
-            return np.array([-q95, -q80, q80, q95])
+            return np.array([-q95, -q80, np.nan, q80, q95])
         return np.quantile(e, QUANTILES)
 
     @property
@@ -79,16 +82,21 @@ class ConformalCalibrator:
         return None
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Agrega lo_80, hi_80, lo_95, hi_95 a df (columnas group_col, step, yhat, scale)."""
+        """Agrega lo_80, hi_80, lo_95, hi_95 y p50 a df (columnas group_col, step, yhat, scale).
+
+        `lo_80`/`hi_80` son los cuantiles P10/P90 del error (modo "quantile") o ±cuantil 80 % del |error|
+        (modo "absolute"). `p50` = pronóstico + mediana del error normalizado × escala (≥ 0): solo en modo
+        "quantile"; NaN en "absolute". Es una mediana CONDICIONAL estimada: no se publica sin evaluarla.
+        """
         out = df.copy()
         if self.empty or out.empty:
-            for c in ("lo_80", "hi_80", "lo_95", "hi_95"):
+            for c in ("lo_80", "hi_80", "lo_95", "hi_95", "p50"):
                 out[c] = np.nan
             return out
         steps = out["step"].to_numpy()
         buckets = self.bucketer(steps)
         groups = out[self.group_col].to_numpy()
-        qs = np.full((len(out), 4), np.nan)
+        qs = np.full((len(out), len(QUANTILES)), np.nan)
         cache: dict[tuple, np.ndarray | None] = {}
         for i, (g, b) in enumerate(zip(groups, buckets)):
             key = (g, int(b))
@@ -99,12 +107,13 @@ class ConformalCalibrator:
         widen = np.where(steps > self.max_step, np.sqrt(steps / max(self.max_step, 1)), 1.0)
         yhat = out["yhat"].to_numpy(dtype=float)
         scale = out["scale"].to_numpy(dtype=float) * widen
-        lo95, lo80, hi80, hi95 = (yhat + qs[:, j] * scale for j in range(4))
+        lo95, lo80, mid, hi80, hi95 = (yhat + qs[:, j] * scale for j in range(len(QUANTILES)))
         lo80 = np.minimum(np.clip(lo80, 0, None), yhat)
         lo95 = np.minimum(np.clip(lo95, 0, None), lo80)
         hi80 = np.maximum(hi80, yhat)
         hi95 = np.maximum(hi95, hi80)
         out["lo_80"], out["hi_80"], out["lo_95"], out["hi_95"] = lo80, hi80, lo95, hi95
+        out["p50"] = np.clip(mid, 0, None)
         return out
 
 
@@ -138,7 +147,7 @@ def score_intervals(calibration: pd.DataFrame, test: pd.DataFrame, group_col: st
     """
     cal = ConformalCalibrator(calibration, group_col, bucketer, mode)
     if cal.empty or test.empty:
-        return test.iloc[0:0].assign(lo_80=np.nan, hi_80=np.nan, lo_95=np.nan, hi_95=np.nan,
+        return test.iloc[0:0].assign(lo_80=np.nan, hi_80=np.nan, lo_95=np.nan, hi_95=np.nan, p50=np.nan,
                                      hit_80=False, hit_95=False)
     out = cal.apply(test)
     out = out[out["lo_80"].notna()].copy()

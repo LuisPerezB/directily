@@ -187,6 +187,20 @@ final class SalesLineNormalizer
 
         $customerCode = $p->string($raw['customer_code'] ?? null, 100);
 
+        // Disponibilidad en la fuente (tres fechas): NULL = desconocida; nunca se rellena con la fecha de ingestión.
+        $recordedAt = null;
+        $rawRecorded = $raw['source_recorded_at'] ?? null;
+        if (! ValueParser::isBlank($rawRecorded)) {
+            $parsedRecorded = $p->dateTime($rawRecorded);
+            if ($parsedRecorded === null) {
+                $issues[] = Issue::warning('invalid_date', 'Fecha de registro en la fuente no válida; se deja desconocida.', 'source_recorded_at', $rawRecorded);
+            } elseif ($parsedRecorded[0]->greaterThan($this->maxDate)) {
+                $issues[] = Issue::warning('future_date', 'La fecha de registro en la fuente está en el futuro; se deja desconocida.', 'source_recorded_at', $rawRecorded);
+            } else {
+                $recordedAt = $parsedRecorded[0]->utc()->format('Y-m-d H:i:sP');
+            }
+        }
+
         return [[
             'doc_key' => $type.'|'.mb_strtoupper((string) $number),
             'document_type' => $type,
@@ -212,6 +226,7 @@ final class SalesLineNormalizer
             'channel' => ValueParser::channel($p->string($raw['channel'] ?? null, 50)),
             'currency' => $this->currency,
             'line_number' => $lineNumber,
+            'source_recorded_at' => $recordedAt,
         ], $issues];
     }
 }
