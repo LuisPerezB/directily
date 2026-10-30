@@ -51,8 +51,6 @@ BASE_FEATURES: list[str] = [
     "cust_gap_median", "cust_overdue_ratio", "cust_n_products_180",
     # producto (popularidad)
     "prod_buyers_30", "prod_buyers_90", "prod_buyer_share_90",
-    # calendario del corte
-    "cal_dow", "cal_dom", "cal_month", "cal_days_to_month_end",
     # disponibilidad en la sucursal habitual
     "avail_now", "unavail_days_30", "avail_share_90",
     # promoción conocida al corte
@@ -66,7 +64,7 @@ SEASON_FLAGS = ["is_decimo_tercero", "is_decimo_cuarto", "is_school_season", "is
                 "is_fathers_day_window", "is_black_friday_window", "is_christmas_window", "is_carnival_window"]
 # Identificadores y soportes que NO son variables del modelo.
 ID_COLUMNS = ["rel", "customer_id", "product_id", "branch_id", "currency_code"]
-SUPPORT_COLUMNS = ["last_net_price", "last_list_price", "last_day"]
+SUPPORT_COLUMNS = ["last_net_price", "last_list_price", "last_day", "n_purchases_all"]
 
 
 def model_feature_names(horizon: bool = True) -> list[str]:
@@ -349,7 +347,10 @@ class FeatureBuilder:
         n_all = (hi - st).astype(float)
         recency = (c - last_day).astype(float)
         tenure = (c - first_day).astype(float)
-        feats: dict[str, np.ndarray] = {"rel_recency_days": recency, "rel_tenure_days": tenure, "rel_n_purchases": n_all}
+        # Variables que crecen con el calendario (antigüedad, conteo histórico) se acotan para que sean estacionarias:
+        # un corte futuro no debe quedar fuera del rango visto en el entrenamiento.
+        feats: dict[str, np.ndarray] = {"rel_recency_days": np.minimum(recency, 365.0), "rel_tenure_days": np.minimum(tenure, 365.0),
+                                        "rel_n_purchases": np.minimum(n_all, 50.0)}
         pos_w = {w: ev.pos(R, c - w) for w in (30, 90, 180, 365)}
         for w, name in ((30, "rel_n_30"), (90, "rel_n_90"), (180, "rel_n_180"), (365, "rel_n_365")):
             feats[name] = (hi - pos_w[w]).astype(float)
@@ -406,7 +407,7 @@ class FeatureBuilder:
         feats["prod_disc_30"] = _safe_div(pdc[phi] - pdc[p30], pg[phi] - pg[p30])
         lc_idx = np.clip(phi - 1, 0, max(ps.n - 1, 0))
         lc = np.where((phi - 1) >= ps.start[pc], self.last_change[lc_idx], -1.0)
-        feats["days_since_price_change"] = np.where(lc >= 0, c - lc, np.nan)
+        feats["days_since_price_change"] = np.where(lc >= 0, np.minimum(c - lc, 365.0), np.nan)
         n90_pos = feats["rel_n_90"] > 0
         feats["prod_buyers_90"] = np.bincount(pc[n90_pos], minlength=self.n_prod)[pc].astype(float)
         feats["prod_buyers_30"] = np.bincount(pc[feats["rel_n_30"] > 0], minlength=self.n_prod)[pc].astype(float)
@@ -418,7 +419,7 @@ class FeatureBuilder:
         chi = cs.pos(cc, c)
         cstart = cs.start[cc]
         feats["cust_recency_any"] = (c - cs.day[chi - 1]).astype(float)
-        feats["cust_tenure_days"] = (c - cs.day[cstart]).astype(float)
+        feats["cust_tenure_days"] = np.minimum((c - cs.day[cstart]).astype(float), 365.0)
         for w in (30, 90, 180, 365):
             feats[f"cust_n_days_{w}"] = (chi - cs.pos(cc, c - w)).astype(float)
         CG = cs.last_gaps(chi, cc, GAP_K)
@@ -445,14 +446,6 @@ class FeatureBuilder:
         av90, kn90 = self.avail.window(aidx, c - 90, c)
         feats["avail_share_90"] = np.where(kn90 > 0, av90 / np.maximum(kn90, 1), np.nan)
 
-        # calendario del corte
-        d = from_day(c)
-        feats["cal_dow"] = np.full(n, float(d.weekday()))
-        feats["cal_dom"] = np.full(n, float(d.day))
-        feats["cal_month"] = np.full(n, float(d.month))
-        dim = pd.Timestamp(d).days_in_month
-        feats["cal_days_to_month_end"] = np.full(n, float(dim - d.day))
-
         # promociones conocidas al corte
         promos = self._promos_as_of(c)
         cat = np.array([self.product_category.get(int(p), -1) for p in prod_ids], dtype=np.int64)
@@ -468,6 +461,7 @@ class FeatureBuilder:
         base["last_net_price"] = ev.values["price"][last_idx]
         base["last_list_price"] = ev.values["listp"][last_idx]
         base["last_day"] = last_day.astype(np.int64)
+        base["n_purchases_all"] = n_all
 
         key_idx = self.calendar.key_for(branch)
         hfr: dict[int, pd.DataFrame] = {}

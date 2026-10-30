@@ -300,7 +300,7 @@ def run_pipeline(
     evaluations, eval_info = ev.evaluate(bt, served, eval_served, cat, data.currency)
     history_days = int((cutoff - panel.df["ds"].min()).days) + 1
     support = hz.horizon_support(horizon, history_days, plan, ev.horizon_obs(evaluations))
-    p50_info = ev.p50_decision(eval_info["quantiles"])
+    p50_info = eval_info["p50"]
     if not p50_info["published"]:
         limitations.append({"code": "p50_not_published", "message": p50_info["message"]})
     if plan is not None and not plan.has_holdout:

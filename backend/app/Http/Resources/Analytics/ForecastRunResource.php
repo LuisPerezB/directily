@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Analytics;
 
 use App\Models\ForecastRun;
+use App\Services\Analytics\DemandEnvelope;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -36,6 +37,13 @@ class ForecastRunResource extends JsonResource
             'completed_at' => $this->completed_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
             'training_job' => $this->whenLoaded('trainingJob', fn () => $this->trainingJob ? new TrainingJobResource($this->trainingJob) : null),
+            // Etapa 2 (aditivo): huella, configuración efectiva y manifiesto del protocolo de evaluación.
+            'config_version' => $this->config_version,
+            'data_snapshot_id' => $this->data_snapshot_id !== null ? (int) $this->data_snapshot_id : null,
+            'effective_config' => $this->effective_config,
+            // El manifiesto es voluminoso: solo en el detalle (GET /forecast-runs/{id}); también en /accuracy/summary.
+            'evaluation_manifest' => $this->when($request->routeIs('analytics.forecast-runs.show'), fn () => $this->evaluation_manifest),
+            'envelope' => app(DemandEnvelope::class)->for($this->resource),
         ];
     }
 }

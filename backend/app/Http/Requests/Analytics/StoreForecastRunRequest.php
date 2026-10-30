@@ -20,7 +20,7 @@ class StoreForecastRunRequest extends AnalyticsRequest
     public function messages(): array
     {
         return [
-            'horizon_days.in' => 'El horizonte debe ser 7, 30 o 90 días.',
+            'horizon_days.in' => 'El horizonte debe ser 7, 14, 30, 60 o 90 días.',
             'cutoff_date.before' => 'La fecha de corte debe ser anterior a hoy.',
         ];
     }

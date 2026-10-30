@@ -69,11 +69,15 @@ def test_execute_writes_versioned_results(first_run, db_engine, tenants):
             "SELECT period_days, lo_80, hi_80 FROM forecast_values WHERE forecast_run_id = :r AND node_key = 'total' "
             "AND granularity = 'horizon' ORDER BY period_days"), {"r": run_id}).all()
         assert [h[0] for h in hz] == [7, 30, 90] and all(h[1] is not None for h in hz)
-        reg = conn.execute(text("SELECT model_family, status, training_data_hash, artifact_path, random_seed "
+        reg = conn.execute(text("SELECT model_family, status, role, core, training_data_hash, artifact_path, random_seed "
                                 "FROM model_registry WHERE forecast_run_id = :r"), {"r": run_id}).mappings().all()
         statuses = {r["model_family"]: r["status"] for r in reg}
-        assert "production" in statuses.values() and "fallback" in statuses.values() or \
-            any(r["status"] == "production" for r in reg)
+        # Estados de la etapa 2 (candidate | validated | production | retired | failed) y rol primary | fallback.
+        assert set(statuses.values()) <= {"candidate", "validated", "production", "failed"}
+        assert any(r["status"] == "production" and r["role"] == "primary" for r in reg)
+        assert any(r["status"] == "production" and r["role"] == "fallback" for r in reg) or \
+            any(r["role"] == "primary" for r in reg)
+        assert {r["core"] for r in reg} == {"demand"}
         assert all(r["training_data_hash"] and r["random_seed"] == 42 for r in reg)
         if "lightgbm_global" in statuses and statuses["lightgbm_global"] == "production":
             assert any(r["artifact_path"] for r in reg if r["model_family"] == "lightgbm_global")
@@ -154,7 +158,8 @@ def test_second_run_becomes_current_and_archives_models(first_run, client, db_en
         assert current == [run2]
         old = conn.execute(text("SELECT DISTINCT status FROM model_registry WHERE forecast_run_id = :r"),
                            {"r": first_run["run_id"]}).scalars().all()
-        assert set(old) <= {"archived", "rejected"}
+        assert set(old) <= {"retired", "validated"}, "los modelos de producción anteriores pasan a retired"
+        assert "production" not in old
 
 
 def test_historical_run_and_evaluate_actuals(client, db_engine, tenants):

@@ -35,6 +35,7 @@ class ModelEvaluationResource extends JsonResource
             'coverage_80' => Num::ratio($this->coverage_80),
             'coverage_95' => Num::ratio($this->coverage_95),
             'n_obs' => (int) $this->n_obs,
+            'metrics' => $this->metrics,
             'n_windows' => (int) $this->n_windows,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

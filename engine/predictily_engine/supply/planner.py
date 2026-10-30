@@ -51,6 +51,13 @@ def prepare_problem(problem: PlanProblem) -> PlanProblem:
             if r.output_product_id == node.product_id:
                 firsts.append(0 + math.ceil((max(1, r.production_days) - 1) / R))
         node.meta["ss_from"] = min(firsts) if firsts else node.horizon
+        if node.safety_stock > EPS and node.u_weights is None:
+            # Urgencia decreciente: ω_τ = 1 + (T−1−τ)/T. Un faltante cercano pesa más que uno lejano (el lejano se
+            # corregirá en las próximas revisiones). Evita que el modelo «retenga ventas» para proteger el stock de
+            # seguridad: trasladar una venta del período τ al τ' cuesta ≥ (τ'−τ)/T por unidad, más que cualquier
+            # reducción de déficit de stock de seguridad (≤ w/T por período con w < 1).
+            T_n = node.horizon
+            node.u_weights = 1.0 + (T_n - 1 - np.arange(T_n)) / T_n
     return problem
 
 
@@ -93,8 +100,160 @@ def _add(d: dict[int, float], j: int, v: float) -> None:
 
 def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset(), coverage_mode: str | None = None,
                     time_limit: float | None = None) -> PlanSolution:
-    """Construye y resuelve el MILP. `relax` ⊆ {budget, supplier_capacity, storage, resource} (diagnóstico)."""
+    """Construye y resuelve el MILP. `relax` ⊆ {budget, supplier_capacity, storage, resource} (diagnóstico).
+
+    El modelo se descompone en componentes independientes (productos/ubicaciones sin restricción en común:
+    presupuesto, almacenamiento de una misma sucursal, capacidad de una misma oferta, recetas y recursos). Cada
+    componente se resuelve por separado (exacto) y los resultados se combinan; con restricciones acopladoras queda
+    un único componente. Se aplica el mismo límite de tiempo total.
+    """
     prepare_problem(problem)
+    total = float(time_limit if time_limit is not None else problem.time_limit)
+    comps = _components(problem, relax)
+    t0 = time.perf_counter()
+    if len(comps) <= 1:
+        sol, _ = _solve_once(problem, relax, coverage_mode, total, set())
+        sol.n_components = 1
+        return sol
+    # Dos pasadas: primero todos con la mitad del tiempo repartida por tamaño (los fáciles terminan antes); el tiempo
+    # sobrante se reparte entre los componentes que no llegaron a la tolerancia pedida.
+    subs = [_subproblem(problem, c) for c in comps]
+    weights = [len(c) for c in comps]
+    sols: list[PlanSolution | None] = [None] * len(comps)
+    for i in sorted(range(len(comps)), key=lambda j: weights[j]):
+        share = max(0.3, 0.5 * total * weights[i] / sum(weights))
+        sols[i] = _solve_once(subs[i], relax, coverage_mode, share, set())[0]
+    pending = [i for i in range(len(comps)) if sols[i].status not in ("optimal", "infeasible")]
+    for n_done, i in enumerate(sorted(pending, key=lambda j: weights[j])):
+        left = total - (time.perf_counter() - t0)
+        if left <= 0.5:
+            break
+        w_pending = sum(weights[j] for j in pending[n_done:]) or 1
+        share = max(0.5, left * weights[i] / w_pending)
+        again = _solve_once(subs[i], relax, coverage_mode, share, set())[0]
+        if again.evaluation is not None and (sols[i].evaluation is None or again.status == "optimal"
+                                             or (again.objective_value or 0) <= (sols[i].objective_value or 1e30)):
+            sols[i] = again
+    return _merge(problem, sols, time.perf_counter() - t0)
+
+
+def _components(problem: PlanProblem, relax: frozenset[str]) -> list[list[tuple[int, int]]]:
+    keys = [n.key for n in problem.nodes]
+    parent = {k: k for k in keys}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    nodes = problem.node_index()
+    if "budget" not in relax:
+        for bud in problem.budgets:
+            scope = [k for k in keys if bud.branch_id is None or k[0] == bud.branch_id]
+            for k in scope[1:]:
+                union(scope[0], k)
+    if "storage" not in relax:
+        for cap in problem.capacities:
+            scope = [k for k in keys if k[0] == cap.branch_id and nodes[k].space is not None]
+            for k in scope[1:]:
+                union(scope[0], k)
+    if "supplier_capacity" not in relax:
+        for o in problem.offers:
+            if o.capacity is None:
+                continue
+            scope = [k for k in keys if k[1] == o.product_id and o.applies_to(k[0])]
+            for k in scope[1:]:
+                union(scope[0], k)
+    for r in problem.recipes:
+        scope = [k for k in keys if k[1] == r.output_product_id and (r.branch_id is None or k[0] == r.branch_id)]
+        for k in scope:
+            for pid in r.inputs:
+                if (k[0], pid) in nodes:
+                    union(k, (k[0], pid))
+    if "resource" not in relax:
+        for res in problem.resources:
+            members = [r for r in problem.recipes if r.resource_id == res.resource_id]
+            anchor = None
+            for r in members:
+                for k in keys:
+                    if k[1] == r.output_product_id and (r.branch_id is None or k[0] == r.branch_id) \
+                            and (res.branch_id is None or k[0] == res.branch_id):
+                        if anchor is None:
+                            anchor = k
+                        else:
+                            union(anchor, k)
+    groups: dict = {}
+    for k in keys:
+        groups.setdefault(find(k), []).append(k)
+    return list(groups.values())
+
+
+def _subproblem(problem: PlanProblem, comp: list[tuple[int, int]]) -> PlanProblem:
+    keys = set(comp)
+    nodes = [n for n in problem.nodes if n.key in keys]
+    products = {n.product_id for n in nodes}
+    branches = {n.branch_id for n in nodes}
+    offers = [o for o in problem.offers if o.product_id in products and any(o.applies_to(b) for b in branches)]
+    recipes = [r for r in problem.recipes if any(n.product_id == r.output_product_id for n in nodes)]
+    res_ids = {r.resource_id for r in recipes if r.resource_id is not None}
+    return PlanProblem(
+        as_of=problem.as_of, period_days=problem.period_days, n_periods=problem.n_periods, currency=problem.currency,
+        nodes=nodes, offers=offers, recipes=recipes,
+        resources=[r for r in problem.resources if r.resource_id in res_ids],
+        budgets=[b for b in problem.budgets if b.branch_id is None or b.branch_id in branches],
+        capacities=[c for c in problem.capacities if c.branch_id in branches],
+        objective=problem.objective, coverage_mode=problem.coverage_mode, time_limit=problem.time_limit,
+        mip_gap=problem.mip_gap, ss_weight=problem.ss_weight, meta=problem.meta)
+
+
+def _merge(problem: PlanProblem, sols: list[PlanSolution], seconds: float) -> PlanSolution:
+    order = ["optimal", "feasible_with_gap", "time_limit", "not_solved", "infeasible"]
+    worst = max((s.status for s in sols), key=lambda st: order.index(st) if st in order else 3)
+    out = PlanSolution(status=worst, seconds=seconds, n_vars=sum(s.n_vars for s in sols),
+                       n_constraints=sum(s.n_constraints for s in sols), n_integer=sum(s.n_integer for s in sols))
+    out.n_components = len(sols)
+    out.detail = f"{len(sols)} componentes independientes; " + "; ".join(sorted({s.detail for s in sols if s.detail}))[:300]
+    for s in sols:
+        out.notes += s.notes
+    if worst in ("infeasible", "not_solved") or any(s.evaluation is None for s in sols):
+        out.status = "infeasible" if worst == "infeasible" else ("time_limit" if worst == "time_limit" else "not_solved")
+        return out
+    out.purchases = [p for s in sols for p in s.purchases]
+    out.productions = [p for s in sols for p in s.productions]
+    out.evaluation = evaluate(problem, out.purchases, out.productions)
+    if all(s.objective_value is not None for s in sols):
+        out.objective_value = float(sum(s.objective_value for s in sols))
+        bounds = [s.dual_bound if s.dual_bound is not None else (s.objective_value if s.mip_gap in (None, 0.0) and s.status == "optimal" else None)
+                  for s in sols]
+        if all(b is not None for b in bounds):
+            out.dual_bound = float(sum(bounds))
+            denom = max(abs(out.objective_value), 1e-9)
+            out.mip_gap = max(0.0, (out.objective_value - out.dual_bound) / denom)
+    if worst == "optimal":
+        out.mip_gap = 0.0 if out.mip_gap is None else out.mip_gap
+    elif out.mip_gap is not None and worst in ("feasible_with_gap", "time_limit"):
+        # Componentes independientes: la brecha global es (Σ objetivo − Σ cota) / Σ objetivo y es una garantía válida.
+        opt_tol = max(1e-6, min(float(problem.mip_gap), 1e-4))
+        if out.mip_gap <= opt_tol:
+            out.status = "optimal"
+            out.notes = [n for n in out.notes if "límite de tiempo" not in n]
+            out.notes.append("Algunos componentes no cerraron su brecha individual, pero la brecha global probada "
+                             f"({out.mip_gap:.2e}) está dentro de la tolerancia.")
+        elif out.mip_gap <= float(problem.mip_gap) * (1 + 1e-9):
+            out.status = "feasible_with_gap"
+        elif worst == "time_limit":
+            out.status = "time_limit"
+    return out
+
+
+def _solve_once(problem: PlanProblem, relax: frozenset[str], coverage_mode: str | None, time_limit: float,
+                z_pairs: set) -> tuple[PlanSolution, set]:
     t0 = time.perf_counter()
     mode = coverage_mode or problem.coverage_mode
     R = problem.period_days
@@ -131,7 +290,8 @@ def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset()
         for tau in range(node.horizon):
             I_var[(key, tau)] = m.var(0.0, np.inf, node.holding)
             d = float(node.demand[tau])
-            U_var[(key, tau)] = m.var(0.0, 0.0 if mode == "hard" else d, node.penalty)
+            w = float(node.u_weights[tau]) if node.u_weights is not None else 1.0
+            U_var[(key, tau)] = m.var(0.0, 0.0 if mode == "hard" else d, node.penalty * w)
             if node.safety_stock > EPS and tau >= node.meta["ss_from"]:
                 V_var[(key, tau)] = m.var(0.0, node.safety_stock,
                                           problem.ss_weight * node.penalty / max(1, node.horizon))
@@ -280,7 +440,7 @@ def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset()
         sol.evaluation = evaluate(problem, [], [])
         sol.objective_value = sol.evaluation.total_cost
         sol.mip_gap = 0.0
-        return sol
+        return sol, set()
 
     A, lo, hi = m.matrices()
     options = {"mip_rel_gap": float(problem.mip_gap), "presolve": True,
@@ -291,7 +451,7 @@ def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset()
     except Exception as exc:  # pragma: no cover - fallo interno del solver
         sol.detail = f"El solver falló: {exc.__class__.__name__}: {exc}"
         sol.seconds = time.perf_counter() - t0
-        return sol
+        return sol, set()
     sol.seconds = time.perf_counter() - t0
     sol.detail = str(res.message)
     gap = getattr(res, "mip_gap", None)
@@ -300,11 +460,11 @@ def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset()
     sol.dual_bound = None if bound is None or not math.isfinite(bound) else float(bound)
     if res.status == 2:
         sol.status = "infeasible"
-        return sol
+        return sol, set()
     if res.x is None:
         sol.status = "time_limit" if res.status == 1 else "not_solved"
         sol.notes.append("El solver no encontró ninguna solución factible.")
-        return sol
+        return sol, set()
 
     x = res.x
     purchases: list[PurchaseLine] = []
@@ -334,10 +494,12 @@ def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset()
     sol.evaluation = evaluate(problem, purchases, productions)
     sol.objective_value = float(res.fun)
     if res.status == 0:
-        sol.status = "optimal" if (sol.mip_gap is None or sol.mip_gap <= 1e-6) else "feasible_with_gap"
+        # «Óptimo» = brecha probada ≤ min(tolerancia pedida, 0,01 %). Con una tolerancia mayor se informa la brecha.
+        opt_tol = max(1e-6, min(float(problem.mip_gap), 1e-4))
+        sol.status = "optimal" if (sol.mip_gap is None or sol.mip_gap <= opt_tol) else "feasible_with_gap"
     elif res.status == 1:
         sol.status = "time_limit"
         sol.notes.append("Se alcanzó el límite de tiempo: la mejor solución factible NO está probada óptima.")
     else:
         sol.status = "not_solved"
-    return sol
+    return sol, set()

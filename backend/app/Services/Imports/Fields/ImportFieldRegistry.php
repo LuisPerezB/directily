@@ -84,6 +84,8 @@ final class ImportFieldRegistry
             new FieldDefinition('current_price', 'Precio actual', false, 'number', 'Precio de venta vigente (referencia; no reemplaza precios históricos).', ['precio', 'pvp', 'precio_venta', 'precio_actual', 'price', 'current_price']),
             new FieldDefinition('current_cost', 'Costo actual', false, 'number', 'Costo de compra vigente.', ['costo', 'costo_actual', 'costo_unitario', 'cost', 'current_cost']),
             new FieldDefinition('is_active', 'Activo', false, 'boolean', 'Sí/No. Por defecto: sí.', ['activo', 'estado', 'is_active', 'habilitado']),
+            new FieldDefinition('price_known_at', 'Precio conocido desde', false, 'datetime', 'Desde cuándo la fuente conocía el precio vigente (disponibilidad en la fuente). Vacío = desconocido (NULL); no se rellena con la fecha de la carga.', ['price_known_at', 'fecha_precio', 'precio_desde', 'fecha_actualizacion_precio']),
+            new FieldDefinition('cost_known_at', 'Costo conocido desde', false, 'datetime', 'Desde cuándo la fuente conocía el costo vigente (factura o lista de costos recibida). Vacío = desconocido (NULL).', ['cost_known_at', 'fecha_costo', 'costo_desde', 'fecha_actualizacion_costo']),
         ];
     }
 

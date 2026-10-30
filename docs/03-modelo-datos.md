@@ -499,3 +499,28 @@ pedidos ni compromete fondos.
 | Modelos | `model_registry` con huella de datos, artefacto SHA-256, semilla y versiones de librerías |
 | Auditoría | `audit_logs` de solo inserción para acciones sensibles |
 | Retención | Ventas según `tenants.data_retention_months` (60 por defecto); `forecast_values` de ejecuciones antiguas no vigentes purgables (se conservan métricas y `forecast_actuals`); purga definitiva de la empresa 30 días después de la solicitud |
+
+
+## 10. Core de Datos (etapa 2 · P3)
+
+Tablas de la migración `2026_02_02_000100` (contrato canónico común) y `2026_02_06_000100` (P3). Todas con `tenant_id` y FKs compuestas
+`(tenant_id, x_id)`, salvo `calendar_events` (calendario público con `tenant_id` NULL). Detalle de campos y reglas: `docs/architecture/v2/P3-datos.md` §2.
+
+| Tabla | Clave natural | Notas |
+|---|---|---|
+| `warehouses` | `(tenant_id, code)` | Un almacén por sucursal (`branch_id`). `storage_capacity` NULL = desconocida; `capacity_unit` obligatoria con capacidad (regla del importador). |
+| `unit_conversions` | `(tenant, producto\|general, from_unit, to_unit, valid_from)` | `cantidad_to = cantidad_from × factor`. Unidades normalizadas solo tipográficamente; no hay equivalencias implícitas ni cadenas. |
+| `commercial_commitments` | `(tenant_id, commitment_type, external_id)` | `quote|order|contract`; estado, fechas, `known_at` (NULL = desconocido), `cancelled_at`, `data_source_id`, `source_hash`. No es una venta. |
+| `commercial_commitment_items` | `(commitment_id, line_number)` | `quantity`, `quantity_fulfilled`, `unit`, `unit_price`, `delivery_date`; `source_quantity`/`source_unit`/`conversion_factor` conservan lo original cuando hubo una conversión declarada. |
+| `commercial_commitment_revisions` | `(commitment_id, revision)` | Solo inserción. Snapshot (cabecera + líneas, el código de cliente seudonimizado) con `known_at`, `cancelled_at`, `source_hash`, `import_job_id` y `recorded_at` (ingestión). Permite reconstruir el estado a un corte. |
+| `calendar_events` | `(COALESCE(tenant,0), scope, COALESCE(scope_ref,''), code, starts_on, revision)` | Alcance `country|region|tenant|branch|category|product|sector`; `scope_ref` normalizado (`EC`, `sierra`, `branch:3`, `product:45`, `sector:x`); `known_at` NULL = desconocido; una fila por revisión. |
+| `source_mappings` | `(tenant_id, data_source_id, entity, version)` | Consulta/vista **autorizada** (`query`), `field_map`, `options`; `approved_at/by`, `is_active`. Solo la versión aprobada y activa sincroniza. |
+| `source_syncs` | `id` | Ejecución de una sincronización: `mode` (`full|incremental`), `since`, `watermark`, `rows_extracted`, `status`, `import_job_id`. Índice único parcial: una sola activa (`queued|running`) por fuente y entidad. |
+| `data_coverage` | `(tenant, entity, COALESCE(source,0), COALESCE(branch,0))` | `complete_from/through`; `basis`: `declared` (usuario) o `inferred` (conector, regla documentada). |
+
+Columnas de las tres fechas: `sales.source_recorded_at`, `product_price_history.known_at`, `purchase_cost_history.known_at` (+ `unit`),
+`commercial_commitments.known_at`, `calendar_events.known_at`; `customers.is_generic` marca el código genérico (consumidor final).
+Todas aceptan NULL = «la fuente no declaró cuándo lo conocía» (jamás se rellenan con la fecha de ingestión).
+
+Configuración por precedencia: `tenants.settings.cores.<core>` guarda los valores de empresa de la etapa 2 (validados por el motor);
+`core_runs.effective_config` y `config_version` guardan, por ejecución, la configuración con la que se calculó.

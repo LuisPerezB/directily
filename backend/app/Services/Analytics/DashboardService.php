@@ -27,6 +27,7 @@ class DashboardService
         private readonly ProductForecastQuery $products,
         private readonly AccuracyService $accuracy,
         private readonly InventoryQuery $inventory,
+        private readonly HorizonSupport $support,
     ) {}
 
     /** @return array<string, mixed> */
@@ -89,6 +90,8 @@ class DashboardService
                 'cutoff_date' => $run->cutoff_date?->toDateString(),
             ] : null,
             'kpis' => $kpis,
+            // Etapa 2 (aditivo): respaldo del horizonte mostrado; no se presenta como completo uno sin respaldo.
+            'horizon_support' => $this->support->forHorizon($run, $horizon),
             'top_increasing' => $topUp,
             'top_decreasing' => $topDown,
             'stockout_risks' => $risks,

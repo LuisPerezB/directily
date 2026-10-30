@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--run-id", type=int, required=True)
     r.add_argument("--tenant-id", type=int, required=True)
     r.add_argument("--training-job-id", type=int, default=None)
-    r.add_argument("--horizons", type=int, nargs="+", default=[7, 30, 90])
+    r.add_argument("--horizons", type=int, nargs="+", default=[7, 14, 30, 60, 90])
     r.add_argument("--cutoff-date", default=None)
     r.set_defaults(func=_cmd_run)
 

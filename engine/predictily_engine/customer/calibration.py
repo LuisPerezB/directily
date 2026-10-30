@@ -25,19 +25,46 @@ def prior_correction(p: np.ndarray, neg_rate: float) -> np.ndarray:
 
 
 class IsotonicCalibrator:
+    """Isotónica sobre grupos de puntaje (≥ ~100 filas por grupo) con interpolación y extremos constantes.
+
+    La isotónica clásica sobre filas sueltas produce escalones en los extremos (grupos diminutos con 0 positivos ⇒
+    probabilidad ≈ 0 que luego falla fuera de muestra). Agrupar por cuantiles, suavizar con la tasa global y acotar
+    evita probabilidades degeneradas sin perder monotonía.
+    """
+
     method = "isotonic"
+    MIN_PER_BIN = 100
+    SMOOTH = 2.0
 
     def __init__(self) -> None:
-        self.model = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip", increasing=True)
+        self.x = np.array([0.0, 1.0])
+        self.y = np.array([0.5, 0.5])
         self.floor = 1e-4
 
     def fit(self, raw: np.ndarray, y: np.ndarray) -> IsotonicCalibrator:
-        self.model.fit(np.asarray(raw, dtype=np.float64), np.asarray(y, dtype=np.float64))
-        self.floor = 1.0 / (len(y) + 2)
+        raw = np.asarray(raw, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        n = len(y)
+        k = int(np.clip(n // self.MIN_PER_BIN, 3, 40))
+        order = np.argsort(raw, kind="mergesort")
+        r, t = raw[order], y[order]
+        edges = np.linspace(0, n, k + 1).astype(int)
+        prior = float(y.mean())
+        xs, ys, ws = [], [], []
+        for a, b in zip(edges[:-1], edges[1:]):
+            if b <= a:
+                continue
+            xs.append(float(r[a:b].mean()))
+            ys.append((float(t[a:b].sum()) + self.SMOOTH * prior) / ((b - a) + self.SMOOTH))
+            ws.append(float(b - a))
+        iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True).fit(np.array(xs), np.array(ys), sample_weight=np.array(ws))
+        self.x = np.array(xs)
+        self.y = iso.predict(self.x)
+        self.floor = 1.0 / (n + 2)
         return self
 
     def transform(self, raw: np.ndarray) -> np.ndarray:
-        return np.clip(self.model.predict(np.asarray(raw, dtype=np.float64)), self.floor, 1.0 - self.floor)
+        return np.clip(np.interp(np.asarray(raw, dtype=np.float64), self.x, self.y), self.floor, 1.0 - self.floor)
 
 
 class PlattCalibrator:

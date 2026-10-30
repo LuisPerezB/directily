@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Analytics;
 
 use App\Http\Requests\Analytics\AccuracyRequest;
+use App\Http\Requests\Analytics\ModelIndexRequest;
 use App\Http\Resources\Analytics\ModelEvaluationResource;
 use App\Http\Resources\Analytics\ModelRegistryResource;
 use App\Models\ModelEvaluation;
@@ -12,8 +13,8 @@ use App\Models\ModelRegistry;
 use App\Services\Analytics\AccuracyService;
 use App\Services\Analytics\RunResolver;
 use App\Services\Analytics\Support\ForecastNode;
+use App\Services\Analytics\Support\ModelStatus;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /** Historial de precisión: backtesting, precisión realizada y registro de modelos. */
@@ -53,10 +54,14 @@ class AccuracyController extends AnalyticsController
         return ModelEvaluationResource::collection($rows);
     }
 
-    public function models(Request $request): AnonymousResourceCollection
+    public function models(ModelIndexRequest $request): AnonymousResourceCollection
     {
+        $status = $request->validated('status') !== null ? ModelStatus::filter((string) $request->validated('status')) : null;
         $models = ModelRegistry::query()
-            ->when($request->query('status'), fn ($q, $v) => $q->where('status', (string) $v))
+            ->when($status, fn ($q) => $q->where('status', $status['status']))
+            ->when($status['role'] ?? $request->validated('role'), fn ($q, $role) => $q->where('role', $role))
+            ->when($request->validated('core'), fn ($q, $core) => $q->where('core', $core))
+            ->when($request->validated('run_id'), fn ($q, $run) => $q->where('forecast_run_id', (int) $run))
             ->latest('id')
             ->paginate($this->perPage($request, 25));
 

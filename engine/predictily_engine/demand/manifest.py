@@ -131,7 +131,9 @@ def build_manifest(*, cutoff: date, data_from: date, plan: Any | None, bt: pd.Da
         "model_selection_for_evaluation": {"windows": [w["window"] for w in sel_w]},
         "interval_calibration_for_evaluation": {"windows": [w["window"] for w in sel_w]},
         "production_selection_and_calibration": {"windows": [w["window"] for w in sel_w + hold_w]},
-        "holdout_windows_used_for_decisions_of_the_evaluation": [] if has_holdout else [w["window"] for w in hold_w],
+        # Ventanas que a la vez se evalúan y deciden (no hay período final que las separe): vacío = protocolo
+        # limpio; con historia corta son todas las de selección y la métrica es optimista.
+        "evaluation_windows_that_also_took_decisions": [] if has_holdout else [w["window"] for w in sel_w + hold_w],
     }
     manifest["checks"] = {
         "holdout_disjoint_from_selection": holdout_shared == 0,

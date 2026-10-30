@@ -322,9 +322,12 @@ def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, c
 
 def evaluate(bt: pd.DataFrame, selection: Selection, eval_selection: Selection | None, cat: pd.Series,
              currency: str | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Filas de `model_evaluations` + info = {"quantiles": cuantiles del holdout o None}."""
+    """Filas de `model_evaluations` + info = {"quantiles": cuantiles del holdout o None, "p50": decisión}.
+
+    `metrics.pinball_p50` solo se informa si la mediana se PUBLICA (evaluada y mejor que la media como
+    mediana); si no, queda null y la pinball de la mediana candidata va en `pinball_p50_candidate`."""
     if bt.empty:
-        return [], {"quantiles": None}
+        return [], {"quantiles": None, "p50": p50_decision(None)}
     if eval_selection is not None:
         in_holdout = bt["is_holdout"].astype(bool)
         hold, windows = bt[in_holdout], bt[~in_holdout]
@@ -334,10 +337,19 @@ def evaluate(bt: pd.DataFrame, selection: Selection, eval_selection: Selection |
                      "cutoffs": iso_dates(windows["cutoff"]), "currency": currency}
         r1, info = scope_rows(hold, windows, eval_selection, cat, primary, detail=True)
         r2, _ = scope_rows(windows, None, eval_selection, cat, secondary, detail=False)
-        return r1 + r2, info
-    ctx = {"evaluation_type": EVALUATION_PRIMARY, "scope": SCOPE_SELECTION_WINDOWS, "cutoffs": iso_dates(bt["cutoff"]),
-           "currency": currency}
-    return scope_rows(bt, None, selection, cat, ctx, detail=True)
+        rows = r1 + r2
+    else:
+        ctx = {"evaluation_type": EVALUATION_PRIMARY, "scope": SCOPE_SELECTION_WINDOWS,
+               "cutoffs": iso_dates(bt["cutoff"]), "currency": currency}
+        rows, info = scope_rows(bt, None, selection, cat, ctx, detail=True)
+    decision = p50_decision(info["quantiles"])
+    for r in rows:
+        m = r["metrics"]
+        m["pinball_p50_candidate"] = m.get("pinball_p50")
+        if not decision["published"]:
+            m["pinball_p50"] = None
+    info["p50"] = decision
+    return rows, info
 
 
 def horizon_obs(evaluations: list[dict[str, Any]]) -> dict[int, int]:

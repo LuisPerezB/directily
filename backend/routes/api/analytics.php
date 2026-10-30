@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Analytics\ExportController;
 use App\Http\Controllers\Api\Analytics\ForecastController;
 use App\Http\Controllers\Api\Analytics\ForecastRunController;
 use App\Http\Controllers\Api\Analytics\InventoryController;
+use App\Http\Controllers\Api\Analytics\ModelRollbackController;
 use App\Http\Controllers\Api\Analytics\ReportController;
 use App\Http\Controllers\Api\Analytics\ScenarioController;
 use Illuminate\Support\Facades\Route;
@@ -52,6 +53,10 @@ Route::middleware(['auth:sanctum', 'tenant'])->name('analytics.')->group(functio
         // Reportes
         Route::get('reports/forecast-summary', [ReportController::class, 'forecastSummary'])->name('reports.forecast-summary');
     });
+
+    // Reversión del modelo servido de demanda (ADR-V2-07): re-apunta la ejecución vigente a una anterior de producción.
+    Route::post('models/demand/rollback', [ModelRollbackController::class, 'demand'])
+        ->middleware(['tenant.ability:forecast.run', 'throttle:10,1'])->name('models.demand.rollback');
 
     Route::patch('inventory/recommendations/{id}', [InventoryController::class, 'update'])->whereNumber('id')
         ->middleware('tenant.ability:alerts.manage')->name('inventory.recommendations.update');

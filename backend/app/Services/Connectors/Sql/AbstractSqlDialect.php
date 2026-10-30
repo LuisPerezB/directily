@@ -18,7 +18,7 @@ abstract class AbstractSqlDialect implements SqlDialect
 
     public function configKeys(): array
     {
-        return ['host', 'port', 'database', 'sslmode', 'source_timezone', 'connect_timeout_seconds', 'statement_timeout_seconds'];
+        return ['host', 'port', 'database', 'sslmode', 'source_timezone', 'connect_timeout_seconds', 'statement_timeout_seconds', 'sync_schedule'];
     }
 
     public function end(PDO $pdo): void

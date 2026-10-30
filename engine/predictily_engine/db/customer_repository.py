@@ -205,6 +205,25 @@ class CustomerRepository:
             ORDER BY cc.id, ci.line_number
             """)
 
+    def commitment_revisions(self) -> pd.DataFrame:
+        """Versiones históricas de los compromisos (P3): cabecera y líneas tal como la fuente las conocía."""
+        tz = TenantRepository._TENANT_TZ
+        df = self._read(
+            f"""
+            SELECT r.commitment_id, r.revision, r.status, (r.known_at AT TIME ZONE tz.tz)::date AS known_on, r.snapshot
+            FROM commercial_commitment_revisions r
+            {tz.format(alias='r')}
+            WHERE r.tenant_id = :tenant_id
+            ORDER BY r.commitment_id, r.revision
+            """)
+        if len(df):
+            df["snapshot"] = df["snapshot"].map(lambda v: json.loads(v) if isinstance(v, str) else v)
+        return df
+
+    def product_skus(self) -> dict[str, int]:
+        df = self._read("SELECT id, upper(sku) AS sku FROM products WHERE tenant_id = :tenant_id")
+        return {r.sku: int(r.id) for r in df.itertuples(index=False)}
+
     def unit_conversions(self) -> pd.DataFrame:
         return self._read(
             "SELECT product_id, from_unit, to_unit, factor::float8 AS factor, valid_from FROM unit_conversions "
@@ -233,6 +252,13 @@ class CustomerRepository:
             run_id=forecast_run_id, pids=[int(p) for p in product_ids], as_of=as_of, h=int(horizon_days))
 
     # ── registro de modelos ──
+    def validated_references(self) -> pd.DataFrame:
+        """Referencias validadas (más reciente primero): respaldo si falla el artefacto en producción."""
+        return self._read(
+            "SELECT id, version, model_family, role, status, hyperparameters, artifact_path, artifact_sha256, artifact_compat "
+            "FROM model_registry WHERE tenant_id = :tenant_id AND core = 'customer' AND status IN ('validated', 'retired', 'production') "
+            "AND hyperparameters->>'kind' = 'reference' AND artifact_path IS NOT NULL ORDER BY id DESC")
+
     def production_models(self) -> pd.DataFrame:
         return self._read(
             "SELECT id, version, model_family, role, status, hyperparameters, artifact_path, artifact_sha256, "

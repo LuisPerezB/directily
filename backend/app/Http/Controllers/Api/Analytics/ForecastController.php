@@ -8,7 +8,9 @@ use App\Http\Requests\Analytics\ForecastListRequest;
 use App\Http\Requests\Analytics\ForecastSeriesRequest;
 use App\Models\ForecastRun;
 use App\Services\Analytics\ForecastQuery;
+use App\Services\Analytics\DemandEnvelope;
 use App\Services\Analytics\HistoryQuery;
+use App\Services\Analytics\HorizonSupport;
 use App\Services\Analytics\NodeLabeler;
 use App\Services\Analytics\ProductForecastQuery;
 use App\Services\Analytics\RunResolver;
@@ -29,6 +31,8 @@ class ForecastController extends AnalyticsController
         private readonly HistoryQuery $history,
         private readonly ProductForecastQuery $products,
         private readonly NodeLabeler $labels,
+        private readonly HorizonSupport $support,
+        private readonly DemandEnvelope $envelopes,
     ) {}
 
     public function series(ForecastSeriesRequest $request): JsonResponse
@@ -69,7 +73,12 @@ class ForecastController extends AnalyticsController
                 'interval_levels' => [80, 95],
                 'has_forecast' => $run !== null,
                 'notes' => $this->notes($granularity, $forecast, $node),
+                // Etapa 2 (aditivo): respaldo del horizonte pedido (ok | degraded | insufficient_data | ...).
+                'horizon_support' => $this->support->forHorizon($run, $horizon),
             ],
+            'envelope' => $run ? $this->envelopes->for($run, $horizon, [
+                'entity_keys' => $this->entityKeys($node),
+            ]) : null,
         ]]);
     }
 
@@ -89,6 +98,7 @@ class ForecastController extends AnalyticsController
         return JsonResource::collection($page)->additional([
             'run' => $this->runSummary($run),
             'horizon' => $horizon,
+            'horizon_support' => $this->support->forHorizon($run, $horizon),
         ]);
     }
 
@@ -107,7 +117,21 @@ class ForecastController extends AnalyticsController
             ], (string) ($request->validated('sort') ?? '-forecast_units')),
             'run' => $this->runSummary($run),
             'horizon' => $horizon,
+            'horizon_support' => $this->support->forHorizon($run, $horizon),
         ]);
+    }
+
+    /** @return list<string> */
+    private function entityKeys(ForecastNode $node): array
+    {
+        return match ($node->level) {
+            ForecastNode::LEVEL_SERIES => ['branch_id', 'product_id'],
+            ForecastNode::LEVEL_PRODUCT => ['product_id'],
+            ForecastNode::LEVEL_CATEGORY => ['category_id'],
+            ForecastNode::LEVEL_BRANCH => ['branch_id'],
+            ForecastNode::LEVEL_BRANCH_CATEGORY => ['branch_id', 'category_id'],
+            default => [],
+        };
     }
 
     private function emptyList(int $horizon): JsonResponse

@@ -148,6 +148,9 @@ def test_holdout_evaluation_is_independent_of_holdout_data(small_data, pipeline_
     np.testing.assert_allclose(m["yhat_o"], m["yhat_p"], rtol=1e-9, atol=1e-9)
     before, after = pipeline_result.summary["metrics"], pert.summary["metrics"]
     assert after["selected_wape"] != pytest.approx(before["selected_wape"]), "las métricas del holdout sí cambian"
+    # E2-06: el manifiesto de selección y calibración tampoco depende de lo ocurrido en el período final.
+    for section in ("selection", "calibration", "protocol", "decisions"):
+        assert pert.manifest[section] == pipeline_result.manifest[section], section
 
 
 def test_short_history_degrades_without_faking_a_holdout():
@@ -177,6 +180,12 @@ def test_reproducible_with_same_seed(small_data, pipeline_result):
     b = again.forecast_values.sort_values(["node_key", "granularity", "target_date"]).reset_index(drop=True)
     pd.testing.assert_frame_equal(a, b)
     assert again.training_data_hash == pipeline_result.training_data_hash
+    # Mismo snapshot + misma configuración + misma semilla ⇒ mismos valores (huella y manifiesto incluidos).
+    assert again.snapshot.hash == pipeline_result.snapshot.hash
+    assert again.snapshot.components == pipeline_result.snapshot.components
+    assert again.config_version == pipeline_result.config_version
+    assert again.manifest == pipeline_result.manifest
+    assert again.summary["p50"] == pipeline_result.summary["p50"]
 
 
 def test_recommendations_and_censoring(pipeline_result):

@@ -122,6 +122,34 @@ conocía ese día (y con los valores vigentes entonces). Al cargar un histórico
 las promociones figuran como conocidas el día de la carga: el backtest las verá como hechos pasados,
 pero no como promociones planificadas, y medirá un pronóstico sin conocimiento previo de ellas.
 
+### 2.9 Etapa 2 · campos nuevos en ventas y productos (tres fechas)
+- `sales`: `source_recorded_at` (fecha-hora, opcional): cuándo el sistema de origen registró o modificó el documento. `NULL` = desconocida;
+  no entra en `source_hash`. También en `POST /sales/batch` (`documents[].source_recorded_at`).
+- `products`: `price_known_at`, `cost_known_at` (fecha-hora, opcionales): desde cuándo la fuente conocía el precio/costo vigente
+  (`product_price_history.known_at`, `purchase_cost_history.known_at`). `NULL` = desconocida, nunca la fecha de la carga.
+- Una fecha de disponibilidad futura o inválida en productos es error; en ventas, advertencia y `NULL`.
+
+### 2.10 `entity_type = commitments` (cotización / pedido / contrato; una fila por línea)
+Obligatorios: `commitment_type` (`quote|order|contract`), `external_id`, `issued_at`, `product_sku`, `quantity`. Opcionales: `status`, `known_at`,
+`valid_from`, `valid_to`, `expected_delivery_date`, `cancelled_at`, `branch_code`, `customer_code`, `currency`, `line_number`,
+`quantity_fulfilled`, `unit`, `unit_price`, `delivery_date`. Idempotente por `(commitment_type, external_id)`; un cambio de contenido
+actualiza y agrega una revisión (`commercial_commitment_revisions`). Estado derivado si falta; cancelación con `cancelled_at`; una unidad
+distinta de la del producto exige una conversión declarada (`unit_conversion_missing`). No son ventas ni se suman a la demanda.
+Reglas de estado a un corte (`GET /commitments?as_of=`): ver `docs/architecture/v2/P3-datos.md` §2.3.
+Códigos nuevos: `unit_conversion_missing`, `unit_converted` (advertencia), `fulfilled_exceeds_quantity`, `cancelled_without_date`,
+`status_overridden`, `status_quantity_mismatch`, `known_before_issued`, `cancelled_before_issued`, `unknown_status`, `existing_commitment_changed`.
+
+### 2.11 `entity_type = calendar_events`
+Obligatorios: `scope` (`country|region|tenant|branch|category|product|sector`), `code`, `name`, `category`, `starts_on`. Opcionales: `scope_ref`
+(obligatorio salvo `tenant`), `ends_on`, `status` (`planned|confirmed|cancelled`), `known_at`, `source`. Identidad `(scope, scope_ref, code, starts_on)` +
+revisión. `known_at` vacío ⇒ `NULL` (advertencia `known_at_unknown`): el evento no se usa como conocido a futuro de un corte histórico.
+Códigos: `known_at_unknown`, `known_after_start`, `scope_ref_ignored`.
+
+### 2.12 `entity_type = unit_conversions` y `entity_type = warehouses`
+- `unit_conversions`: `from_unit`*, `to_unit`*, `factor`* (> 0), `product_sku` (vacío = general), `valid_from`, `source`. Sin conversiones silenciosas ni cadenas.
+  Códigos: `conversion_conflict`.
+- `warehouses`: `code`*, `name`*, `branch_code`*, `storage_capacity`, `capacity_unit` (obligatoria con la capacidad: `capacity_unit_required`), `is_active`.
+
 ---
 
 ## 3. API pública REST (Laravel) — `/api/v1`
@@ -216,24 +244,25 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 | POST | `/data-sources` [T] `datasources.manage` | `{type: file_upload|rest_api|connector, name, connector_key?, config?, credentials?}` |
 | PATCH/DELETE | `/data-sources/{id}` [T] | |
 | POST | `/data-sources/{id}/tokens` [T] | crea token de API ligado a la empresa para `rest_api` → `{data:{token}}` (se muestra una sola vez) |
-| GET | `/connectors` [T] | conectores registrados `[{key, name, description, status: available|requires_credentials|planned, entity_types}]` |
+| GET | `/connectors` [T] | conectores registrados `[{key, name, description, status: available|requires_credentials|implemented_untested|planned, verification, entity_types, credential_keys}]`. Etapa 2: `sql_postgresql` (`requires_credentials`, `verification: tested_with_test_database`), `sql_mysql` y `sql_sqlserver` (`implemented_untested`: implementados sin servidor de pruebas; nunca «disponibles») |
+| POST | `/data-sources/{id}/test` [T] `datasources.manage` | prueba de conexión; en conectores SQL abre la transacción de solo lectura y devuelve `{ok, message, details:{server_version, warnings[], verification, read_only_enforcement}}` (sin credenciales) |
 
 ### 3.8 Pronósticos y trabajos  (backend-analytics)
 | Método | Ruta | Detalle |
 |---|---|---|
-| POST | `/forecast-runs` [T] `forecast.run` | `{horizon_days?: 7|30|90 (def 90), cutoff_date?: date (crea run histórico)}` → 202 `{data: ForecastRun}` (status queued) + `training_job` |
+| POST | `/forecast-runs` [T] `forecast.run` | `{horizon_days?: 7|14|30|60|90 (def. el mayor que permita el plan), cutoff_date?: date (crea run histórico)}` → 202 `{data: ForecastRun}` (status queued) + `training_job` |
 | GET | `/forecast-runs` [T] | paginado, más reciente primero |
 | GET | `/forecast-runs/{id}` [T] | `ForecastRun` |
 | GET | `/jobs/{id}` [T] | `TrainingJob = {id, job_type, status, stage, progress, attempts, error_message, queued_at, started_at, finished_at, duration_ms, result, forecast_run_id}` |
 | GET | `/forecasts/series` [T] | ver abajo |
-| GET | `/forecasts/products` [T] | query `run_id?, horizon(7|30|90), branch_id?, category_id?, search?, sort(change_pct|-change_pct|forecast_units|-forecast_units|revenue), page` → `[{product:{id,sku,name,category}, history_units (mismo nº de días previos), forecast_units, change_pct, trend: up|down|flat, forecast_revenue, lo_80, hi_80, model_family, demand_class, wape (backtest de la serie si existe)}]` |
+| GET | `/forecasts/products` [T] | query `run_id?, horizon(7|14|30|60|90), branch_id?, category_id?, search?, sort(change_pct|-change_pct|forecast_units|-forecast_units|revenue), page` → `[{product:{id,sku,name,category}, history_units (mismo nº de días previos), forecast_units, change_pct, trend: up|down|flat, forecast_revenue, lo_80, hi_80, model_family, case_label (etapa 2: caso especial de la serie o null), demand_class, wape (backtest de la serie si existe)}]`; respuesta con `horizon_support` (§3.8.1) |
 | GET | `/forecasts/categories` [T] | igual por categoría |
-| GET | `/dashboard/summary` [T] | query `horizon(7|30|90, def tenant.default_horizon_days), branch_id?` → ver abajo |
+| GET | `/dashboard/summary` [T] | query `horizon(7|14|30|60|90, def tenant.default_horizon_days), branch_id?` → ver abajo; añade `horizon_support` |
 
-`ForecastRun = {id, version, run_type, status, triggered_by, horizon_days, cutoff_date, data_from, data_to, feature_set_version, is_current, selection, summary, error_message, started_at, completed_at, created_at, training_job:{...}}`.
+`ForecastRun = {id, version, run_type, status, triggered_by, horizon_days, cutoff_date, data_from, data_to, feature_set_version, is_current, selection, summary, error_message, started_at, completed_at, created_at, training_job:{...}, config_version, data_snapshot_id, effective_config, evaluation_manifest (solo en GET /forecast-runs/{id}), envelope}` — los seis últimos son **aditivos** (etapa 2 · P1).
 
 `GET /forecasts/series` query: `run_id?` (def. vigente), `branch_id?`, `category_id?`, `product_id?`,
-`granularity` (day|week|month, def. day), `horizon` (7|30|90), `history_days` (def. 90; máx 730).
+`granularity` (day|week|month, def. day), `horizon` (7|14|30|60|90), `history_days` (def. 90; máx 730).
 Selección de nodo: sin filtros→`total`; branch→`branch:{b}`; category→`category:{c}`;
 branch+category→`branch_category:{b}:{c}`; product→`product:{p}`; product+branch→`series:{b}:{p}`.
 Respuesta:
@@ -243,9 +272,13 @@ Respuesta:
   "granularity":"day",
   "history":[{"date":"2026-07-01","units":12.0,"revenue":95.4,"stockout":false}],
   "forecast":[{"date":"2026-10-28","yhat":13.2,"lo_80":9.1,"hi_80":17.4,"lo_95":7.0,"hi_95":20.1,"revenue":105.6}],
-  "meta":{"run_id":12,"run_version":5,"generated_at":"...","cutoff_date":"2026-10-27","model_family":"lightgbm_global","models":{"lightgbm_global":120,"seasonal_naive":15},"price_assumption":"último precio neto promedio (28 días)","intervals_available":true}
+  "meta":{"run_id":12,"run_version":5,"generated_at":"...","cutoff_date":"2026-10-27","model_family":"lightgbm_global","models":{"lightgbm_global":120,"seasonal_naive":15},"price_assumption":"último precio neto promedio (28 días)","intervals_available":true,
+          "horizon_support":{"horizon":30,"status":"ok","reasons":[],"history_days":574,"required_history_days":60,"backtest_horizon_days":90,"independent_holdout":true,"evaluated_obs":36}},
+  "envelope":{...}
 }}
 ```
+Cada punto de `forecast` añade, de forma aditiva: `p50` (mediana; **null** salvo que el motor la haya evaluado y publicado),
+`quality_status` (`ok|degraded|insufficient_data`) y `case_label` (producto nuevo, descontinuado, apertura…; null = serie regular).
 Si la granularidad pedida no existe precalculada para el nodo, Laravel agrega los valores
 diarios (`yhat`, `revenue`) y devuelve intervalos `null` con `intervals_available:false`.
 
@@ -268,13 +301,25 @@ diarios (`yhat`, `revenue`) y devuelve intervalos `null` con `intervals_availabl
 ```
 Si no hay pronóstico vigente: `run:null`, KPIs de pronóstico `null` y `data_status.has_forecast=false`.
 
+#### 3.8.1 Etapa 2 · P1 Demanda: respaldo por horizonte y envoltura
+
+- **`horizon_support`** (series, productos, categorías y dashboard): `{horizon, status, reasons[{code,message}], history_days,
+  required_history_days, backtest_horizon_days, independent_holdout, evaluated_obs}`. `status`: `ok` · `degraded` (sin período final
+  independiente) · `insufficient_data` (historia < 2×H o backtest sin ventanas de H días: el número existe pero **no debe presentarse como
+  completo**) · `not_computed` (H mayor que el horizonte de la ejecución) · `unknown` (ejecución anterior a la etapa 2).
+- **`envelope`** (ADR-V2-03; en `GET /forecast-runs/{id}`, listado y `GET /forecasts/series`): `{tenant_id, run_id, core:'demand', run_version, status,
+  as_of, horizon_start, horizon_end, target_definition, entity_keys, unit, currency, result_type:'forecast', model_version, data_snapshot_id,
+  config_version, assumptions[], limitations[], limitation_codes[], quality_status, uncertainty_source, horizon_support, p50}`. `status` es el estado técnico
+  del trabajo; `quality_status` la aptitud estadística (en series, la del horizonte pedido).
+
 ### 3.9 Precisión
 | Método | Ruta | Detalle |
 |---|---|---|
-| GET | `/accuracy/summary` [T] | query `run_id?` → `{data:{run, backtest:{selected:{wape,mae,rmse,bias,coverage_80,coverage_95}, baseline:{...}, by_horizon:[{horizon_days, wape, baseline_wape}], by_demand_class:[...], by_branch:[...], models:[{model_family, wape, is_baseline, is_selected}]}, realized:{wape, mae, bias, n_obs, by_run:[{run_id, version, wape, n_obs}]}, explanation:[string]}}` |
+| GET | `/accuracy/summary` [T] | query `run_id?` → `{data:{run, backtest:{selected:{wape,mae,rmse,bias,coverage_80,coverage_95}, baseline:{...}, by_horizon:[{horizon_days, wape, baseline_wape}], by_demand_class:[...], by_branch:[...], models:[{model_family, wape, is_baseline, is_selected}]}, realized:{wape, mae, bias, n_obs, by_run:[{run_id, version, wape, n_obs}]}, explanation:[string], **evaluation_manifest, horizon_support{7..90}, p50** (aditivos)}}`; `backtest.selected|baseline` añaden `mase, rmsse, pinball{p10,p50,p90}, interval_width{80,95}, money{currency,wape,mae,bias,actual_total,forecast_total,n_obs}, sample{n_obs,n_series,n_windows,exclusions}`; `backtest.by_horizon` usa los tramos `h1-7,h8-14,h15-30,h31-60,h61-90` y `backtest.by_horizon_total:[{horizon_days,wape,baseline_wape,bias,mae,money,n_obs}]` el error del total de H días |
 | GET | `/accuracy/comparison` [T] | query `run_id*, branch_id?, category_id?, product_id?` → `{data:{points:[{date, yhat, lo_80, hi_80, actual|null}], metrics:{wape, mae, bias, n_obs}}}` real vs pronosticado de una ejecución pasada |
-| GET | `/model-evaluations` [T] | query `run_id*, evaluation_type?, level?` → filas de `model_evaluations` |
-| GET | `/models` [T] | `model_registry` de la empresa: `[{id, version, model_family, strategy_level, status, demand_class, trained_at, training_data_from, training_data_to, series_count}]` |
+| GET | `/model-evaluations` [T] | query `run_id*, evaluation_type?, level? (incl. horizon_total, total)` → filas de `model_evaluations` con `metrics` (jsonb) |
+| GET | `/models` [T] | `model_registry` de la empresa; query `status?` (nuevo: `candidate|validated|production|retired|failed`, o legado: `fallback|archived|rejected`), `role? (primary|fallback)`, `core?`, `run_id?` → `[{id, version, model_family, strategy_level, status, legacy_status, core, role, demand_class, artifact_sha256, artifact_compat, validated_at, trained_at, training_data_from, training_data_to, series_count}]` |
+| POST | `/models/demand/rollback` [T] `forecast.run` | `{run_id}` → 200 `{data:{from_run_id, to_run_id, to_version, to_cutoff_date, to_data_snapshot_id, to_config_version, restored_model_ids[], retired_model_ids[], artifacts_verified: true|null, restored_models[], note}}`. Re-apunta la ejecución **vigente** a una ejecución de **producción, completada y anterior**; restaura sus modelos `retired`→`production` y retira los actuales; auditoría `models.demand_rolled_back`. 404 (ejecución inexistente o de otra empresa), 409 con `code`: `no_current_run`, `rollback_already_current`, `rollback_target_not_production`, `rollback_target_not_previous`, `rollback_target_without_models`, `rollback_target_without_forecasts`, `rollback_artifact_mismatch`; 422 sin `run_id`. No reentrena |
 
 ### 3.10 Inventario, recomendaciones y alertas
 | Método | Ruta | Detalle |
@@ -338,6 +383,29 @@ conocido × (1+cost_change_pct). Si falta costo para productos, se informa `cost
   (`plan_code, status, plan_overrides`), `GET /admin/plans`, `GET /admin/usage`. El superadmin
   **no** accede a ventas/pronósticos de empresas a menos que sea miembro.
 
+### 3.14 Core de Datos (etapa 2 · P3) — detalle en `docs/architecture/v2/P3-datos.md`
+| Método | Ruta | Detalle |
+|---|---|---|
+| GET/POST | `/data-sources/{id}/mappings`, GET `/{mapping}` [T] `datasources.manage` | consultas autorizadas: `{entity, query, field_map, options}`; cada cambio crea una versión **sin aprobar**. 422 `sql_query_rejected` (`reason`) si no es un único SELECT de solo lectura |
+| POST | `/data-sources/{id}/mappings/{mapping}/preview`, `/approve`, `/deactivate` [T] `datasources.manage` | vista previa de campos canónicos (sin importar); aprobar activa la versión; solo la aprobada sincroniza |
+| POST | `/data-sources/{id}/sync` [T] `datasources.manage` | `{entity, mode: full|incremental}` → 202 `SourceSync`; 409 `mapping_not_approved` / `sync_in_progress`. Job `SyncDataSource` (cola `imports`) |
+| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, stats, error_message, started_at, finished_at}` |
+| GET | `/data-coverage` [T] | `{data:[{id, entity, data_source_id, branch_id, complete_from, complete_through, basis: declared|inferred, last_ingested_at, notes}], effective:{entidad:{complete_from, complete_through, rule: declared_by_user|min_over_sources|none, basis}}}` |
+| PUT | `/data-coverage` [T] `imports.manage` | `{entity, complete_from?, complete_through*, data_source_id?, branch_id?, notes?}`; `complete_through` no puede ser futura |
+| GET | `/data-quality/extended` [T] | reporte ampliado: `temporal_coverage, sales_days, customer_identity, product_code_changes, price_history, units`; `?persist=1` lo guarda (`data_quality_reports`, scope `data_core`) |
+| GET | `/calendar-events` [T] | query `from, to, scope, category, status, include_public, as_of, limit`; con `as_of` solo revisiones con `known_at` ≤ corte (las de `known_at` desconocido no se devuelven) |
+| POST/PATCH/DELETE | `/calendar-events[/{id}]` [T] `catalog.manage` | alta/edición (nueva **revisión**) / cancelación; solo eventos propios (el calendario público es de solo lectura). Pasan por el importador |
+| GET | `/commitments`, `/commitments/{id}` [T] | filtros `type, status, customer_id, product_id, from, to`; `as_of` reconstruye el estado conocido al corte (`status_at_cutoff`, `pending_total`, `flags`) |
+| POST | `/commitments` [T] `imports.manage` | `{commitment_type, external_id, issued_at, …, items:[{product_sku, quantity, quantity_fulfilled?, unit?, unit_price?, …}]}` → 201 `created` / 200 `updated|unchanged`; 422 `validation_failed` con los errores del importador |
+| POST | `/commitments/{id}/cancel` [T] `imports.manage` | `{cancelled_at?, known_at?}` → agrega una revisión; 409 `already_cancelled` |
+| GET/POST | `/warehouses`, `/unit-conversions` [T] | consulta / alta-actualización (importador). `DELETE /unit-conversions/{id}` (`catalog.manage`) |
+| GET | `/tenant/effective-config?core=` [T] | `{core, config_version, profile, precedence:[core,profile,tenant], keys:[{key,value,source}], tenant_overrides}`; 503 `engine_unavailable` |
+| PUT | `/tenant/core-config/{core}` [T] `settings.manage` | `{overrides:{…}}`; el motor valida (claves desconocidas, tipos y rangos ⇒ 422 `invalid_config`); `{}` elimina los valores de empresa |
+| GET | `/platform/extensions` [T] | perfil sectorial y proveedores que aplican a la empresa (vacío si no tiene perfil) |
+
+Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calendar_events`, `unit_conversions`, `warehouses` (§2.10–2.12).
+No se actualizó `docs/openapi/predictily-api.yaml` con estas rutas (pendiente de la integración).
+
 ---
 
 ## 4. API interna del motor (FastAPI)
@@ -361,7 +429,7 @@ solo en las tablas que le pertenecen (ver migración `2026_01_01_000700`). Larav
 Petición:
 ```json
 {"tenant_id": 3, "training_job_id": 41,
- "horizons": [7, 30, 90],
+ "horizons": [7, 14, 30, 60, 90],
  "cutoff_date": null,
  "options": {"force_models": null, "max_backtest_windows": 3, "seed": 42}}
 ```
@@ -426,6 +494,15 @@ objetivo ya observadas, inserta/actualiza `forecast_actuals` y `model_evaluation
   medium, high, critical.
 - `alerts.type` (motor): stockout_risk, forecast_drift, data_quality, run_completed.
 
+### 4.5 Rutas de plataforma y datos del motor (etapa 2 · P3)
+| Método | Ruta | Uso |
+|---|---|---|
+| GET | `/v1/platform/effective-config?tenant_id&core` | configuración efectiva (core → perfil → empresa) con procedencia por clave y `config_version`; 422 `invalid_config` (`errors[]`) / `unknown_core`; 404 empresa |
+| POST | `/v1/platform/validate-config` | `{tenant_id, core, overrides}` validación en seco |
+| GET | `/v1/platform/profiles`, `/v1/platform/tenants/{tenant_id}/extensions` | perfiles registrados / proveedores de la empresa |
+| GET | `/v1/data-core/calendar?tenant_id&start&end[&as_of]` | eventos de calendario (empresa + público); con `as_of`, solo lo conocido |
+| GET | `/v1/data-core/coverage?tenant_id[&entity&branch_id]` | cobertura efectiva de las fuentes |
+
 ---
 
 ## 5. Orquestación (colas de Laravel)
@@ -440,6 +517,7 @@ Colas Redis: `default`, `imports`, `forecasting`.
 | `RefreshReadiness` | forecasting | llama `/readiness` |
 | `RunForecastPipeline` | forecasting | llama `/execute`; `timeout=ENGINE_TIMEOUT`, `tries=2`, backoff 60 s; marca `failed` si el motor no responde |
 | `EvaluateActuals` | forecasting | llama `/evaluate-actuals` |
+| `SyncDataSource` | imports | etapa 2: extrae la consulta autorizada de una fuente SQL de solo lectura y la importa por el mismo pipeline (`tries=1`, empresa explícita); programada por `predictily:sync-sources` |
 
 Programación (`routes/console.php`): diaria 02:00 America/Guayaquil `predictily:evaluate-actuals`;
 según `settings.forecast_schedule` (daily/weekly) `predictily:schedule-forecasts`; diaria

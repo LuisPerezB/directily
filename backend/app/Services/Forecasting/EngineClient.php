@@ -71,7 +71,7 @@ class EngineClient
         int $runId,
         int $tenantId,
         int $trainingJobId,
-        array $horizons = [7, 30, 90],
+        array $horizons = [7, 14, 30, 60, 90],
         ?string $cutoffDate = null,
         array $options = [],
     ): array {

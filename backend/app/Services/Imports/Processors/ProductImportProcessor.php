@@ -36,6 +36,8 @@ final class ProductImportProcessor implements ImportProcessor
             }
             $price = $this->optionalNumber($p, $raw, 'current_price', $issues);
             $cost = $this->optionalNumber($p, $raw, 'current_cost', $issues);
+            $priceKnown = $this->knownAt($p, $raw, 'price_known_at', $issues);
+            $costKnown = $this->knownAt($p, $raw, 'cost_known_at', $issues);
             if ($sku !== null && isset($seen[CatalogResolver::norm($sku)])) {
                 $issues[] = Issue::error('duplicate_in_file', "El SKU '{$sku}' aparece más de una vez en el archivo.", 'sku', $sku);
             }
@@ -48,6 +50,7 @@ final class ProductImportProcessor implements ImportProcessor
                     'unit' => $p->string($raw['unit'] ?? null, 20) ?? 'unidad',
                     'brand' => $p->string($raw['brand'] ?? null, 100),
                     'current_price' => $price, 'current_cost' => $cost,
+                    'price_known_at' => $priceKnown, 'cost_known_at' => $costKnown,
                     'is_active' => $p->boolean($raw['is_active'] ?? null, true),
                 ];
                 $valid[] = $row;
@@ -112,10 +115,10 @@ final class ProductImportProcessor implements ImportProcessor
                         continue;
                     }
                     if ($r['current_price'] !== null && ($e === null || (float) $e->current_price !== (float) $r['current_price'])) {
-                        $prices[] = ['tenant_id' => $tenant->id, 'product_id' => $id, 'price' => $r['current_price'], 'currency' => $tenant->currency, 'valid_from' => $today, 'source' => 'import', 'created_at' => $now];
+                        $prices[] = ['tenant_id' => $tenant->id, 'product_id' => $id, 'price' => $r['current_price'], 'currency' => $tenant->currency, 'valid_from' => $today, 'source' => 'import', 'known_at' => $r['price_known_at'], 'created_at' => $now];
                     }
                     if ($r['current_cost'] !== null && ($e === null || (float) $e->current_cost !== (float) $r['current_cost'])) {
-                        $costs[] = ['tenant_id' => $tenant->id, 'product_id' => $id, 'unit_cost' => $r['current_cost'], 'currency' => $tenant->currency, 'valid_from' => $today, 'source' => 'import', 'created_at' => $now];
+                        $costs[] = ['tenant_id' => $tenant->id, 'product_id' => $id, 'unit_cost' => $r['current_cost'], 'currency' => $tenant->currency, 'valid_from' => $today, 'source' => 'import', 'known_at' => $r['cost_known_at'], 'unit' => $r['unit'], 'created_at' => $now];
                     }
                 }
                 foreach (array_chunk($prices, 1000) as $chunk) {
@@ -128,6 +131,27 @@ final class ProductImportProcessor implements ImportProcessor
         }
 
         return ['stats' => $stats, 'issues' => $ctx->issues->summary()];
+    }
+
+    /**
+     * Disponibilidad en la fuente de un precio/costo (tres fechas): NULL = desconocida; nunca la fecha de la carga.
+     *
+     * @param  list<Issue>  $issues
+     */
+    private function knownAt($p, array $raw, string $field, array &$issues): ?string
+    {
+        $value = $raw[$field] ?? null;
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return null;
+        }
+        $parsed = $p->dateTime($value);
+        if ($parsed === null || $parsed[0]->isFuture()) {
+            $issues[] = Issue::error($parsed === null ? 'invalid_date' : 'future_date', $parsed === null ? 'Fecha no válida.' : 'La fecha desde la que se conocía el dato no puede ser futura.', $field, $value);
+
+            return null;
+        }
+
+        return $parsed[0]->utc()->format('Y-m-d H:i:sP');
     }
 
     /** @param list<Issue> $issues */

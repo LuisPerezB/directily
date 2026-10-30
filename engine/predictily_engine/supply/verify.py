@@ -241,7 +241,8 @@ def evaluate(problem: PlanProblem, purchases: list[PurchaseLine], productions: l
     for k, node in nodes.items():
         res = results[k]
         holding += node.holding * float(res.inventory.sum())
-        shortage += node.penalty * float(res.unmet.sum())
+        w = node.u_weights if node.u_weights is not None else 1.0
+        shortage += node.penalty * float((res.unmet * w).sum())
         ss_pen += (problem.ss_weight * node.penalty / max(1, node.horizon)) * float(res.ss_shortfall.sum())
         unmet_units += float(res.unmet.sum())
         demand_units += float(node.demand.sum())

@@ -12,6 +12,7 @@ use App\Models\SourceSync;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
+use App\Services\Connectors\Sql\SqlQueryRejected;
 use App\Services\Connectors\Sql\SqlSourceConnection;
 use App\Services\Connectors\Sql\SqlSourceException;
 use App\Services\DataCore\Coverage\CoverageService;
@@ -102,7 +103,11 @@ final class SourceSyncService
             }
             $connector = $this->mappings->connectorFor($source);
             $options = (array) $mapping->options;
-            $query = $this->mappings->guard($mapping->query, $connector); // se revalida siempre antes de ejecutar
+            try {
+                $query = $this->mappings->validateQuery($mapping->query, $connector); // se revalida siempre antes de ejecutar
+            } catch (SqlQueryRejected $e) {
+                throw new DomainStateException('La consulta guardada ya no cumple la política de solo lectura y no se ejecutó: '.$e->getMessage(), 'sql_query_rejected');
+            }
 
             [$mode, $since, $previous] = $this->window($sync, $mapping, $options);
             $sync->forceFill(['mode' => $mode, 'since' => $since])->save();
@@ -214,7 +219,7 @@ final class SourceSyncService
 
     private function fail(SourceSync $sync, Throwable $e, ?SqlSourceConnection $connection): void
     {
-        $message = $e instanceof DomainStateException || $e instanceof SqlSourceException || $e instanceof \Illuminate\Validation\ValidationException
+        $message = $e instanceof DomainStateException || $e instanceof SqlSourceException || $e instanceof \App\Exceptions\PlanLimitExceededException || $e instanceof \Illuminate\Validation\ValidationException
             ? $e->getMessage()
             : 'La sincronización falló por un error interno. Revise los registros del servidor.';
         Log::error('Sincronización de fuente SQL fallida', ['sync_id' => $sync->id, 'data_source_id' => $sync->data_source_id, 'exception' => $e::class,

@@ -25,7 +25,12 @@ from predictily_engine.demand.horizons import SUPPORTED_HORIZONS  # noqa: E402
 from predictily_engine.db.session import get_engine  # noqa: E402
 from predictily_engine.models.foundation import TimesFMAdapter  # noqa: E402
 from predictily_engine.models.registry import FAMILIES  # noqa: E402
-from predictily_engine.pipeline.errors import ConflictError, InsufficientDataError, NotFoundError  # noqa: E402
+from predictily_engine.pipeline.errors import (  # noqa: E402
+    ConflictError,
+    InsufficientDataError,
+    InvalidConfigurationError,
+    NotFoundError,
+)
 from predictily_engine.pipeline.schemas import (  # noqa: E402
     EvaluateRequest,
     ExecuteRequest,
@@ -59,6 +64,11 @@ async def _conflict(_: Request, exc: ConflictError) -> JSONResponse:
 async def _insufficient(_: Request, exc: InsufficientDataError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"code": "insufficient_data", "message": str(exc),
                                                   "details": exc.details})
+
+
+@app.exception_handler(InvalidConfigurationError)
+async def _invalid_config(_: Request, exc: InvalidConfigurationError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"code": "invalid_configuration", "message": str(exc)})
 
 
 @app.get("/health")

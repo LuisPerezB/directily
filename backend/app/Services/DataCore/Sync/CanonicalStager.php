@@ -70,14 +70,7 @@ final class CanonicalStager
                     if (++$result->rows > $maxRows) {
                         throw new SqlSourceException("La consulta devuelve más de {$maxRows} filas; acótela con :since o aumente max_rows en el mapeo.");
                     }
-                    $out = [];
-                    foreach ($headers as $field) {
-                        $raw = $this->rawValue($field, $mapping, $row, $columnIndex);
-                        if (isset($valueMaps[$field]) && $raw !== null && array_key_exists((string) $raw, $valueMaps[$field])) {
-                            $raw = $valueMaps[$field][(string) $raw];
-                        }
-                        $out[] = $this->format($raw, $types[$field] ?? 'string', $sourceTimezone, $tenant->timezone ?: 'America/Guayaquil');
-                    }
+                    $out = $this->transform($row, $headers, $types, $mapping, $columnIndex, $valueMaps, $sourceTimezone, $tenant->timezone ?: 'America/Guayaquil');
                     if ($eventIndex !== false) {
                         $this->trackEvent($result, $out[$eventIndex]);
                     }
@@ -93,6 +86,53 @@ final class CanonicalStager
         }
 
         return $result;
+    }
+
+    /**
+     * Vista previa: las primeras filas ya convertidas a campos canónicos (no devuelve las columnas crudas de la fuente).
+     *
+     * @return array{headers: list<string>, rows: list<list<string>>}
+     *
+     * @throws SqlSourceException
+     */
+    public function preview(SqlSourceConnection $connection, ValidatedQuery $query, SourceMapping $mapping, Tenant $tenant, string $sourceTimezone, int $limit): array
+    {
+        $headers = $this->headers($mapping);
+        $types = [];
+        foreach ($this->fields->fields(ImportEntity::from($mapping->entity)) as $definition) {
+            $types[$definition->key] = $definition->type;
+        }
+        $valueMaps = (array) (((array) $mapping->options)['value_maps'] ?? []);
+        $rows = [];
+        $columnIndex = null;
+        foreach ($connection->preview($query, null, $limit) as $row) {
+            $columnIndex ??= $this->resolveColumns($row, $mapping);
+            $rows[] = $this->transform($row, $headers, $types, $mapping, $columnIndex, $valueMaps, $sourceTimezone, $tenant->timezone ?: 'America/Guayaquil');
+        }
+
+        return ['headers' => $headers, 'rows' => $rows];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  list<string>  $headers
+     * @param  array<string, string>  $types
+     * @param  array<string, string>  $columnIndex
+     * @param  array<string, mixed>  $valueMaps
+     * @return list<string>
+     */
+    private function transform(array $row, array $headers, array $types, SourceMapping $mapping, array $columnIndex, array $valueMaps, string $sourceTimezone, string $tenantTimezone): array
+    {
+        $out = [];
+        foreach ($headers as $field) {
+            $raw = $this->rawValue($field, $mapping, $row, $columnIndex);
+            if (isset($valueMaps[$field]) && $raw !== null && array_key_exists((string) $raw, $valueMaps[$field])) {
+                $raw = $valueMaps[$field][(string) $raw];
+            }
+            $out[] = $this->format($raw, $types[$field] ?? 'string', $sourceTimezone, $tenantTimezone);
+        }
+
+        return $out;
     }
 
     /**

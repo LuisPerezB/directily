@@ -33,6 +33,7 @@ class CustomerData:
     sales_last: date | None
     excluded: dict[str, Any] = field(default_factory=dict)
     tenant: dict[str, Any] = field(default_factory=dict)  # currency, timezone, sector
+    through: date | None = None       # los datos se cargaron hasta esta fecha (incluida)
 
     def __post_init__(self) -> None:
         for col in ("ds",):
@@ -43,7 +44,10 @@ class CustomerData:
 
     # ── cobertura y madurez ──
     def last_complete_day(self) -> date | None:
-        return last_complete_day(self.coverage, self.sales_last)
+        complete = last_complete_day(self.coverage, self.sales_last)
+        if complete is not None and self.through is not None and self.through < complete:
+            return self.through
+        return complete
 
     def coverage_source(self) -> str:
         cov = self.coverage
@@ -92,5 +96,5 @@ def load_customer_data(repo: CustomerRepository, cfg: dict[str, Any], through: d
         purchases=purchases, returns=returns, products=repo.products(), branches=repo.branches(),
         availability=availability, coverage=coverage, promotions=repo.promotions(),
         promotion_revisions=repo.promotion_revisions(), sales_first=first, sales_last=last,
-        excluded=excluded, tenant=repo.tenant(),
+        excluded=excluded, tenant=repo.tenant(), through=through,
     )

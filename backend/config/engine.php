@@ -21,5 +21,6 @@ return [
     // Una ejecución queued/running más antigua que esto se considera vencida (no bloquea nuevas).
     'stale_run_minutes' => (int) env('ENGINE_STALE_RUN_MINUTES', 120),
     'queue' => env('ENGINE_QUEUE', 'forecasting'),
-    'horizons' => [7, 30, 90],
+    // Horizontes de demanda del dominio (ADR-V2-10). Que un plan los autorice es otra cosa (config/predictily.php).
+    'horizons' => [7, 14, 30, 60, 90],
 ];

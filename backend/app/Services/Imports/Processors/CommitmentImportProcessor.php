@@ -400,7 +400,8 @@ final class CommitmentImportProcessor implements ImportProcessor
                         'tenant_id' => $tenant->id, 'commitment_id' => $id, 'import_job_id' => $ctx->job->id, 'revision' => $revision,
                         'status' => $h['status'], 'known_at' => $h['known_at'], 'cancelled_at' => $h['cancelled_at'],
                         'source_hash' => $doc['source_hash'], 'recorded_at' => $now,
-                        'snapshot' => json_encode(['header' => $h, 'lines' => $doc['lines']], JSON_UNESCAPED_UNICODE),
+                        // El código de cliente (puede ser cédula/RUC) nunca se guarda en claro: solo su identidad seudonimizada.
+                        'snapshot' => json_encode(['header' => array_merge($h, ['customer_code' => $h['customer_code'] !== null ? CustomerIdentity::fromCode($h['customer_code'])['external_code'] : null]), 'lines' => $doc['lines']], JSON_UNESCAPED_UNICODE),
                     ]);
                 }
 

@@ -1,0 +1,14 @@
+{
+  "tenant_id": 1,
+  "core": "supply",
+  "sector": "synthetic_process_b",
+  "profile": {"code": "synthetic_process_b", "version": "1.0.0"},
+  "config_version": "0000000000000000000000000000000000000000000000000000000000000000",
+  "precedence": ["core", "profile", "tenant"],
+  "config": {"service_level": 0.9, "objective": "min_cost"},
+  "provenance": {"service_level": "profile:synthetic_process_b@1.0.0", "objective": "core"},
+  "keys": [
+    {"key": "service_level", "value": 0.9, "source": "profile:synthetic_process_b@1.0.0"},
+    {"key": "objective", "value": "min_cost", "source": "core"}
+  ]
+}

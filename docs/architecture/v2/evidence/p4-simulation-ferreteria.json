@@ -1,0 +1,697 @@
+{
+  "window": {
+    "start": "2026-06-29",
+    "end": "2026-10-26",
+    "days": 120,
+    "review_days": 7,
+    "series": 186
+  },
+  "demand_basis": "true_demand_synthetic",
+  "policies": {
+    "current": {
+      "demand_units": 91106.0,
+      "sold_units": 88150.0,
+      "unmet_units": 2956.0,
+      "fill_rate": 0.9676,
+      "stockout_day_share": 0.0543,
+      "overstock_unit_days": 5783.0,
+      "overstock_value_days": 94867.1,
+      "avg_overstock_value": 1581.12,
+      "avg_inventory_value": 23466.63,
+      "days_of_inventory": 12.56,
+      "holding_cost": 1543.01,
+      "ordering_cost": 0.0,
+      "purchase_outlay": 226268.36,
+      "orders": 2405,
+      "ordered_units": 88035.0,
+      "lost_margin": 5895.49,
+      "operating_cost_proxy": 7438.5,
+      "avg_capital_committed": 36624.41,
+      "peak_capital_committed": 44212.54,
+      "ending_inventory_value": 24668.63,
+      "overstock_window_days": 60,
+      "policy": "current",
+      "runtime_seconds": 5.11,
+      "spend_per_review_mean": 13309.9,
+      "series_weekly": [
+        {
+          "week_start": "2026-06-29",
+          "demand": 5579.0,
+          "sold": 4920.0,
+          "unmet": 659.0,
+          "inventory_value_end": 22765.7
+        },
+        {
+          "week_start": "2026-07-06",
+          "demand": 5182.0,
+          "sold": 4617.0,
+          "unmet": 565.0,
+          "inventory_value_end": 22078.5
+        },
+        {
+          "week_start": "2026-07-13",
+          "demand": 5530.0,
+          "sold": 5404.0,
+          "unmet": 126.0,
+          "inventory_value_end": 20891.7
+        },
+        {
+          "week_start": "2026-07-20",
+          "demand": 5135.0,
+          "sold": 5025.0,
+          "unmet": 110.0,
+          "inventory_value_end": 21235.2
+        },
+        {
+          "week_start": "2026-07-27",
+          "demand": 5992.0,
+          "sold": 5890.0,
+          "unmet": 102.0,
+          "inventory_value_end": 19987.2
+        },
+        {
+          "week_start": "2026-08-03",
+          "demand": 5343.0,
+          "sold": 5182.0,
+          "unmet": 161.0,
+          "inventory_value_end": 23559.8
+        },
+        {
+          "week_start": "2026-08-10",
+          "demand": 5245.0,
+          "sold": 4991.0,
+          "unmet": 254.0,
+          "inventory_value_end": 24337.0
+        },
+        {
+          "week_start": "2026-08-17",
+          "demand": 4906.0,
+          "sold": 4823.0,
+          "unmet": 83.0,
+          "inventory_value_end": 25538.6
+        },
+        {
+          "week_start": "2026-08-24",
+          "demand": 5332.0,
+          "sold": 5257.0,
+          "unmet": 75.0,
+          "inventory_value_end": 25961.6
+        },
+        {
+          "week_start": "2026-08-31",
+          "demand": 5696.0,
+          "sold": 5590.0,
+          "unmet": 106.0,
+          "inventory_value_end": 23379.3
+        },
+        {
+          "week_start": "2026-09-07",
+          "demand": 5430.0,
+          "sold": 5321.0,
+          "unmet": 109.0,
+          "inventory_value_end": 24825.2
+        },
+        {
+          "week_start": "2026-09-14",
+          "demand": 5232.0,
+          "sold": 5084.0,
+          "unmet": 148.0,
+          "inventory_value_end": 26250.7
+        },
+        {
+          "week_start": "2026-09-21",
+          "demand": 5021.0,
+          "sold": 4909.0,
+          "unmet": 112.0,
+          "inventory_value_end": 25095.0
+        },
+        {
+          "week_start": "2026-09-28",
+          "demand": 5581.0,
+          "sold": 5486.0,
+          "unmet": 95.0,
+          "inventory_value_end": 24158.1
+        },
+        {
+          "week_start": "2026-10-05",
+          "demand": 4571.0,
+          "sold": 4470.0,
+          "unmet": 101.0,
+          "inventory_value_end": 26529.4
+        },
+        {
+          "week_start": "2026-10-12",
+          "demand": 5450.0,
+          "sold": 5380.0,
+          "unmet": 70.0,
+          "inventory_value_end": 25739.8
+        },
+        {
+          "week_start": "2026-10-19",
+          "demand": 5116.0,
+          "sold": 5045.0,
+          "unmet": 71.0,
+          "inventory_value_end": 25048.2
+        },
+        {
+          "week_start": "2026-10-26",
+          "demand": 765.0,
+          "sold": 756.0,
+          "unmet": 9.0,
+          "inventory_value_end": 24668.6
+        }
+      ]
+    },
+    "reference": {
+      "demand_units": 91106.0,
+      "sold_units": 86239.0,
+      "unmet_units": 4867.0,
+      "fill_rate": 0.9466,
+      "stockout_day_share": 0.0843,
+      "overstock_unit_days": 5370.0,
+      "overstock_value_days": 78977.4,
+      "avg_overstock_value": 1316.29,
+      "avg_inventory_value": 21446.92,
+      "days_of_inventory": 11.77,
+      "holding_cost": 1410.21,
+      "ordering_cost": 0.0,
+      "purchase_outlay": 216655.92,
+      "orders": 1529,
+      "ordered_units": 86478.0,
+      "lost_margin": 8972.55,
+      "operating_cost_proxy": 10382.76,
+      "avg_capital_committed": 33382.13,
+      "peak_capital_committed": 40942.89,
+      "ending_inventory_value": 21745.24,
+      "overstock_window_days": 60,
+      "policy": "reference",
+      "runtime_seconds": 0.05,
+      "spend_per_review_mean": 12744.47,
+      "series_weekly": [
+        {
+          "week_start": "2026-06-29",
+          "demand": 5579.0,
+          "sold": 4920.0,
+          "unmet": 659.0,
+          "inventory_value_end": 22941.4
+        },
+        {
+          "week_start": "2026-07-06",
+          "demand": 5182.0,
+          "sold": 4604.0,
+          "unmet": 578.0,
+          "inventory_value_end": 22735.7
+        },
+        {
+          "week_start": "2026-07-13",
+          "demand": 5530.0,
+          "sold": 5344.0,
+          "unmet": 186.0,
+          "inventory_value_end": 21204.3
+        },
+        {
+          "week_start": "2026-07-20",
+          "demand": 5135.0,
+          "sold": 4992.0,
+          "unmet": 143.0,
+          "inventory_value_end": 19837.4
+        },
+        {
+          "week_start": "2026-07-27",
+          "demand": 5992.0,
+          "sold": 5780.0,
+          "unmet": 212.0,
+          "inventory_value_end": 19037.0
+        },
+        {
+          "week_start": "2026-08-03",
+          "demand": 5343.0,
+          "sold": 4984.0,
+          "unmet": 359.0,
+          "inventory_value_end": 21828.0
+        },
+        {
+          "week_start": "2026-08-10",
+          "demand": 5245.0,
+          "sold": 4815.0,
+          "unmet": 430.0,
+          "inventory_value_end": 22174.4
+        },
+        {
+          "week_start": "2026-08-17",
+          "demand": 4906.0,
+          "sold": 4774.0,
+          "unmet": 132.0,
+          "inventory_value_end": 22802.6
+        },
+        {
+          "week_start": "2026-08-24",
+          "demand": 5332.0,
+          "sold": 5159.0,
+          "unmet": 173.0,
+          "inventory_value_end": 23968.4
+        },
+        {
+          "week_start": "2026-08-31",
+          "demand": 5696.0,
+          "sold": 5441.0,
+          "unmet": 255.0,
+          "inventory_value_end": 19419.7
+        },
+        {
+          "week_start": "2026-09-07",
+          "demand": 5430.0,
+          "sold": 5046.0,
+          "unmet": 384.0,
+          "inventory_value_end": 23242.1
+        },
+        {
+          "week_start": "2026-09-14",
+          "demand": 5232.0,
+          "sold": 5048.0,
+          "unmet": 184.0,
+          "inventory_value_end": 23593.6
+        },
+        {
+          "week_start": "2026-09-21",
+          "demand": 5021.0,
+          "sold": 4747.0,
+          "unmet": 274.0,
+          "inventory_value_end": 21531.6
+        },
+        {
+          "week_start": "2026-09-28",
+          "demand": 5581.0,
+          "sold": 5381.0,
+          "unmet": 200.0,
+          "inventory_value_end": 21285.9
+        },
+        {
+          "week_start": "2026-10-05",
+          "demand": 4571.0,
+          "sold": 4393.0,
+          "unmet": 178.0,
+          "inventory_value_end": 22323.6
+        },
+        {
+          "week_start": "2026-10-12",
+          "demand": 5450.0,
+          "sold": 5244.0,
+          "unmet": 206.0,
+          "inventory_value_end": 22765.6
+        },
+        {
+          "week_start": "2026-10-19",
+          "demand": 5116.0,
+          "sold": 4821.0,
+          "unmet": 295.0,
+          "inventory_value_end": 22209.4
+        },
+        {
+          "week_start": "2026-10-26",
+          "demand": 765.0,
+          "sold": 746.0,
+          "unmet": 19.0,
+          "inventory_value_end": 21745.2
+        }
+      ]
+    },
+    "planner": {
+      "demand_units": 91106.0,
+      "sold_units": 88542.0,
+      "unmet_units": 2564.0,
+      "fill_rate": 0.9719,
+      "stockout_day_share": 0.0514,
+      "overstock_unit_days": 5142.0,
+      "overstock_value_days": 74796.1,
+      "avg_overstock_value": 1246.6,
+      "avg_inventory_value": 25266.92,
+      "days_of_inventory": 13.51,
+      "holding_cost": 1661.39,
+      "ordering_cost": 0.0,
+      "purchase_outlay": 228500.78,
+      "orders": 2508,
+      "ordered_units": 90559.0,
+      "lost_margin": 5870.83,
+      "operating_cost_proxy": 7532.22,
+      "avg_capital_committed": 38112.69,
+      "peak_capital_committed": 46324.77,
+      "ending_inventory_value": 26421.5,
+      "overstock_window_days": 60,
+      "policy": "planner",
+      "runtime_seconds": 25.4,
+      "spend_per_review_mean": 13441.22,
+      "series_weekly": [
+        {
+          "week_start": "2026-06-29",
+          "demand": 5579.0,
+          "sold": 4920.0,
+          "unmet": 659.0,
+          "inventory_value_end": 24397.5
+        },
+        {
+          "week_start": "2026-07-06",
+          "demand": 5182.0,
+          "sold": 4617.0,
+          "unmet": 565.0,
+          "inventory_value_end": 24145.9
+        },
+        {
+          "week_start": "2026-07-13",
+          "demand": 5530.0,
+          "sold": 5323.0,
+          "unmet": 207.0,
+          "inventory_value_end": 22917.7
+        },
+        {
+          "week_start": "2026-07-20",
+          "demand": 5135.0,
+          "sold": 5072.0,
+          "unmet": 63.0,
+          "inventory_value_end": 23674.6
+        },
+        {
+          "week_start": "2026-07-27",
+          "demand": 5992.0,
+          "sold": 5870.0,
+          "unmet": 122.0,
+          "inventory_value_end": 22118.0
+        },
+        {
+          "week_start": "2026-08-03",
+          "demand": 5343.0,
+          "sold": 5192.0,
+          "unmet": 151.0,
+          "inventory_value_end": 25027.9
+        },
+        {
+          "week_start": "2026-08-10",
+          "demand": 5245.0,
+          "sold": 5096.0,
+          "unmet": 149.0,
+          "inventory_value_end": 25522.8
+        },
+        {
+          "week_start": "2026-08-17",
+          "demand": 4906.0,
+          "sold": 4833.0,
+          "unmet": 73.0,
+          "inventory_value_end": 27149.1
+        },
+        {
+          "week_start": "2026-08-24",
+          "demand": 5332.0,
+          "sold": 5249.0,
+          "unmet": 83.0,
+          "inventory_value_end": 27599.9
+        },
+        {
+          "week_start": "2026-08-31",
+          "demand": 5696.0,
+          "sold": 5622.0,
+          "unmet": 74.0,
+          "inventory_value_end": 24979.2
+        },
+        {
+          "week_start": "2026-09-07",
+          "demand": 5430.0,
+          "sold": 5402.0,
+          "unmet": 28.0,
+          "inventory_value_end": 26427.7
+        },
+        {
+          "week_start": "2026-09-14",
+          "demand": 5232.0,
+          "sold": 5176.0,
+          "unmet": 56.0,
+          "inventory_value_end": 28326.9
+        },
+        {
+          "week_start": "2026-09-21",
+          "demand": 5021.0,
+          "sold": 4948.0,
+          "unmet": 73.0,
+          "inventory_value_end": 26914.2
+        },
+        {
+          "week_start": "2026-09-28",
+          "demand": 5581.0,
+          "sold": 5489.0,
+          "unmet": 92.0,
+          "inventory_value_end": 26801.1
+        },
+        {
+          "week_start": "2026-10-05",
+          "demand": 4571.0,
+          "sold": 4509.0,
+          "unmet": 62.0,
+          "inventory_value_end": 28830.7
+        },
+        {
+          "week_start": "2026-10-12",
+          "demand": 5450.0,
+          "sold": 5404.0,
+          "unmet": 46.0,
+          "inventory_value_end": 27462.6
+        },
+        {
+          "week_start": "2026-10-19",
+          "demand": 5116.0,
+          "sold": 5063.0,
+          "unmet": 53.0,
+          "inventory_value_end": 26855.6
+        },
+        {
+          "week_start": "2026-10-26",
+          "demand": 765.0,
+          "sold": 757.0,
+          "unmet": 8.0,
+          "inventory_value_end": 26421.5
+        }
+      ],
+      "solver": {
+        "seconds": 25.27,
+        "statuses": {
+          "feasible_with_gap": 1,
+          "optimal": 16
+        }
+      }
+    },
+    "planner_budget_60pct_of_current": {
+      "demand_units": 91106.0,
+      "sold_units": 52614.0,
+      "unmet_units": 38492.0,
+      "fill_rate": 0.5775,
+      "stockout_day_share": 0.4905,
+      "overstock_unit_days": 4989.0,
+      "overstock_value_days": 68784.9,
+      "avg_overstock_value": 1146.41,
+      "avg_inventory_value": 8703.26,
+      "days_of_inventory": 6.74,
+      "holding_cost": 572.27,
+      "ordering_cost": 0.0,
+      "purchase_outlay": 135750.46,
+      "orders": 1778,
+      "ordered_units": 45379.0,
+      "lost_margin": 48524.74,
+      "operating_cost_proxy": 49097.01,
+      "avg_capital_committed": 13876.9,
+      "peak_capital_committed": 32958.05,
+      "ending_inventory_value": 8146.54,
+      "overstock_window_days": 60,
+      "policy": "planner_budget_60pct_of_current",
+      "runtime_seconds": 11.64,
+      "spend_per_review_mean": 7985.32,
+      "series_weekly": [
+        {
+          "week_start": "2026-06-29",
+          "demand": 5579.0,
+          "sold": 4920.0,
+          "unmet": 659.0,
+          "inventory_value_end": 20947.0
+        },
+        {
+          "week_start": "2026-07-06",
+          "demand": 5182.0,
+          "sold": 4569.0,
+          "unmet": 613.0,
+          "inventory_value_end": 15798.6
+        },
+        {
+          "week_start": "2026-07-13",
+          "demand": 5530.0,
+          "sold": 4855.0,
+          "unmet": 675.0,
+          "inventory_value_end": 12215.4
+        },
+        {
+          "week_start": "2026-07-20",
+          "demand": 5135.0,
+          "sold": 4509.0,
+          "unmet": 626.0,
+          "inventory_value_end": 9738.1
+        },
+        {
+          "week_start": "2026-07-27",
+          "demand": 5992.0,
+          "sold": 3682.0,
+          "unmet": 2310.0,
+          "inventory_value_end": 7171.4
+        },
+        {
+          "week_start": "2026-08-03",
+          "demand": 5343.0,
+          "sold": 2513.0,
+          "unmet": 2830.0,
+          "inventory_value_end": 7543.0
+        },
+        {
+          "week_start": "2026-08-10",
+          "demand": 5245.0,
+          "sold": 2323.0,
+          "unmet": 2922.0,
+          "inventory_value_end": 7458.8
+        },
+        {
+          "week_start": "2026-08-17",
+          "demand": 4906.0,
+          "sold": 2353.0,
+          "unmet": 2553.0,
+          "inventory_value_end": 7412.8
+        },
+        {
+          "week_start": "2026-08-24",
+          "demand": 5332.0,
+          "sold": 2736.0,
+          "unmet": 2596.0,
+          "inventory_value_end": 7070.5
+        },
+        {
+          "week_start": "2026-08-31",
+          "demand": 5696.0,
+          "sold": 2902.0,
+          "unmet": 2794.0,
+          "inventory_value_end": 5337.0
+        },
+        {
+          "week_start": "2026-09-07",
+          "demand": 5430.0,
+          "sold": 2332.0,
+          "unmet": 3098.0,
+          "inventory_value_end": 5654.6
+        },
+        {
+          "week_start": "2026-09-14",
+          "demand": 5232.0,
+          "sold": 2441.0,
+          "unmet": 2791.0,
+          "inventory_value_end": 6547.0
+        },
+        {
+          "week_start": "2026-09-21",
+          "demand": 5021.0,
+          "sold": 2306.0,
+          "unmet": 2715.0,
+          "inventory_value_end": 5999.4
+        },
+        {
+          "week_start": "2026-09-28",
+          "demand": 5581.0,
+          "sold": 2591.0,
+          "unmet": 2990.0,
+          "inventory_value_end": 6817.7
+        },
+        {
+          "week_start": "2026-10-05",
+          "demand": 4571.0,
+          "sold": 2099.0,
+          "unmet": 2472.0,
+          "inventory_value_end": 8420.4
+        },
+        {
+          "week_start": "2026-10-12",
+          "demand": 5450.0,
+          "sold": 2645.0,
+          "unmet": 2805.0,
+          "inventory_value_end": 7996.8
+        },
+        {
+          "week_start": "2026-10-19",
+          "demand": 5116.0,
+          "sold": 2354.0,
+          "unmet": 2762.0,
+          "inventory_value_end": 8559.8
+        },
+        {
+          "week_start": "2026-10-26",
+          "demand": 765.0,
+          "sold": 484.0,
+          "unmet": 281.0,
+          "inventory_value_end": 8146.5
+        }
+      ],
+      "solver": {
+        "seconds": 11.51,
+        "statuses": {
+          "optimal": 15,
+          "feasible_with_gap": 2
+        }
+      }
+    }
+  },
+  "delta_vs_current": {
+    "current": {
+      "unmet_units": 0.0,
+      "fill_rate": 0.0,
+      "overstock_value_days": 0.0,
+      "avg_inventory_value": 0.0,
+      "holding_cost": 0.0,
+      "lost_margin": 0.0,
+      "operating_cost_proxy": 0.0,
+      "avg_capital_committed": 0.0,
+      "purchase_outlay": 0.0
+    },
+    "reference": {
+      "unmet_units": 1911.0,
+      "fill_rate": -0.021,
+      "overstock_value_days": -15889.7,
+      "avg_inventory_value": -2019.71,
+      "holding_cost": -132.8,
+      "lost_margin": 3077.06,
+      "operating_cost_proxy": 2944.26,
+      "avg_capital_committed": -3242.28,
+      "purchase_outlay": -9612.44
+    },
+    "planner": {
+      "unmet_units": -392.0,
+      "fill_rate": 0.0043,
+      "overstock_value_days": -20071.0,
+      "avg_inventory_value": 1800.29,
+      "holding_cost": 118.38,
+      "lost_margin": -24.66,
+      "operating_cost_proxy": 93.72,
+      "avg_capital_committed": 1488.28,
+      "purchase_outlay": 2232.42
+    }
+  },
+  "parameters": {
+    "service_level": 0.95,
+    "overstock_days": 60,
+    "holding_rate_annual": 0.2,
+    "order_cost": 0.0,
+    "seed": 7,
+    "lead_time_noise": "normal(0, lead_std) redondeado, común a todas las políticas"
+  },
+  "caveats": [
+    "No reemplaza la validación con datos reales: la demanda de evaluación es la demanda latente de un generador sintético.",
+    "El pronóstico de cada revisión es ligero (nivel de 28 días × día de semana) y usa solo ventas hasta esa fecha; no es el pipeline de producción.",
+    "Existencias iniciales reales de la ventana; sin órdenes en camino iniciales (supuesto).",
+    "Mantenimiento = tasa anual × valor de existencias (supuesto); costo por orden = 0.0 (supuesto).",
+    "Margen perdido = unidades no atendidas × (precio − costo) de catálogo."
+  ],
+  "budget_note": "planner_budget_60pct_of_current: tope de 7,986 por revisión (60 % del gasto medio de `current`).",
+  "company": {
+    "slug": "ferreteria_andina",
+    "data": "FICTICIOS (generador sintético con semilla 42)"
+  }
+}

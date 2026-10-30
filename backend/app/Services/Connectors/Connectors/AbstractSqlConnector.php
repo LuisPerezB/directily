@@ -105,6 +105,9 @@ abstract class AbstractSqlConnector extends AbstractConnector implements SqlConn
         if (isset($config['sslmode']) && ! in_array($config['sslmode'], ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'], true)) {
             $errors['config.sslmode'][] = 'sslmode no válido.';
         }
+        if (isset($config['sync_schedule']) && ! in_array($config['sync_schedule'], ['manual', 'hourly', 'daily'], true)) {
+            $errors['config.sync_schedule'][] = 'Use manual, hourly o daily.';
+        }
         if (isset($config['source_timezone']) && ! in_array($config['source_timezone'], timezone_identifiers_list(), true)) {
             $errors['config.source_timezone'][] = 'Zona horaria no válida.';
         }

@@ -64,7 +64,7 @@ final class PlanLimitService
 
     public function allowsHorizon(Tenant $tenant, int $horizonDays): bool
     {
-        return in_array($horizonDays, $this->limits($tenant)['horizons'] ?? [7, 30, 90], true);
+        return in_array($horizonDays, $this->limits($tenant)['horizons'] ?? [7, 14, 30, 60, 90], true);
     }
 
     /** @throws PlanLimitExceededException */

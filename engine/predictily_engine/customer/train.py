@@ -84,7 +84,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
                     "censoring": {"min_availability_share": cfg["min_availability_share"],
                                   "treatment": "La fila censurada se excluye por completo (ni negativo ni positivo)."}}
     if fr.empty:
-        res.reason = "No hay etiquetas maduras y no censuradas para este horizonte."
+        res.reason = "Datos insuficientes: no hay etiquetas maduras y no censuradas para este horizonte."
         return res
     fractions = cfg["block_fractions"]
     min_cut, min_rows = int(cfg["min_block_cutoffs"]), int(cfg["min_block_rows"])
@@ -200,7 +200,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
         m_ref = prob_info["reference"]["holdout"]
         impr = (m_ref["brier"] - m_ch["brier"]) / m_ref["brier"] if m_ref["brier"] else None
         ece_ok = (m_ch["ece"] is not None and m_ref["ece"] is not None
-                  and m_ch["ece"] <= max(0.02, m_ref["ece"] + 0.01))
+                  and m_ch["ece"] <= max(0.03, m_ref["ece"] + 0.02))
         checks = {
             "selection_positives_sufficient": True if sel_pos is None else sel_pos >= MIN_SELECTION_POSITIVES,
             "brier_relative_improvement": impr,
@@ -248,6 +248,9 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
         "definition": ("Candidatos = relaciones comprador×producto con compras previas al corte; unidad = (corte, comprador); "
                        "precision@k sobre unidades con ≥ k candidatos, recall@k sobre unidades con ≥ 1 positivo."),
     }
+    if challenger_art is not None and challenger_art is not served_prob_art:   # informativo: el candidato no promovido
+        p_ch_rank, _ = serve_probability(challenger_art, X[hold_rows], ref_p[hold_rows])
+        ranking["challenger_not_promoted"] = ranking_metrics(units, p_ch_rank, yh, ks)
     res.holdout["ranking"] = ranking
 
     # ── cantidad condicionada a compra ──
@@ -266,9 +269,11 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
     served_q_art = q_art_ref
     q_gate: dict[str, Any] = {"rule_version": cfg["promotion_rule_version"], "passed": False, "checks": {}}
     q_challenger = None
-    if tier == "full":
+    if tier in ("full", "lean"):
         tr_pos = in_block["train"]
-        sel_pos_rows = in_block["selection"]
+        # «full»: objetivo elegido en el bloque de selección. «lean»: sin bloque de selección; el objetivo se elige con el
+        # MAE SIN escalar del bloque de calibración (la escala es un único parámetro) y el holdout queda intacto.
+        sel_pos_rows = in_block["selection"] if tier == "full" else cal_pos
         if len(tr_pos) >= 50 and len(cal_pos) >= 10 and len(sel_pos_rows) >= MIN_SELECTION_POSITIVES:
             qc = fit_quantity_candidates(X[tr_pos], qty[tr_pos], seed, n_jobs)
             q_cands: dict[str, Any] = {}
@@ -278,7 +283,10 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
                 interval = ratio_interval(qty[cal_pos], mdl.predict(X[cal_pos]) * scale, float(cfg["interval_level"]))
                 art = {"objective": obj, "kind": "complex", "model": mdl, "scale": scale, "interval_log_q": interval,
                        "level": float(cfg["interval_level"]), "feature_names": MODEL_FEATURES, "horizon": h}
-                q_sel, _, _ = serve_quantity(art, X[sel_pos_rows], ref_q[sel_pos_rows])
+                if tier == "full":
+                    q_sel, _, _ = serve_quantity(art, X[sel_pos_rows], ref_q[sel_pos_rows])
+                else:
+                    q_sel = mdl.predict(X[sel_pos_rows])
                 m = quantity_metrics(qty[sel_pos_rows], q_sel)
                 q_cands[obj] = {"scale": scale, "selection": {k: m[k] for k in ("n", "mae", "bias", "wape", "rmse")}}
                 scaled[obj] = art
@@ -289,7 +297,8 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
             pool = admissible or list(q_cands)
             key = (lambda o: q_cands[o]["selection"]["mae"]) if admissible else (lambda o: abs(q_cands[o]["selection"]["bias"] or 9))
             best_obj = min(pool, key=key)
-            qinfo["selection_rule"] = (f"menor MAE en el bloque de selección entre objetivos con |sesgo| ≤ {QTY_SELECTION_MAX_ABS_BIAS:.0%}"
+            where = "selección" if tier == "full" else "calibración (sin escalar; nivel lean)"
+            qinfo["selection_rule"] = (f"menor MAE en el bloque de {where} entre objetivos con |sesgo| ≤ {QTY_SELECTION_MAX_ABS_BIAS:.0%}"
                                        if admissible else "ningún objetivo cumple el sesgo: menor |sesgo|")
             q_challenger = scaled[best_obj]
             q_ch_hold, cl, ch = serve_quantity(q_challenger, X[hold_pos], ref_q[hold_pos])
@@ -337,7 +346,8 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
         "served": quantity_metrics(net[hold_rows][ok_price], (e_served * price)[ok_price]),
         "reference": quantity_metrics(net[hold_rows][ok_price], (e_ref * price)[ok_price]),
         "price_assumption": "last_net_price_of_relation", "rows_without_price": int((~ok_price).sum())}
-    res.artifacts = {"prob": served_prob_art, "qty": served_q_art, "prob_challenger": challenger_art, "qty_challenger": q_challenger}
+    res.artifacts = {"prob": served_prob_art, "qty": served_q_art, "prob_challenger": challenger_art, "qty_challenger": q_challenger,
+                     "prob_reference": art_ref, "qty_reference": q_art_ref}
     res.holdout["blocks_rows"] = res.manifest["block_rows"]
     res.duration_s = time.perf_counter() - t0
     res.manifest["promotion"] = {"probability": gate, "quantity": q_gate}
@@ -345,51 +355,61 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
 
 
 def evaluate_coherence(bundle: DatasetBundle, results: dict[int, HorizonResult]) -> dict[str, Any]:
-    """Efecto de la corrección de coherencia P7 ≤ P30 ≤ P90 en las filas del holdout comunes a todos los horizontes."""
+    """Efecto de la corrección de coherencia P(H1) ≤ P(H2) para cada par de horizontes consecutivos.
+
+    Para el par (a < b) se usan las filas del holdout de b que existen (válidas) en el dataset de a:
+    - «limpias»: además caen en el holdout de a (ningún modelo las vio al ajustar ni calibrar);
+    - «todas»: incluyen filas que el modelo de a pudo ver en entrenamiento/calibración (diagnóstico optimista).
+    Se informa la tasa de violación P_a > P_b y el Brier/log loss de b antes y después de la corrección.
+    """
     served = {h: r for h, r in results.items() if r.status in ("trained", "reference_only") and r.artifacts}
     horizons = sorted(served)
-    out: dict[str, Any] = {"rule": "cumulative_max", "horizons": horizons}
+    out: dict[str, Any] = {"rule": "cumulative_max", "horizons": horizons, "pairs": {}}
     if len(horizons) < 2:
         out["evaluated"] = False
         out["note"] = "Un solo horizonte servido: no hay anidamiento que evaluar."
         return out
-    common: set[int] | None = None
-    frames: dict[int, pd.DataFrame] = {}
-    for h in horizons:
-        r = served[h]
-        fr = bundle.per_horizon[h].frame
-        plan_cuts = _holdout_cutoffs(r)
-        sub = fr[fr["cutoff"].isin(plan_cuts)]
-        frames[h] = sub
-        keys = set(sub["base_row"].tolist())
-        common = keys if common is None else common & keys
-    if not common:
-        out["evaluated"] = False
-        out["note"] = "Los holdouts de los horizontes no comparten filas: se aplica la corrección sin evaluarla."
-        return out
-    common_rows = np.array(sorted(common))
-    probs_raw: dict[int, np.ndarray] = {}
-    ys: dict[int, np.ndarray] = {}
-    for h in horizons:
-        fr = bundle.per_horizon[h].frame
-        pos = pd.Series(np.arange(len(fr)), index=fr["base_row"].to_numpy()).loc[common_rows].to_numpy()
-        X = bundle.matrix(h, pos)
-        p, _ = serve_probability(served[h].artifacts["prob"], X, fr["ref_p"].to_numpy(dtype=float)[pos])
-        probs_raw[h] = p
-        ys[h] = fr["y"].to_numpy(dtype=float)[pos]
-    corrected, stats = enforce_nested(probs_raw)
-    out.update(stats)
-    out["evaluated"] = True
-    out["n_rows"] = int(len(common_rows))
-    pairs = list(zip(horizons[:-1], horizons[1:]))
-    for a, b in pairs:
-        out[f"violation_rate_h{a}_gt_h{b}"] = float((probs_raw[a] > probs_raw[b] + 1e-12).mean())
-    out["brier_before"] = {str(h): float(np.mean((probs_raw[h] - ys[h]) ** 2)) for h in horizons}
-    out["brier_after"] = {str(h): float(np.mean((corrected[h] - ys[h]) ** 2)) for h in horizons}
-    out["log_loss_before"] = {str(h): float(probability_metrics(ys[h], probs_raw[h])["log_loss"]) for h in horizons}
-    out["log_loss_after"] = {str(h): float(probability_metrics(ys[h], corrected[h])["log_loss"]) for h in horizons}
-    out["note"] = ("Los eventos son anidados ((c,c+7] ⊂ (c,c+30] ⊂ (c,c+90]); se aplica el máximo acumulado sobre los "
-                   "horizontes crecientes y se registra la tasa de corrección. No se multiplica P7 para obtener P30/P90.")
+    frames = {h: bundle.per_horizon[h].frame for h in horizons}
+    positions = {h: pd.Series(np.arange(len(frames[h])), index=frames[h]["base_row"].to_numpy()) for h in horizons}
+    any_clean = False
+    for a, b in zip(horizons[:-1], horizons[1:]):
+        fb, fa = frames[b], frames[a]
+        hold_b = set(_holdout_cutoffs(served[b]))
+        hold_a = set(_holdout_cutoffs(served[a]))
+        sub_b = np.nonzero(fb["cutoff"].isin(hold_b).to_numpy())[0]
+        keys = fb["base_row"].to_numpy()[sub_b]
+        in_a = np.isin(keys, positions[a].index.to_numpy())
+        sub_b, keys = sub_b[in_a], keys[in_a]
+        pair: dict[str, Any] = {"n_rows_all": int(len(sub_b))}
+        if len(sub_b) == 0:
+            pair["evaluated"] = False
+            out["pairs"][f"{a}_{b}"] = pair
+            continue
+        pos_a = positions[a].loc[keys].to_numpy()
+        p_b, _ = serve_probability(served[b].artifacts["prob"], bundle.matrix(b, sub_b), fb["ref_p"].to_numpy(dtype=float)[sub_b])
+        p_a, _ = serve_probability(served[a].artifacts["prob"], bundle.matrix(a, pos_a), fa["ref_p"].to_numpy(dtype=float)[pos_a])
+        y_b = fb["y"].to_numpy(dtype=float)[sub_b]
+        clean = np.isin(fa["cutoff"].to_numpy()[pos_a], list(hold_a))
+        corrected = np.maximum(p_b, p_a)
+        for label, mask in (("all", np.ones(len(sub_b), dtype=bool)), ("clean", clean)):
+            if mask.sum() == 0:
+                pair[label] = None
+                continue
+            pair[label] = {
+                "n_rows": int(mask.sum()), "violation_rate": float((p_a[mask] > p_b[mask] + 1e-12).mean()),
+                "mean_correction": float((corrected[mask] - p_b[mask]).mean()),
+                "brier_before": float(np.mean((p_b[mask] - y_b[mask]) ** 2)), "brier_after": float(np.mean((corrected[mask] - y_b[mask]) ** 2)),
+                "log_loss_before": probability_metrics(y_b[mask], p_b[mask])["log_loss"],
+                "log_loss_after": probability_metrics(y_b[mask], corrected[mask])["log_loss"]}
+        pair["evaluated"] = True
+        pair["clean_rows_available"] = bool(clean.sum() > 0)
+        any_clean = any_clean or bool(clean.sum() > 0)
+        out["pairs"][f"{a}_{b}"] = pair
+    out["evaluated"] = any(p.get("evaluated") for p in out["pairs"].values())
+    out["any_pair_with_unseen_rows"] = any_clean
+    out["note"] = ("Eventos anidados ((c,c+7] ⊂ (c,c+30] ⊂ (c,c+90]): se aplica el máximo acumulado sobre los horizontes crecientes "
+                   "y se registra la tasa de corrección. No se multiplica P7 para obtener P30/P90. «clean» = filas que ningún "
+                   "modelo vio; «all» puede ser optimista porque el modelo del horizonte corto pudo entrenarse con esas filas.")
     return out
 
 

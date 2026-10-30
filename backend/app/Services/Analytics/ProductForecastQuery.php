@@ -245,10 +245,11 @@ class ProductForecastQuery
             ->where('horizon_step', 1)
             ->whereIn('product_id', $productIds)
             ->when($branchId !== null, fn ($q) => $q->where('branch_id', $branchId))
-            ->selectRaw('DISTINCT ON (product_id) product_id, model_family')
+            ->selectRaw('DISTINCT ON (product_id) product_id, model_family, case_label')
             ->orderBy('product_id')
             ->orderByDesc('yhat')
-            ->pluck('model_family', 'product_id');
+            ->get()
+            ->keyBy('product_id');
 
         $classes = DB::table('forecasting_series')
             ->where('tenant_id', $tenantId)
@@ -311,7 +312,9 @@ class ProductForecastQuery
                 // Intervalo del total del horizonte (no se deriva sumando cuantiles diarios).
                 'lo_80' => Num::units($horizonIntervals->get($pid)?->lo_80),
                 'hi_80' => Num::units($horizonIntervals->get($pid)?->hi_80),
-                'model_family' => $models[$pid] ?? null,
+                'model_family' => $models->get($pid)?->model_family,
+                // Etapa 2 (aditivo): caso especial de la serie (producto nuevo, descontinuado, apertura...); null = regular.
+                'case_label' => $models->get($pid)?->case_label,
                 'demand_class' => $classes[$pid] ?? null,
                 'wape' => Num::ratio($wape),
             ];

@@ -21,3 +21,8 @@ Schedule::command('predictily:evaluate-actuals')
 Schedule::command('predictily:schedule-forecasts')
     ->dailyAt('03:00')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
+
+// ── datacore (etapa 2 · P3): sincronización incremental de fuentes SQL programadas (hourly/daily) ──
+Schedule::command('predictily:sync-sources')
+    ->hourlyAt(17)->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();

@@ -74,11 +74,16 @@ def build_snapshot(data: Any, panel: Panel, effective_config: dict[str, Any], kn
     asof = promotions_as_of(data.promotions, data.promotion_revisions, knowledge_date)
     promo_cols = ["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id"]
 
-    def _h(df: pd.DataFrame) -> list:
-        return [] if df is None or df.empty else df.sort_values("promotion_id")[promo_cols].astype(str).values.tolist()
+    def _h(df: pd.DataFrame, with_known_at: pd.DataFrame | None = None) -> list:
+        if df is None or df.empty:
+            return []
+        out = df.sort_values("promotion_id")[promo_cols]
+        if with_known_at is not None and "known_at" in with_known_at:  # procedencia: cuándo se conocía cada una
+            out = out.assign(known_at=out["promotion_id"].map(with_known_at.set_index("promotion_id")["known_at"]))
+        return out.astype(str).values.tolist()
 
-    snap.add_value("promotions", {"knowledge_date": str(pd.Timestamp(knowledge_date).date()), "observed": _h(obs),
-                                  "as_of": _h(asof)})
+    snap.add_value("promotions", {"knowledge_date": str(pd.Timestamp(knowledge_date).date()),
+                                  "observed": _h(obs, data.promotions), "as_of": _h(asof, data.promotions)})
     events = exceptional_events if exceptional_events is not None else pd.DataFrame()
     snap.add_value("calendar", {
         "feature_set_version": FEATURE_SET_VERSION, "calendar_features": list(CALENDAR_FEATURES),

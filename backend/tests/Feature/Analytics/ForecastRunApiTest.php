@@ -32,7 +32,7 @@ class ForecastRunApiTest extends TestCase
             ->assertJsonPath('data.status', 'queued')
             ->assertJsonPath('data.run_type', 'production')
             ->assertJsonPath('data.horizon_days', 30)
-            ->assertJsonPath('data.options.horizons', [7, 30])
+            ->assertJsonPath('data.options.horizons', [7, 14, 30])
             ->assertJsonPath('data.training_job.status', 'queued')
             ->assertJsonPath('data.training_job.job_type', 'forecast_pipeline');
 

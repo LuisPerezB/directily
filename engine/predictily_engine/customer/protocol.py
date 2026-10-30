@@ -18,6 +18,7 @@ import numpy as np
 from predictily_engine.customer.events import from_day
 
 FULL_BLOCKS = ("train", "calibration", "selection", "holdout")
+LEAN_BLOCKS = ("train", "calibration", "holdout")
 REFERENCE_BLOCKS = ("calibration", "holdout")
 
 

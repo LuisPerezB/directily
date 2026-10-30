@@ -36,7 +36,7 @@ class ForecastQuery
             $rows = (clone $base)->where('granularity', 'day')
                 ->where('horizon_step', '<=', $horizon)
                 ->orderBy('target_date')
-                ->get(['target_date', 'yhat', 'lo_80', 'hi_80', 'lo_95', 'hi_95', 'revenue_yhat', 'period_days']);
+                ->get(['target_date', 'yhat', 'lo_80', 'hi_80', 'lo_95', 'hi_95', 'p50', 'revenue_yhat', 'period_days', 'quality_status', 'case_label']);
             $points = $rows->map(fn ($r) => $this->point($r))->all();
             $intervals = $rows->contains(fn ($r) => $r->lo_80 !== null);
         } else {
@@ -44,7 +44,7 @@ class ForecastQuery
             $pre = (clone $base)->where('granularity', $granularity)
                 ->when($limitDate, fn ($q) => $q->where('target_date', '<=', $limitDate))
                 ->orderBy('target_date')
-                ->get(['target_date', 'yhat', 'lo_80', 'hi_80', 'lo_95', 'hi_95', 'revenue_yhat', 'period_days']);
+                ->get(['target_date', 'yhat', 'lo_80', 'hi_80', 'lo_95', 'hi_95', 'p50', 'revenue_yhat', 'period_days', 'quality_status', 'case_label']);
             if ($pre->isNotEmpty()) {
                 $points = $pre->map(fn ($r) => $this->point($r))->all();
                 $intervals = $pre->contains(fn ($r) => $r->lo_80 !== null);
@@ -141,6 +141,10 @@ class ForecastQuery
             'hi_80' => $r->hi_80 !== null ? round((float) $r->hi_80, 4) : null,
             'lo_95' => $r->lo_95 !== null ? round((float) $r->lo_95, 4) : null,
             'hi_95' => $r->hi_95 !== null ? round((float) $r->hi_95, 4) : null,
+            // Etapa 2 (aditivo): P50 solo si el motor la evaluó (null si no); respaldo y caso especial de la fila.
+            'p50' => ($r->p50 ?? null) !== null ? round((float) $r->p50, 4) : null,
+            'quality_status' => $r->quality_status ?? null,
+            'case_label' => $r->case_label ?? null,
             'revenue' => $r->revenue_yhat !== null ? round((float) $r->revenue_yhat, 2) : null,
             'period_days' => (int) ($r->period_days ?? 1),
         ];

@@ -89,6 +89,7 @@ class NodeSpec:
     space: float | None = None  # unidades de capacidad por unidad del producto
     price: float | None = None
     derived: bool = False  # sin pronóstico propio: solo demanda dependiente (insumo)
+    u_weights: np.ndarray | None = None  # ponderación de urgencia del faltante por período (ver planner.prepare_problem)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -262,3 +263,4 @@ class PlanSolution:
     n_integer: int = 0
     evaluation: Evaluation | None = None
     notes: list[str] = field(default_factory=list)
+    n_components: int = 1

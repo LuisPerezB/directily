@@ -113,18 +113,26 @@ final class SourceMappingService
             ->where('is_active', true)->whereNotNull('approved_at')->orderByDesc('version')->first();
     }
 
-    /** @throws ValidationException */
+    /** @throws SqlQueryRejected */
+    public function validateQuery(string $query, SqlConnectorInterface $connector): ValidatedQuery
+    {
+        return SqlQueryGuard::validate($query, $connector->dialect()->name());
+    }
+
+    /** Versión para la API: la consulta rechazada responde 422 con `code: sql_query_rejected`. @throws ValidationException */
     public function guard(string $query, SqlConnectorInterface $connector): ValidatedQuery
     {
         try {
-            return SqlQueryGuard::validate($query, $connector->dialect()->name());
+            return $this->validateQuery($query, $connector);
         } catch (SqlQueryRejected $e) {
-            throw ValidationException::withMessages(['query' => [$e->getMessage()]])->response(response()->json([
+            $exception = ValidationException::withMessages(['query' => [$e->getMessage()]]);
+            $exception->response = response()->json([
                 'message' => 'La consulta no cumple la política de solo lectura: '.$e->getMessage(),
                 'code' => 'sql_query_rejected',
                 'reason' => $e->reason,
                 'errors' => ['query' => [$e->getMessage()]],
-            ], 422));
+            ], 422);
+            throw $exception;
         }
     }
 
