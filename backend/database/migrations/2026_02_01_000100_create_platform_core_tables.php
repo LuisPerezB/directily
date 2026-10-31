@@ -72,7 +72,7 @@ return new class extends Migration
             $table->index(['tenant_id', 'core', 'status', 'created_at']);
             $table->foreign(['tenant_id', 'data_snapshot_id'])->references(['tenant_id', 'id'])->on('data_snapshots')->nullOnDelete();
         });
-        DB::statement("CREATE UNIQUE INDEX core_runs_one_current_per_core ON core_runs (tenant_id, core, operation) WHERE is_current");
+        DB::statement('CREATE UNIQUE INDEX core_runs_one_current_per_core ON core_runs (tenant_id, core, operation) WHERE is_current');
 
         Schema::create('data_coverage', function (Blueprint $table) {
             $table->id();

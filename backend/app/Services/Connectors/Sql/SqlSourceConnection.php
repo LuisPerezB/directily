@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Connectors\Sql;
 
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Generator;
 use PDO;
@@ -104,7 +105,7 @@ final class SqlSourceConnection
         if (! $query->usesSince) {
             return $query->render();
         }
-        $local = $since?->setTimezone($this->settings->sourceTimezone) ?? \Carbon\CarbonImmutable::parse(self::FULL_LOAD_SINCE, $this->settings->sourceTimezone);
+        $local = $since?->setTimezone($this->settings->sourceTimezone) ?? CarbonImmutable::parse(self::FULL_LOAD_SINCE, $this->settings->sourceTimezone);
 
         return $query->render($this->dialect->sinceLiteral($local));
     }

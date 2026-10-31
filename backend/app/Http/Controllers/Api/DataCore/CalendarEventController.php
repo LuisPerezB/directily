@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Services\Audit\AuditLogger;
 use App\Services\Imports\ImportEntity;
+use App\Services\Imports\Parsing\ValueParser;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -154,8 +155,8 @@ final class CalendarEventController extends Controller
             'branch' => ($id = Branch::query()->whereRaw('upper(code) = ?', [mb_strtoupper($ref)])->value('id')) !== null ? 'branch:'.$id : null,
             'product' => ($id = Product::query()->whereRaw('upper(sku) = ?', [mb_strtoupper($ref)])->value('id')) !== null ? 'product:'.$id : null,
             'category' => ($id = ProductCategory::query()->whereRaw('upper(name) = ?', [mb_strtoupper($ref)])->value('id')) !== null ? 'category:'.$id : null,
-            'sector' => 'sector:'.\App\Services\Imports\Parsing\ValueParser::key($ref),
-            default => \App\Services\Imports\Parsing\ValueParser::key($ref),
+            'sector' => 'sector:'.ValueParser::key($ref),
+            default => ValueParser::key($ref),
         };
     }
 

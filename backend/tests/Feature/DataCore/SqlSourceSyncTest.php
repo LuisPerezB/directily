@@ -10,11 +10,14 @@ use App\Models\Customer;
 use App\Models\DataSource;
 use App\Models\ImportJob;
 use App\Models\Sale;
+use App\Models\SourceMapping;
 use App\Models\SourceSync;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Connectors\ConnectorRegistry;
+use App\Services\DataCore\Sync\SourceSyncService;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use PDOException;
@@ -65,27 +68,27 @@ final class SqlSourceSyncTest extends TestCase
         parent::tearDown();
     }
 
-    private function sales(): \Illuminate\Database\Eloquent\Builder
+    private function sales(): Builder
     {
         return Sale::withoutTenantScope()->where('tenant_id', $this->tenant->id);
     }
 
-    private function customers(): \Illuminate\Database\Eloquent\Builder
+    private function customers(): Builder
     {
         return Customer::withoutTenantScope()->where('tenant_id', $this->tenant->id);
     }
 
-    private function imports(): \Illuminate\Database\Eloquent\Builder
+    private function imports(): Builder
     {
         return ImportJob::withoutTenantScope()->where('tenant_id', $this->tenant->id);
     }
 
-    private function sources(): \Illuminate\Database\Eloquent\Builder
+    private function sources(): Builder
     {
         return DataSource::withoutTenantScope()->where('tenant_id', $this->tenant->id);
     }
 
-    private function syncModels(): \Illuminate\Database\Eloquent\Builder
+    private function syncModels(): Builder
     {
         return SourceSync::withoutTenantScope()->where('tenant_id', $this->tenant->id);
     }
@@ -292,7 +295,7 @@ SQL,
             'SELECT * INTO nueva_tabla FROM erp_facturas',
             'SELECT pg_sleep(60)',
             'SELECT * FROM pg_shadow',
-            "SELECT * FROM erp_facturas FOR UPDATE",
+            'SELECT * FROM erp_facturas FOR UPDATE',
             "SELECT 'a\\' ; DROP TABLE erp_facturas; --'",
             'SELECT 1 -- comentario'."\n".'; TRUNCATE erp_facturas',
             'CREATE TABLE x AS SELECT 1',
@@ -326,7 +329,7 @@ SQL,
     {
         $id = $this->approvedSalesMapping();
         // Alguien altera la consulta guardada en la base de datos tras la aprobación.
-        DB::table('source_mappings')->where('id', $id)->update(['query' => "DELETE FROM erp_facturas WHERE :since IS NOT NULL"]);
+        DB::table('source_mappings')->where('id', $id)->update(['query' => 'DELETE FROM erp_facturas WHERE :since IS NOT NULL']);
         $sync = $this->sync(mode: 'full');
         $this->assertSame('failed', $sync['status']);
         $this->assertStringContainsString('SELECT', (string) $sync['error_message']);
@@ -405,7 +408,7 @@ SQL,
             return $s;
         });
         // Equivale al middleware SetTenantContext del trabajo: contexto de B, sincronización de A.
-        $this->withinTenant($otherTenant, fn () => (new SyncDataSource($otherTenant->id, $queued->id))->handle(app(\App\Services\DataCore\Sync\SourceSyncService::class)));
+        $this->withinTenant($otherTenant, fn () => (new SyncDataSource($otherTenant->id, $queued->id))->handle(app(SourceSyncService::class)));
         $this->assertSame('queued', DB::table('source_syncs')->where('id', $queued->id)->value('status'));
     }
 
@@ -445,7 +448,7 @@ SQL,
     public function test_only_one_sync_per_source_and_entity_can_be_active(): void
     {
         $this->approvedSalesMapping();
-        $mapping = $this->inTenant(fn () => \App\Models\SourceMapping::query()->firstOrFail());
+        $mapping = $this->inTenant(fn () => SourceMapping::query()->firstOrFail());
         $this->inTenant(function () use ($mapping): void {
             $busy = new SourceSync;
             $busy->forceFill(['data_source_id' => $this->sourceId, 'source_mapping_id' => $mapping->id, 'entity' => 'sales', 'mode' => 'full', 'status' => 'running'])->save();

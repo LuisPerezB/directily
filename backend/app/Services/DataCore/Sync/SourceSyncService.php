@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\DataCore\Sync;
 
 use App\Exceptions\DomainStateException;
+use App\Exceptions\PlanLimitExceededException;
 use App\Models\DataSource;
 use App\Models\ImportJob;
 use App\Models\SourceMapping;
@@ -26,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
@@ -219,7 +221,7 @@ final class SourceSyncService
 
     private function fail(SourceSync $sync, Throwable $e, ?SqlSourceConnection $connection): void
     {
-        $message = $e instanceof DomainStateException || $e instanceof SqlSourceException || $e instanceof \App\Exceptions\PlanLimitExceededException || $e instanceof \Illuminate\Validation\ValidationException
+        $message = $e instanceof DomainStateException || $e instanceof SqlSourceException || $e instanceof PlanLimitExceededException || $e instanceof ValidationException
             ? $e->getMessage()
             : 'La sincronización falló por un error interno. Revise los registros del servidor.';
         Log::error('Sincronización de fuente SQL fallida', ['sync_id' => $sync->id, 'data_source_id' => $sync->data_source_id, 'exception' => $e::class,

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Imports\Processors;
 
-use App\Models\CommercialCommitment;
 use App\Services\Catalog\CatalogResolver;
 use App\Services\DataCore\Units\UnitConverter;
 use App\Services\DataCore\Units\UnitNormalizer;

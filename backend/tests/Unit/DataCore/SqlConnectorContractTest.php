@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace Tests\Unit\DataCore;
 
+use App\Models\DataSource;
+use App\Services\Connectors\ConnectorRegistry;
 use App\Services\Connectors\Connectors\MySqlSqlConnector;
 use App\Services\Connectors\Connectors\PostgresSqlConnector;
 use App\Services\Connectors\Connectors\SqlServerSqlConnector;
-use App\Services\Connectors\ConnectorRegistry;
 use App\Services\Connectors\Sql\MySqlDialect;
 use App\Services\Connectors\Sql\PostgresDialect;
 use App\Services\Connectors\Sql\SqlConnectionSettings;
 use App\Services\Connectors\Sql\SqlConnectorInterface;
+use App\Services\Connectors\Sql\SqlDialect;
 use App\Services\Connectors\Sql\SqlQueryGuard;
+use App\Services\Connectors\Sql\SqlQueryRejected;
 use App\Services\Connectors\Sql\SqlServerDialect;
+use App\Services\Connectors\Sql\SqlSourceConnection;
 use Illuminate\Validation\ValidationException;
 use PDO;
 use Tests\TestCase;
@@ -54,7 +58,7 @@ final class SqlConnectorContractTest extends TestCase
         try {
             SqlQueryGuard::validate($sql, $connector->dialect()->name());
             $this->fail('Debió rechazarse en '.$connector->key());
-        } catch (\App\Services\Connectors\Sql\SqlQueryRejected) {
+        } catch (SqlQueryRejected) {
             $this->addToAssertionCount(1);
         }
     }
@@ -79,7 +83,7 @@ final class SqlConnectorContractTest extends TestCase
         if ($connector->dialect()->driverAvailable()) {
             $this->markTestSkipped('pdo_sqlsrv está instalado: no aplica la comprobación del controlador ausente.');
         }
-        $source = new \App\Models\DataSource;
+        $source = new DataSource;
         $source->forceFill(['config' => ['host' => 'x', 'database' => 'erp'], 'credentials_encrypted' => ['username' => 'u', 'password' => 'p']]);
         $result = $connector->test($source);
         $this->assertFalse($result->ok);
@@ -134,9 +138,9 @@ final class SqlConnectorContractTest extends TestCase
     }
 
     /** Contrato común contra un servidor real: lee en páginas, respeta :since y rechaza escrituras en el propio motor cuando existe modo de solo lectura. */
-    private function runServerContract(\App\Services\Connectors\Sql\SqlDialect $dialect, SqlConnectionSettings $settings, string $user, string $password): void
+    private function runServerContract(SqlDialect $dialect, SqlConnectionSettings $settings, string $user, string $password): void
     {
-        $connection = \App\Services\Connectors\Sql\SqlSourceConnection::open($dialect, $settings, $user, $password);
+        $connection = SqlSourceConnection::open($dialect, $settings, $user, $password);
         try {
             $query = SqlQueryGuard::validate('SELECT 1 AS uno', $dialect->name());
             $pages = iterator_to_array($connection->stream($query, null, 10));

@@ -151,7 +151,7 @@ final class ExtendedQualityReport
     private function customerIdentity(int $tenantId): array
     {
         $docs = DB::selectOne(
-            "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE s.customer_id IS NULL) AS without_customer, COUNT(*) FILTER (WHERE c.is_generic) AS generic "
+            'SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE s.customer_id IS NULL) AS without_customer, COUNT(*) FILTER (WHERE c.is_generic) AS generic '
             ."FROM sales s LEFT JOIN customers c ON c.tenant_id = s.tenant_id AND c.id = s.customer_id WHERE s.tenant_id = ? AND s.status = 'completed' AND s.document_type <> 'credit_note'",
             [$tenantId],
         );

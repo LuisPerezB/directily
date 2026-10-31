@@ -6,6 +6,7 @@ namespace Tests\Feature\DataCore;
 
 use App\Models\CalendarEvent;
 use App\Models\CommercialCommitment;
+use App\Models\DataSource;
 use App\Models\SourceMapping;
 use App\Models\SourceSync;
 use App\Models\UnitConversion;
@@ -81,7 +82,7 @@ final class DataCoreIsolationTest extends TestCase
         }
         [$a] = $this->createTenantWithUser();
         [$b] = $this->createTenantWithUser();
-        $sourceA = $this->withinTenant($a, fn () => \App\Models\DataSource::query()->create(['type' => 'rest_api', 'connector_key' => 'generic_rest', 'name' => 'A', 'config' => []]));
+        $sourceA = $this->withinTenant($a, fn () => DataSource::query()->create(['type' => 'rest_api', 'connector_key' => 'generic_rest', 'name' => 'A', 'config' => []]));
         $this->expectException(QueryException::class);
         DB::table('source_syncs')->insert(['tenant_id' => $b->id, 'data_source_id' => $sourceA->id, 'entity' => 'sales', 'mode' => 'full', 'status' => 'queued', 'created_at' => now(), 'updated_at' => now()]);
     }
