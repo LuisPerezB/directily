@@ -355,7 +355,7 @@ def test_time_limit_is_never_called_optimal():
     assert sol.status in ("time_limit", "optimal")
     if sol.status == "time_limit":
         assert sol.mip_gap is None or sol.mip_gap >= 0
-        assert any("límite de tiempo" in n for n in sol.notes)
+        assert any("límite de tiempo" in n for n in sol.notes)   # nunca se presenta como óptimo, con o sin solución factible
 
 
 def test_solve_plan_falls_back_to_the_heuristic_when_the_solver_fails(monkeypatch):

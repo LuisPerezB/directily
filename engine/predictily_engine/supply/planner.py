@@ -223,6 +223,8 @@ def _merge(problem: PlanProblem, sols: list[PlanSolution], seconds: float) -> Pl
         out.notes += s.notes
     if worst in ("infeasible", "not_solved") or any(s.evaluation is None for s in sols):
         out.status = "infeasible" if worst == "infeasible" else ("time_limit" if worst == "time_limit" else "not_solved")
+        if out.status == "time_limit":
+            out.notes.append("Se alcanzó el límite de tiempo sin una solución factible en algún componente: NO hay plan óptimo.")
         return out
     out.purchases = [p for s in sols for p in s.purchases]
     out.productions = [p for s in sols for p in s.productions]
@@ -249,6 +251,8 @@ def _merge(problem: PlanProblem, sols: list[PlanSolution], seconds: float) -> Pl
             out.status = "feasible_with_gap"
         elif worst == "time_limit":
             out.status = "time_limit"
+    if out.status == "time_limit" and not any("límite de tiempo" in n for n in out.notes):
+        out.notes.append("Se alcanzó el límite de tiempo: la mejor solución factible NO está probada óptima.")
     return out
 
 
@@ -463,7 +467,8 @@ def _solve_once(problem: PlanProblem, relax: frozenset[str], coverage_mode: str 
         return sol, set()
     if res.x is None:
         sol.status = "time_limit" if res.status == 1 else "not_solved"
-        sol.notes.append("El solver no encontró ninguna solución factible.")
+        sol.notes.append("El solver no encontró ninguna solución factible"
+                         + (" dentro del límite de tiempo." if res.status == 1 else "."))
         return sol, set()
 
     x = res.x

@@ -350,6 +350,22 @@ hash se guardan en cada corrida.
 | E2-26 | `test_supply_offers.py` y `test_supply_integration.py::test_plan_respects_budget_lots_minimums…` |
 | E2-17 | `test_supply_integration.py` (aislamiento, 404 entre empresas, FK compuestas) y `backend/tests/Feature/Supply/*` |
 
+### Comandos y resultados (BD de pruebas aisladas; datos ficticios; sin semillas aleatorias salvo las indicadas)
+
+```
+cd backend && DB_DATABASE=predictily_engine_test_p4 php artisan migrate --force      # esquema para el motor
+cd engine && ENGINE_TEST_DATABASE_URL=postgresql+psycopg://predictily:secret@127.0.0.1:5432/predictily_engine_test_p4 \
+    OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1 .venv/bin/python -m pytest -q tests        # @@ENGINE_RESULT@@
+cd backend && DB_DATABASE=predictily_test_p4 php artisan test                          # 348 pruebas: 346 aprobadas, 2 omitidas
+cd backend && DB_DATABASE=predictily_test_p4 php artisan test tests/Feature/Supply     # 19 pruebas, 159 aserciones
+```
+
+Pruebas propias del motor: `tests/unit/test_supply_{planner,balance,offers,inputs,simulation}.py`, `test_costs_forecast.py`,
+`test_scenarios_evaluator.py`, `test_causal_contract.py` y `tests/integration/test_supply_integration.py` (11 casos con su propia
+empresa sintética: independiente del orden y del estado compartido de la BD). Entorno: Python 3.12.3, scipy 1.18.1 (HiGHS),
+numpy 2.5.4, pandas 2.3.3, 4 núcleos. Las instancias aleatorias de las pruebas usan semillas fijas (`default_rng(100+seed)`, 0–24).
+Advertencia conocida: `StarletteDeprecationWarning` por `httpx` en el `TestClient` (no es de P4).
+
 ## 14. Limitaciones y pendientes (honestas)
 
 * Todo se comprobó con datos sintéticos; **no hay validación con datos reales** (Soyoda/Resgasa pendientes de acceso).
