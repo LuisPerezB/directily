@@ -14,6 +14,7 @@ use App\Services\Analytics\AccuracyService;
 use App\Services\Analytics\RunResolver;
 use App\Services\Analytics\Support\ForecastNode;
 use App\Services\Analytics\Support\ModelStatus;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -29,7 +30,13 @@ class AccuracyController extends AnalyticsController
     {
         $run = $this->runs->resolveCompleted($request->intOrNull('run_id'));
 
-        return response()->json(['data' => $this->accuracy->summary($run)]);
+        $data = $this->accuracy->summary($run);
+        // Mapas de la etapa 2 (manifiesto, respaldo por horizonte, P50): objeto JSON aunque estén vacíos o con claves numéricas.
+        foreach (['evaluation_manifest', 'horizon_support', 'p50'] as $map) {
+            $data[$map] = JsonMap::of($data[$map] ?? null);
+        }
+
+        return response()->json(['data' => $data]);
     }
 
     public function comparison(AccuracyRequest $request): JsonResponse

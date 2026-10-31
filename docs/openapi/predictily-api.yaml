@@ -1015,10 +1015,10 @@ paths:
                         type: object
                         additionalProperties: true
                       models:
-                        type:
-                        - object
-                        - array
-                        - 'null'
+                        type: object
+                        additionalProperties: true
+                        description: Modelo servido por horizonte (clave = horizonte). Siempre objeto, también vacío
+                          o con claves numéricas
                       summary:
                         type:
                         - object
@@ -7035,10 +7035,10 @@ components:
         model_version:
           type:
           - object
-          - array
           - 'null'
-          description: 'Versiones de modelo servidas por horizonte/objetivo. NOTA: con claves numéricas (horizontes)
-            un JsonResource de Laravel puede serializarlo como lista en lugar de objeto'
+          additionalProperties: true
+          description: Versiones de modelo servidas por horizonte/objetivo (p. ej. claves «7», «30», «90»). Siempre
+            objeto JSON, también con claves numéricas o vacío; null cuando la corrida no registra modelos
         data_snapshot_id:
           type:
           - integer
@@ -7226,9 +7226,9 @@ components:
         model_versions:
           type:
           - object
-          - array
           - 'null'
-          description: Versiones servidas por horizonte (ver nota en ResultEnvelope.model_version)
+          additionalProperties: true
+          description: Versiones servidas por horizonte (clave = horizonte). Siempre objeto JSON (ver ResultEnvelope.model_version)
         envelope:
           $ref: '#/components/schemas/ResultEnvelope'
     SupplyRun:
@@ -7334,10 +7334,9 @@ components:
           - 'null'
           format: date
         options:
-          type:
-          - object
-          - array
-          description: Opciones de la solicitud; un objeto vacío puede serializarse como []
+          type: object
+          additionalProperties: true
+          description: Opciones de la solicitud. Siempre objeto JSON, también `{}` cuando no hay opciones
     SourceMapping:
       type: object
       properties:
@@ -8374,8 +8373,8 @@ components:
         assumptions:
           type:
           - object
-          - array
           - 'null'
+          additionalProperties: true
     SupplyPlanDetail:
       type: object
       description: 'Plan de reposición: SUGERENCIAS; Predictily no envía pedidos ni compromete fondos.'

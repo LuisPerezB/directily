@@ -18,7 +18,7 @@ import { supplyApi } from '@/api'
 import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
 import { formatCurrency, formatDate, formatNumber, formatPercent } from '@/utils/format'
-import { infeasibilityCauses, isProvenOptimal, planTotals, shortfallTotals, solverHasPlan, sortPlanLines } from '@/utils/supply'
+import { infeasibilityCauses, planTotals, shortfallTotals, solverHasPlan, sortPlanLines } from '@/utils/supply'
 
 const props = defineProps<{ runId: number }>()
 const { t, te } = useI18n()

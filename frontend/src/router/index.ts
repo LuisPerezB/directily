@@ -25,6 +25,7 @@ export const routes: RouteRecordRaw[] = [
       { path: 'compradores/:tab?', name: 'customers', component: () => import('@/views/CustomersView.vue'), props: true, meta: { requiresTenant: true, ability: 'forecast.view', title: 'Compradores' } },
       { path: 'comprador/:id(\\d+)', name: 'customer-detail', component: () => import('@/views/CustomerDetailView.vue'), props: true, meta: { requiresTenant: true, ability: 'forecast.view', title: 'Ficha del comprador' } },
       { path: 'plan-de-compras/:tab?', name: 'supply', component: () => import('@/views/SupplyView.vue'), props: true, meta: { requiresTenant: true, ability: 'forecast.view', title: 'Plan de compras' } },
+      { path: 'asistente', name: 'assistant', component: () => import('@/views/AssistantView.vue'), meta: { requiresTenant: true, ability: 'data.view', title: 'Asistente' } },
       { path: 'inventario', name: 'inventory', component: () => import('@/views/InventoryView.vue'), meta: { requiresTenant: true, ability: 'forecast.view', title: 'Inventario y abastecimiento' } },
       { path: 'precision', name: 'accuracy', component: () => import('@/views/AccuracyView.vue'), meta: { requiresTenant: true, ability: 'forecast.view', title: 'Historial de precisión' } },
       { path: 'escenarios', name: 'scenarios', component: () => import('@/views/ScenariosView.vue'), meta: { requiresTenant: true, ability: 'forecast.view', title: 'Simulador de escenarios' } },

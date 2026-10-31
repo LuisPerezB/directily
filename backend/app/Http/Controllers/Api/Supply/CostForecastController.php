@@ -8,6 +8,7 @@ use App\Http\Resources\Supply\SupplyRunResource;
 use App\Models\CoreRun;
 use App\Models\CostForecast;
 use App\Services\Supply\SupplyRunService;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -63,7 +64,7 @@ class CostForecastController extends SupplyController
                 'cost_source' => $c->cost_source, 'currency' => $c->currency, 'unit' => $c->unit, 'method' => $c->method,
                 'reference_method' => $c->reference_method, 'quality_status' => $c->quality_status, 'n_obs' => $c->n_obs,
                 'last_observed_on' => $c->last_observed_on?->toDateString(), 'last_observed_cost' => $c->last_observed_cost,
-                'points' => $c->points, 'metrics' => $c->metrics, 'availability' => $c->availability, 'limitations' => $c->limitations,
+                'points' => $c->points, 'metrics' => JsonMap::of($c->metrics), 'availability' => JsonMap::of($c->availability), 'limitations' => $c->limitations,
             ])->values(),
             'meta' => ['current_page' => $page->currentPage(), 'per_page' => $page->perPage(), 'total' => $page->total(), 'last_page' => $page->lastPage()],
             'envelope' => $this->envelope($run, ['result_type' => 'forecast']),

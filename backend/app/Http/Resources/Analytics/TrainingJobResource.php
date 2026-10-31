@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Analytics;
 
 use App\Models\TrainingJob;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -27,7 +28,7 @@ class TrainingJobResource extends JsonResource
             'started_at' => $this->started_at?->toIso8601String(),
             'finished_at' => $this->finished_at?->toIso8601String(),
             'duration_ms' => $this->duration_ms !== null ? (int) $this->duration_ms : null,
-            'result' => $this->result,
+            'result' => JsonMap::of($this->result),
             'forecast_run_id' => $this->forecast_run_id,
             'model_registry_id' => $this->model_registry_id,
             'created_at' => $this->created_at?->toIso8601String(),

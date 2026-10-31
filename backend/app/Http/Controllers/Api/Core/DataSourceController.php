@@ -12,6 +12,7 @@ use App\Services\Audit\AuditLogger;
 use App\Services\Connectors\ConnectorRegistry;
 use App\Services\Connectors\Sql\SqlConnectorInterface;
 use App\Services\Plans\PlanLimitService;
+use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -175,7 +176,7 @@ final class DataSourceController extends Controller
             'connector' => $connector ? ['name' => $connector->name(), 'status' => $connector->status()] : null,
             'name' => $s->name,
             'status' => $s->status,
-            'config' => $s->config ?? (object) [],
+            'config' => JsonMap::orEmpty($s->config),
             'has_credentials' => $s->getRawOriginal('credentials_encrypted') !== null,
             'last_synced_at' => $s->last_synced_at?->toIso8601String(),
             'last_error' => $s->last_error,

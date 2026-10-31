@@ -7,6 +7,7 @@ namespace App\Http\Resources\Analytics;
 use App\Models\ModelEvaluation;
 use App\Services\Analytics\Support\ModelCatalog;
 use App\Services\Analytics\Support\Num;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -35,7 +36,7 @@ class ModelEvaluationResource extends JsonResource
             'coverage_80' => Num::ratio($this->coverage_80),
             'coverage_95' => Num::ratio($this->coverage_95),
             'n_obs' => (int) $this->n_obs,
-            'metrics' => $this->metrics,
+            'metrics' => JsonMap::of($this->metrics),
             'n_windows' => (int) $this->n_windows,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

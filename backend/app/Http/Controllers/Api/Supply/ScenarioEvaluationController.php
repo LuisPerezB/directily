@@ -15,6 +15,7 @@ use App\Services\Forecasting\TrainingJobRecorder;
 use App\Services\Supply\SupplyEngineClient;
 use App\Services\Supply\SupplyRunRecorder;
 use App\Services\Supply\SupplyRunService;
+use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -114,7 +115,7 @@ class ScenarioEvaluationController extends SupplyController
 
         return response()->json([
             'data' => ['run_id' => $run->id, 'status' => $run->status, 'name' => $eval?->name, 'horizon_days' => $eval?->horizon_days,
-                'request' => $eval?->request, 'results' => $eval?->results],
+                'request' => JsonMap::of($eval?->request), 'results' => JsonMap::of($eval?->results)],
             'envelope' => $this->envelope($run, ['result_type' => 'conditional_simulation']),
         ], $status);
     }

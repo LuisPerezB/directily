@@ -311,6 +311,10 @@ Si no hay pronóstico vigente: `run:null`, KPIs de pronóstico `null` y `data_st
   as_of, horizon_start, horizon_end, target_definition, entity_keys, unit, currency, result_type:'forecast', model_version, data_snapshot_id,
   config_version, assumptions[], limitations[], limitation_codes[], quality_status, uncertainty_source, horizon_support, p50}`. `status` es el estado técnico
   del trabajo; `quality_status` la aptitud estadística (en series, la del horizonte pedido).
+  **Forma JSON de los mapas (P6).** En todas las respuestas de la etapa 2 los campos que son mapas (`model_version`/`model_versions`, `target_definition`, `options`,
+  `selection`, `summary`, `field_map`, `stats`, `horizon_support`, …) se emiten **siempre como objeto** `{}`, aunque estén vacíos o sus claves sean numéricas
+  (`{"7": …, "30": …}`: horizontes o ids de producto); `null` significa «sin valor registrado». Las listas (`assumptions[]`, `limitations[]`, `horizons[]`,
+  `entity_keys[]`) siempre son `[]`. Un cliente puede iterar las claves de un mapa sin comprobar si llegó como lista.
 
 ### 3.9 Precisión
 | Método | Ruta | Detalle |

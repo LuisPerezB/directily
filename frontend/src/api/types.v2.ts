@@ -1192,3 +1192,48 @@ export interface Supplier {
   is_active?: boolean
   default_lead_time_days?: number | null
 }
+
+// ─── Asistente conversacional opcional (P5b) ────────────────────────────────
+
+export type AssistantDisabledReason =
+  | 'missing_api_key' | 'disabled_by_config' | 'provider_disabled' | 'unknown_provider'
+  | 'disabled_for_plan' | 'invalid_base_url' | 'missing_model'
+
+export interface AssistantStatus {
+  enabled: boolean
+  reason: AssistantDisabledReason | string | null
+  provider?: string | null
+  model?: string | null
+  tools: { name: string; available_to_you: boolean }[]
+  limits?: { max_message_chars: number; max_history_messages: number; rate_per_minute: number; daily_limit_per_tenant: number | null; max_tool_rounds: number }
+  usage_today?: Record<string, unknown>
+  notice: string
+}
+
+export type AssistantFigureStatus = 'ok' | 'no_data' | 'forbidden' | 'plan_limit' | 'invalid_arguments' | 'not_found' | 'tool_not_allowed' | 'error'
+
+/** Resultado de una herramienta tal como lo devolvió: las CIFRAS salen de `data`, nunca del texto de la respuesta. */
+export interface AssistantFigure {
+  tool: string
+  arguments: Record<string, unknown>
+  status: AssistantFigureStatus
+  data: unknown
+  envelope: ResultEnvelope | null
+}
+
+export type AssistantReplyStatus = 'answered' | 'no_applicable_tool' | 'tool_denied' | 'no_answer' | 'ungrounded_rejected'
+
+export interface AssistantReply {
+  status: AssistantReplyStatus
+  answer: string
+  figures: AssistantFigure[]
+  grounding: { checked: boolean; ungrounded_numbers: string[] }
+  provider: { name: string; model: string | null }
+  usage: Record<string, unknown>
+  notice: string
+}
+
+export interface AssistantHistoryItem {
+  role: 'user' | 'assistant'
+  content: string
+}

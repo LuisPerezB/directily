@@ -6,6 +6,7 @@ namespace App\Http\Resources\Supply;
 
 use App\Http\Resources\Analytics\TrainingJobResource;
 use App\Models\CoreRun;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -30,10 +31,11 @@ class SupplyRunResource extends JsonResource
             'as_of' => $this->as_of?->toDateString(),
             'horizon_start' => $this->horizon_start?->toDateString(),
             'horizon_end' => $this->horizon_end?->toDateString(),
-            'options' => $this->options,
+            // Mapa de opciones de la solicitud: objeto JSON también cuando está vacío.
+            'options' => JsonMap::orEmpty($this->options),
             'config_version' => $this->config_version,
             'data_snapshot_id' => $this->data_snapshot_id,
-            'summary' => $this->summary,
+            'summary' => JsonMap::of($this->summary),
             'assumptions' => $this->assumptions ?? [],
             'limitations' => $this->limitations ?? [],
             'is_current' => (bool) $this->is_current,

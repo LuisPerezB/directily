@@ -10,7 +10,7 @@ la etapa 2 y **seguridad** (`docs/07` §13–15). Propietario de los archivos: `
 |---|---|---|
 | Servicio conversacional opcional (proveedor configurable, Ollama Cloud, herramientas de lista blanca, límites, auditoría) | Implementado y probado **con proveedor falso (sin red)**. No se probó contra Ollama Cloud real: no hay clave en el entorno | §2 y §6 |
 | Autonomía de los cuatro cores sin proveedor (E2-24, parte autonomía) | Implementado y probado | `CoresWorkWithoutAssistantTest`, `CoresDoNotDependOnAssistantTest` |
-| Exportación LOPDP con las tablas de la etapa 2 (incluidas las de P3 y P4) | Implementado y probado | `TenantDataExporterStage2Test` |
+| Exportación LOPDP con las tablas de la etapa 2 (incluidas las de P3 y P4) y, desde P6, **todas** las de la etapa 1 (solo se excluyen credenciales) | Implementado y probado | `TenantDataExporterStage2Test`, `TenantDataExporterStage1Test` |
 | OpenAPI 3.1 de la etapa 2 (`v2.yaml`) + fusión validada con `core` y `analytics` | Implementado: 83 operaciones nuevas; **182 operaciones documentadas = 182 rutas reales**, 0 exclusiones | §4, `OpenApiRoutesTest` |
 | Sección de seguridad (conectores SQL, capa conversacional, retención) | Implementado | `docs/07` §13–15 |
 
@@ -128,9 +128,18 @@ CONVERSATION_CUSTOMER_TOOLS=true
 `data_sources` (**sin** `config`, `credentials_encrypted` ni `last_error`), `source_mappings`, `source_syncs` (sin `error_message`), `customer_predictions`,
 `customer_product_rankings`, `customer_activity`, `customer_reconciliations` y las de P4 (`exchange_rates`, `supplier_offers`, `location_capacities`,
 `purchase_budgets`, `production_resources`, `production_recipes`, `production_recipe_lines`, `supply_plans`, `supply_plan_lines`, `supply_plan_shortfalls`,
-`cost_forecasts`, `scenario_evaluations`). `NOT_EXPORTED` clasifica el resto de tablas con `tenant_id` y su motivo.
+`cost_forecasts`, `scenario_evaluations`).
 
-Pruebas (`tests/Feature/Privacy/TenantDataExporterStage2Test.php`): el ZIP de la empresa A contiene todas las tablas nuevas con exactamente sus filas
+**P6 · exportación completa.** Se incorporan las tablas de la etapa 1 que estaban marcadas `PENDIENTE`: `alerts`, `scenarios`, `purchase_orders`,
+`purchase_order_items`, `stock_movements`, `external_indicators` y `external_indicator_observations` (solo los indicadores propios: la tabla de observaciones no
+tiene `tenant_id` y se filtra por su indicador mediante `CHILD_TABLES`; el catálogo público con `tenant_id` NULL no es de la empresa), además de `tenant_users`,
+`tenant_exports`, `tenant_usage`, `import_errors`, `forecast_values`, `forecast_actuals`, `forecast_features`, `forecasting_series`, `model_registry`,
+`model_evaluations`, `training_jobs` y `data_quality_reports`. **Lo único que `NOT_EXPORTED` mantiene fuera es `personal_access_tokens`** (credenciales: solo se guarda
+su hash). Dentro de las tablas exportadas se omiten columnas secretas o internas: `tenant_exports.path` y `error_message` (ruta interna del archivo),
+`model_registry.artifact_path` (ruta del artefacto en el servidor) y `training_jobs.error_message` (texto técnico interno), además de lo ya excluido de
+`data_sources`/`source_syncs`. `forecast_values` puede ser voluminosa: se escribe por bloques de 5 000 filas, igual que `sale_items`.
+
+Pruebas (`tests/Feature/Privacy/TenantDataExporterStage2Test.php` y, para la etapa 1, `TenantDataExporterStage1Test.php`: filas exactas por tabla, otra empresa ausente, indicadores públicos ausentes, ni tokens ni rutas internas ni errores técnicos): el ZIP de la empresa A contiene todas las tablas nuevas con exactamente sus filas
 (resumen y CSV), nada de la empresa B (marcador), ninguna credencial (`SECRETO-CRED-A`, host/usuario de conexión, errores internos) ni el calendario público;
 ninguna cabecera de CSV contiene columnas de credenciales; la empresa B recibe solo lo suyo; y **toda tabla con `tenant_id` debe estar clasificada**
 (exportada o excluida con motivo), de modo que una tabla futura sin decidir rompe la prueba.
@@ -161,8 +170,8 @@ contraste de rutas dentro de `php artisan test`.
 
 Verificaciones adicionales hechas al redactar `v2.yaml` (no quedan como prueba permanente): las **83** habilidades documentadas coinciden con el middleware
 `tenant.ability` de la ruta real; 67 de 68 respuestas reales de las rutas nuevas (generadas con datos de prueba) validan contra su esquema (la restante fue un
-artefacto del volcado). Defectos reales de serialización que se documentaron tal cual en el esquema (ver §7): `model_versions`/`model_version` y `options` pueden
-salir como lista cuando las claves son horizontes numéricos o el objeto está vacío.
+artefacto del volcado). Defectos reales de serialización que se documentaron tal cual en el esquema (ver §7): `model_versions`/`model_version` y `options` podían
+salir como lista cuando las claves son horizontes numéricos o el objeto está vacío. **Corregido en P6**: esos campos son ahora siempre `object` en `v2.yaml`.
 
 ## 5. Seguridad
 
@@ -185,15 +194,24 @@ Resultados de la última ejecución (31-oct-2026): conversación `50 pruebas, 50
 MySQL/SQL Server de pruebas); Pint sin hallazgos en los archivos del paquete; `merge_openapi.py --routes … --strict --check` sin errores. No se ejecutaron
 las suites del motor ni del frontend (fuera del alcance de este paquete).
 
+**P6 · correcciones de integración (31-oct-2026):** suite completa del backend `429 pruebas, 427 aprobadas, 2 omitidas, 11 999 aserciones` (58,6 s; las 2 omitidas son las mismas
+de P3); nuevas: `JsonObjectContractTest` (8), `JsonMapTest` (4), `TenantDataExporterStage1Test` (3) y dos pruebas unitarias de `PiiMasker`/`NumericGrounding` con mapas
+`stdClass`. `merge_openapi.py --strict --check` sin errores (182 operaciones = 182 rutas); `docker compose config` válido (motor sin puertos publicados); Pint sin hallazgos.
+
 ## 7. Hallazgos y pendientes (para el arquitecto)
 
-1. **Serialización de mapas con claves numéricas (P2/P4, no corregido aquí).** `JsonResource` renumera como lista un arreglo cuyas claves son todas numéricas:
-   `CustomerRunResource` (`model_versions`) y `ResultEnvelope::fromCoreRun` (`model_version`) pierden las claves de horizonte `"7"/"30"/"90"`; `SupplyRunResource.options`
-   vacío sale `[]`. `DemandEnvelope` ya lo evita con `(object)`. Corrección sugerida: convertir esos mapas con `(object)` (y actualizar `v2.yaml`, donde hoy figura `object|array`).
+1. **Serialización de mapas con claves numéricas (P2/P4) — CORREGIDO en P6.** `JsonResource` renumera como lista un arreglo cuyas claves son todas numéricas y PHP
+   serializa `[]` para un mapa vacío. `App\Support\Results\JsonMap` (`of` / `orEmpty`) convierte los campos que son mapas en objeto: `ResultEnvelope`
+   (`model_version`, `target_definition`; `ResultEnvelope::normalize` para envolturas del motor), `CustomerRunResource`, `SupplyRunResource` (`options` con claves
+   de producto), `ForecastRunResource`, los recursos de analítica (`metrics`, `assumptions`, `payload`, …), `ImportJobResource` y los controladores de Customer
+   (evaluación, reconciliación, perfil), Supply (plan, costos, escenarios, simulación, causal), Core de Datos (`field_map`, `options`, `stats`, `config`) y
+   Analytics (`accuracy/summary`). Las listas (`assumptions`, `limitations`, `horizons`, `entity_keys`) no se tocan. Prueba: `JsonObjectContractTest` (JSON crudo,
+   `{}` y claves numéricas en customer, supply, demanda y datos) y `JsonMapTest`. `v2.yaml` ya no declara `object|array`.
 2. **Retención de artefactos sin implementar** (`docs/07` §15): no hay limpieza de modelos `candidate/failed`, ni de ejecuciones antiguas, ni borrado de
    `artifacts/{tenant_id}` del volumen del motor al purgar una empresa.
-3. **Exportación**: tablas de etapa 1 todavía fuera (`alerts`, `scenarios`, `purchase_orders`, `purchase_order_items`, `stock_movements`, `external_indicators`),
-   marcadas `PENDIENTE` en `TenantDataExporter::NOT_EXPORTED`.
-4. **Variables `CONVERSATION_*`** no están en `backend/.env.example` (fuera de mi propiedad): copiar el bloque de §2.5.
+3. **Exportación — CORREGIDO en P6**: las tablas de etapa 1 pendientes (`alerts`, `scenarios`, `purchase_orders`, `purchase_order_items`, `stock_movements`,
+   `external_indicators`) y el resto de tablas con `tenant_id` se exportan; solo `personal_access_tokens` (credenciales) queda en `NOT_EXPORTED` (ver §3).
+4. **Variables `CONVERSATION_*` — CORREGIDO en P6**: están (comentadas) en `backend/.env.example` y en `.env.example`, junto con `PREDICTILY_SQL_*` y las
+   sobrescrituras `ENGINE_*` del motor, y `docker-compose.yml` las pasa a backend / queue / queue-forecasting / scheduler (motor sin puertos publicados).
 5. **Interfaz (P5a)**: consumir `GET /assistant/status` para ocultar el panel si `enabled=false` y mostrar las cifras desde `figures`, no desde `answer`.
 6. Validación contra Ollama Cloud real y elección del modelo: pendiente de clave y de EIPD/contrato con el proveedor.

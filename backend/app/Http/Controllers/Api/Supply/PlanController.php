@@ -9,6 +9,7 @@ use App\Models\CoreRun;
 use App\Models\ForecastRun;
 use App\Models\SupplyPlan;
 use App\Services\Supply\SupplyRunService;
+use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -134,7 +135,7 @@ class PlanController extends SupplyController
                     'order_date' => $l->order_date?->toDateString(), 'expected_receipt_date' => $l->expected_receipt_date?->toDateString(),
                     'unit_cost' => $l->unit_cost, 'line_cost' => $l->line_cost, 'currency' => $l->currency,
                     'actionable_now' => (bool) $l->actionable_now, 'binding_constraints' => $l->binding_constraints,
-                    'justification' => $l->justification, 'assumptions' => $l->assumptions,
+                    'justification' => $l->justification, 'assumptions' => JsonMap::of($l->assumptions),
                 ])->values(),
                 'shortfalls' => $shortfalls->map(fn ($s) => [
                     'branch_id' => $s->branch_id, 'product_id' => $s->product_id,
@@ -143,16 +144,17 @@ class PlanController extends SupplyController
                     'demand' => $s->demand, 'unmet' => $s->unmet, 'reason' => $s->reason,
                 ])->values(),
                 'constraints' => $details['constraints'] ?? [],
-                'solver' => $details['solver'] ?? null,
-                'diagnosis' => $details['diagnosis'] ?? null,
-                'infeasibility' => $details['infeasibility'] ?? null,
-                'alternative_plan' => $details['alternative_plan'] ?? null,
+                // Mapas del motor (objeto JSON aunque estén vacíos); null = el bloque no aplica a este plan.
+                'solver' => JsonMap::of($details['solver'] ?? null),
+                'diagnosis' => JsonMap::of($details['diagnosis'] ?? null),
+                'infeasibility' => JsonMap::of($details['infeasibility'] ?? null),
+                'alternative_plan' => JsonMap::of($details['alternative_plan'] ?? null),
                 'offers' => $details['offers'] ?? [],
-                'comparison_coverage' => $details['report']['comparison_coverage'] ?? null,
+                'comparison_coverage' => JsonMap::of($details['report']['comparison_coverage'] ?? null),
                 'offer_diagnostics' => $details['report']['offer_diagnostics'] ?? [],
                 'excluded_nodes' => $details['report']['excluded_nodes'] ?? [],
-                'production' => $details['report']['production'] ?? ['status' => 'not_configured'],
-                'receipts_summary' => $details['report']['receipts_summary'] ?? null,
+                'production' => JsonMap::of($details['report']['production'] ?? ['status' => 'not_configured']),
+                'receipts_summary' => JsonMap::of($details['report']['receipts_summary'] ?? null),
                 'balance' => $details['balance'] ?? [],
                 'periods' => $details['periods'] ?? [],
             ],

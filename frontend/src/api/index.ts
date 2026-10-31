@@ -296,6 +296,12 @@ export function supplyConfigCrud<R>(path: string) {
   }
 }
 
+// ─── Asistente conversacional opcional (consume resultados; no calcula) ────
+export const assistantApi = {
+  status: () => getData<T.AssistantStatus>('/assistant/status'),
+  send: (message: string, history: T.AssistantHistoryItem[] = []) => postData<T.AssistantReply>('/assistant/messages', { message, ...(history.length ? { history } : {}) }),
+}
+
 // ─── Descargas (CSV) ───────────────────────────────────────────────────────
 /**
  * Descarga un archivo autenticado. Se usa axios (no un <a href>) para enviar el

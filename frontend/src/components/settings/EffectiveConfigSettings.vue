@@ -124,7 +124,7 @@ const extension = computed<PlatformExtensions | null>(() => extensions.data.valu
       <InlineNotice v-if="generalError" kind="danger" data-test="config-error">{{ generalError }}</InlineNotice>
       <div class="table-wrap">
         <table class="table">
-          <caption class="sr-only">{{ t('effectiveConfig.cores.' + core) }}</caption>
+          <caption class="sr-only">{{ t(`effectiveConfig.cores.${core}`) }}</caption>
           <thead><tr><th scope="col">{{ t('effectiveConfig.key') }}</th><th scope="col">{{ t('effectiveConfig.value') }}</th><th scope="col">{{ t('effectiveConfig.origin') }}</th><th v-if="canEdit" scope="col"></th></tr></thead>
           <tbody>
             <tr v-for="row in rows" :key="row.key" :data-key="row.key">

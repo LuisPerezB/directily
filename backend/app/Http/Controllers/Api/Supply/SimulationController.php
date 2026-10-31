@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\Supply;
 use App\Http\Resources\Supply\SupplyRunResource;
 use App\Models\CoreRun;
 use App\Services\Supply\SupplyRunService;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -43,7 +44,7 @@ class SimulationController extends SupplyController
         $run = CoreRun::query()->where('core', 'supply')->where('operation', 'simulate')->with('trainingJobs')->findOrFail($id);
 
         return response()->json([
-            'data' => ['run' => (new SupplyRunResource($run))->resolve(request()), 'results' => $run->status === 'completed' ? $run->summary : null],
+            'data' => ['run' => (new SupplyRunResource($run))->resolve(request()), 'results' => $run->status === 'completed' ? JsonMap::of($run->summary) : null],
             'envelope' => $this->envelope($run, ['result_type' => 'evaluation']),
         ]);
     }

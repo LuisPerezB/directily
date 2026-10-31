@@ -70,4 +70,13 @@ final class NumericGroundingTest extends TestCase
         $this->assertSame([], NumericGrounding::ungrounded('Consultó 500 unidades.', [self::tool(), 'quiero saber de 500 unidades']));
         $this->assertSame(['7'], NumericGrounding::ungrounded('Son 7 días.', []));
     }
+
+    public function test_numbers_inside_json_maps_of_the_envelope_are_accepted(): void
+    {
+        // Los mapas de la envoltura (model_version por horizonte, horizon_support) viajan como objeto JSON (stdClass).
+        $tool = ['envelope' => ['model_version' => (object) ['7' => (object) ['history_days' => 365, 'wape' => 0.2348]]]];
+
+        $this->assertSame([], NumericGrounding::ungrounded('Con 365 días de historia y WAPE de 23,5 %.', [$tool]));
+        $this->assertSame(['366'], NumericGrounding::ungrounded('Con 366 días.', [$tool]));
+    }
 }

@@ -174,7 +174,7 @@ const diff = (a: number | null | undefined, b: number | null | undefined): strin
         <div class="table-wrap">
           <table class="table">
             <caption class="sr-only">{{ t('customers.eval.rankingTitle') }}</caption>
-            <thead><tr><th scope="col">{{ t('customers.eval.source') }}</th><th v-for="k in RANKING_KS" :key="`p${k}`" scope="col" class="num">precision@{{ k }}</th><th v-for="k in RANKING_KS" :key="`r${k}`" scope="col" class="num">recall@{{ k }}</th></tr></thead>
+            <thead><tr><th scope="col">{{ t('customers.eval.source') }}</th><th v-for="k in RANKING_KS" :key="`p${k}`" scope="col" class="num">{{ t('customers.eval.precisionAtK', { k }) }}</th><th v-for="k in RANKING_KS" :key="`r${k}`" scope="col" class="num">{{ t('customers.eval.recallAtK', { k }) }}</th></tr></thead>
             <tbody>
               <tr v-for="c in rankingColumns" :key="c.id">
                 <td>{{ c.label }}</td>

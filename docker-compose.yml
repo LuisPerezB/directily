@@ -60,6 +60,28 @@ x-backend-env: &backend-env
   MAIL_PASSWORD: ${MAIL_PASSWORD:-}
   MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-reply@predictily.local}
   MAIL_FROM_NAME: Predictily
+  # ── Etapa 2 · Asistente conversacional OPCIONAL (ADR-V2-12) ──
+  # Sin CONVERSATION_API_KEY queda desactivado (503 assistant_disabled, sin llamadas de red) y los cuatro cores siguen funcionando.
+  # La clave vive solo en el .env del servidor. Llama a Internet desde backend (red edge); el motor no interviene.
+  CONVERSATION_ENABLED: ${CONVERSATION_ENABLED:-true}
+  CONVERSATION_PROVIDER: ${CONVERSATION_PROVIDER:-ollama_cloud}
+  CONVERSATION_BASE_URL: ${CONVERSATION_BASE_URL:-https://ollama.com}
+  CONVERSATION_API_KEY: ${CONVERSATION_API_KEY:-}
+  CONVERSATION_MODEL: ${CONVERSATION_MODEL:-gpt-oss:120b}
+  CONVERSATION_TIMEOUT_SECONDS: ${CONVERSATION_TIMEOUT_SECONDS:-30}
+  CONVERSATION_CONNECT_TIMEOUT_SECONDS: ${CONVERSATION_CONNECT_TIMEOUT_SECONDS:-5}
+  CONVERSATION_DEADLINE_SECONDS: ${CONVERSATION_DEADLINE_SECONDS:-45}
+  CONVERSATION_MAX_MESSAGE_CHARS: ${CONVERSATION_MAX_MESSAGE_CHARS:-1000}
+  CONVERSATION_MAX_OUTPUT_TOKENS: ${CONVERSATION_MAX_OUTPUT_TOKENS:-700}
+  CONVERSATION_TEMPERATURE: ${CONVERSATION_TEMPERATURE:-0.1}
+  CONVERSATION_RATE_PER_MINUTE: ${CONVERSATION_RATE_PER_MINUTE:-10}
+  CONVERSATION_DAILY_LIMIT: ${CONVERSATION_DAILY_LIMIT:-300}
+  CONVERSATION_CUSTOMER_TOOLS: ${CONVERSATION_CUSTOMER_TOOLS:-true}
+  # ── Etapa 2 · Conectores SQL de solo lectura (P3) ──
+  # En un SaaS público multiempresa: PREDICTILY_SQL_DENY_PRIVATE=true y/o PREDICTILY_SQL_ALLOWED_HOSTS=host1,host2 (lista blanca).
+  PREDICTILY_SQL_DENY_PRIVATE: ${PREDICTILY_SQL_DENY_PRIVATE:-false}
+  PREDICTILY_SQL_ALLOWED_HOSTS: ${PREDICTILY_SQL_ALLOWED_HOSTS:-}
+  PREDICTILY_SQL_MAX_ROWS: ${PREDICTILY_SQL_MAX_ROWS:-2000000}
 
 x-backend-service: &backend-service
   image: predictily/backend:${IMAGE_TAG:-latest}
@@ -170,6 +192,11 @@ services:
       ENGINE_N_JOBS: ${ENGINE_N_JOBS:-2}
       ENGINE_MAX_SERIES_LGBM: ${ENGINE_MAX_SERIES_LGBM:-5000}
       ENGINE_WORKERS: ${ENGINE_WORKERS:-2}
+      ENGINE_STALE_RUN_SECONDS: ${ENGINE_STALE_RUN_SECONDS:-1800}
+      # Sobrescrituras del operador (etapa 2): SIN valor por defecto a propósito. Si se definen en .env, anulan la configuración por
+      # core / perfil sectorial / empresa (ADR-V2-06); sin definir no se pasan al contenedor y manda esa configuración (0,03 y 3).
+      ENGINE_MIN_IMPROVEMENT:
+      ENGINE_MAX_BACKTEST_WINDOWS:
     volumes:
       - engine-artifacts:/data/artifacts
     expose:

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Core;
 
 use App\Models\ImportJob;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\DB;
@@ -32,20 +33,20 @@ final class ImportJobResource extends JsonResource
             'status' => $this->status,
             'progress' => $this->progress,
             'detected_columns' => $this->detected_columns ?? [],
-            'suggested_mapping' => $this->suggested_mapping ?? (object) [],
-            'column_mapping' => $this->column_mapping ?? (object) [],
-            'options' => $this->options ?? (object) [],
+            'suggested_mapping' => JsonMap::orEmpty($this->suggested_mapping),
+            'column_mapping' => JsonMap::orEmpty($this->column_mapping),
+            'options' => JsonMap::orEmpty($this->options),
             'preview' => [
                 'headers' => $preview['headers'] ?? [],
                 'rows' => $preview['rows'] ?? [],
                 'dialect' => $preview['dialect'] ?? null,
             ],
             'normalized_preview' => $preview['normalized'] ?? [],
-            'stats' => $this->stats ?? (object) [],
+            'stats' => JsonMap::orEmpty($this->stats),
             'quality_report' => $quality ? [
                 'score' => (float) $quality->score,
                 'issues' => json_decode((string) $quality->issues, true) ?? [],
-                'summary' => json_decode((string) $quality->summary, true) ?? [],
+                'summary' => JsonMap::orEmpty(json_decode((string) $quality->summary, true)),
             ] : null,
             'error_message' => $this->error_message,
             'created_at' => $this->created_at?->toIso8601String(),

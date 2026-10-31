@@ -209,9 +209,17 @@ class TenantDataExporterStage2Test extends TestCase
         $tenantTables = collect(DB::select("select table_name from information_schema.columns where column_name = 'tenant_id' and table_schema = current_schema()"))
             ->pluck('table_name')->unique()->sort()->values()->all();
         $classified = array_merge(array_keys(TenantDataExporter::TABLES), array_keys(TenantDataExporter::NOT_EXPORTED));
+        // Las tablas hijas (sin `tenant_id` propio) pertenecen a la empresa por su tabla padre, que sí lo tiene.
+        $children = array_keys(TenantDataExporter::CHILD_TABLES);
 
         $this->assertSame([], array_values(array_diff($tenantTables, $classified)), 'Tablas con tenant_id sin clasificar en TenantDataExporter (TABLES o NOT_EXPORTED).');
-        $this->assertSame([], array_values(array_diff($classified, $tenantTables)), 'TenantDataExporter menciona tablas que no existen o no tienen tenant_id.');
+        $this->assertSame([], array_values(array_diff($classified, $tenantTables, $children)), 'TenantDataExporter menciona tablas que no existen o no tienen tenant_id.');
+        foreach (TenantDataExporter::CHILD_TABLES as $table => [$link, $parent]) {
+            $this->assertArrayHasKey($table, TenantDataExporter::TABLES, "{$table} (hija de {$parent}) debe exportarse");
+            $this->assertNotContains($table, $tenantTables, "{$table} tiene tenant_id: no debe declararse como hija");
+            $this->assertContains($parent, $tenantTables, "El padre {$parent} de {$table} debe tener tenant_id");
+            $this->assertTrue(Schema::hasColumn($table, $link), "No existe {$table}.{$link}");
+        }
         $this->assertSame([], array_values(array_intersect(array_keys(TenantDataExporter::TABLES), array_keys(TenantDataExporter::NOT_EXPORTED))), 'Una tabla no puede estar exportada y excluida a la vez.');
         foreach (TenantDataExporter::NOT_EXPORTED as $table => $reason) {
             $this->assertNotSame('', trim($reason), "Falta el motivo de exclusión de {$table}");

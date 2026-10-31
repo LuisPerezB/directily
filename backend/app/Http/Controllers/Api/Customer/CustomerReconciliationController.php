@@ -54,7 +54,7 @@ class CustomerReconciliationController extends CustomerController
         return response()->json([
             'data' => $rows,
             'meta' => ['current_page' => $page->currentPage(), 'per_page' => $page->perPage(), 'total' => $page->total(), 'last_page' => $page->lastPage()],
-            'summary' => ['horizon_days' => $horizon, 'status_counts' => $summary],
+            'summary' => ['horizon_days' => $horizon, 'status_counts' => (object) $summary],
             'policy' => self::POLICY,
             'envelope' => CustomerEnvelope::forRun($run, $tenant, $horizon, ['entity_keys' => ['product_id'], 'result_type' => 'forecast']),
         ]);

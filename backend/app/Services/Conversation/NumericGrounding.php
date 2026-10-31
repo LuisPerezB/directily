@@ -128,6 +128,9 @@ final class NumericGrounding
             foreach (self::numbersIn($value) as $n) {
                 $allowed[] = [$n, false];
             }
+        } elseif ($value instanceof \stdClass) {
+            // Mapa JSON de la envoltura (p. ej. model_version): sus claves y valores son cifras de la herramienta como cualquier arreglo.
+            self::collect((array) $value, $allowed);
         } elseif (is_array($value)) {
             // El tamaño de una lista es un dato que la herramienta ya entrega implícitamente (p. ej. «3 productos»).
             $allowed[] = [(float) count($value), false];

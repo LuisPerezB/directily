@@ -8,6 +8,8 @@ use App\Services\Forecasting\Exceptions\EngineException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Services\Supply\SupplyEngineClient;
+use App\Support\Results\JsonMap;
+use App\Support\Results\ResultEnvelope;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,6 +51,7 @@ class CausalController extends SupplyController
         $payload = $result['data'] ?? null;
         unset($result['data']);
 
-        return response()->json(['data' => $payload, 'envelope' => $result]);
+        // La envoltura viene del motor ya decodificada: sus mapas (model_version, target_definition) se emiten como objeto.
+        return response()->json(['data' => JsonMap::of($payload), 'envelope' => ResultEnvelope::normalize($result)]);
     }
 }

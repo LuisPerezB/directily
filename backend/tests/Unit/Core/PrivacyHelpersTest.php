@@ -17,6 +17,16 @@ final class PrivacyHelpersTest extends TestCase
         $this->assertSame(['password' => '[REDACTED]', 'nested' => ['email' => 'a***@b***.com']], PiiMasker::sanitize(['password' => 'x', 'nested' => ['email' => 'ana@b.com']]));
     }
 
+    public function test_sanitize_cleans_json_maps_and_keeps_them_as_objects(): void
+    {
+        $clean = PiiMasker::sanitize(['model_version' => (object) ['contact' => 'ana@b.com', 'token' => 'x'], 'empty' => (object) []]);
+
+        $this->assertInstanceOf(\stdClass::class, $clean['model_version']);
+        $this->assertSame('a***@b***.com', $clean['model_version']->contact);
+        $this->assertSame('[REDACTED]', $clean['model_version']->token);
+        $this->assertSame('{}', json_encode($clean['empty']), 'un mapa vacío no se vuelve lista');
+    }
+
     public function test_customer_identity_never_keeps_tax_ids_in_clear(): void
     {
         $person = CustomerIdentity::fromCode('1710034065');

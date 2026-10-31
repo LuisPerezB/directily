@@ -7,10 +7,12 @@ namespace App\Http\Controllers\Api\DataCore;
 use App\Http\Controllers\Controller;
 use App\Models\DataSource;
 use App\Models\SourceMapping;
+use App\Services\Connectors\Sql\SqlQueryGuard;
 use App\Services\Connectors\Sql\SqlSourceException;
 use App\Services\DataCore\Sync\CanonicalStager;
 use App\Services\DataCore\Sync\SourceMappingService;
 use App\Support\Privacy\PiiMasker;
+use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -46,7 +48,7 @@ final class SourceMappingController extends Controller
     {
         $data = $request->validate([
             'entity' => ['required', 'string', 'max:30'],
-            'query' => ['required', 'string', 'max:'.\App\Services\Connectors\Sql\SqlQueryGuard::MAX_LENGTH],
+            'query' => ['required', 'string', 'max:'.SqlQueryGuard::MAX_LENGTH],
             'field_map' => ['required', 'array', 'min:1'],
             'options' => ['sometimes', 'array'],
         ]);
@@ -112,7 +114,7 @@ final class SourceMappingController extends Controller
     {
         return [
             'id' => $m->id, 'data_source_id' => $m->data_source_id, 'entity' => $m->entity, 'version' => $m->version,
-            'query' => $m->query, 'field_map' => $m->field_map ?? (object) [], 'options' => $m->options ?? (object) [],
+            'query' => $m->query, 'field_map' => JsonMap::orEmpty($m->field_map), 'options' => JsonMap::orEmpty($m->options),
             'is_active' => $m->is_active, 'approved_at' => $m->approved_at?->toIso8601String(),
             'approved_by' => $m->relationLoaded('approver') && $m->approver ? ['id' => $m->approver->id, 'name' => $m->approver->name] : null,
             'created_at' => $m->created_at?->toIso8601String(),

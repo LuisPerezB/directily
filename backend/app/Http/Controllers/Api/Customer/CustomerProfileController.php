@@ -87,8 +87,9 @@ class CustomerProfileController extends CustomerController
                     'spend_ratio' => $activity->spend_ratio,
                 ],
             ] : null,
-            'rankings' => $rankings,
-            'ranking_sources' => $rankingSources,
+            // Mapas horizonte → valor: objeto JSON (las claves son los horizontes 7/30/90).
+            'rankings' => (object) $rankings,
+            'ranking_sources' => (object) $rankingSources,
             'ranking_source_note' => CustomerEnvelope::DEFINITIONS['ranking_source'],
         ], 'envelope' => CustomerEnvelope::forRun($run, $tenant), 'definitions' => CustomerEnvelope::DEFINITIONS]);
     }

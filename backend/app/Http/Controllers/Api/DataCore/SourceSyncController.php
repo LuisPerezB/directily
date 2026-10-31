@@ -10,6 +10,7 @@ use App\Models\DataSource;
 use App\Models\SourceSync;
 use App\Services\DataCore\Sync\SourceMappingService;
 use App\Services\DataCore\Sync\SourceSyncService;
+use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -60,7 +61,7 @@ final class SourceSyncController extends Controller
             'mode' => $s->mode, 'status' => $s->status, 'triggered_by' => $s->triggered_by,
             'since' => $s->since?->toIso8601String(), 'watermark' => $s->watermark?->toIso8601String(),
             'rows_extracted' => $s->rows_extracted, 'pages' => $s->pages, 'import_job_id' => $s->import_job_id,
-            'stats' => $s->stats ?? (object) [], 'error_message' => $s->error_message,
+            'stats' => JsonMap::orEmpty($s->stats), 'error_message' => $s->error_message,
             'started_at' => $s->started_at?->toIso8601String(), 'finished_at' => $s->finished_at?->toIso8601String(),
             'created_at' => $s->created_at?->toIso8601String(),
         ];

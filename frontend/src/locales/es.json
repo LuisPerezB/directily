@@ -151,7 +151,10 @@
     "expand": "Expandir menú",
     "openMenu": "Abrir menú",
     "closeMenu": "Cerrar menú",
-    "admin": "Administración de la plataforma"
+    "admin": "Administración de la plataforma",
+    "customers": "Compradores",
+    "supply": "Plan de compras",
+    "assistant": "Asistente"
   },
   "filters": {
     "title": "Filtros",
@@ -222,7 +225,9 @@
     "units": "unidades",
     "dollars": "dólares",
     "viewTable": "Ver datos en tabla",
-    "date": "Fecha"
+    "date": "Fecha",
+    "forecastProvisional": "Pronóstico (sin respaldo suficiente)",
+    "median": "Mediana (P50)"
   },
   "status": {
     "import": {
@@ -279,14 +284,45 @@
     "connector": {
       "available": "Disponible",
       "requires_credentials": "Requiere credenciales",
-      "planned": "Planificado"
+      "planned": "Planificado",
+      "implemented_untested": "Implementado, sin probar"
     },
     "model": {
       "candidate": "Candidato",
       "production": "En producción",
       "fallback": "Respaldo",
       "archived": "Archivado",
-      "rejected": "Rechazado"
+      "rejected": "Rechazado",
+      "validated": "Validado",
+      "retired": "Retirado",
+      "failed": "Fallido"
+    },
+    "verification": {
+      "tested": "Probado",
+      "tested_with_test_database": "Probado con base de pruebas",
+      "implemented_untested": "Implementado, sin probar",
+      "not_verified": "Sin verificar",
+      "planned": "Planificado"
+    },
+    "sync": {
+      "queued": "En cola",
+      "running": "En proceso",
+      "completed": "Completada",
+      "needs_review": "Por revisar",
+      "failed": "Falló"
+    },
+    "commitment": {
+      "open": "Abierto",
+      "confirmed": "Confirmado",
+      "partially_fulfilled": "Cumplido en parte",
+      "fulfilled": "Cumplido",
+      "cancelled": "Cancelado",
+      "expired": "Vencido"
+    },
+    "calendar": {
+      "planned": "Planificado",
+      "confirmed": "Confirmado",
+      "cancelled": "Cancelado"
     }
   },
   "jobs": {
@@ -546,7 +582,8 @@
     "units90": "Unidades 90 días",
     "revenue90": "Ventas 90 días",
     "lastSale": "Última venta",
-    "tableNote": "El cambio compara las unidades pronosticadas con las vendidas en el mismo número de días previos. El rango debajo de cada cifra es el intervalo probable del 80 %."
+    "tableNote": "El cambio compara las unidades pronosticadas con las vendidas en el mismo número de días previos. El rango debajo de cada cifra es el intervalo probable del 80 %.",
+    "caseLabel": "Caso especial"
   },
   "inventory": {
     "title": "Inventario y abastecimiento",
@@ -688,8 +725,29 @@
       "realized": {
         "term": "Error real",
         "text": "Error calculado después, comparando pronósticos ya emitidos con las ventas que ocurrieron."
+      },
+      "mase": {
+        "term": "MASE",
+        "text": "Error escalado: compara el error con el de repetir lo vendido la semana anterior. Menor que 1 mejora ese método simple."
+      },
+      "rmsse": {
+        "term": "RMSSE",
+        "text": "Como el MASE, pero penaliza más los errores grandes."
+      },
+      "pinball": {
+        "term": "Pérdida pinball",
+        "text": "Mide qué tan buenos son los límites del rango (P10, P50 y P90). Menor es mejor."
+      },
+      "manifest": {
+        "term": "Manifiesto del protocolo",
+        "text": "Lista de fechas que muestra con qué datos se entrenó, eligió, calibró y probó el modelo."
       }
-    }
+    },
+    "bandLabel": "Días {from} a {to}",
+    "horizonTotalTitle": "Error del total de cada horizonte",
+    "horizonTotalText": "Al comprar importa el total de los próximos 7, 14, 30, 60 o 90 días, no el error día a día. Aquí se mide ese total frente al método simple.",
+    "totalError": "Error del total",
+    "totalErrorMoney": "Error en dinero"
   },
   "scenarios": {
     "title": "Simulador de escenarios",
@@ -968,7 +1026,19 @@
     "tokenUsage": "Úselo en el encabezado Authorization para enviar ventas. Ejemplo:",
     "tokenSaved": "Ya lo guardé",
     "deleteTitle": "Eliminar fuente",
-    "deleteText": "¿Eliminar la fuente «{name}»? Los datos ya importados se conservan."
+    "deleteText": "¿Eliminar la fuente «{name}»? Los datos ya importados se conservan.",
+    "tabs": {
+      "fuentes": "Fuentes",
+      "cobertura": "Cobertura",
+      "calidad": "Calidad",
+      "calendario": "Calendario",
+      "compromisos": "Compromisos",
+      "almacenes": "Almacenes y unidades"
+    },
+    "configureSql": "Configurar consultas",
+    "verification": "Comprobación",
+    "untestedWarning": "Implementado pero sin probar contra un servidor real: no se presenta como disponible.",
+    "createdInactive": "La fuente se creó pero quedó inactiva: {reason}"
   },
   "alerts": {
     "title": "Alertas",
@@ -997,7 +1067,8 @@
       "usuarios": "Usuarios",
       "privacidad": "Privacidad y datos",
       "plan": "Plan y consumo",
-      "auditoria": "Auditoría"
+      "auditoria": "Auditoría",
+      "modulos": "Módulos y configuración"
     },
     "saved": "Cambios guardados.",
     "readOnly": "Su rol permite ver esta configuración, pero no modificarla.",
@@ -1110,6 +1181,1411 @@
       "active": "Activa",
       "suspended": "Suspendida",
       "pending_deletion": "En eliminación"
+    }
+  },
+  "quality": {
+    "ok": "Resultado completo",
+    "degraded": "Con reservas",
+    "insufficient_data": "Datos insuficientes",
+    "not_configured": "Sin configurar",
+    "insufficient_evidence": "Evidencia insuficiente",
+    "unknown": "Sin evaluar",
+    "title": "Calidad de los datos",
+    "extendedTitle": "Calidad de datos ampliada",
+    "extendedNote": "Este reporte describe la calidad de los datos cargados. No mide la precisión de ningún pronóstico.",
+    "generatedAt": "Calculado el {date}",
+    "overall": {
+      "ok": "Sin advertencias",
+      "warning": "Con advertencias"
+    },
+    "status": {
+      "ok": "Correcto",
+      "warning": "Advertencia",
+      "no_data": "Sin datos"
+    },
+    "salesDays": "Días sin ventas: cero observado o ausente",
+    "observedZero": "Ceros observados",
+    "observedZeroHint": "Días sin ventas dentro del período que la fuente declara completo: cierre o falta de demanda.",
+    "absent": "Días ausentes",
+    "absentHint": "Días sin registros fuera de la cobertura declarada: no se convierten en ceros.",
+    "range": "Período revisado",
+    "longestGaps": "Tramo más largo sin ventas: {n} días",
+    "temporal": "Cobertura temporal por fuente",
+    "observed": "Datos observados",
+    "daysWithRecords": "Días con registros",
+    "temporalStatus": {
+      "undeclared": "Cobertura sin declarar",
+      "declared": "Declarada",
+      "inferred": "Inferida por el conector",
+      "stale": "Desactualizada",
+      "data_beyond_coverage": "Datos posteriores a la cobertura",
+      "no_data": "Sin datos"
+    },
+    "identity": "Identificación de compradores",
+    "identityShare": "{pct} de los documentos ({n} en total) no tiene un comprador identificable (sin cliente o consumidor final).",
+    "prices": "Historia de precios",
+    "priceSummary": "{v} productos cambiaron de precio; {big} variaron más de 20 %; {unknown} registros de precio no indican desde cuándo se conocían.",
+    "codes": "Posibles cambios de código de producto",
+    "units": "Unidades de medida",
+    "unitsSummary": "{n} unidades incompatibles sin conversión declarada. Conversiones declaradas: {c}."
+  },
+  "caseLabels": {
+    "new_product_category_median": "Producto nuevo: respaldo por categoría",
+    "new_product_own_average": "Producto nuevo: promedio propio",
+    "new_product_own_average_low_evidence": "Producto nuevo: pocas ventas propias",
+    "sparse_history": "Historia escasa",
+    "discontinued_zero": "Descontinuado: cero explícito",
+    "branch_closed_declared": "Sucursal cerrada (declarada)",
+    "branch_opening": "Sucursal en apertura",
+    "exceptional_event": "Evento extraordinario"
+  },
+  "caseLabelHints": {
+    "new_product_category_median": "Tiene menos de 28 días de historia y pocas ventas propias: se usa la mediana diaria de productos comparables de su categoría. No es un pronóstico entrenado con su propia historia.",
+    "new_product_own_average": "Tiene menos de 28 días de historia: se usa su promedio diario propio.",
+    "new_product_own_average_low_evidence": "Tiene menos de 28 días de historia y muy pocas ventas: el promedio propio es poca evidencia.",
+    "sparse_history": "Vende muy pocos días: el pronóstico es el promedio de su historia, sin estacionalidad.",
+    "discontinued_zero": "El producto está inactivo y vendió en el último año: se declara demanda cero.",
+    "branch_closed_declared": "La sucursal está marcada como cerrada: se declara demanda cero.",
+    "branch_opening": "La sucursal abrió hace poco: la serie empieza en su primera venta.",
+    "exceptional_event": "Hay un evento extraordinario conocido en el período. Solo se marca: no cambia el valor del pronóstico."
+  },
+  "horizonSupport": {
+    "degraded": {
+      "title": "Horizonte de {n} días con métricas optimistas",
+      "text": "La historia no alcanzó para reservar un período final independiente: las métricas de precisión de este horizonte provienen de las mismas ventanas que eligieron el modelo."
+    },
+    "insufficient_data": {
+      "title": "Horizonte de {n} días sin respaldo suficiente",
+      "text": "La historia o las ventanas de prueba no alcanzan para respaldar este horizonte. Las cifras se muestran como provisionales, sin rangos de incertidumbre, y no deben usarse como un pronóstico completo."
+    },
+    "not_computed": {
+      "title": "Horizonte de {n} días no calculado",
+      "text": "La ejecución vigente se calculó a un horizonte menor. Genere un pronóstico con este horizonte para ver cifras."
+    },
+    "unknown": {
+      "title": "Respaldo del horizonte de {n} días desconocido",
+      "text": "La ejecución es anterior a la verificación de horizontes: no se sabe si la historia respalda este horizonte."
+    },
+    "runHint": "Generar un pronóstico",
+    "noneInPlan": "Su plan no incluye horizontes de pronóstico.",
+    "provisionalTotal": "provisional, sin respaldo suficiente",
+    "unsupportedKpi": "Sin respaldo suficiente para este horizonte: cifra provisional.",
+    "unsupportedCell": "sin respaldo",
+    "tableTitle": "Respaldo por horizonte",
+    "tableText": "Un horizonte solo se considera respaldado si la historia es al menos el doble del horizonte y las pruebas incluyeron ventanas de esa duración.",
+    "why": "Motivo",
+    "status": {
+      "ok": "Respaldado",
+      "degraded": "Con reservas",
+      "insufficient_data": "Sin respaldo suficiente",
+      "not_computed": "No calculado",
+      "unknown": "Desconocido"
+    }
+  },
+  "envelope": {
+    "title": "Trazabilidad del resultado",
+    "quality": "Aptitud del resultado",
+    "uncertaintyLabel": "Origen de la incertidumbre",
+    "uncertainty": {
+      "empirical_holdout": "Medida en un período de prueba reservado",
+      "conformal": "Rangos conformales calibrados con errores pasados",
+      "model": "Propia del modelo",
+      "unknown": "Desconocida: no se muestra un rango como si fuera conocido",
+      "none": "No aplica"
+    },
+    "abstention": {
+      "insufficient_data": "No hay datos suficientes para dar este resultado como completo. Se muestra únicamente lo que existe, con sus motivos.",
+      "not_configured": "Falta configurar datos o reglas para calcular este resultado.",
+      "insufficient_evidence": "La evidencia disponible no permite publicar este resultado."
+    },
+    "limitations": "Limitaciones",
+    "assumptions": "Supuestos",
+    "noLimitations": "El resultado no declara limitaciones adicionales.",
+    "noAssumptions": "El resultado no declara supuestos.",
+    "asOf": "Fecha de corte",
+    "horizon": "Período cubierto",
+    "configVersion": "Versión de configuración",
+    "snapshot": "Huella de datos",
+    "resultTypes": {
+      "forecast": "Pronóstico",
+      "conditional_simulation": "Simulación condicionada",
+      "causal_estimate": "Estimación causal",
+      "optimized_plan": "Plan optimizado",
+      "evaluation": "Evaluación"
+    }
+  },
+  "modelRegistry": {
+    "title": "Modelos y versiones",
+    "text": "Cada modelo pasa por estados: candidato, validado, en producción, retirado o fallido. Un modelo validado no está en uso hasta que se promueva. El papel indica si es el modelo principal o el de respaldo.",
+    "filter": "Estado",
+    "allStatuses": "Todos",
+    "version": "Versión",
+    "role": "Papel",
+    "trainedAt": "Entrenado",
+    "legacy": "Estado anterior: {status}",
+    "empty": "Aún no hay modelos registrados.",
+    "roles": {
+      "primary": "Principal",
+      "fallback": "Respaldo"
+    }
+  },
+  "rollback": {
+    "confirm": "Sí, volver a esta versión",
+    "noRetrain": "No se reentrena nada: se vuelve a usar una versión ya calculada y probada. Queda registrado en la auditoría.",
+    "needsAbility": "Volver a una versión anterior requiere permiso para generar pronósticos.",
+    "verified": "Integridad de los archivos del modelo verificada.",
+    "notVerified": "La integridad de los archivos no se pudo verificar desde este servidor; el motor la verifica al cargarlos.",
+    "errors": {
+      "no_current_run": "No hay una ejecución vigente: no hay a qué volver.",
+      "rollback_already_current": "Esa versión ya es la vigente.",
+      "rollback_target_not_production": "Solo se puede volver a una ejecución de producción completada.",
+      "rollback_target_not_previous": "Solo se puede volver a una versión anterior a la vigente. Para una más nueva, genere un pronóstico.",
+      "rollback_target_without_models": "Esa versión no tiene modelos retirados que restaurar.",
+      "rollback_target_without_forecasts": "Esa versión ya no conserva sus pronósticos.",
+      "rollback_artifact_mismatch": "El archivo del modelo no coincide con su huella de integridad: no se puede restaurar.",
+      "rollback_target_not_restorable": "Esa versión no se puede volver a servir (debe estar validada o retirada).",
+      "rollback_target_without_slot": "Esa versión no indica a qué horizonte y objetivo pertenece.",
+      "rollback_target_without_artifact": "Esa versión no tiene archivo de modelo.",
+      "rollback_target_incompatible": "Esa versión usa un esquema de variables incompatible con el actual."
+    },
+    "demand": {
+      "title": "Volver a la versión anterior del pronóstico",
+      "text": "Si el último pronóstico no es confiable, puede volver a una ejecución de producción anterior. Sus pronósticos conservan su fecha de corte; para actualizarlos con ventas recientes genere un pronóstico nuevo.",
+      "from": "Versión vigente",
+      "to": "Volver a",
+      "done": "Se volvió a la versión anterior.",
+      "noCurrent": "No hay una versión vigente.",
+      "noPrevious": "No hay versiones anteriores de producción a las que volver.",
+      "action": "Volver a esta versión",
+      "confirmTitle": "¿Volver a la versión anterior?",
+      "confirmText": "La versión elegida pasará a ser la vigente y los modelos actuales se retirarán. Esta acción se puede deshacer generando un pronóstico nuevo."
+    },
+    "customer": {
+      "slot": "Horizonte y objetivo",
+      "done": "Se volvió a servir la versión elegida.",
+      "action": "Volver a servir esta versión",
+      "confirmTitle": "¿Volver a servir esta versión?",
+      "confirmText": "La versión elegida pasará a producción y la actual del mismo horizonte y objetivo se retirará. La próxima predicción la usará."
+    }
+  },
+  "manifest": {
+    "title": "Cómo se evaluó el modelo",
+    "subtitle": "Fechas del protocolo: con qué datos se entrenó, se eligió el modelo, se calibraron los rangos y se hizo la prueba final.",
+    "missing": "Esta ejecución no tiene manifiesto del protocolo (es anterior a la etapa 2).",
+    "range": "Del {from} al {to}",
+    "holdoutMissing": "No hubo período final independiente",
+    "observableAt": "Los errores usados ya eran observables el {date}.",
+    "holdoutOrigin": "La prueba se hizo con el modelo calculado hasta el {date}.",
+    "windows": "{n} ventanas de selección",
+    "labelMaturity": "Cuándo se considera un resultado conocido",
+    "overlap": "Ventanas solapadas",
+    "sharedDates": "{n} fechas compartidas entre ventanas",
+    "criterion": "Criterio de elección",
+    "productionModel": "Modelo en producción",
+    "steps": {
+      "history": {
+        "title": "Historia disponible",
+        "text": "Todos los datos de ventas hasta la fecha de corte."
+      },
+      "selection": {
+        "title": "Elección del modelo",
+        "text": "Ventanas anteriores donde se compararon los modelos y se eligió el mejor para cada tipo de demanda."
+      },
+      "calibration": {
+        "title": "Calibración de los rangos",
+        "text": "Errores pasados con los que se calculan los rangos de incertidumbre."
+      },
+      "holdout": {
+        "title": "Prueba final",
+        "text": "Período reservado que no participa en ninguna decisión: solo mide qué tan bien funciona el procedimiento."
+      },
+      "production": {
+        "title": "Modelo en producción",
+        "text": "El modelo que genera el pronóstico entrena con toda la historia, incluida la prueba final."
+      }
+    },
+    "holdoutRules": {
+      "used_for_model_selection": "Usado para elegir el modelo",
+      "used_for_hyperparameters": "Usado para ajustar parámetros",
+      "used_for_thresholds": "Usado para fijar umbrales",
+      "used_for_interval_calibration": "Usado para calibrar rangos"
+    },
+    "warnings": {
+      "noBacktest": "La historia no alcanzó para hacer pruebas retrospectivas: no hay métricas de precisión para esta ejecución.",
+      "noHoldout": "No hubo un período final independiente: las métricas provienen de las ventanas que eligieron el modelo y son optimistas.",
+      "overlap": "Las ventanas de selección se solapan: sus observaciones no son independientes y no sirven para estimar la incertidumbre de la métrica.",
+      "checksFailed": "El propio manifiesto reporta una verificación del protocolo que no se cumple",
+      "residualsNotObservable": "Algunos errores usados para calibrar los rangos aún no eran observables en la fecha de la prueba."
+    }
+  },
+  "extended": {
+    "title": "Métricas ampliadas",
+    "subtitle": "Errores comparados con un método simple, cuantiles, amplitud de los rangos y dinero.",
+    "missing": "Esta ejecución no tiene métricas ampliadas.",
+    "notAvailable": "No disponible",
+    "mase": "MASE",
+    "rmsse": "RMSSE",
+    "betterThanNaive": "Menor que 1: mejora al método simple de entrenamiento",
+    "worseThanNaive": "1 o más: no mejora al método simple de entrenamiento",
+    "maseNote": "MASE y RMSSE comparan el error con el de repetir lo vendido la misma semana anterior (calculado solo con datos anteriores a cada prueba). Menor que 1 significa que mejora ese método simple.",
+    "width80": "Amplitud del rango de 80 %",
+    "width95": "Amplitud del rango de 95 %",
+    "widthHint": "unidades por serie y día",
+    "pinballTitle": "Cuantiles P10, P50 y P90",
+    "pinballNeedsHoldout": "Sin un período final independiente no se evalúan los cuantiles: los valores quedan vacíos en vez de mostrarse optimistas.",
+    "quantile": "Cuantil",
+    "pinball": "Pérdida pinball",
+    "meaning": "Qué significa",
+    "p10Meaning": "Límite inferior del rango de 80 %: se espera vender más que esto 9 de cada 10 veces.",
+    "p50Meaning": "Mediana evaluada: la mitad de las veces se vende más y la otra mitad menos.",
+    "p50NotPublished": "No publicada: la mediana no mejoró a usar el pronóstico central como mediana.",
+    "p90Meaning": "Límite superior del rango de 80 %: se espera vender menos que esto 9 de cada 10 veces.",
+    "p50Decision": "Decisión sobre la mediana: {reason}",
+    "moneyTitle": "Error en dinero ({currency})",
+    "moneyNote": "Se mide aparte de las unidades: el pronóstico en dinero usa el último precio neto conocido al momento de cada prueba.",
+    "measure": "Medida",
+    "inUnits": "En unidades",
+    "inMoney": "En dinero",
+    "actualTotal": "Vendido",
+    "forecastTotal": "Pronosticado",
+    "sample": "Muestra: {obs} observaciones, {series} series, {windows} ventanas.",
+    "exclusions": {
+      "scale_undefined": "{n} filas excluidas de MASE y RMSSE porque la serie no varía (la escala no está definida).",
+      "price_missing": "{n} filas sin precio conocido, excluidas del error en dinero.",
+      "stockout_days": "{n} días con quiebre de stock excluidos de la medición."
+    }
+  },
+  "calibration": {
+    "empty": "No hay una curva de calibración para este horizonte.",
+    "aria": "Curva de calibración con {groups} grupos y {n} observaciones; brecha media {gap}.",
+    "predicted": "Probabilidad predicha",
+    "observed": "Frecuencia observada",
+    "perfect": "Calibración perfecta",
+    "smallSample": "muestra pequeña",
+    "flat": "El modelo predice casi la misma probabilidad para todos: la curva no distingue compradores ni productos.",
+    "smallGroups": "{n} grupos tienen menos de {min} observaciones: su frecuencia observada es poca evidencia.",
+    "summary": "{groups} grupos, {n} observaciones. Diferencia media entre lo predicho y lo observado: {gap}.",
+    "table": "Ver tabla de la curva",
+    "range95": "Rango observado (95 %)"
+  },
+  "crud": {
+    "add": "Agregar",
+    "saved": "Guardado.",
+    "editTitle": "Editar: {name}",
+    "createTitle": "Nuevo: {name}",
+    "deleteTitle": "¿Eliminar este registro?",
+    "deleteText": "Se eliminará {name}. Esta acción no se puede deshacer."
+  },
+  "rankingSources": {
+    "model": "probabilidad del modelo",
+    "popularity": "popularidad",
+    "recency": "compra más reciente"
+  },
+  "customerModels": {
+    "reference": "Referencia de frecuencia y recencia",
+    "logistic": "Regresión logística",
+    "lgbm_small": "LightGBM pequeño",
+    "lgbm_large": "LightGBM grande",
+    "customer_prob_reference": "Referencia de frecuencia y recencia",
+    "customer_prob_logistic": "Regresión logística",
+    "customer_prob_lgbm_small": "LightGBM pequeño",
+    "customer_prob_lgbm_large": "LightGBM grande",
+    "customer_qty_reference": "Referencia histórica",
+    "customer_qty_l2": "LightGBM (error cuadrático)",
+    "customer_qty_log1p": "LightGBM (logarítmico)",
+    "customer_qty_tweedie": "LightGBM (Tweedie)",
+    "customer_qty_gamma": "LightGBM (Gamma)",
+    "customer_qty_poisson": "LightGBM (Poisson)",
+    "customer_expected_qty_reference": "Referencia",
+    "customer_expected_qty_served": "Modelo servido",
+    "customer_expected_amount_reference": "Referencia",
+    "customer_expected_amount_served": "Modelo servido"
+  },
+  "customerFlags": {
+    "thin_history": "Poca historia",
+    "stock_unavailable_now": "Sin existencias hoy",
+    "low_availability_90d": "Poca disponibilidad reciente",
+    "price_unknown": "Precio desconocido",
+    "coherence_adjusted": "Ajustada por coherencia",
+    "calibration_degraded": "Calibración degradada",
+    "calibration_uncalibrated": "Sin calibrar"
+  },
+  "customers": {
+    "title": "Compradores",
+    "subtitle": "Qué compradores comprarán qué productos en los próximos 7, 30 o 90 días, y cuánto.",
+    "privacyTitle": "Solo compradores identificados",
+    "privacy": "Las ventas sin comprador y las de consumidor final no se convierten en una persona recurrente: no tienen predicción individual y su demanda queda en el residual de la conciliación. Los documentos de identidad no se muestran.",
+    "noHorizonsInPlan": "Su plan no incluye horizontes de comportamiento de compra.",
+    "tabs": {
+      "predicciones": "Predicciones",
+      "evaluacion": "Evaluación",
+      "conciliacion": "Conciliación",
+      "modelos": "Modelos",
+      "ejecuciones": "Ejecuciones",
+      "predictions": "Predicciones",
+      "evaluation": "Evaluación",
+      "reconciliation": "Conciliación",
+      "models": "Modelos",
+      "runs": "Ejecuciones"
+    },
+    "buyer": "Comprador",
+    "probability": "Probabilidad de comprar",
+    "noProbability": "Sin predicción",
+    "quantityIfPurchase": "Cantidad si compra",
+    "expectedQuantity": "Cantidad esperada",
+    "estimatedAmount": "Monto estimado",
+    "amountAssumption": "Estimación con supuesto de precio, no es una venta confirmada",
+    "amountNoticeTitle": "Montos estimados",
+    "amountNotice": "El monto es la cantidad esperada por el último precio neto de la relación. Es una estimación con un supuesto de precio: no son ventas confirmadas ni facturas futuras.",
+    "committed": "Comprometido",
+    "model": "Modelo",
+    "fallbackModel": "respaldo",
+    "flags": "Avisos",
+    "orderBy": "Ordenar por",
+    "minProbability": "Probabilidad mínima",
+    "anyProbability": "Cualquiera",
+    "purchasesCount": "{n} compras previas",
+    "range80": "rango 80 %: {lo} a {hi}",
+    "coherenceAdjusted": "ajustada para ser coherente entre horizontes",
+    "calibration": {
+      "degraded": "calibración degradada",
+      "uncalibrated": "sin calibrar"
+    },
+    "rankingSource": "Fuente del ranking de productos probables: {source}",
+    "definitions": "Qué significa cada cifra",
+    "defTerms": {
+      "purchase_probability": "Probabilidad de comprar",
+      "quantity_if_purchase": "Cantidad si compra",
+      "expected_quantity": "Cantidad esperada",
+      "expected_amount": "Monto estimado",
+      "committed_quantity": "Comprometido",
+      "ranking_source": "Fuente del ranking",
+      "inactivity": "Inactividad"
+    },
+    "noRowsFilter": "Ninguna predicción cumple los filtros elegidos.",
+    "horizonUnavailableTitle": "Sin predicciones a {n} días",
+    "horizonUnavailableText": "La última corrida se abstuvo de este horizonte por datos insuficientes o porque no hay un modelo en producción. No se muestra ninguna cifra.",
+    "viewHorizon": "Ver {n} días",
+    "noPredictionTitle": "Aún no hay predicciones de compra",
+    "noPredictionText": "Entrene los modelos y genere una predicción. Sin ventas con comprador identificado suficientes, el sistema se abstiene en lugar de inventar cifras.",
+    "goRuns": "Ir a ejecuciones",
+    "backToList": "Volver a compradores",
+    "profile": {
+      "title": "Ficha del comprador",
+      "noSegment": "Sin segmento",
+      "generic": "Consumidor final",
+      "notFoundTitle": "Comprador no encontrado",
+      "notFoundText": "No existe o no pertenece a esta empresa.",
+      "fallbackDefault": "No hay una predicción individual para este comprador.",
+      "status": {
+        "predicted": "Con predicción",
+        "no_individual_prediction": "Sin predicción individual",
+        "no_candidate_relations": "Sin relaciones activas con productos",
+        "no_prediction_run": "Aún no hay predicciones"
+      },
+      "frequencyTitle": "Frecuencia de compra",
+      "frequency": "Días de compra por 30 días",
+      "frequencyHint": "Promedio reciente, en cualquier producto",
+      "medianInterval": "Intervalo habitual",
+      "medianIntervalHint": "Mediana de días entre compras",
+      "sinceLast": "Desde la última compra",
+      "purchaseDays": "Días con compra",
+      "inactivityTitle": "Riesgo de inactividad",
+      "notAbandonment": "No es abandono definitivo.",
+      "inactivity": {
+        "active": "Activo",
+        "at_risk": "En riesgo",
+        "inactive_by_pattern": "Inactivo según su patrón",
+        "insufficient_history": "Historia insuficiente"
+      },
+      "inactivityRisk": "Su pausa actual es más larga que el {pct} de sus pausas anteriores.",
+      "inactivityUnknown": "No hay suficientes intervalos propios para estimar el riesgo; no se muestra un valor.",
+      "inactivityThresholds": "Su pausa habitual llega a {p75} días (75 % de las veces) y a {p90} días (90 %), con {n} intervalos observados.",
+      "behaviorTitle": "Cambio de comportamiento",
+      "behavior": {
+        "increase": "Compra más que antes",
+        "decrease": "Compra menos que antes",
+        "stable": "Estable",
+        "insufficient_history": "Historia insuficiente"
+      },
+      "behaviorUnknown": "Se necesitan al menos 180 días de historia y 4 días de compra para evaluar un cambio.",
+      "frequencyRatio": "Razón de frecuencia (90 días / 90 días previos)",
+      "spendRatio": "Cambio de gasto",
+      "rankingTitle": "Productos más probables a {n} días",
+      "rankingEmpty": "No hay productos candidatos para este horizonte.",
+      "rankedBy": "Ordenado por"
+    },
+    "eval": {
+      "honestyTitle": "Qué mide esta evaluación",
+      "honesty": "Se mide en un período final reservado que no participa en ninguna decisión. Los datos de demostración o sintéticos comprueban el procedimiento; no validan la precisión comercial.",
+      "noneTitle": "Aún no hay una evaluación",
+      "noneText": "Entrene los modelos para obtener métricas. Si no hay datos suficientes, el entrenamiento se abstiene y lo explica aquí.",
+      "noMetricsTitle": "Sin métricas para este horizonte",
+      "noMetricsText": "Este horizonte no llegó a evaluarse: no hubo datos suficientes para un período de prueba.",
+      "protocolTitle": "Protocolo a {n} días",
+      "tier": {
+        "full": "Protocolo completo",
+        "lean": "Protocolo reducido",
+        "reference_only": "Solo referencia",
+        "abstained": "Sin entrenar"
+      },
+      "tierText": {
+        "full": "Se entrenó, calibró, seleccionó y probó con bloques cronológicos separados.",
+        "lean": "No hubo datos para un bloque de selección: se entrenó un único modelo preconfigurado y se probó en el período final.",
+        "reference_only": "No hubo datos suficientes para entrenar un modelo: se usa solo la referencia de frecuencia y recencia, calibrada. El resultado queda con reservas.",
+        "abstained": "No hubo datos suficientes: no hay modelo ni probabilidad para este horizonte."
+      },
+      "block": "Bloque",
+      "blocks": {
+        "train": "Entrenamiento",
+        "calibration": "Calibración",
+        "selection": "Selección",
+        "holdout": "Prueba final"
+      },
+      "cutoffs": "Fechas de corte",
+      "labelWindow": "Ventana del resultado",
+      "rows": "Filas",
+      "positives": "Compras",
+      "maturity": "Resultados conocidos",
+      "maturityText": "Solo se usan resultados ya completos hasta el {date}.",
+      "gap": "Separación entre bloques",
+      "gapText": "{n} días entre bloques, para que ninguna ventana de resultado se solape con el bloque siguiente.",
+      "holdoutNotUsed": "La prueba final no se usó para",
+      "promoted": "Promovido",
+      "notPromoted": "No promovido",
+      "challenger": "candidato: {name}",
+      "objectives": {
+        "probability": "Probabilidad",
+        "quantity": "Cantidad",
+        "quantity_if_purchase": "Cantidad si compra",
+        "expected_quantity": "Cantidad esperada",
+        "expected_amount": "Monto esperado",
+        "ranking": "Ranking"
+      },
+      "probabilityTitle": "Probabilidad de comprar",
+      "probabilityText": "Brier y log loss: menores son mejores. PR-AUC: mayor es mejor y debe compararse con la referencia. ECE: diferencia media entre lo predicho y lo observado.",
+      "prAucVsRef": "PR-AUC vs referencia",
+      "baseRate": "Tasa base",
+      "served": "servido",
+      "brierSkill": "Mejora del Brier frente a predecir siempre la tasa base: {value}",
+      "calibrationTitle": "Curva de calibración",
+      "calibrationText": "Compara la probabilidad predicha con la frecuencia con que realmente se compró, por grupos, con el número de observaciones de cada grupo.",
+      "curveOf": "Curva del modelo",
+      "rankingTitle": "Ranking de productos probables",
+      "rankingText": "Precisión en los primeros k: de los k productos sugeridos, qué parte se compró. Cobertura en los primeros k: qué parte de lo comprado estaba entre los k primeros.",
+      "source": "Fuente",
+      "rankingServed": "Modelo servido",
+      "rankingChallenger": "Candidato no promovido",
+      "rankingDecision": "Fuente elegida: {source}. {reason}",
+      "quantity": {
+        "quantity_if_purchase": {
+          "title": "Cantidad si compra",
+          "text": "Error de la cantidad total comprada en la ventana, solo en los casos en que hubo compra."
+        },
+        "expected_quantity": {
+          "title": "Cantidad esperada",
+          "text": "Error de la cantidad esperada (probabilidad por cantidad), incluyendo los casos sin compra."
+        },
+        "expected_amount": {
+          "title": "Monto esperado",
+          "text": "Error del monto esperado frente al importe neto real de la ventana."
+        }
+      },
+      "inactivityTitle": "Evaluación de la inactividad",
+      "inactivityBase": "Tasa base de ninguna compra en 90 días: {rate}. AUC del riesgo propio: {auc}; AUC de los días desde la última compra: {aucNaive}.",
+      "frequencyTitle": "Evaluación de la frecuencia",
+      "precisionAtK": "Precisión (primeros {k})",
+      "recallAtK": "Cobertura (primeros {k})"
+    },
+    "reconciliation": {
+      "intro": "La demanda agregada se descompone en compradores modelados, comprometido fuera del modelo y residual (anónimos, compradores nuevos y no modelados). Las dos vistas nunca se suman.",
+      "inconsistentTitle": "{n} productos con compradores por encima del agregado",
+      "inconsistentText": "La suma de los compradores y lo comprometido supera la demanda agregada. Se muestra el exceso y no se ajusta ninguna probabilidad individual.",
+      "allStatuses": "Todos los estados",
+      "status": {
+        "ok": "Conciliado",
+        "inconsistent": "Inconsistente",
+        "aggregate_unavailable": "Sin demanda agregada",
+        "aggregate_incomplete": "Agregado incompleto"
+      },
+      "severity": {
+        "minor": "exceso leve",
+        "major": "exceso grave"
+      },
+      "hint": {
+        "aggregate_unavailable": "No hay pronóstico agregado vigente para este producto: no se calcula el residual.",
+        "aggregate_incomplete": "El pronóstico agregado no cubre todo el horizonte: no se calcula el residual.",
+        "ok": "",
+        "inconsistent": ""
+      },
+      "notComputed": "No se calcula",
+      "aggregate": "Demanda agregada",
+      "buyers": "Compradores modelados",
+      "committedOutside": "Comprometido fuera del modelo",
+      "residual": "Residual",
+      "days": "{n} días cubiertos",
+      "buyersSplit": "comprometido {committed} + adicional {incremental}",
+      "excess": "exceso {qty} ({pct})",
+      "emptyTitle": "Sin productos para conciliar",
+      "emptyText": "Genere una predicción de compra para ver la conciliación."
+    },
+    "models": {
+      "text": "Modelos por horizonte y objetivo. Una versión validada o retirada se puede volver a servir; la actual del mismo horizonte y objetivo se retira."
+    },
+    "runs": {
+      "differenceTitle": "Entrenar no es lo mismo que predecir",
+      "difference": "Entrenar reconstruye y evalúa los modelos. Predecir usa los modelos en producción y recalcula las variables a la fecha: la recencia cambia cada día aunque no haya ventas nuevas.",
+      "needsAbility": "Entrenar y predecir requiere permiso para generar pronósticos.",
+      "horizonsToUse": "Horizontes",
+      "train": "Entrenar modelos",
+      "predict": "Actualizar predicciones",
+      "inProgress": "Ya hay una ejecución de esta operación en curso.",
+      "trainDone": "Entrenamiento terminado.",
+      "predictDone": "Predicciones actualizadas.",
+      "history": "Ejecuciones recientes",
+      "empty": "Aún no hay ejecuciones.",
+      "operation": "Operación",
+      "operations": {
+        "train": "Entrenamiento",
+        "predict": "Predicción"
+      },
+      "asOf": "Fecha de cálculo"
+    }
+  },
+  "sql": {
+    "title": "Fuente SQL",
+    "subtitle": "Conexión de solo lectura, consultas autorizadas y sincronización.",
+    "back": "Volver a fuentes de datos",
+    "notFoundTitle": "Fuente no encontrada",
+    "notFoundText": "No existe o no pertenece a esta empresa.",
+    "fixFields": "Revise los campos marcados.",
+    "untestedTitle": "Conector sin probar",
+    "untested": "Este conector está implementado pero no se ha probado contra un servidor real. Pruebe la conexión y valide los resultados antes de confiar en él.",
+    "readOnlyPrinciple": "Predictily solo lee: ejecuta únicamente consultas SELECT autorizadas, en una transacción de solo lectura. Aun así, use una cuenta de base de datos con permisos de solo lectura.",
+    "credentialsNote": "El usuario y la clave se guardan cifrados y nunca se muestran de nuevo.",
+    "credentialsKept": "Ya hay credenciales guardadas. Déjelas vacías para conservarlas; si escribe unas nuevas, reemplazan a las anteriores.",
+    "steps": {
+      "connection": "Conexión",
+      "queries": "Consultas",
+      "sync": "Sincronización"
+    },
+    "fields": {
+      "name": "Nombre",
+      "host": "Servidor",
+      "port": "Puerto",
+      "database": "Base de datos",
+      "sslmode": "Cifrado de la conexión",
+      "timezone": "Zona horaria de la fuente",
+      "schedule": "Sincronización automática",
+      "username": "Usuario",
+      "password": "Clave"
+    },
+    "hints": {
+      "host": "Nombre o dirección del servidor.",
+      "sslmode": "En producción use require o verify-full.",
+      "timezone": "Se usa para interpretar las fechas sin zona de la consulta."
+    },
+    "schedules": {
+      "manual": "Solo manual",
+      "hourly": "Cada hora",
+      "daily": "Diaria"
+    },
+    "connection": {
+      "saved": "Conexión guardada.",
+      "test": "Probar conexión",
+      "ok": "Conexión de solo lectura establecida",
+      "failed": "No se pudo conectar",
+      "serverVersion": "Versión del servidor",
+      "readOnly": "Cómo se impide escribir",
+      "verification": "Comprobación del conector",
+      "warnings": "Advertencias de la conexión"
+    },
+    "readOnlyModes": {
+      "transaction_read_only": "Transacción de solo lectura del motor",
+      "validator_and_reader_account": "Validador de consultas y cuenta de solo lectura (este motor no tiene modo de solo lectura por transacción)"
+    },
+    "entities": {
+      "sales": "Ventas",
+      "products": "Productos",
+      "inventory": "Inventario",
+      "commitments": "Compromisos comerciales",
+      "branches": "Sucursales",
+      "suppliers": "Proveedores",
+      "lead_times": "Plazos de entrega",
+      "promotions": "Promociones",
+      "calendar_events": "Calendario de eventos",
+      "unit_conversions": "Conversiones de unidades",
+      "warehouses": "Almacenes"
+    },
+    "query": {
+      "principle": "Cada cambio crea una versión nueva sin aprobar. Solo la versión aprobada y activa sincroniza, y la consulta se vuelve a validar cada vez que se ejecuta.",
+      "entity": "Qué datos trae",
+      "query": "Consulta SELECT autorizada",
+      "queryHint": "Una sola sentencia SELECT. La consulta debe traer documentos completos. Puede usar el parámetro :since para la fecha de la última sincronización.",
+      "rejected": "La consulta fue rechazada: {reason}",
+      "fieldMap": "Equivalencia de columnas",
+      "fieldMapHint": "Para cada campo de Predictily, escriba la columna de su consulta. Marque «valor fijo» para usar un valor constante. Los campos con asterisco son obligatorios.",
+      "sourceColumn": "columna de origen",
+      "fixedValue": "valor fijo",
+      "fixed": "valor fijo",
+      "missingFields": "Faltan campos obligatorios: {list}",
+      "advanced": "Opciones avanzadas",
+      "options": "Opciones (JSON)",
+      "optionsHint": "Ejemplo: tamaño de página, minutos de traslape, zona horaria de la fuente, cobertura. Sin zona, las fechas se interpretan en la zona de la empresa ({tz}).",
+      "optionsInvalid": "Las opciones avanzadas no son un JSON válido.",
+      "saveVersion": "Guardar como versión nueva",
+      "savedVersion": "Versión {n} guardada, pendiente de aprobación.",
+      "versions": "Versiones",
+      "noVersions": "Aún no hay versiones de consulta para estos datos.",
+      "state": {
+        "active": "Aprobada y activa",
+        "pending": "Pendiente de aprobar",
+        "inactive": "Desactivada"
+      },
+      "approvedBy": "aprobada por {name}",
+      "useAsBase": "Usar como base",
+      "preview": "Vista previa",
+      "approve": "Aprobar",
+      "deactivate": "Desactivar",
+      "approveTitle": "¿Aprobar esta versión?",
+      "approveText": "La versión {n} pasará a ser la que sincroniza y reemplazará a la versión activa de estos datos.",
+      "approved": "Versión aprobada.",
+      "previewTitle": "Vista previa de la versión {n}",
+      "previewEmpty": "La consulta no devolvió filas.",
+      "sourceUnavailable": "No se pudo consultar la fuente: {reason}"
+    },
+    "sync": {
+      "principle": "La sincronización usa el mismo flujo de importación que un archivo: valida, evita duplicados y registra de dónde vino cada dato. Si hay filas con error, queda por revisar y no se importa nada.",
+      "mode": "Modo",
+      "modes": {
+        "incremental": "Incremental (solo lo nuevo)",
+        "full": "Completa"
+      },
+      "start": "Sincronizar",
+      "running": "Sincronizando…",
+      "notApproved": "No hay una versión aprobada y activa para estos datos. Apruebe una versión en el paso de consultas.",
+      "inProgress": "Ya hay una sincronización en curso para estos datos.",
+      "current": "Sincronización {id}",
+      "completed": "Sincronización terminada.",
+      "needsReview": "Hay filas con error y no se importó nada. Revíselas en la importación y confírmela o recházela.",
+      "openImport": "Abrir la importación",
+      "history": "Sincronizaciones recientes",
+      "empty": "Aún no hay sincronizaciones.",
+      "version": "Versión",
+      "rows": "Filas extraídas",
+      "finished": "Fecha"
+    }
+  },
+  "coverage": {
+    "title": "Cobertura de las fuentes",
+    "intro": "Indique hasta qué fecha está completa cada fuente. Dentro de esa cobertura, un día sin ventas es un cero real; fuera de ella, o si no se declara, es un dato ausente y no se convierte en cero.",
+    "effectiveTitle": "Cobertura efectiva",
+    "entity": "Fuente",
+    "completeFrom": "Completa desde",
+    "completeThrough": "Completa hasta",
+    "rule": "Cómo se determinó",
+    "rules": {
+      "declared_by_user": "Declarada por usted",
+      "min_over_sources": "Mínimo entre las fuentes",
+      "none": "Sin cobertura declarada"
+    },
+    "noneHint": "Los días sin registros se tratan como ausentes, no como cero.",
+    "declaredTitle": "Declaraciones y coberturas inferidas",
+    "basis": "Origen",
+    "bases": {
+      "declared": "Declarada",
+      "inferred": "Inferida por el conector"
+    },
+    "lastIngested": "Última carga",
+    "fromSource": "Fuente #{id}",
+    "declareTitle": "Declarar cobertura",
+    "fromHint": "Opcional. Vacío si no se conoce.",
+    "throughHint": "No puede ser una fecha futura.",
+    "notes": "Notas",
+    "declare": "Declarar cobertura",
+    "saved": "Cobertura declarada.",
+    "readOnly": "Declarar la cobertura requiere permiso para importar datos.",
+    "entities": {
+      "sales": "Ventas",
+      "inventory": "Inventario",
+      "purchases": "Compras",
+      "costs": "Costos",
+      "promotions": "Promociones",
+      "customers": "Clientes",
+      "commitments": "Compromisos",
+      "calendar": "Calendario",
+      "externals": "Indicadores externos"
+    }
+  },
+  "calendar": {
+    "title": "Calendario de eventos",
+    "intro": "Feriados, temporadas y campañas con su alcance. Cada evento indica desde cuándo se conocía (conocimiento): un evento sin esa fecha no se usa como conocido de antemano al evaluar el pasado.",
+    "all": "Todos",
+    "includePublic": "Incluir calendario público",
+    "add": "Agregar evento",
+    "empty": "No hay eventos con estos filtros.",
+    "unknownWarning": "Hay eventos sin fecha de conocimiento: no se usarán como conocidos de antemano en cortes históricos.",
+    "dates": "Fechas",
+    "public": "público",
+    "revision": "revisión {n}",
+    "readOnly": "solo lectura",
+    "knownAtUnknown": "Conocimiento desconocido",
+    "cancel": "Cancelar evento",
+    "cancelTitle": "¿Cancelar este evento?",
+    "cancelText": "El evento {name} quedará cancelado. El historial de revisiones se conserva.",
+    "fields": {
+      "scope": "Alcance",
+      "scopeRef": "Referencia del alcance",
+      "code": "Código",
+      "name": "Nombre",
+      "category": "Categoría",
+      "startsOn": "Desde",
+      "endsOn": "Hasta",
+      "status": "Estado",
+      "knownAt": "Conocido desde"
+    },
+    "hints": {
+      "scope": "A quién aplica: país, región, toda la empresa, una sucursal, una categoría o un producto.",
+      "scopeRef": "País (EC), código de sucursal, SKU o nombre de categoría. Vacío si aplica a toda la empresa.",
+      "knownAt": "Desde cuándo la empresa conocía este evento. Si no lo sabe, déjelo vacío."
+    },
+    "scopes": {
+      "country": "País",
+      "region": "Región",
+      "tenant": "Toda la empresa",
+      "branch": "Sucursal",
+      "category": "Categoría",
+      "product": "Producto",
+      "sector": "Sector"
+    },
+    "categories": {
+      "holiday": "Feriado",
+      "local_holiday": "Feriado local",
+      "commercial_season": "Temporada comercial",
+      "campaign": "Campaña",
+      "promotion": "Promoción",
+      "sector_event": "Evento del sector",
+      "agricultural_season": "Temporada agrícola",
+      "international_peak": "Pico internacional",
+      "exceptional": "Evento extraordinario"
+    }
+  },
+  "commitments": {
+    "title": "Compromisos comerciales",
+    "notSalesTitle": "No son ventas realizadas",
+    "notSales": "Las cotizaciones, los pedidos confirmados y los contratos son compromisos: se muestran aparte, con su estado y lo que falta por entregar. No se suman a la demanda ni a las ventas.",
+    "number": "Número",
+    "type": "Tipo",
+    "issued": "Emisión",
+    "pending": "Pendiente",
+    "detail": "Ver detalle",
+    "types": {
+      "quote": "Cotización",
+      "order": "Pedido confirmado",
+      "contract": "Contrato"
+    },
+    "empty": "No hay compromisos con estos filtros.",
+    "cancelDateUnknown": "Cancelado sin fecha conocida",
+    "detailTitle": "Compromiso {number}",
+    "validity": "Vigencia",
+    "expectedDelivery": "Entrega prevista",
+    "items": "Líneas",
+    "quantity": "Cantidad",
+    "fulfilled": "Cumplido",
+    "delivery": "Entrega",
+    "converted": "convertido de {q} {u} (factor {f})",
+    "revisions": "Revisiones",
+    "revisionLine": "Revisión {n}: {status}, registrada el {date}",
+    "cancel": "Cancelar compromiso",
+    "cancelTitle": "¿Cancelar este compromiso?",
+    "cancelText": "El compromiso {number} quedará cancelado desde hoy; se agrega una revisión y el historial se conserva.",
+    "cancelled": "Compromiso cancelado.",
+    "alreadyCancelled": "Ese compromiso ya estaba cancelado."
+  },
+  "warehouses": {
+    "title": "Almacenes",
+    "intro": "Un almacén por sucursal con su capacidad física. Una capacidad vacía significa desconocida, no cero.",
+    "add": "Agregar almacén",
+    "empty": "Aún no hay almacenes.",
+    "capacityUnknown": "Desconocida",
+    "fields": {
+      "code": "Código",
+      "name": "Nombre",
+      "capacity": "Capacidad",
+      "unit": "Unidad de la capacidad"
+    },
+    "hints": {
+      "capacity": "Déjela vacía si no se conoce.",
+      "unit": "Obligatoria si indica una capacidad (m3, pallets, kg...)."
+    }
+  },
+  "units": {
+    "title": "Conversiones de unidades",
+    "intro": "Si una unidad difiere de la del producto y no hay una conversión declarada, el dato se rechaza: nunca se asume un factor.",
+    "add": "Agregar conversión",
+    "empty": "Aún no hay conversiones declaradas.",
+    "general": "General (todos los productos)",
+    "fields": {
+      "productSku": "SKU del producto",
+      "from": "Unidad de origen",
+      "to": "Unidad de destino",
+      "factor": "Factor",
+      "validFrom": "Vigente desde"
+    },
+    "hints": {
+      "productSku": "Vacío para una conversión general.",
+      "factor": "cantidad en destino = cantidad en origen × factor"
+    }
+  },
+  "effectiveConfig": {
+    "intro": "Cada módulo se calcula con valores del core, de un perfil sectorial (si su empresa tiene uno) o propios de su empresa. Aquí ve de dónde viene cada valor y puede definir los de su empresa. Cambiarlos no altera los pronósticos ya calculados.",
+    "module": "Módulo",
+    "cores": {
+      "demand": "Demanda",
+      "customer": "Comportamiento de compra",
+      "supply": "Abastecimiento",
+      "cost": "Costos",
+      "scenario": "Escenarios"
+    },
+    "version": "Versión de la configuración",
+    "profileApplied": "Perfil sectorial aplicado: {code} (versión {version}).",
+    "syntheticProfile": "perfil de prueba",
+    "noProfile": "Sin perfil sectorial: solo se usan los valores del core y los de su empresa.",
+    "key": "Parámetro",
+    "value": "Valor",
+    "origin": "Origen",
+    "sources": {
+      "core": "Core",
+      "profile": "Perfil {name}",
+      "tenant": "Su empresa"
+    },
+    "restore": "Volver al valor heredado",
+    "willRestore": "Al guardar, volverá al valor heredado.",
+    "unsaved": "Hay cambios sin guardar.",
+    "saved": "Configuración guardada.",
+    "rejected": "El motor rechazó la configuración. Revise los parámetros marcados.",
+    "engineUnavailable": "El motor predictivo no está disponible. Intente de nuevo en unos minutos.",
+    "readOnly": "Cambiar la configuración requiere permiso de administración.",
+    "extensionsTitle": "Extensiones del perfil sectorial",
+    "invalid": {
+      "booleano": "Elija sí o no.",
+      "vacío": "Este valor no puede quedar vacío.",
+      "número": "Escriba un número.",
+      "lista": "Escriba una lista en formato JSON, por ejemplo [7, 30].",
+      "objeto": "Escriba un objeto en formato JSON.",
+      "json": "Escriba un JSON válido."
+    }
+  },
+  "supply": {
+    "title": "Plan de compras",
+    "subtitle": "Sugerencias de reposición con restricciones, pronóstico de costos, escenarios y verificación causal.",
+    "principle": "Predictily sugiere; no emite pedidos ni compromete fondos. Cada sugerencia indica qué restricciones la limitan y por qué se eligió ese proveedor.",
+    "needsRun": "Esta acción requiere permiso para generar pronósticos.",
+    "tabs": {
+      "plan": "Plan",
+      "configuracion": "Datos del plan",
+      "costos": "Costos",
+      "escenarios": "Escenarios",
+      "causalidad": "Causalidad",
+      "simulacion": "Simulación histórica",
+      "config": "Datos del plan",
+      "costs": "Costos",
+      "scenarios": "Escenarios",
+      "causal": "Causalidad",
+      "simulation": "Simulación histórica"
+    },
+    "solver": {
+      "gap": "Brecha: {gap}",
+      "seconds": "{s} s de cálculo",
+      "notProven": "Este plan no tiene un óptimo probado: es una solución válida, pero podría existir una mejor.",
+      "optimal": {
+        "label": "Óptimo probado",
+        "text": "El solver probó que no existe un plan mejor dentro de la tolerancia declarada."
+      },
+      "feasible_with_gap": {
+        "label": "Factible con brecha",
+        "text": "Es un plan válido, pero la brecha frente al mejor teórico es mayor que la mínima. Se informa la brecha."
+      },
+      "time_limit": {
+        "label": "Límite de tiempo agotado",
+        "text": "Se agotó el tiempo de cálculo. Es la mejor solución encontrada, no probada óptima."
+      },
+      "infeasible": {
+        "label": "Sin plan posible",
+        "text": "Con cobertura obligatoria no existe un plan que respete todas las restricciones. No se devuelve ningún plan; se explican las causas y las alternativas."
+      },
+      "heuristic_fallback": {
+        "label": "Plan de respaldo",
+        "text": "El solver no entregó una solución utilizable: este plan viene de una regla simple de respaldo que no optimiza el costo conjunto."
+      },
+      "not_solved": {
+        "label": "Sin resolver",
+        "text": "Ni el solver ni el respaldo produjeron un plan verificable."
+      },
+      "unknown": {
+        "label": "Estado desconocido",
+        "text": "No se conoce el estado del solver; no se debe asumir que el plan es óptimo."
+      }
+    },
+    "plan": {
+      "suggestionTitle": "Sugerencias, no pedidos",
+      "suggestion": "Predictily no envía pedidos ni compromete fondos. Las líneas son sugerencias que usted decide emitir.",
+      "newPlan": "Nuevo plan de compras",
+      "objective": "Objetivo",
+      "objectiveHint": "Qué se minimiza o maximiza.",
+      "objectives": {
+        "min_cost": "Minimizar el costo",
+        "max_margin": "Maximizar el margen"
+      },
+      "coverage": "Cobertura de la demanda",
+      "coverageModes": {
+        "soft": "Flexible",
+        "hard": "Obligatoria"
+      },
+      "coverageHints": {
+        "soft": "Puede dejar demanda sin atender, penalizada y declarada.",
+        "hard": "Debe cubrir toda la demanda; si no se puede, no hay plan y se explican las causas."
+      },
+      "horizonDays": "Horizonte del plan (días)",
+      "horizonHint": "Entre 14 y 365 días.",
+      "periodDays": "Período de planificación",
+      "advanced": "Supuestos del cálculo",
+      "advancedHint": "Si deja un valor vacío se usa la configuración de su empresa. Estos son supuestos, no costos observados.",
+      "default": "predeterminado",
+      "shortagePenaltyMultiplier": "Multiplicador de la penalización por faltante",
+      "shortagePenaltyHint": "Mayor que 1: dejar de vender cuesta más que comprar.",
+      "safetyWeight": "Peso del stock de seguridad",
+      "safetyWeightHint": "Menor que 1: vender tiene prioridad sobre el stock de seguridad.",
+      "holdingRate": "Costo anual de mantener inventario",
+      "holdingRateHint": "Fracción del costo (0,20 = 20 %).",
+      "timeLimit": "Tiempo máximo del cálculo (s)",
+      "implicitOffers": "Usar el último costo conocido cuando un producto no tenga ofertas",
+      "create": "Generar plan",
+      "createHint": "El cálculo corre en segundo plano.",
+      "inProgress": "Ya hay un plan en cálculo.",
+      "ready": "El plan está listo.",
+      "history": "Planes recientes",
+      "empty": "Aún no hay planes.",
+      "open": "Abrir",
+      "errors": {
+        "range14_365": "Debe estar entre 14 y 365.",
+        "gt1": "Debe ser mayor que 1.",
+        "lt1": "Debe estar entre 0 y 1 (sin llegar a 1).",
+        "range0_5": "Debe estar entre 0 y 5.",
+        "range1_300": "Debe estar entre 1 y 300."
+      },
+      "resultTitle": "Resultado del plan",
+      "noPlanTitle": "No hay plan",
+      "noPlanText": "El cálculo no produjo un plan: no hay un pronóstico de demanda completado o faltan datos.",
+      "solverTitle": "Estado del solver",
+      "purchaseCost": "Costo de compra",
+      "holdingCost": "Costo de mantener inventario",
+      "shortagePenalty": "Penalización por faltantes",
+      "assumptionCost": "supuesto, no costo observado",
+      "unmet": "Demanda no atendida",
+      "unmetShare": "{pct} de la demanda",
+      "infeasibleTitle": "No existe un plan que respete todas las restricciones",
+      "infeasibleText": "Con cobertura obligatoria no hay solución.",
+      "causes": "Causas",
+      "cause": "Restricción",
+      "unitsRecovered": "Unidades que se recuperarían",
+      "requirement": "Requisito",
+      "needed": "se necesitan {needed} y se declararon {declared}",
+      "structural": "Aun sin restricciones quedarían {units} unidades sin atender por: {label}.",
+      "alternativeTitle": "Plan de máxima cobertura factible",
+      "alternativeLines": "Respeta todas las restricciones: {n} líneas y {unmet} unidades sin atender.",
+      "linesTitle": "Qué comprar",
+      "linesCount": "{n} líneas, {now} para emitir hoy",
+      "onlyNow": "Solo lo que puedo emitir hoy",
+      "noLines": "El plan no sugiere compras en este filtro.",
+      "supplier": "Proveedor",
+      "quantity": "Cantidad",
+      "issueDate": "Emitir el",
+      "receiptDate": "Recepción",
+      "unitCost": "Costo unitario",
+      "lineCost": "Costo de la línea",
+      "constraints": "Restricciones y motivo",
+      "issueToday": "Emitir hoy",
+      "production": "producción",
+      "why": "Por qué este proveedor",
+      "shortfallsTitle": "Demanda no atendida",
+      "shortfallsText": "{units} unidades en total ({pct} de la demanda del plan), con la causa de cada faltante.",
+      "noShortfalls": "El plan atiende toda la demanda pronosticada.",
+      "period": "Período",
+      "demand": "Demanda",
+      "reason": "Causa",
+      "activeConstraints": "Restricciones activas",
+      "offersTitle": "Comparación de ofertas",
+      "offersSummary": "{received} ofertas recibidas: {comparable} comparables y {excluded} excluidas.",
+      "excludedOffer": "Oferta {id} del producto {product}",
+      "productionNotConfigured": "Producción no configurada: sin recetas, el plan solo incluye compras. Esto no bloquea la reposición."
+    },
+    "shortfall": {
+      "lead_time": "El proveedor tarda más de lo que se puede esperar",
+      "budget": "Falta presupuesto",
+      "supplier_capacity": "El proveedor no alcanza a surtir",
+      "storage_capacity": "No cabe en el almacén",
+      "resource_capacity": "Falta capacidad de producción",
+      "economic": "No conviene económicamente",
+      "no_offer": "No hay oferta comparable",
+      "mixed": "Varias causas a la vez",
+      "unknown": "Causa no determinada"
+    },
+    "families": {
+      "budget": "Presupuesto",
+      "supplier_capacity": "Capacidad del proveedor",
+      "storage_capacity": "Capacidad de almacén",
+      "storage": "Almacenamiento",
+      "resource_capacity": "Capacidad de producción",
+      "resource": "Producción",
+      "minimum_order": "Pedido mínimo",
+      "structural": "Plazos u ofertas"
+    },
+    "offerReasons": {
+      "no_unit_conversion": "Falta declarar la conversión de unidades",
+      "no_fx_rate": "Falta una tasa de cambio explícita",
+      "expired": "Oferta vencida",
+      "not_valid_yet": "Aún no vigente",
+      "inactive": "Oferta inactiva",
+      "unknown_known_at": "Sin fecha de conocimiento"
+    },
+    "config": {
+      "intro": "Estos son los datos que usa el planificador. Lo que no se conoce se deja vacío: no se rellena con cero. Una oferta sin conversión de unidades o sin tasa de cambio explícita no es comparable y se excluye del plan.",
+      "readOnly": "Ver estos datos es posible; modificarlos requiere permiso para administrar el catálogo.",
+      "unknown": "Desconocido",
+      "unknownHint": "Déjelo vacío si no se conoce.",
+      "validFrom": "Vigente desde",
+      "validTo": "Vigente hasta",
+      "validity": "Vigencia",
+      "notes": "Notas",
+      "tabs": {
+        "offers": "Ofertas",
+        "rates": "Tasas de cambio",
+        "capacities": "Capacidades",
+        "budgets": "Presupuestos",
+        "resources": "Recursos",
+        "recipes": "Recetas"
+      },
+      "offers": {
+        "intro": "Precio, unidad, mínimos, plazo y vigencia de lo que ofrece cada proveedor.",
+        "empty": "Aún no hay ofertas. Sin ofertas, el plan usa el último costo conocido de cada producto.",
+        "supplier": "Proveedor",
+        "branch": "Sucursal",
+        "branchHint": "Vacío si aplica a todas.",
+        "unitCost": "Costo unitario",
+        "currency": "Moneda",
+        "currencyHint": "La moneda de su empresa es {currency}.",
+        "unit": "Unidad de la oferta",
+        "unitHint": "Si difiere de la unidad del producto debe haber una conversión declarada.",
+        "minOrder": "Pedido mínimo",
+        "multiple": "Múltiplo de pedido",
+        "leadTime": "Plazo de entrega (días)",
+        "leadTimeStd": "Variación del plazo (días)",
+        "capacity": "Capacidad del proveedor por período",
+        "capacityDays": "Días del período de capacidad",
+        "fixedCost": "Costo fijo por pedido",
+        "acquisitionPct": "Gastos de adquisición (fracción)",
+        "acquisitionPctHint": "0,05 = 5 % sobre el costo.",
+        "acquisitionUnit": "Gastos de adquisición por unidad",
+        "comparability": "Comparabilidad",
+        "comparable": "Comparable",
+        "notComparable": "No comparable",
+        "issues": {
+          "no_unit_conversion": "Falta declarar cuánto es {from} en {to}.",
+          "no_fx_rate": "Falta una tasa de cambio de {cfrom} a {cto}."
+        }
+      },
+      "rates": {
+        "intro": "Tasas explícitas con fecha y fuente. Sin tasa, una oferta o presupuesto en otra moneda no es comparable.",
+        "empty": "Aún no hay tasas de cambio.",
+        "from": "Moneda de origen",
+        "to": "Moneda de destino",
+        "rate": "Tasa",
+        "rateHint": "1 de origen = tasa de destino",
+        "validOn": "Vigente desde",
+        "source": "Fuente",
+        "sourceHint": "De dónde sale la tasa (banco, manual...).",
+        "pair": "Par"
+      },
+      "capacities": {
+        "intro": "Capacidad física de almacenamiento por sucursal, en una unidad explícita.",
+        "empty": "Aún no hay capacidades de almacén.",
+        "capacity": "Capacidad",
+        "unit": "Unidad",
+        "unitHint": "m3, pallets, kg, unidades..."
+      },
+      "budgets": {
+        "intro": "Tope de compra por período. Aplica a los pedidos emitidos dentro del período; el plan nunca lo excede.",
+        "empty": "Aún no hay presupuestos. Sin presupuesto, el plan no tiene tope de gasto.",
+        "branchHint": "Vacío para toda la empresa.",
+        "start": "Inicio del período",
+        "end": "Fin del período",
+        "amount": "Monto",
+        "period": "Período"
+      },
+      "resources": {
+        "intro": "Recursos de producción con capacidad por período (horas, lotes, kg...).",
+        "empty": "Aún no hay recursos de producción.",
+        "capacity": "Capacidad por período",
+        "unit": "Unidad",
+        "unitHint": "horas, lotes, kg...",
+        "periodDays": "Días del período"
+      },
+      "recipes": {
+        "intro": "Cómo se obtiene un producto a partir de insumos: cantidad por lote, rendimiento, tiempo y recurso. Sin recetas, la producción queda sin configurar y no bloquea la reposición.",
+        "empty": "Aún no hay recetas.",
+        "output": "Producto que se obtiene",
+        "outputQty": "Cantidad nominal por lote",
+        "yield": "Rendimiento",
+        "yieldHint": "Entre 0 y 1 (0,9 = 90 % útil).",
+        "days": "Días de producción",
+        "resource": "Recurso",
+        "usage": "Uso del recurso por lote",
+        "cost": "Costo por lote",
+        "useful": "Útil por lote",
+        "inputs": "Insumos",
+        "perBatch": "Cantidad por lote",
+        "addInput": "Agregar insumo"
+      }
+    },
+    "costs": {
+      "intro": "Pronostica el costo unitario de compra, no cantidades. Se compara cada método con una referencia simple (el último costo) en un período de prueba; si ninguno mejora a la referencia, se usa la referencia. Con menos de 6 meses de costos observados no se pronostica.",
+      "policy": "Costos sin fecha de conocimiento",
+      "policies": {
+        "strict": "Estricta: no usarlos en cortes pasados",
+        "assume_valid_from": "Suponer que se conocían desde que rigen",
+        "assumeHint": "Suponer el conocimiento degrada la calidad del resultado."
+      },
+      "request": "Pronosticar costos",
+      "ready": "El pronóstico de costos está listo.",
+      "inProgress": "Ya hay un pronóstico de costos en cálculo.",
+      "empty": "Aún no hay un pronóstico de costos completado.",
+      "servedMethod": "Método usado",
+      "noMethod": "Datos insuficientes: sin pronóstico",
+      "referenceServed": "referencia",
+      "vsReference": "frente a {ref}",
+      "holdout": "Error en la prueba (MAE)",
+      "referenceMae": "referencia: {v}",
+      "lastObserved": "Último costo observado",
+      "lastPoint": "Último período pronosticado",
+      "intervalUnknown": "Rango desconocido",
+      "detail": "Detalle",
+      "points": "Puntos del pronóstico",
+      "step": "Período",
+      "reference": "Referencia",
+      "range": "Rango",
+      "methods": {
+        "last_value": "Último valor",
+        "mean_3": "Promedio de 3 meses",
+        "drift": "Tendencia",
+        "holt_damped": "Holt amortiguado"
+      }
+    },
+    "scenarios": {
+      "notCausalTitle": "Simulación condicionada, no causal",
+      "notCausal": "Estos escenarios comparan estrategias con los supuestos que usted declara. El cambio de demanda es un supuesto: no se calcula a partir del cambio de precio ni se estima el efecto del precio.",
+      "horizon": "Horizonte (días)",
+      "strategies": "Estrategias",
+      "name": "Nombre",
+      "baseName": "Escenario base",
+      "strategyN": "Estrategia {n}",
+      "price": "Precio (%)",
+      "discount": "Descuento (%)",
+      "cost": "Costo (%)",
+      "demand": "Demanda (%)",
+      "useCostForecast": "Usar pronóstico de costos",
+      "plan": "Plan de compras",
+      "noPlan": "Sin plan",
+      "pctHint": "Cambios en porcentaje respecto a lo observado. La primera fila sirve de comparación para las demás.",
+      "evaluate": "Evaluar escenarios",
+      "addStrategy": "Agregar estrategia",
+      "planLimit": "Su plan no incluye el evaluador de escenarios.",
+      "emptyTitle": "Defina las estrategias y evalúelas",
+      "emptyText": "Todas parten del mismo corte, pronóstico base, unidades y horizonte.",
+      "results": "Resultados por estrategia",
+      "measure": "Medida",
+      "sales": "Ventas atendibles (unid.)",
+      "unmet": "Demanda no atendida (unid.)",
+      "revenue": "Ingresos",
+      "margin": "Margen bruto",
+      "marginUnknown": "margen desconocido (falta costo)",
+      "unknown": "Desconocido",
+      "endingInventory": "Inventario final (valor)",
+      "planOutlay": "Desembolso del plan",
+      "ranking": "Orden por margen bruto: {list}",
+      "noRanking": "Ninguna estrategia tiene margen conocido, así que no se ordenan.",
+      "inputsOf": "Entradas de {name}",
+      "counts": "observadas {observed}, pronosticadas {forecasted}, supuestas {assumed}",
+      "classes": {
+        "observed": "Observada",
+        "forecasted": "Pronosticada",
+        "assumed": "Supuesta"
+      },
+      "inputs": {
+        "demand_base": "Demanda base",
+        "opening_inventory": "Inventario inicial",
+        "receipts_dated": "Recepciones con fecha",
+        "price_base": "Precio base",
+        "unit_cost_base": "Costo unitario base",
+        "receipts_undated": "Recepciones sin fecha",
+        "demand_change": "Cambio de demanda",
+        "price_change": "Cambio de precio",
+        "discount": "Descuento",
+        "cost_change": "Cambio de costo",
+        "plan_receipts": "Llegada del plan de compras",
+        "extra_supply": "Oferta adicional",
+        "lead_time_delta_days": "Cambio de plazo"
+      }
+    },
+    "causal": {
+      "introTitle": "Qué es y qué no es esta verificación",
+      "intro": "Revisa si hay datos y declaraciones suficientes para publicar el efecto del precio sobre la demanda. Hoy no hay ningún estimador causal habilitado: el resultado siempre es evidencia insuficiente, y la simulación condicionada sigue disponible.",
+      "priceChange": "Cambio de precio a evaluar (%)",
+      "optional": "opcional",
+      "treatment": "Tratamiento",
+      "outcome": "Resultado",
+      "unit": "Unidad de análisis",
+      "estimand": "Efecto buscado",
+      "horizon": "Horizonte (días)",
+      "population": "Población",
+      "controlled": "Confusores observables que controla",
+      "unobserved": "Confusores no observables que reconoce",
+      "assumptions": "Supuestos de identificación que sostiene",
+      "assumptionsHint": "Declararlos no los hace ciertos: no se pueden verificar con los datos.",
+      "confounders": {
+        "promotions": "Promociones",
+        "calendar_seasonality": "Calendario y temporada",
+        "stock_availability": "Disponibilidad de stock",
+        "own_cost_changes": "Cambios de costo propios",
+        "competitor_prices": "Precios de la competencia",
+        "macro_conditions": "Condiciones macroeconómicas",
+        "marketing_other_than_promotions": "Otra publicidad distinta de promociones"
+      },
+      "assumptionNames": {
+        "conditional_ignorability": "Dados los confusores, el precio no depende de la demanda potencial",
+        "positivity": "Todos los niveles de precio relevantes ocurren en cada grupo",
+        "no_interference": "El precio de un producto no altera la demanda de otro",
+        "price_exogeneity": "Los cambios de precio no reaccionaron a la demanda observada"
+      },
+      "check": "Verificar requisitos",
+      "verdictTitle": "Evidencia insuficiente",
+      "noEffect": "No se publica ningún efecto causal.",
+      "estimatorOff": "Ningún estimador causal está habilitado en esta etapa.",
+      "eligible": "Datos y declaraciones aptos para evaluar un estimador: {v}",
+      "counts": "{met} requisitos cumplidos, {notMet} sin cumplir y {declared} declarados que no se pueden verificar.",
+      "status": {
+        "met": "Cumplido",
+        "not_met": "No cumplido",
+        "declared_not_verifiable": "Declarado, no verificable"
+      },
+      "howToFix": "Cómo corregirlo:",
+      "requirements": {
+        "effect_definition": "Definición del efecto",
+        "price_variation": "Variación de precios",
+        "support": "Soporte de precios, sin extrapolar",
+        "confounders": "Confusores",
+        "availability": "Disponibilidad temporal de la información",
+        "identification": "Supuestos de identificación",
+        "estimator": "Estimador con rangos y límites"
+      },
+      "goScenarios": "Ir a escenarios"
+    },
+    "simulation": {
+      "notRealTitle": "No reemplaza la validación con datos reales",
+      "notReal": "Re-juega políticas de reposición con la información disponible a cada fecha. La demanda es la venta observada, censurada por quiebres de stock, así que el faltante queda subestimado.",
+      "days": "Días a simular",
+      "reviewDays": "Revisión cada (días)",
+      "start": "Simular",
+      "ready": "La simulación terminó.",
+      "inProgress": "Ya hay una simulación en curso.",
+      "history": "Simulaciones recientes",
+      "empty": "Aún no hay simulaciones.",
+      "results": "Resultados por política",
+      "window": "Del {from} al {to}, {series} series.",
+      "basis": "demanda: {basis}",
+      "fillRate": "Nivel de servicio",
+      "unmet": "Unidades no atendidas",
+      "inventory": "Inventario medio (valor)",
+      "daysInventory": "Días de inventario",
+      "holding": "Costo de mantener (supuesto)",
+      "lostMargin": "Margen perdido",
+      "operatingProxy": "Costo operativo aproximado",
+      "capital": "Capital comprometido medio",
+      "outlay": "Compras emitidas",
+      "solverStatuses": "Estados del solver",
+      "caveats": "Advertencias",
+      "policies": {
+        "current": "Política actual",
+        "reference": "Referencia mín-máx",
+        "planner": "Planificador",
+        "planner_budget_85pct_of_current": "Planificador con tope de gasto"
+      }
+    }
+  },
+  "assistant": {
+    "title": "Asistente",
+    "subtitle": "Pregunte por resultados que Predictily ya calculó. Es opcional: nada más depende de él.",
+    "noticeTitle": "Qué hace y qué no hace",
+    "notice": "El asistente solo explica resultados ya calculados. No calcula, no estima ni decide por usted. Las cifras que ve vienen de las tarjetas de resultados con su procedencia; si el texto citara una cifra que no está en ellas, se descarta.",
+    "disabledTitle": "El asistente no está disponible",
+    "disabledText": "Todos los resultados de Predictily siguen disponibles en el resto de la aplicación.",
+    "reasons": {
+      "missing_api_key": "Falta configurar la clave del proveedor del asistente.",
+      "disabled_by_config": "El asistente está desactivado por configuración.",
+      "provider_disabled": "El proveedor del asistente está desactivado.",
+      "unknown_provider": "El proveedor configurado no es reconocido.",
+      "disabled_for_plan": "Su plan no incluye el asistente.",
+      "invalid_base_url": "La dirección del proveedor no es válida.",
+      "missing_model": "Falta indicar el modelo del proveedor."
+    },
+    "examplesLabel": "Ejemplos de preguntas",
+    "examples": {
+      "sales": "¿Cuánto se espera vender en los próximos 30 días?",
+      "accuracy": "¿Qué tan preciso ha sido el pronóstico?",
+      "buyers": "¿Qué compradores tienen más probabilidad de comprar esta semana?"
+    },
+    "ask": "Su pregunta",
+    "placeholder": "Escriba una pregunta sobre resultados ya calculados",
+    "send": "Preguntar",
+    "explanation": "Explicación (no contiene cifras propias)",
+    "status": {
+      "no_applicable_tool": "Sin resultados aplicables",
+      "tool_denied": "Sin permiso o fuera del plan",
+      "no_answer": "Sin explicación",
+      "ungrounded_rejected": "Explicación descartada",
+      "answered": "Respondida"
+    },
+    "discarded": "Se descartó el texto porque citaba cifras que no provienen de los resultados: {list}. Use las cifras de las tarjetas.",
+    "tools": {
+      "dashboard_summary": "Resumen del panel",
+      "product_forecast": "Pronóstico por producto",
+      "forecast_accuracy": "Precisión del pronóstico",
+      "inventory_recommendations": "Recomendaciones de inventario",
+      "customer_predictions": "Predicciones de compradores",
+      "supply_plan": "Plan de compras"
+    },
+    "figureStatus": {
+      "ok": "Resultado",
+      "no_data": "Sin datos",
+      "forbidden": "Sin permiso",
+      "plan_limit": "Fuera de su plan",
+      "invalid_arguments": "Argumentos no válidos",
+      "not_found": "No encontrado",
+      "tool_not_allowed": "Herramienta no permitida",
+      "error": "Error"
+    },
+    "noData": "No hay resultados calculados para esta consulta.",
+    "field": "Campo",
+    "value": "Valor",
+    "truncated": "Se muestran solo las primeras filas del resultado.",
+    "provenance": "Procedencia de las cifras",
+    "errors": {
+      "disabled": "El asistente dejó de estar disponible.",
+      "plan": "Su plan no incluye el asistente.",
+      "rate_limited": "Demasiadas preguntas seguidas. Intente de nuevo en unos segundos.",
+      "quota": "Se alcanzó el límite diario de preguntas de su empresa.",
+      "provider": "El proveedor del asistente no respondió. Intente de nuevo; el resto de la aplicación no se ve afectado.",
+      "validation": "La pregunta no es válida (máximo de caracteres o historial)."
     }
   }
 }

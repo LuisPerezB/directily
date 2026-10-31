@@ -55,6 +55,8 @@ final class PiiMasker
             }
             $clean[$key] = match (true) {
                 is_array($value) => self::sanitize($value, $depth + 1),
+                // Los mapas JSON (stdClass) se limpian igual y siguen siendo objeto (no se vuelven lista al estar vacíos).
+                $value instanceof \stdClass => (object) self::sanitize((array) $value, $depth + 1),
                 is_string($value) => self::mask(mb_substr($value, 0, 500)),
                 default => $value,
             };

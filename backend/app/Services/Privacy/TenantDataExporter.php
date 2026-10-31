@@ -6,13 +6,15 @@ namespace App\Services\Privacy;
 
 use App\Models\Tenant;
 use App\Models\TenantExport;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use ZipArchive;
 
 /**
- * Genera un ZIP con CSVs de todos los datos de la empresa (portabilidad, LOPDP).
+ * Genera un ZIP con CSVs de todos los datos de la empresa (portabilidad, LOPDP): toda tabla con `tenant_id` se exporta salvo las credenciales
+ * (NOT_EXPORTED), y de las exportadas se omiten las columnas secretas o internas (credenciales, errores técnicos, rutas del servidor).
  * Los nombres de clientes se exportan descifrados porque pertenecen a la empresa titular;
  * las cédulas/RUC nunca se almacenaron en claro y solo existe su huella.
  */
@@ -74,39 +76,71 @@ final class TenantDataExporter
         'supply_plan_shortfalls' => ['id', 'supply_plan_id', 'branch_id', 'product_id', 'period_start', 'period_end', 'demand', 'unmet', 'reason'],
         'cost_forecasts' => ['id', 'core_run_id', 'product_id', 'supplier_id', 'cost_source', 'currency', 'unit', 'method', 'reference_method', 'quality_status', 'n_obs', 'last_observed_on', 'last_observed_cost', 'points', 'metrics', 'availability', 'limitations', 'created_at'],
         'scenario_evaluations' => ['id', 'core_run_id', 'user_id', 'name', 'horizon_days', 'request', 'results', 'created_at'],
+
+        // ── Etapa 1 · datos de la empresa que antes faltaban (P6) ──
+        'alerts' => ['id', 'type', 'severity', 'title', 'message', 'payload', 'related_type', 'related_id', 'dedup_key', 'status', 'acknowledged_by', 'acknowledged_at', 'created_at', 'updated_at'],
+        'scenarios' => ['id', 'user_id', 'forecast_run_id', 'name', 'horizon_days', 'filters', 'assumptions', 'results', 'created_at', 'updated_at'],
+        'purchase_orders' => ['id', 'supplier_id', 'branch_id', 'external_id', 'status', 'ordered_at', 'expected_at', 'received_at', 'total', 'created_at', 'updated_at'],
+        'purchase_order_items' => ['id', 'purchase_order_id', 'product_id', 'quantity_ordered', 'quantity_received', 'unit_cost', 'created_at', 'updated_at'],
+        'stock_movements' => ['id', 'branch_id', 'product_id', 'movement_type', 'quantity', 'occurred_at', 'reference', 'created_at'],
+        // Solo los indicadores DE LA EMPRESA (tenant_id = empresa); el catálogo público (tenant_id NULL) no es de la empresa.
+        'external_indicators' => ['id', 'code', 'name', 'source', 'frequency', 'unit', 'country', 'description', 'affected_sectors', 'connector_key', 'is_active', 'created_at', 'updated_at'],
+        'external_indicator_observations' => ['id', 'indicator_id', 'period_date', 'value', 'published_at', 'ingested_at', 'revision', 'source_url', 'created_at'],
+        // Membresías (quién tiene acceso y con qué rol); nombres y correos viven en la cuenta de la plataforma, no se exportan aquí.
+        'tenant_users' => ['id', 'user_id', 'role', 'invited_by', 'created_at', 'updated_at'],
+        // Sin `path` (ruta interna del archivo en el servidor) ni `error_message`.
+        'tenant_exports' => ['id', 'user_id', 'status', 'file_size', 'file_hash', 'summary', 'expires_at', 'created_at', 'updated_at'],
+        'tenant_usage' => ['id', 'period', 'metric', 'value', 'created_at', 'updated_at'],
+        'import_errors' => ['id', 'import_job_id', 'row_number', 'column', 'error_code', 'severity', 'message', 'raw_value', 'created_at'],
+
+        // ── Etapa 1 · resultados de demanda y registro técnico (derivados, pero producidos para la empresa con sus datos) ──
+        'forecast_values' => ['id', 'forecast_run_id', 'node_key', 'level', 'branch_id', 'product_id', 'category_id', 'granularity', 'target_date', 'period_days', 'horizon_step', 'yhat', 'lo_80', 'hi_80', 'lo_95', 'hi_95', 'model_registry_id', 'model_family', 'unit_price_assumed', 'revenue_yhat', 'p50', 'quality_status', 'case_label'],
+        'forecast_actuals' => ['id', 'forecast_run_id', 'node_key', 'level', 'branch_id', 'product_id', 'category_id', 'target_date', 'horizon_step', 'yhat', 'lo_80', 'hi_80', 'actual', 'abs_error', 'is_censored', 'evaluated_at'],
+        'forecast_features' => ['id', 'feature_set_version', 'name', 'kind', 'description', 'config', 'is_active', 'created_at'],
+        'forecasting_series' => ['id', 'branch_id', 'product_id', 'unique_id', 'first_sale_date', 'last_sale_date', 'history_days', 'nonzero_days', 'total_units', 'adi', 'cv2', 'demand_class', 'stockout_days', 'censored_days', 'is_active', 'last_profiled_at', 'lifecycle', 'created_at', 'updated_at'],
+        // Sin `artifact_path` (ruta interna del artefacto en el servidor); sí su huella `artifact_sha256`.
+        'model_registry' => ['id', 'version', 'model_family', 'strategy_level', 'scope', 'sector', 'demand_class', 'status', 'core', 'role', 'hyperparameters', 'feature_set_version', 'training_data_from', 'training_data_to', 'training_data_hash', 'series_count', 'artifact_sha256', 'artifact_compat', 'library_versions', 'random_seed', 'training_job_id', 'forecast_run_id', 'core_run_id', 'trained_at', 'validated_at', 'promoted_at', 'retired_at', 'notes', 'created_at', 'updated_at'],
+        'model_evaluations' => ['id', 'model_registry_id', 'forecast_run_id', 'core_run_id', 'core', 'model_family', 'evaluation_type', 'level', 'level_key', 'horizon_days', 'is_baseline', 'is_selected', 'wape', 'mae', 'rmse', 'bias', 'coverage_80', 'coverage_95', 'n_obs', 'n_windows', 'cutoffs', 'extra', 'metrics', 'created_at'],
+        // Sin `error_message` (texto técnico interno); el estado y el resultado sí.
+        'training_jobs' => ['id', 'forecast_run_id', 'core_run_id', 'job_type', 'status', 'stage', 'progress', 'attempts', 'triggered_by', 'user_id', 'params', 'result', 'model_registry_id', 'queued_at', 'started_at', 'finished_at', 'duration_ms', 'created_at', 'updated_at'],
+        'data_quality_reports' => ['id', 'import_job_id', 'forecast_run_id', 'scope', 'score', 'summary', 'issues', 'created_at'],
+    ];
+
+    /**
+     * Tablas de la empresa que NO tienen `tenant_id` propio y pertenecen a ella por su tabla padre: tabla => [columna de enlace, tabla padre].
+     * Se exportan solo las filas cuyo padre tiene `tenant_id` = empresa (las observaciones de los indicadores públicos, con tenant_id NULL, no).
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    public const CHILD_TABLES = [
+        'external_indicator_observations' => ['indicator_id', 'external_indicators'],
     ];
 
     /**
      * Tablas con `tenant_id` que NO se exportan, con el motivo. La prueba de cobertura exige que toda tabla con `tenant_id` esté en
      * TABLES o aquí: una tabla nueva sin clasificar rompe la prueba y obliga a decidir qué se exporta y qué nunca (credenciales).
+     * Solo quedan fuera las credenciales: todo dato de la empresa se exporta (con columnas internas o secretas omitidas arriba).
      *
      * @var array<string, string>
      */
     public const NOT_EXPORTED = [
         'personal_access_tokens' => 'credenciales de acceso (solo se guarda su hash): nunca se exportan',
-        'tenant_users' => 'membresías de cuentas de la plataforma (datos de usuarios de Predictily, no de la empresa)',
-        'tenant_exports' => 'metadatos de exportaciones anteriores',
-        'tenant_usage' => 'consumo de la plataforma para facturación',
-        'import_errors' => 'detalle de filas rechazadas (valor truncado); el resumen está en import_jobs',
-        'forecast_values' => 'valores diarios derivados y regenerables del pronóstico (volumen alto); la ejecución sí se exporta',
-        'forecast_features' => 'variables derivadas de entrenamiento, regenerables',
-        'forecast_actuals' => 'evaluación derivada de pronósticos, regenerable',
-        'forecasting_series' => 'catálogo derivado de series, regenerable',
-        'model_registry' => 'registro técnico de artefactos y modelos (rutas internas)',
-        'model_evaluations' => 'métricas derivadas, regenerables',
-        'training_jobs' => 'trabajos técnicos de la cola',
-        'data_quality_reports' => 'informes derivados, regenerables',
-        // Pendientes de etapa 1: son datos de la empresa que aún no estaban en la exportación (ver docs/architecture/v2/P5b-plataforma.md).
-        'alerts' => 'PENDIENTE (etapa 1): alertas derivadas, sin datos personales',
-        'scenarios' => 'PENDIENTE (etapa 1): escenarios guardados por el usuario',
-        'purchase_orders' => 'PENDIENTE (etapa 1): órdenes de compra históricas',
-        'purchase_order_items' => 'PENDIENTE (etapa 1): líneas de órdenes de compra',
-        'stock_movements' => 'PENDIENTE (etapa 1): movimientos de inventario',
-        'external_indicators' => 'PENDIENTE (etapa 1): indicadores externos configurados',
     ];
 
     /** Fragmentos de nombre de columna que jamás deben exportarse (la prueba lo verifica sobre TABLES). */
     public const FORBIDDEN_COLUMN_PARTS = ['credential', 'password', 'secret', 'token', 'api_key', 'name_encrypted', 'remember', 'error_message', 'last_error'];
+
+    /** Filas de `$table` que son de la empresa: por su `tenant_id` o, en las tablas hijas, por el `tenant_id` de su padre. */
+    private function tenantRows(string $table, int $tenantId): Builder
+    {
+        if (isset(self::CHILD_TABLES[$table])) {
+            [$link, $parent] = self::CHILD_TABLES[$table];
+
+            return DB::table($table)->whereIn($link, DB::table($parent)->where('tenant_id', $tenantId)->select('id'));
+        }
+
+        return DB::table($table)->where('tenant_id', $tenantId);
+    }
 
     public function export(TenantExport $export): void
     {
@@ -130,7 +164,7 @@ final class TenantDataExporter
                 fwrite($out, "\xEF\xBB\xBF");
                 fputcsv($out, $columns, ',', '"', '');
                 $count = 0;
-                DB::table($table)->where('tenant_id', $tenant->id)->select($columns)->orderBy('id')
+                $this->tenantRows($table, $tenant->id)->select($columns)->orderBy('id')
                     ->chunkById(5000, function ($rows) use ($out, &$count): void {
                         foreach ($rows as $row) {
                             fputcsv($out, array_map(fn ($v) => is_bool($v) ? ($v ? '1' : '0') : $v, (array) $row), ',', '"', '');
@@ -163,7 +197,8 @@ final class TenantDataExporter
             $zip->addFromString('LEEME.txt', implode("\n", [
                 'Exportación de datos de la empresa '.$tenant->name,
                 'Generada: '.now($tenant->timezone)->toIso8601String(),
-                'Contenido: un CSV por tabla (UTF-8), incluidos los resultados de los cores de la etapa 2 (ejecuciones, huellas de datos, cobertura, compromisos comerciales, predicciones de compra, planes de abastecimiento, costos y escenarios).',
+                'Contenido: un CSV por tabla (UTF-8) con todos los datos de la empresa: catálogos, ventas, inventario, compras y movimientos, alertas, escenarios, indicadores externos propios, resultados de demanda y de los cores de la etapa 2 (ejecuciones, huellas de datos, cobertura, compromisos comerciales, predicciones de compra, planes de abastecimiento, costos), registro técnico de modelos, membresías y consumo.',
+                'Quedan fuera los indicadores y el calendario públicos compartidos (no son de la empresa) y las rutas internas de archivos y artefactos del servidor.',
                 'Las cédulas/RUC de clientes no se almacenan en claro en Predictily; solo existe una huella irreversible.',
                 'No se incluyen credenciales de conectores, tokens de acceso ni la configuración de conexión de las fuentes de datos.',
             ]));
