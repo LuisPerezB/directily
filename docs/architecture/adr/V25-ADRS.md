@@ -294,3 +294,45 @@ mayor precedencia de la V2.5 (§0.5).
 **Consecuencias.** Las demos y cargas existentes (backfill) conservan sus resultados; las cargas
 incrementales posteriores quedan protegidas contra fugas. La anulación sin historial de la fuente en una
 carga backfill es una limitación declarada, no un dato inventado.
+
+## ADR-V25-24 · Data Core P0: SourceSystem, Bronze, calidad, cuarentena, reconciliación e identidades
+
+**Contexto.** La auditoría de datos (`docs/roadmap/audit/2026-10-31/datos.json`) halló tres informes de
+calidad con vocabularios distintos, filas inválidas descartadas sin conservar el original, Bronze solo
+para archivos en disco local, sin reconciliación entre capas, sin alias de identidad (un cambio de código
+en el ERP crea otro producto) y sin versión de esquema por registro. `data_quality_reports` existe desde
+la etapa 1 (`scope`, `score`, `summary`, `issues`) y lo consumen el importador, el tablero y la
+exportación LOPDP.
+
+**Decisión** (migración `2026_03_03_000100_create_data_quality_lineage_and_identity_tables`, aditiva):
+
+- **SourceSystem** = `data_sources` ampliado (`system_kind`, `vendor`, `source_timezone`,
+  `schema_version`, `schema_fingerprint`). La huella del esquema observado se recalcula en cada carga o
+  sincronización; si cambia, sube `schema_version` y se registra un hallazgo `WARNING` `schema_drift`.
+- **Bronze** = `bronze_objects` en el `ObjectStore` (ADR-V25-08): clave generada por el servidor con
+  prefijo de la empresa, SHA-256, procedencia (usuario o dispositivo), versión de esquema y retención.
+  Archivos subidos, extracciones SQL y lotes REST/Bridge se guardan íntegros antes de normalizar.
+  Contenido inmutable; solo cambian estado y retención.
+- **Linaje Silver**: `bronze_object_id`, `source_row` y `schema_version` (versión del contrato canónico)
+  en ventas, revisiones e inventario; las demás entidades se vinculan por su importación.
+- **Data Quality Engine único**: un contrato de hallazgo con clase `AUTO_FIX_SAFE`, `REVIEW_REQUIRED`,
+  `QUARANTINED`, `WARNING` o `BLOCKER`, código estable, registro sin PII, campo, valor original acotado,
+  propuesta y motivo (`data_quality_issues`). Los registros `REVIEW_REQUIRED`/`QUARANTINED` no entran a
+  Silver: quedan en `quarantine_records`, revisables y reprocesables (liberar o descartar). El backend
+  produce los hallazgos de ingestión; el motor, las métricas de dataset y los gates. Ambos escriben en
+  `data_quality_reports` (ampliado con `dataset`, `metrics`, `issue_counts`, `gate_results`,
+  `rules_version`), conservando `summary` e `issues` para los consumidores existentes.
+- **Gates por módulo** (Demand, Customer, Supply): salida `PASS`, `WARN`, `DEGRADE` o `BLOCK`, evaluada
+  antes de entrenar y de inferir con la política de la empresa (precedencia core → perfil → tenant de la
+  etapa 2). `DEGRADE` deshabilita features opcionales según un mapa declarativo feature → datos
+  requeridos; `BLOCK` impide la ejecución con un motivo explícito. Umbrales iniciales documentados con su
+  justificación y marcados «a aprobar en el piloto».
+- **Reconciliación**: `reconciliation_reports` por importación, sincronización y ventana con conteos y
+  totales por capa (fuente, Bronze, Silver, Gold), discrepancias y estado `balanced`, `explained` o
+  `unexplained`. Una diferencia de ventas netas `unexplained` bloquea el Gate A.
+- **Identidades**: `product_aliases` y `customer_aliases` (código de origen → identidad canónica con
+  vigencia; `alias`, `code_change`, `merge`, `split`). La resolución del catálogo consulta los alias antes
+  de crear una identidad nueva.
+
+**Consecuencias.** Los contratos y pantallas existentes de calidad siguen funcionando; los nuevos campos
+son aditivos. La política de retención de Bronze por empresa queda configurable y su purga se registra.
