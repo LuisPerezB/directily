@@ -18,8 +18,8 @@ use App\Services\Supply\SupplyRunService;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
-use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * Evaluador de escenarios (E2-15): compara estrategias sobre los mismos cortes, unidades y horizontes, con cada entrada
@@ -98,7 +98,7 @@ class ScenarioEvaluationController extends SupplyController
         return $this->payload(CoreRun::query()->findOrFail($run->id), 201);
     }
 
-    public function index(Request $request): \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection
     {
         return SupplyRunResource::collection(CoreRun::query()->where('core', 'scenario')->with('trainingJobs')->latest('id')->paginate($this->perPage($request, 20)));
     }

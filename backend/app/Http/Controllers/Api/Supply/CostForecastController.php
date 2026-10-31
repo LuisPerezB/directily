@@ -10,6 +10,7 @@ use App\Models\CostForecast;
 use App\Services\Supply\SupplyRunService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -69,7 +70,7 @@ class CostForecastController extends SupplyController
         ]);
     }
 
-    public function runs(Request $request): \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+    public function runs(Request $request): AnonymousResourceCollection
     {
         return SupplyRunResource::collection(CoreRun::query()->where('core', 'cost')->with('trainingJobs')->latest('id')->paginate($this->perPage($request, 20)));
     }

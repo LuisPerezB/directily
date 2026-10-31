@@ -40,11 +40,14 @@ class CustomerProfileController extends CustomerController
         $activity = CustomerActivity::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)->first();
         $hasPredictions = CustomerPrediction::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)->exists();
         $rankings = [];
+        $rankingSources = [];
         foreach ($horizons as $h) {
+            $rankingSources[(string) $h] = $run->model_versions[(string) $h]['ranking_source'] ?? null;
             $rankings[(string) $h] = CustomerProductRanking::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)
                 ->where('horizon_days', $h)->with('product:id,sku,name,unit')->orderBy('rank')->get()
                 ->map(fn (CustomerProductRanking $r) => [
                     'rank' => (int) $r->rank,
+                    'ranking_source' => $r->ranking_source, 'ranking_score' => $r->ranking_score,
                     'product' => ['id' => (int) $r->product_id, 'sku' => $r->product?->sku, 'name' => $r->product?->name, 'unit' => $r->product?->unit],
                     'purchase_probability' => $r->purchase_probability, 'expected_quantity' => $r->expected_quantity,
                     'expected_amount' => ['value' => $r->expected_amount, 'currency' => $r->currency, 'basis' => 'supuesto, no venta confirmada'],
@@ -85,6 +88,8 @@ class CustomerProfileController extends CustomerController
                 ],
             ] : null,
             'rankings' => $rankings,
+            'ranking_sources' => $rankingSources,
+            'ranking_source_note' => CustomerEnvelope::DEFINITIONS['ranking_source'],
         ], 'envelope' => CustomerEnvelope::forRun($run, $tenant), 'definitions' => CustomerEnvelope::DEFINITIONS]);
     }
 }

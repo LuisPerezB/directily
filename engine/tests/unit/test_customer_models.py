@@ -24,7 +24,7 @@ from predictily_engine.customer.metrics import (
     ranking_metrics,
 )
 from predictily_engine.customer.models import quantity_objectives
-from predictily_engine.customer.outputs import compute_activity, evaluate_activity, top_k_products
+from predictily_engine.customer.outputs import choose_ranking_source, compute_activity, evaluate_activity, top_k_products
 from predictily_engine.customer.predict import predict_all
 from predictily_engine.customer.protocol import FULL_BLOCKS, plan_blocks
 from predictily_engine.customer.serving import enforce_nested, enforce_nested_quantity, serve_probability
@@ -372,7 +372,7 @@ def test_behavior_change_detects_a_drop_with_exact_test():
 def test_top_k_orders_by_probability_and_breaks_ties_by_expected_quantity():
     pred = pd.DataFrame({"customer_id": [1, 1, 1, 2, 2], "product_id": [10, 11, 12, 10, 11],
                          "purchase_probability": [.3, .6, .6, .2, .1], "expected_quantity": [1.0, 2.0, 5.0, 1.0, 1.0]})
-    top = top_k_products(pred, 2)
+    top = top_k_products(pred, 2, tiebreak_col="expected_quantity")
     c1 = top[top["customer_id"] == 1].sort_values("rank")
     assert list(c1["product_id"]) == [12, 11] and list(c1["rank"]) == [1, 2]
     assert len(top[top["customer_id"] == 2]) == 2
@@ -401,3 +401,80 @@ def test_expected_amount_is_a_declared_assumption_not_a_sale(trained):
     np.testing.assert_allclose(p.loc[ok, "expected_amount"], p.loc[ok, "expected_quantity"] * p.loc[ok, "assumed_unit_price"], rtol=1e-9)
     assert (p["currency"] == "USD").all()
     assert out.rankings.groupby("customer_id").size().max() <= c["top_k_stored"]
+
+
+# ───────────────────────────── fuente del ranking servido (ADR-P2-01 · cust-ranking-v1) ─────────────────────────────
+
+def _ranking(model, popularity, recency, units=500, k=5):
+    key, nkey = f"precision_at_{k}", f"n_units_precision_at_{k}"
+    return {"served": {key: model, nkey: units}, "popularity": {key: popularity, nkey: units}, "recency": {key: recency, nkey: units}}
+
+
+def test_popularity_is_the_default_ranking_source_unless_another_beats_it_by_the_margin():
+    c = cfg()                                                                     # k = 5, margen relativo 5 %
+    assert choose_ranking_source(_ranking(0.100, 0.100, 0.100), c)["source"] == "popularity"      # empate
+    assert choose_ranking_source(_ranking(0.1040, 0.100, 0.090), c)["source"] == "popularity"     # +4 % < margen
+    assert choose_ranking_source(_ranking(0.0900, 0.100, 0.0950), c)["source"] == "popularity"    # popularidad gana
+    won = choose_ranking_source(_ranking(0.1060, 0.100, 0.090), c)
+    assert won["source"] == "model" and won["rule_version"] == "cust-ranking-v1" and won["primary_k"] == 5
+    assert choose_ranking_source(_ranking(0.080, 0.100, 0.120), c)["source"] == "recency"
+    assert choose_ranking_source(_ranking(0.130, 0.100, 0.120), c)["source"] == "model"           # ambas superan: gana la de mayor precision@k
+    assert choose_ranking_source(_ranking(0.120, 0.100, 0.120), c)["source"] == "model"           # empate entre ellas: el modelo
+    few = choose_ranking_source(_ranking(0.500, 0.100, 0.500, units=50), c)
+    assert few["source"] == "popularity" and "insuficientes" in few["reason"]                     # sin unidades suficientes no se compara
+    assert choose_ranking_source(_ranking(0.2, None, 0.2), c)["source"] == "popularity"
+    assert choose_ranking_source(_ranking(0.001, 0.0, 0.0), c)["source"] == "model"               # popularidad 0: cualquier fuente con señal la supera
+    strict = cfg(ranking_min_relative_margin=50.0, ranking_primary_k=3)
+    assert choose_ranking_source(_ranking(0.5, 0.1, 0.5, k=3), strict)["source"] == "popularity"
+    assert choose_ranking_source(_ranking(0.5, 0.1, 0.5, k=3), strict)["primary_k"] == 3
+
+
+def test_the_ranking_source_is_decided_in_the_holdout_and_matches_the_rule(trained):
+    for h in (7, 30):
+        rk = trained["results"][h].holdout["ranking"]
+        sel = rk["selection"]
+        key = f"precision_at_{sel['primary_k']}"
+        assert sel["values"] == {"model": rk["served"][key], "popularity": rk["popularity"][key], "recency": rk["recency"][key]}
+        pop = rk["popularity"][key]
+        enough = rk["popularity"][f"n_units_precision_at_{sel['primary_k']}"] >= sel["min_units"]
+        beating = [s for s, v in sel["values"].items() if s != "popularity" and v is not None and v >= pop * 1.05 and v > pop]
+        assert (sel["source"] == "popularity") == (not beating or not enough)     # solo se aparta de popularidad si alguien la supera con margen y hay unidades
+        assert sel["source"] in ("model", "popularity", "recency")
+
+
+def _arts(trained, source):
+    arts = {h: {"prob": dict(r.artifacts["prob"]), "qty": r.artifacts["qty"]} for h, r in trained["results"].items() if r.artifacts}
+    for a in arts.values():
+        a["prob"]["meta"] = {"calibration_status": "calibrated", "ranking_source": source}
+    return arts
+
+
+def test_the_served_ranking_uses_the_decided_source(trained):
+    """Si popularidad gana en el holdout, el ranking servido es el de popularidad (y queda declarado en cada fila)."""
+    fb, c = trained["fb"], trained["cfg"]
+    as_of = int(to_day(trained["world"].start)) + trained["world"].n_days - 1
+    pop = predict_all(fb, _arts(trained, "popularity"), as_of, c)
+    assert set(pop.rankings["ranking_source"]) == {"popularity"}
+    for _, g in pop.rankings.groupby(["customer_id", "horizon_days"]):
+        g = g.sort_values("rank")
+        assert list(g["ranking_score"]) == sorted(g["ranking_score"], reverse=True)               # ordenado por compradores distintos 90 d
+    top = pop.predictions[pop.predictions["horizon_days"] == 30].set_index(["customer_id", "product_id"])["ranking_score_popularity"]
+    first = pop.rankings[(pop.rankings["horizon_days"] == 30) & (pop.rankings["rank"] == 1)]
+    assert all(top[(r.customer_id, r.product_id)] == top.loc[r.customer_id].max() for r in first.itertuples())
+    mod = predict_all(fb, _arts(trained, "model"), as_of, c)
+    assert set(mod.rankings["ranking_source"]) == {"model"}
+    m30 = mod.rankings[(mod.rankings["horizon_days"] == 30) & (mod.rankings["rank"] == 1)]
+    allp = mod.predictions[mod.predictions["horizon_days"] == 30].set_index(["customer_id", "product_id"])["purchase_probability"]
+    assert all(r.purchase_probability == pytest.approx(allp.loc[r.customer_id].max()) for r in m30.itertuples())
+    rec = predict_all(fb, _arts(trained, "recency"), as_of, c)
+    assert set(rec.rankings["ranking_source"]) == {"recency"} and (rec.rankings["ranking_score"] <= 0).all()
+    assert {h: v["ranking_source"] for h, v in pop.served.items()} == {7: "popularity", 30: "popularity", 90: "popularity"}
+
+
+def test_without_a_recorded_decision_the_ranking_falls_back_to_popularity(trained):
+    arts = _arts(trained, "model")
+    for a in arts.values():
+        a["prob"]["meta"] = {"calibration_status": "calibrated"}                  # artefacto sin decisión de ranking
+    as_of = int(to_day(trained["world"].start)) + trained["world"].n_days - 1
+    out = predict_all(trained["fb"], arts, as_of, trained["cfg"])
+    assert set(out.rankings["ranking_source"]) == {"popularity"}

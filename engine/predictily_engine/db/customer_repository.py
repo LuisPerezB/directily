@@ -16,6 +16,7 @@ import pandas as pd
 from sqlalchemy import Connection, text
 
 from predictily_engine.db.repository import TenantRepository, TenantScopeError
+from predictily_engine.extensions.data_core import effective_coverage
 
 VALID_DOCS = "('invoice', 'sales_note', 'other')"
 
@@ -171,9 +172,15 @@ class CustomerRepository:
         return df
 
     def coverage(self, entity: str = "sales") -> pd.DataFrame:
-        return self._read(
-            "SELECT entity, branch_id, complete_from, complete_through FROM data_coverage "
-            "WHERE tenant_id = :tenant_id AND entity = :entity", entity=entity)
+        """Cobertura EFECTIVA de la fuente (regla de P3: declaración del usuario > mínimo entre fuentes > ninguna), en una fila.
+
+        Sin cobertura (`rule = none`) devuelve un DataFrame vacío: la maduración de etiquetas usa entonces la última venta.
+        """
+        eff = effective_coverage(self.conn, self.tenant_id, entity, None)
+        if eff["complete_through"] is None:
+            return pd.DataFrame(columns=["entity", "branch_id", "complete_from", "complete_through", "rule", "basis"])
+        return pd.DataFrame([{"entity": entity, "branch_id": None, "complete_from": eff["complete_from"],
+                              "complete_through": eff["complete_through"], "rule": eff["rule"], "basis": eff["basis"]}])
 
     # ── promociones (mismo contrato as-of que la demanda) ──
     def promotions(self) -> pd.DataFrame:
@@ -183,37 +190,19 @@ class CustomerRepository:
         return self.base.promotion_revisions()
 
     # ── compromisos comerciales (los escribe P3; aquí solo se leen) ──
-    def commitments(self) -> pd.DataFrame:
-        """Líneas de cotizaciones/pedidos/contratos con fechas en la zona horaria de la empresa."""
-        tz = TenantRepository._TENANT_TZ
-        return self._read(
-            f"""
-            SELECT cc.id AS commitment_id, cc.customer_id, cc.commitment_type, cc.status, cc.currency,
-                   (cc.issued_at AT TIME ZONE tz.tz)::date AS issued_on,
-                   (cc.known_at AT TIME ZONE tz.tz)::date AS known_on,
-                   (cc.created_at AT TIME ZONE tz.tz)::date AS ingested_on,
-                   (cc.cancelled_at AT TIME ZONE tz.tz)::date AS cancelled_on,
-                   cc.expected_delivery_date,
-                   ci.id AS item_id, ci.product_id, ci.quantity::float8 AS quantity,
-                   ci.quantity_fulfilled::float8 AS quantity_fulfilled, ci.unit, ci.unit_price::float8 AS unit_price,
-                   ci.delivery_date, p.unit AS product_unit
-            FROM commercial_commitments cc
-            {tz.format(alias='cc')}
-            JOIN commercial_commitment_items ci ON ci.commitment_id = cc.id AND ci.tenant_id = cc.tenant_id
-            JOIN products p ON p.id = ci.product_id AND p.tenant_id = ci.tenant_id
-            WHERE cc.tenant_id = :tenant_id AND ci.tenant_id = :tenant_id AND p.tenant_id = :tenant_id
-            ORDER BY cc.id, ci.line_number
-            """)
-
     def commitment_revisions(self) -> pd.DataFrame:
-        """Versiones históricas de los compromisos (P3): cabecera y líneas tal como la fuente las conocía."""
+        """Todas las revisiones de compromisos con `known_at`/`cancelled_at` en hora local de la empresa (la regla de visibilidad
+        a un corte —P3 `CommitmentAsOf`— se aplica en `customer.commitments.state_as_of`)."""
         tz = TenantRepository._TENANT_TZ
         df = self._read(
             f"""
-            SELECT r.commitment_id, r.revision, r.status, (r.known_at AT TIME ZONE tz.tz)::date AS known_on, r.snapshot
+            SELECT r.commitment_id, r.revision, r.status, (r.known_at AT TIME ZONE tz.tz) AS known_local,
+                   (r.cancelled_at AT TIME ZONE tz.tz) AS cancelled_local, r.snapshot,
+                   c.commitment_type, c.customer_id, c.currency
             FROM commercial_commitment_revisions r
             {tz.format(alias='r')}
-            WHERE r.tenant_id = :tenant_id
+            JOIN commercial_commitments c ON c.tenant_id = r.tenant_id AND c.id = r.commitment_id
+            WHERE r.tenant_id = :tenant_id AND c.tenant_id = :tenant_id
             ORDER BY r.commitment_id, r.revision
             """)
         if len(df):
@@ -223,11 +212,6 @@ class CustomerRepository:
     def product_skus(self) -> dict[str, int]:
         df = self._read("SELECT id, upper(sku) AS sku FROM products WHERE tenant_id = :tenant_id")
         return {r.sku: int(r.id) for r in df.itertuples(index=False)}
-
-    def unit_conversions(self) -> pd.DataFrame:
-        return self._read(
-            "SELECT product_id, from_unit, to_unit, factor::float8 AS factor, valid_from FROM unit_conversions "
-            "WHERE tenant_id = :tenant_id")
 
     # ── demanda agregada vigente (para la reconciliación) ──
     def current_forecast_run(self) -> dict[str, Any] | None:

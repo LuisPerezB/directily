@@ -93,21 +93,22 @@ Sin fallo el resultado es idéntico al anterior (los números de la demo no camb
 | Sin ventas recientes | catálogo activo, > 180 días sin venta ⇒ **abstención** (no se inventa un cero) | sin filas; `summary.special_cases.no_recent_sales` |
 | Cierre de sucursal | solo **declarado** (`branches.is_active=false`) ⇒ cero explícito | `branch_closed_declared` |
 | Apertura de sucursal | primera venta ≥ 60 días después de la de la empresa y ≤ 90 días atrás; series con < 90 días | `branch_opening` (la serie empieza en su primera venta) |
-| Evento extraordinario | `calendar_events.category='exceptional'`, **conocido al corte** (`known_at` ≤ corte; nulo ⇒ no se usa y se informa), alcance país/región/empresa/sucursal/producto/categoría | bandera `exceptional_event` + calidad `degraded`; **no cambia el valor**; desactivable con `exceptional_events_flag` |
+| Evento extraordinario | `calendar_events.category='exceptional'`, leído con `extensions.data_core.load_calendar_events(as_of=corte)` (P3: última revisión **conocida al corte**; `known_at` nulo ⇒ no se devuelve; se cuenta y se informa en `special_cases.exceptional_events.stats`), alcance país/región/empresa/sucursal/producto/categoría | bandera `exceptional_event` + calidad `degraded`; **no cambia el valor**; desactivable con `exceptional_events_flag` |
 
 Precedencia de etiqueta: cierre/descontinuado > apertura > nuevo > escasa > evento. Los ceros declarados son filas de nivel serie (no alteran la jerarquía).
 
 ### 2.6 Cobertura de fuentes (ADR-V2-05)
 
 `data_coverage` (`entity='sales'`), resuelta con la cobertura **efectiva** del core de Datos (`extensions.data_core.effective_coverage`: declaración del usuario > mínimo entre fuentes > ninguna): el corte = mín(corte pedido, `complete_through`
-efectivo de la empresa y de las sucursales **activas** con cobertura propia; una sucursal cerrada no lo fija); las ventas anteriores a `complete_from` se descartan (la serie empieza en su primera venta completa). Sin ninguna fecha declarada: comportamiento de la etapa 1 + limitación `coverage_undeclared`. `summary.coverage.sales` y las limitaciones
+efectivo de la empresa y de las sucursales **activas** con cobertura propia; una sucursal cerrada no lo fija); las ventas anteriores a `complete_from` se descartan (la serie empieza en su primera venta completa). Coherencia con el core de Datos: dentro de la cobertura efectiva, todo día del panel es `observed` o `zero_observed` según `classify_day`; ninguno es `absent` (`test_coverage.py::test_every_zero_day_in_the_panel…`). Sin ninguna fecha declarada: comportamiento de la etapa 1 + limitación `coverage_undeclared`. `summary.coverage.sales` y las limitaciones
 `cutoff_limited_by_coverage`, `sales_before_complete_from_ignored` lo registran. Una ejecución con corte limitado por cobertura usa lo conocido al corte para promociones y órdenes (conservador).
 
 ### 2.7 Huella y configuración (ADR-V2-04/06)
 
 - `forecast_runs.data_snapshot_id` → `data_snapshots` (core `demand`): `sales, returns, inventory, prices, costs, catalog, promotions` (observadas + as-of con `known_at`), `calendar`
   (feature set, librería de feriados, eventos extraordinarios conocidos), `external_indicators`, `supply_inputs`, `config`, `eligibility`, `coverage`. Misma huella ⇒ mismo resultado con la misma semilla.
-- `config_version` = hash de `effective_config = {core: demand, config: <core→perfil→empresa>, run: {seed, horizon_days, horizons, min_improvement, max_backtest_windows, max_series_lgbm, force_families, feature_set_version}}`.
+- `config_version` = hash de `effective_config = {core: demand, config: <core→perfil→empresa>, provenance: {clave: core|profile:…|tenant}, profile: {code, version}|null, core_config_version, run: {seed, horizon_days, horizons, min_improvement, max_backtest_windows, max_series_lgbm, force_families, feature_set_version}}`;
+  la parte `config/provenance/profile/core_config_version` es el registro `platform.config.effective_config_record` de P3, que la ejecución conserva (cambiar después la configuración de la empresa no reescribe ejecuciones ya registradas).
   Claves de empresa en `tenants.settings.cores.demand.*` (`min_improvement`, `max_backtest_windows`, `exceptional_events_flag`, …); una clave desconocida **rechaza** la ejecución (422 `invalid_configuration`, el run queda `failed` con el motivo).
   `ENGINE_MIN_IMPROVEMENT` y `ENGINE_MAX_BACKTEST_WINDOWS` pasan a ser sobrescrituras del operador **solo si se definen** y quedan registradas en `run`.
 
@@ -156,6 +157,20 @@ El motor omite (con aviso) las columnas de la etapa 2 si la BD aún no tiene la 
 | E2-19 | `test_served_model.py`, `test_demand_v2_integration.py::test_forced_final_failure…` | fallo forzado del LightGBM final: WAPE publicado = el del respaldo por clase (cálculo independiente), intervalos = residuos del respaldo, registro `failed`/`fallback` |
 | E2-21 (demanda) | `test_horizons.py`, `test_special_cases.py`, `DemandV2ApiTest` | cinco horizontes, abstención con motivos, evaluación del total de H días, planes y validaciones |
 | E2-24 (demanda) | `DemandV2ApiTest::test_rollback_*`, `test_snapshot_config.py`, `test_demand_v2_integration.py` | reversión con auditoría, aislamiento, integridad de artefactos; reproducibilidad (snapshot+config+semilla) |
+
+### Verificación ejecutada (30-oct-2026, 4 vCPU compartidas con los otros paquetes; datos sintéticos)
+
+| Suite / comprobación | Comando | Resultado |
+|---|---|---|
+| Motor completo (todos los paquetes; BD `predictily_engine_test_p1` migrada) | `cd engine && ENGINE_TEST_DATABASE_URL=postgresql+psycopg://predictily:secret@127.0.0.1:5432/predictily_engine_test_p1 OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1 .venv/bin/python -m pytest -q` | **391 aprobadas**, 0 fallos, 427 s |
+| de ellas, nuevas de P1 | `tests/unit/test_{horizons,scaled_metrics,manifest,served_model,special_cases,coverage,snapshot_config}.py` (11+14+5+6+12+8+6 = 62) y `tests/integration/test_demand_v2_integration.py` (13) | 75 nuevas; más ajustes en `test_pipeline.py` y `test_api_integration.py` |
+| Backend completo | `cd backend && DB_DATABASE=predictily_test_p1 php artisan test` | **355 pruebas, 353 aprobadas, 2 omitidas** (contrato SQL de P3 sin servidor), 3 018 aserciones |
+| de ellas, nuevas de P1 | `tests/Feature/Analytics/DemandV2ApiTest.php` | 17 pruebas |
+| Estilo backend | `vendor/bin/pint --test` sobre los archivos de P1 | sin observaciones |
+| **E2-01** prueba de aceptación de la etapa 1 sobre el stack real (API + cola `database` + motor + PostgreSQL, BD propia) | `python e2e/mvp_acceptance.py --api http://127.0.0.1:8711/api/v1` | **32 de 32** verificaciones |
+| Comprobación de punta a punta de P1 sobre esas empresas (script de la sesión) | horizontes 14 y 60, envoltura, manifiesto, MASE/RMSSE/pinball/dinero, estados del registro, reversión real (SHA-256 verificado), aislamiento A/B | **16 de 16** |
+
+Cifras reales de esa corrida E2E (empresa demo ficticia): MASE 0,850 · RMSSE 0,763 · WAPE 0,493 · WAPE del total de 30 días 0,106; los cinco horizontes `ok`; reversión de la versión 2 a la 1 con `artifacts_verified = true`; `POST /models/demand/rollback` hacia una ejecución de otra empresa responde 404 y hacia una más nueva 409.
 
 ## 6. Límites y pendientes (honestos)
 

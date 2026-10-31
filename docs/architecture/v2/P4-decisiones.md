@@ -45,11 +45,12 @@ Regla única (`supply/availability.py`), usada por ofertas, tasas de cambio y co
 
 1. `known_at` presente: el dato existe para el corte solo si `known_at` (hora local de la empresa) ≤ corte.
 2. `known_at` NULL en una ejecución **vigente**: se acepta (es información actual de la empresa).
-3. `known_at` NULL en una ejecución **retroactiva** (corte histórico, backtest, simulación): se usa la fecha de respaldo
-   *solo* si el llamador aporta evidencia propia (el costo de una compra real se conoce en `valid_from`); si no, el dato
-   se **excluye** y se cuenta como exclusión por disponibilidad desconocida. La ingestión actual de un histórico no
-   demuestra que algo se conociera antes. El pronóstico de costos admite la política `assume_valid_from`, que incluye
-   esos datos pero degrada la calidad a `degraded` y lo declara.
+3. `known_at` NULL en una ejecución **retroactiva** (corte histórico, backtest, simulación): **no es conocido a futuro de
+   un corte pasado** (regla de P3, `docs/architecture/v2/P3-datos.md` §11). El dato se **excluye** y se cuenta como
+   exclusión por disponibilidad desconocida; P4 no inventa fechas de respaldo (tampoco para costos de compras reales). La
+   única vía es explícita: la política `assume_valid_from` del pronóstico de costos, que incluye esos datos en su fecha
+   efectiva, degrada la calidad a `degraded` y lo declara. La ingestión actual de un histórico no demuestra que algo se
+   conociera antes.
 
 ## 3. Modelo matemático del planificador (`supply/planner.py`)
 
@@ -154,6 +155,11 @@ Alternativas devueltas: *plan de máxima cobertura factible* (respeta todas las 
 las cifras de lo que habría que relajar. **Ningún plan relajado se devuelve como plan.** Las atribuciones no son
 aditivas (interacciones entre familias).
 
+**Escala medida (sintética).** Plan completo por la API del motor sobre la demo Ferretería Andina cargada en la BD de pruebas
+(180 series con pronóstico de 90 días y ofertas implícitas, horizonte 84 días): estado `optimal`, brecha 1,3·10⁻⁵, 1.300 líneas,
+27 s en total (4 núcleos, PostgreSQL local). Con presupuesto o almacén todos los productos se acoplan en un solo componente y
+el tiempo crece; el límite de tiempo (`solver_time_limit_seconds`) y los estados anteriores lo hacen explícito.
+
 ## 4. Balance fechado (`supply/balance.py`; E2-12)
 
 * Existencias utilizables hoy = existencias − reservas. Las compras abiertas **no** se suman al stock de hoy: cada
@@ -179,9 +185,11 @@ aditivas (interacciones entre familias).
   desviación), capacidad (con su período), vigencia, `known_at` y gastos de adquisición explícitos (porcentaje no
   recuperable, costo por unidad de la oferta y costo fijo por línea de orden). El IVA recuperable no es costo; si no lo
   es, se declara en `acquisition_cost_pct`.
-* **Unidades:** `unit_conversions` (`cantidad_to = cantidad_from × factor`; específica del producto o general; directa o
-  inversa; sin encadenar). Sin conversión ⇒ oferta no comparable. El mínimo, el múltiplo y la capacidad se convierten a
-  unidades del producto.
+* **Unidades:** `unit_conversions` con las reglas de P3 (`P3-datos.md` §2.5, mismas que `UnitConverter`): normalización solo
+  tipográfica («Caja.» = «caja»; «und» ≠ «unidad» hasta declarar su conversión), `cantidad_to = cantidad_from × factor`,
+  producto > general, directo > inverso, vigente a la fecha, sin cadenas. **Sin conversión declarada ⇒ oferta no
+  comparable** (nunca factor 1). El mínimo, el múltiplo y la capacidad se convierten a unidades del producto. La API de
+  ofertas devuelve `comparability` (usa el `UnitConverter` de P3 y las tasas explícitas) para avisar al registrar la oferta.
 * **Moneda:** `exchange_rates` explícitas con fecha y fuente (directa o inversa, sin triangular). Sin tasa ⇒ no
   comparable. Una tasa de más de `fx_max_age_days` se usa pero se marca `stale`. Un presupuesto en una moneda sin tasa
   **bloquea el plan** (`insufficient_data`): no se genera un plan que pueda exceder el presupuesto.
@@ -212,7 +220,8 @@ leyes del proceso (esas pertenecen al adaptador del rubro).
   moneda y unidad (series separadas) y, solo para productos sin historial de compras, el costo registrado en las ventas
   (ponderado por cantidad dentro del mes; no es costo de reposición).
 * Agregación mensual (promedio de las observaciones disponibles). Un mes sin observación conserva el último costo
-  (se declara; no es una observación). Disponibilidad por `known_at` (§2).
+  (se declara; no es una observación). Disponibilidad por `known_at` (§2): un costo sin `known_at` solo entra en
+  ejecuciones vigentes o con la política explícita `assume_valid_from`.
 * Métodos: referencia simple **último valor**, media de 3 meses, deriva (tendencia) y Holt amortiguado. Protocolo:
   objetivos de selección anteriores al holdout, holdout temporal en los últimos 3 períodos (no participa en la
   elección). Solo se sirve otro método si mejora el MAE de selección en ≥ 3 % frente a la referencia; si no, se sirve la
@@ -333,7 +342,7 @@ hash se guardan en cada corrida.
 | ID | Evidencia |
 |---|---|
 | E2-12 | `engine/tests/unit/test_supply_balance.py` (fechas, parciales, política de fechas desconocidas, sin doble conteo, reservas, identidad del balance, evidencia de retrasos, vencimiento FEFO) |
-| E2-13 | `engine/tests/unit/test_supply_planner.py`: casos a mano (940, mínimo, lote, presupuesto, capacidades, almacén), oráculo de enumeración (25 casos aleatorios), 12 instancias aleatorias sin violaciones y ≤ heurística, infactibilidad explicada, estado `time_limit`, respaldo |
+| E2-13 | `engine/tests/unit/test_supply_planner.py` y `test_supply_inputs.py` (exclusiones explícitas, supuestos de penalización, presupuestos con tasa): casos a mano (940, mínimo, lote, presupuesto, capacidades, almacén), oráculo de enumeración (25 casos aleatorios), 12 instancias aleatorias sin violaciones y ≤ heurística, infactibilidad explicada, estado `time_limit`, respaldo |
 | E2-14 | `test_supply_planner.py::test_generic_production_*` (consumo, rendimiento, tiempo, capacidad, insumos) |
 | E2-15 | `test_costs_forecast.py`, `test_scenarios_evaluator.py`, `test_supply_integration.py` |
 | E2-16 | `test_causal_contract.py` y `/causal/check` |

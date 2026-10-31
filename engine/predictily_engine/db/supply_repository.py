@@ -159,9 +159,9 @@ class SupplyRepository(TenantRepository):
             from predictily_engine.supply.availability import known_by, to_date
 
             hist = hist.copy()
-            hist["_ok"] = [
-                known_by(r.known_at, as_of, retroactive, fallback=to_date(r.valid_from) if r.source == "purchase_order" else None)[0]
-                and to_date(r.valid_from) <= as_of for r in hist.itertuples(index=False)]
+            # known_at NULL ⇒ no es conocido a futuro de un corte pasado (P3-datos.md §11).
+            hist["_ok"] = [known_by(r.known_at, as_of, retroactive)[0] and to_date(r.valid_from) <= as_of
+                           for r in hist.itertuples(index=False)]
             hist = hist[hist["_ok"]].sort_values(["product_id", "valid_from", "cost_id"])
             for pid, g in hist.groupby("product_id"):
                 last = g.iloc[-1]

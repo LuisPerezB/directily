@@ -8,9 +8,8 @@ use App\Enums\TenantRole;
 use App\Jobs\Supply\RunCostForecast;
 use App\Jobs\Supply\RunSupplyPlan;
 use App\Jobs\Supply\RunSupplySimulation;
-use App\Models\CoreRun;
+use App\Models\ForecastRun;
 use App\Models\Tenant;
-use App\Models\TrainingJob;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -66,7 +65,7 @@ class SupplyRunsApiTest extends TestCase
         Queue::fake();
         [$tenantA, $userA] = $this->createTenantWithUser(TenantRole::Analyst);
         [$tenantB] = $this->createTenantWithUser(TenantRole::Analyst);
-        $foreign = $this->withinTenant($tenantB, fn () => \App\Models\ForecastRun::query()->create([
+        $foreign = $this->withinTenant($tenantB, fn () => ForecastRun::query()->create([
             'version' => 1, 'run_type' => 'production', 'status' => 'completed', 'horizon_days' => 30, 'cutoff_date' => '2026-10-01']));
         $this->actingAsTenantUser($userA, $tenantA)->postJson('/api/v1/supply/plans', ['forecast_run_id' => $foreign->id])->assertStatus(422);
     }

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\Supply;
 
+use App\Models\ExchangeRate;
 use App\Models\SupplierOffer;
+use App\Services\DataCore\Units\UnitConverter;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\Rule;
@@ -16,6 +18,13 @@ use Illuminate\Validation\Rule;
  */
 class OfferController extends ConfigResourceController
 {
+    private ?UnitConverter $converter = null;
+
+    private ?\WeakReference $cacheRequest = null;
+
+    /** @var array<string, array{rate: float, valid_on: string, inverse: bool}|null> */
+    private array $rateCache = [];
+
     protected function model(): string
     {
         return SupplierOffer::class;
@@ -74,10 +83,66 @@ class OfferController extends ConfigResourceController
         return $data;
     }
 
+    /**
+     * ¿La oferta es comparable? Usa el `UnitConverter` de P3 (sin conversión declarada ⇒ no comparable, nunca factor 1) y
+     * las tasas de cambio explícitas (sin tasa hacia la moneda de la empresa ⇒ no comparable). Es la misma regla que aplica
+     * el planificador.
+     *
+     * @return array<string, mixed>
+     */
+    private function comparability(SupplierOffer $m): array
+    {
+        // Las memorias viven solo durante una petición (el controlador puede reutilizarse entre peticiones en pruebas/Octane).
+        if ($this->cacheRequest?->get() !== request()) {
+            $this->cacheRequest = \WeakReference::create(request());
+            $this->converter = null;
+            $this->rateCache = [];
+        }
+        $this->converter ??= new UnitConverter($this->tenant());
+        $currency = (string) ($this->tenant()->currency ?: 'USD');
+        $issues = [];
+        $conv = $m->product ? $this->converter->resolve((int) $m->product_id, $m->unit, $m->product->unit, now()->toDateString()) : null;
+        if ($conv === null) {
+            $issues[] = 'no_unit_conversion';
+        }
+        $rate = $m->currency === $currency ? ['rate' => 1.0, 'valid_on' => null, 'inverse' => false] : $this->rate($m->currency, $currency);
+        if ($rate === null) {
+            $issues[] = 'no_fx_rate';
+        }
+
+        return [
+            'comparable' => $issues === [],
+            'issues' => $issues,
+            'unit_conversion' => ['declared' => $conv !== null, 'from' => $m->unit, 'to' => $m->product?->unit, 'factor' => $conv?->factor ?? null],
+            'exchange_rate' => ['declared' => $rate !== null, 'from' => $m->currency, 'to' => $currency, 'rate' => $rate['rate'] ?? null, 'valid_on' => $rate['valid_on'] ?? null],
+        ];
+    }
+
+    /** @return array{rate: float, valid_on: string, inverse: bool}|null */
+    private function rate(string $from, string $to): ?array
+    {
+        $key = "$from>$to";
+        if (array_key_exists($key, $this->rateCache)) {
+            return $this->rateCache[$key];
+        }
+        $found = null;
+        foreach ([[$from, $to, false], [$to, $from, true]] as [$a, $b, $inverse]) {
+            $r = ExchangeRate::query()->where('from_currency', $a)->where('to_currency', $b)->where('valid_on', '<=', now()->toDateString())
+                ->orderByDesc('valid_on')->first();
+            if ($r !== null) {
+                $found = ['rate' => $inverse ? 1.0 / (float) $r->rate : (float) $r->rate, 'valid_on' => $r->valid_on->toDateString(), 'inverse' => $inverse];
+                break;
+            }
+        }
+
+        return $this->rateCache[$key] = $found;
+    }
+
     protected function present(Model $m): array
     {
         /** @var SupplierOffer $m */
         return [
+            'comparability' => $this->comparability($m),
             'id' => $m->id,
             'supplier_id' => $m->supplier_id,
             'supplier' => $m->supplier ? ['id' => $m->supplier->id, 'code' => $m->supplier->code, 'name' => $m->supplier->name] : null,

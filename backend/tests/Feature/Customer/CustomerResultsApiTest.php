@@ -55,6 +55,8 @@ class CustomerResultsApiTest extends TestCase
         $this->assertSame('empirical_holdout', $env['uncertainty_source']);
         $this->assertSame(str_repeat('c', 64), $env['config_version']);
         $this->assertArrayHasKey('expected_amount', $res->json('definitions'));
+        $this->assertSame('model', $res->json('ranking_source'));
+        $api->getJson('/api/v1/customer/predictions?horizon=7')->assertOk()->assertJsonPath('ranking_source', 'popularity');
 
         $api->getJson('/api/v1/customer/predictions?horizon=30&order_by=probability&direction=asc')->assertOk()->assertJsonPath('data.0.purchase_probability', 0.15);
         $api->getJson('/api/v1/customer/predictions?horizon=30&customer_id='.$cat['customers']['c2'])->assertOk()->assertJsonCount(2, 'data');
@@ -123,6 +125,10 @@ class CustomerResultsApiTest extends TestCase
         $this->assertSame([7, 30, 90], array_map('intval', array_keys($p->json('data.rankings'))));
         $this->assertSame(2, count($p->json('data.rankings.30')));
         $this->assertSame(1, $p->json('data.rankings.30.0.rank'));
+        $this->assertSame(['7' => 'popularity', '30' => 'model', '90' => 'model'], $p->json('data.ranking_sources'));   // fuente decidida en el holdout (cust-ranking-v1)
+        $this->assertSame('popularity', $p->json('data.rankings.7.0.ranking_source'));
+        $this->assertSame('model', $p->json('data.rankings.30.0.ranking_source'));
+        $this->assertStringContainsString('cust-ranking-v1', $p->json('data.ranking_source_note'));
         $this->assertSame('customer', $p->json('envelope.core'));
         $api->getJson('/api/v1/customer/customers/'.$cat['customers']['c2'].'/profile?horizon=7')->assertOk()->assertJsonCount(1, 'data.rankings');
     }

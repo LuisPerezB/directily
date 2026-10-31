@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Supply;
 
 use App\Enums\TenantRole;
+use App\Models\Supplier;
+use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Feature\Analytics\Support\AnalyticsFixtures;
 use Tests\TestCase;
 
@@ -15,12 +19,12 @@ class SupplyConfigApiTest extends TestCase
     use AnalyticsFixtures;
     use RefreshDatabase;
 
-    /** @return array{0: \App\Models\Tenant, 1: \App\Models\User, 2: array, 3: int} */
+    /** @return array{0: Tenant, 1: User, 2: array, 3: int} */
     private function world(TenantRole $role = TenantRole::Analyst): array
     {
         [$tenant, $user] = $this->createTenantWithUser($role);
         $cat = $this->seedCatalog($tenant);
-        $supplier = $this->withinTenant($tenant, fn () => \App\Models\Supplier::query()->create(['code' => 'S1', 'name' => 'Proveedor 1']));
+        $supplier = $this->withinTenant($tenant, fn () => Supplier::query()->create(['code' => 'S1', 'name' => 'Proveedor 1']));
 
         return [$tenant, $user, $cat, $supplier->id];
     }
@@ -115,5 +119,24 @@ class SupplyConfigApiTest extends TestCase
         $c()->patchJson("/api/v1/supply/production/recipes/{$id}", ['lines' => [['input_product_id' => $p['p1'], 'quantity_per_batch' => 7]]])
             ->assertOk()->assertJsonCount(1, 'data.lines')->assertJsonPath('data.lines.0.quantity_per_batch', 7);
         $this->assertDatabaseCount('production_recipe_lines', 1);
+    }
+
+    public function test_offer_comparability_uses_declared_unit_conversions_and_explicit_exchange_rates(): void
+    {
+        [$tenant, $user, $cat, $supplierId] = $this->world();
+        $pid = $cat['products']['p1'];
+        $c = fn () => $this->actingAsTenantUser($user, $tenant);
+        $id = $c()->postJson('/api/v1/supply/offers', ['supplier_id' => $supplierId, 'product_id' => $pid, 'unit_cost' => 24, 'currency' => 'EUR', 'unit' => 'Caja.'])
+            ->assertCreated()->assertJsonPath('data.comparability.comparable', false)->json('data.id');
+        $this->assertEqualsCanonicalizing(['no_unit_conversion', 'no_fx_rate'], $c()->getJson("/api/v1/supply/offers/{$id}")->json('data.comparability.issues'));
+        // La normalización es solo tipográfica («Caja.» = «caja») y la conversión debe declararse (nunca se asume factor 1).
+        DB::table('unit_conversions')->insert(['tenant_id' => $tenant->id, 'product_id' => $pid, 'from_unit' => 'caja', 'to_unit' => 'unidad',
+            'factor' => 12, 'created_at' => now(), 'updated_at' => now()]);
+        $r = $c()->getJson("/api/v1/supply/offers/{$id}")->assertOk();
+        $r->assertJsonPath('data.comparability.unit_conversion.declared', true)->assertJsonPath('data.comparability.unit_conversion.factor', 12)
+            ->assertJsonPath('data.comparability.issues', ['no_fx_rate']);
+        // Tasa explícita en sentido inverso (USD→EUR) también permite comparar.
+        $c()->postJson('/api/v1/supply/exchange-rates', ['from_currency' => 'USD', 'to_currency' => 'EUR', 'rate' => 0.8, 'valid_on' => '2026-01-01', 'source' => 'banco (ficticio)'])->assertCreated();
+        $c()->getJson("/api/v1/supply/offers/{$id}")->assertJsonPath('data.comparability.comparable', true)->assertJsonPath('data.comparability.exchange_rate.rate', 1.25);
     }
 }

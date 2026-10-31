@@ -55,7 +55,7 @@ from predictily_engine.models.ml import LightGBMGlobal
 from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL
 from predictily_engine.models.statistical import forecast_statistical
 from predictily_engine.pipeline.data import TenantData
-from predictily_engine.platform.config import config_hash, resolve_config
+from predictily_engine.platform.config import config_hash, effective_config_record
 from predictily_engine.platform.snapshot import DataSnapshot
 from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import Panel, build_panel
@@ -136,7 +136,7 @@ def run_pipeline(
     progress: ProgressFn | None = None,
     force_families: list[str] | None = None,
     horizons: tuple[int, ...] = hz.SUPPORTED_HORIZONS,
-    core_config: dict[str, Any] | None = None,
+    config_record: dict[str, Any] | None = None,
 ) -> PipelineResult:
     progress = progress or _noop
     timings: dict[str, float] = {}
@@ -147,10 +147,13 @@ def run_pipeline(
     horizons = tuple(sorted({int(h) for h in horizons if int(h) <= horizon}))
 
     # Configuración efectiva (core → perfil sectorial → empresa → opciones de la ejecución), con su huella.
-    if core_config is None:
-        core_config, _, _ = resolve_config("demand", data.settings, data.sector)
+    # `config_record` = `platform.config.effective_config_record` (configuración, procedencia por clave, perfil aplicado
+    # y su hash); la ejecución lo conserva: cambiar después la configuración de la empresa no reescribe este registro.
+    record = config_record or effective_config_record("demand", data.settings, data.sector)
+    core_config = record["effective_config"]
     effective_config = {
-        "core": "demand", "config": core_config,
+        "core": "demand", "config": core_config, "provenance": record["provenance"], "profile": record["profile"],
+        "core_config_version": record["config_version"],
         "run": {"seed": seed, "horizon_days": horizon, "horizons": list(horizons), "min_improvement": min_improvement,
                 "max_backtest_windows": max_windows, "max_series_lgbm": max_series_lgbm,
                 "force_families": force_families, "feature_set_version": FEATURE_SET_VERSION},
@@ -334,6 +337,8 @@ def run_pipeline(
     series_fc["quality_status"] = hz.row_status(series_fc["step"].to_numpy(), support, hist_days)
     series_fc["case_label"] = series_fc["unique_id"].map(lifecycle.labels)
     ex_events, ex_stats = known_events(data.exceptional_events, cutoff)
+    if data.exceptional_stats:  # el lector de Datos ya dejó fuera lo desconocido o posterior al corte: se informa
+        ex_stats = {**ex_stats, **data.exceptional_stats}
     flag_on = bool(core_config.get("exceptional_events_flag", True))
     ex_mask, ex_used = (flag_events(series_fc, ex_events, data.branches) if flag_on
                         else (np.zeros(len(series_fc), dtype=bool), []))

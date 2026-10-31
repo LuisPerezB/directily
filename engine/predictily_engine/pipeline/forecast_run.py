@@ -43,7 +43,7 @@ from predictily_engine.pipeline.core import InsufficientDataError, PipelineResul
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
 from predictily_engine.pipeline.schemas import ExecuteRequest
-from predictily_engine.platform.config import resolve_config
+from predictily_engine.platform.config import effective_config_record
 from predictily_engine.platform.snapshot import persist_snapshot
 
 log = logging.getLogger(__name__)
@@ -143,9 +143,10 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             # Configuración efectiva (core → perfil sectorial → empresa): se valida y se registra en el run.
             tenant = repo.tenant()
             try:
-                core_config, _, _ = resolve_config("demand", tenant.get("settings"), tenant.get("sector"))
+                config_record = effective_config_record("demand", tenant.get("settings"), tenant.get("sector"))
             except ValueError as exc:
                 raise InvalidConfigurationError(f"Configuración de demanda inválida: {exc}") from exc
+            core_config = config_record["effective_config"]
             # Cobertura declarada de la fuente de ventas: el corte no la supera y lo posterior es dato ausente.
             branches = repo.branches()
             active_branches = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
@@ -167,7 +168,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             data, horizon=max(req.horizons), seed=seed, n_jobs=settings.n_jobs,
             min_improvement=min_improvement, max_windows=max_windows,
             max_series_lgbm=settings.max_series_lgbm, progress=progress,
-            force_families=req.options.force_models, horizons=tuple(req.horizons), core_config=core_config,
+            force_families=req.options.force_models, horizons=tuple(req.horizons), config_record=config_record,
         )
         progress("persisting", 92)
         result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)

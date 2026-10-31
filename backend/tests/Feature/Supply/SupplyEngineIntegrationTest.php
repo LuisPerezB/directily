@@ -9,8 +9,10 @@ use App\Jobs\Middleware\SetTenantContext;
 use App\Jobs\Supply\RunSupplyPlan;
 use App\Models\CoreRun;
 use App\Models\TrainingJob;
+use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Supply\SupplyRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\Feature\Analytics\Support\AnalyticsFixtures;
@@ -83,7 +85,7 @@ class SupplyEngineIntegrationTest extends TestCase
     {
         [$tenant, $run, $job] = $this->queuedPlan();
         Http::fake(['engine.test/*' => Http::response(['message' => 'boom'], 500)]);
-        $this->expectException(\App\Services\Forecasting\Exceptions\EngineServerException::class);
+        $this->expectException(EngineServerException::class);
         $this->runJob($tenant, $run, $job);
     }
 
@@ -113,7 +115,7 @@ class SupplyEngineIntegrationTest extends TestCase
         Http::fake(function ($request) use ($tenant) {
             $runId = (int) preg_replace('~.*/runs/(\d+)/execute~', '$1', $request->url());
             $this->withinTenant($tenant, function () use ($runId, $tenant): void {
-                \Illuminate\Support\Facades\DB::table('scenario_evaluations')->insert([
+                DB::table('scenario_evaluations')->insert([
                     'tenant_id' => $tenant->id, 'core_run_id' => $runId, 'horizon_days' => 90, 'request' => '{}', 'created_at' => now(), 'updated_at' => now(),
                     'results' => json_encode(['strategies' => [['key' => 'base']], 'assumed_inputs' => ['price_change']])]);
                 CoreRun::query()->whereKey($runId)->update(['status' => 'completed', 'result_type' => 'conditional_simulation', 'quality_status' => 'ok']);

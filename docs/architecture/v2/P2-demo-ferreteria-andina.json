@@ -1,11 +1,11 @@
 {
  "data": "FICTICIO · demo Ferretería Andina (predictily_engine.synthetic)",
  "seed": 42,
- "load_seconds": 20.6,
+ "load_seconds": 26.0,
  "sales_lines": 99334,
  "products": 62,
  "train": {
-  "seconds": 90.7,
+  "seconds": 125.0,
   "status": "completed",
   "quality_status": "degraded",
   "summary": {
@@ -21,6 +21,16 @@
      "tier": "full",
      "reason": null,
      "status": "trained",
+     "ranking": {
+      "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+      "primary_k": 5,
+      "rule_version": "cust-ranking-v1",
+      "precision_at_k": {
+       "model": 0.0138671875,
+       "recency": 0.0160546875,
+       "popularity": 0.0234375
+      }
+     },
      "quantity": {
       "n": 1773,
       "mae": 2.9362303945939483,
@@ -29,7 +39,7 @@
       "reference_mae": 3.1463702010630117,
       "promotion_passed": true
      },
-     "duration_s": 29.7,
+     "duration_s": 44.4,
      "probability": {
       "ece": 0.001810075744295028,
       "role": "fallback",
@@ -44,6 +54,7 @@
       "n_holdout_positive": 1773,
       "reference_log_loss": 0.07843645536444226
      },
+     "ranking_source": "popularity",
      "expected_quantity": {
       "served_bias": -0.22805234399900115,
       "reference_bias": -0.23378751338488848
@@ -53,6 +64,16 @@
      "tier": "full",
      "reason": null,
      "status": "trained",
+     "ranking": {
+      "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+      "primary_k": 5,
+      "rule_version": "cust-ranking-v1",
+      "precision_at_k": {
+       "model": 0.06383928571428571,
+       "recency": 0.06446428571428571,
+       "popularity": 0.09441964285714285
+      }
+     },
      "quantity": {
       "n": 6215,
       "mae": 3.2084183164252984,
@@ -61,7 +82,7 @@
       "reference_mae": 3.589122492563303,
       "promotion_passed": true
      },
-     "duration_s": 28.9,
+     "duration_s": 39.6,
      "probability": {
       "ece": 0.006363910227319228,
       "role": "fallback",
@@ -76,6 +97,7 @@
       "n_holdout_positive": 6215,
       "reference_log_loss": 0.2330909706544164
      },
+     "ranking_source": "popularity",
      "expected_quantity": {
       "served_bias": -0.2684661418665317,
       "reference_bias": -0.31152697034891746
@@ -85,6 +107,16 @@
      "tier": "full",
      "reason": null,
      "status": "trained",
+     "ranking": {
+      "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+      "primary_k": 5,
+      "rule_version": "cust-ranking-v1",
+      "precision_at_k": {
+       "model": 0.24765625,
+       "recency": 0.17875000000000002,
+       "popularity": 0.25984375000000004
+      }
+     },
      "quantity": {
       "n": 10161,
       "mae": 3.741775045097746,
@@ -93,7 +125,7 @@
       "reference_mae": 4.552644079856669,
       "promotion_passed": true
      },
-     "duration_s": 20.9,
+     "duration_s": 25.5,
      "probability": {
       "ece": 0.00652723551481633,
       "role": "primary",
@@ -108,6 +140,7 @@
       "n_holdout_positive": 10161,
       "reference_log_loss": 0.45887848600970954
      },
+     "ranking_source": "popularity",
      "expected_quantity": {
       "served_bias": -0.034598183027688426,
       "reference_bias": -0.29979840651458295
@@ -174,7 +207,7 @@
     },
     "evaluated": true
    },
-   "loading_s": 1.2,
+   "loading_s": 1.5,
    "inactivity": {
     "active": {
      "n": 17954,
@@ -193,7 +226,7 @@
      "no_purchase_rate": 0.03136200716845878
     }
    },
-   "duration_ms": 90383
+   "duration_ms": 124588
   }
  },
  "manifest": {
@@ -988,14 +1021,14 @@
    "metrics": {
     "served": {
      "n_units": 5120,
-     "recall_at_1": 0.039959811206131124,
-     "recall_at_3": 0.128822608533109,
-     "recall_at_5": 0.20276064302070188,
-     "recall_at_10": 0.41672508061124347,
-     "precision_at_1": 0.0146484375,
-     "precision_at_3": 0.014322916666666666,
-     "precision_at_5": 0.01390625,
-     "precision_at_10": 0.014280109846998826,
+     "recall_at_1": 0.04494836207299406,
+     "recall_at_3": 0.12541240244871255,
+     "recall_at_5": 0.20162273938034486,
+     "recall_at_10": 0.41735127809710737,
+     "precision_at_1": 0.015625,
+     "precision_at_3": 0.0142578125,
+     "precision_at_5": 0.0138671875,
+     "precision_at_10": 0.014201647704982346,
      "n_units_with_positive": 1019,
      "n_units_precision_at_1": 5120,
      "n_units_precision_at_3": 5120,
@@ -1033,6 +1066,22 @@
      "n_units_precision_at_3": 5120,
      "n_units_precision_at_5": 5120,
      "n_units_precision_at_10": 5098
+    },
+    "selection": {
+     "metric": "precision_at_k",
+     "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+     "source": "popularity",
+     "values": {
+      "model": 0.0138671875,
+      "recency": 0.0160546875,
+      "popularity": 0.0234375
+     },
+     "default": "popularity",
+     "n_units": 5120,
+     "min_units": 200,
+     "primary_k": 5,
+     "rule_version": "cust-ranking-v1",
+     "relative_margin": 0.05
     },
     "definition": "Candidatos = relaciones comprador×producto con compras previas al corte; unidad = (corte, comprador); precision@k sobre unidades con ≥ k candidatos, recall@k sobre unidades con ≥ 1 positivo.",
     "popularity": {
@@ -1449,14 +1498,14 @@
    "metrics": {
     "served": {
      "n_units": 4480,
-     "recall_at_1": 0.04395560369118061,
-     "recall_at_3": 0.13893130107072413,
-     "recall_at_5": 0.23182278458720768,
-     "recall_at_10": 0.4621086045364891,
-     "precision_at_1": 0.05625,
-     "precision_at_3": 0.06138392857142857,
-     "precision_at_5": 0.061919642857142854,
-     "precision_at_10": 0.06174030051581071,
+     "recall_at_1": 0.05374489292758523,
+     "recall_at_3": 0.15238799661876584,
+     "recall_at_5": 0.24039606227106228,
+     "recall_at_10": 0.46631753663003656,
+     "precision_at_1": 0.07165178571428571,
+     "precision_at_3": 0.06822916666666666,
+     "precision_at_5": 0.06383928571428571,
+     "precision_at_10": 0.06234581744785826,
      "n_units_with_positive": 2704,
      "n_units_precision_at_1": 4480,
      "n_units_precision_at_3": 4480,
@@ -1494,6 +1543,22 @@
      "n_units_precision_at_3": 4480,
      "n_units_precision_at_5": 4480,
      "n_units_precision_at_10": 4459
+    },
+    "selection": {
+     "metric": "precision_at_k",
+     "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+     "source": "popularity",
+     "values": {
+      "model": 0.06383928571428571,
+      "recency": 0.06446428571428571,
+      "popularity": 0.09441964285714285
+     },
+     "default": "popularity",
+     "n_units": 4480,
+     "min_units": 200,
+     "primary_k": 5,
+     "rule_version": "cust-ranking-v1",
+     "relative_margin": 0.05
     },
     "definition": "Candidatos = relaciones comprador×producto con compras previas al corte; unidad = (corte, comprador); precision@k sobre unidades con ≥ k candidatos, recall@k sobre unidades con ≥ 1 positivo.",
     "popularity": {
@@ -1910,14 +1975,14 @@
    "metrics": {
     "served": {
      "n_units": 2560,
-     "recall_at_1": 0.07854943750682268,
-     "recall_at_3": 0.2146071186203582,
-     "recall_at_5": 0.32337460498403814,
-     "recall_at_10": 0.5766053741229579,
-     "precision_at_1": 0.296484375,
-     "precision_at_3": 0.2765625,
-     "precision_at_5": 0.248359375,
-     "precision_at_10": 0.21859552765790508,
+     "recall_at_1": 0.07884990360166197,
+     "recall_at_3": 0.21336689559693284,
+     "recall_at_5": 0.32149668815990706,
+     "recall_at_10": 0.5770631956192569,
+     "precision_at_1": 0.29765625,
+     "precision_at_3": 0.27591145833333336,
+     "precision_at_5": 0.24765625,
+     "precision_at_10": 0.21890937622597098,
      "n_units_with_positive": 2417,
      "n_units_precision_at_1": 2560,
      "n_units_precision_at_3": 2560,
@@ -1955,6 +2020,22 @@
      "n_units_precision_at_3": 2560,
      "n_units_precision_at_5": 2560,
      "n_units_precision_at_10": 2549
+    },
+    "selection": {
+     "metric": "precision_at_k",
+     "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+     "source": "popularity",
+     "values": {
+      "model": 0.24765625,
+      "recency": 0.17875000000000002,
+      "popularity": 0.25984375000000004
+     },
+     "default": "popularity",
+     "n_units": 2560,
+     "min_units": 200,
+     "primary_k": 5,
+     "rule_version": "cust-ranking-v1",
+     "relative_margin": 0.05
     },
     "definition": "Candidatos = relaciones comprador×producto con compras previas al corte; unidad = (corte, comprador); precision@k sobre unidades con ≥ k candidatos, recall@k sobre unidades con ≥ 1 positivo.",
     "popularity": {
@@ -2158,7 +2239,7 @@
   }
  ],
  "predict": {
-  "seconds": 6.7,
+  "seconds": 7.1,
   "status": "completed",
   "quality_status": "degraded",
   "summary": {
@@ -2167,6 +2248,7 @@
     "7": {
      "role": "fallback",
      "family": "reference",
+     "ranking_source": "popularity",
      "calibration_method": "isotonic",
      "calibration_status": "calibrated",
      "quantity_objective": "poisson"
@@ -2174,6 +2256,7 @@
     "30": {
      "role": "fallback",
      "family": "reference",
+     "ranking_source": "popularity",
      "calibration_method": "isotonic",
      "calibration_status": "calibrated",
      "quantity_objective": "gamma"
@@ -2181,6 +2264,7 @@
     "90": {
      "role": "primary",
      "family": "logistic",
+     "ranking_source": "popularity",
      "calibration_method": "isotonic",
      "calibration_status": "calibrated",
      "quantity_objective": "gamma"
@@ -2205,10 +2289,44 @@
     "mean_abs_correction_h30": 0.0,
     "mean_abs_correction_h90": 0.0008546848064329759
    },
-   "committed": {},
+   "committed": {
+    "7": {
+     "excluded": {
+      "unknown_or_after_cutoff": 0
+     },
+     "lines_total": 0,
+     "horizon_days": 7,
+     "lines_committed": 0,
+     "committed_quantity": 0.0,
+     "quantity_by_reason": {},
+     "commitments_not_visible_at_cutoff": 0
+    },
+    "30": {
+     "excluded": {
+      "unknown_or_after_cutoff": 0
+     },
+     "lines_total": 0,
+     "horizon_days": 30,
+     "lines_committed": 0,
+     "committed_quantity": 0.0,
+     "quantity_by_reason": {},
+     "commitments_not_visible_at_cutoff": 0
+    },
+    "90": {
+     "excluded": {
+      "unknown_or_after_cutoff": 0
+     },
+     "lines_total": 0,
+     "horizon_days": 90,
+     "lines_committed": 0,
+     "committed_quantity": 0.0,
+     "quantity_by_reason": {},
+     "commitments_not_visible_at_cutoff": 0
+    }
+   },
    "candidates": 15796,
    "stale_data": false,
-   "duration_ms": 6663,
+   "duration_ms": 7072,
    "reconciliation": {
     "7": {
      "products": 61,

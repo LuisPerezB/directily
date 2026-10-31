@@ -259,14 +259,19 @@ def test_forced_final_failure_serves_the_fallback_and_persists_coherent_registry
 
 def test_tenant_scoped_reads_never_see_other_companys_coverage_or_events(world, db_engine):
     from predictily_engine.db.repository import TenantRepository
+    from predictily_engine.extensions.data_core import load_calendar_events
 
     with db_engine.connect() as conn:
         repo_d = TenantRepository(conn, world["d"])
         assert repo_d.sales_coverage().empty
-        events = repo_d.calendar_events()
+        wide = (pd.Timestamp("2025-01-01").date(), pd.Timestamp("2028-01-01").date())
+        events = load_calendar_events(conn, world["d"], *wide)
         assert set(events["code"]) == {"EVENTO_D", "PUBLICO"}
         repo_c = TenantRepository(conn, world["c"])
-        assert set(repo_c.calendar_events()["code"]) == {"EVENTO_C", "SIN_FECHA_C", "PUBLICO"}
+        assert set(load_calendar_events(conn, world["c"], *wide)["code"]) == {"EVENTO_C", "SIN_FECHA_C", "PUBLICO"}
+        # Con corte, el lector del core de Datos no devuelve lo que no se podía demostrar conocido (known_at nulo).
+        known = load_calendar_events(conn, world["c"], *wide, as_of=pd.Timestamp(world["through"]).date())
+        assert set(known["code"]) == {"EVENTO_C", "PUBLICO"} or set(known["code"]) == {"EVENTO_C"}
         assert len(repo_c.sales_coverage()) == 1
 
 

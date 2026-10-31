@@ -39,7 +39,8 @@ def test_pending_is_quantity_minus_fulfilled_and_never_negative():
 
 
 def test_commitments_unknown_at_the_cutoff_are_excluded():
-    """E2-23: lo conocido después del corte (known_at > corte) o con conocimiento desconocido no entra."""
+    """E2-23: lo conocido después del corte (known_at > corte) o con conocimiento desconocido no entra (defensa en profundidad:
+    la regla P3 ya los saca de la vista antes)."""
     _, s = accepted([line(known_on=pd.Timestamp("2026-06-05")), line(commitment_id=2, known_on=pd.NaT)])
     assert s["committed_quantity"] == 0 and s["excluded"]["unknown_or_after_cutoff"] == 2
 
@@ -91,25 +92,55 @@ def test_committed_by_relation_aggregates_per_buyer_and_product_and_keeps_unattr
     assert rel["customer_id"].isna().sum() == 1
 
 
-def test_state_is_reconstructed_from_revisions_known_at_the_cutoff():
-    cur = pd.DataFrame([line(quantity=999, status="cancelled", cancelled_on=pd.Timestamp("2026-05-30"), ingested_on=pd.Timestamp("2026-05-30"))])
-    snap_v1 = {"header": {"commitment_type": "order", "status": "confirmed", "known_at": "2026-05-01 00:00:00+00:00", "cancelled_at": None,
-                          "expected_delivery_date": "2026-06-10", "currency": "USD"},
-               "lines": [{"product_sku": "ABC", "quantity": 100, "quantity_fulfilled": 10, "unit": "unidad", "delivery_date": None}]}
-    snap_v2 = {"header": {**snap_v1["header"], "status": "cancelled", "known_at": "2026-05-30 00:00:00+00:00", "cancelled_at": "2026-05-30 00:00:00+00:00"},
-               "lines": snap_v1["lines"]}
-    revs = pd.DataFrame({"commitment_id": [1, 1], "revision": [1, 2], "status": ["confirmed", "cancelled"],
-                         "known_on": [pd.Timestamp("2026-05-01"), pd.Timestamp("2026-05-30")], "snapshot": [snap_v1, snap_v2]})
-    # el corte 15-may conocía solo la versión 1 (vigente, pendiente 90); el actual (cancelado) es posterior
-    st = state_as_of(cur, revs, {"ABC": 5}, date(2026, 5, 15), today=date(2026, 6, 1))
-    assert len(st) == 1 and st.iloc[0]["status"] == "confirmed" and st.iloc[0]["quantity"] == 100
-    lines, s = committed_lines(st, date(2026, 5, 15), 30)
-    assert s["committed_quantity"] == pytest.approx(90)
-    # el 31-may la versión conocida es la cancelada
-    st2 = state_as_of(cur, revs, {"ABC": 5}, date(2026, 5, 31), today=date(2026, 6, 1))
-    assert committed_lines(st2, date(2026, 5, 31), 30)[1]["committed_quantity"] == 0
-    # antes de que la fuente conociera el compromiso no existe estado
-    assert state_as_of(cur, revs, {"ABC": 5}, date(2026, 4, 1), today=date(2026, 6, 1)).empty
+def _rev(cid, revision, status, known, cancelled=None, qty=100.0, fulfilled=10.0, ctype="order", delivery="2026-06-10", sku="ABC", unit="unidad"):
+    header = {"commitment_type": ctype, "status": status, "expected_delivery_date": delivery, "currency": "USD"}
+    lines = [{"line_number": 1, "product_sku": sku, "quantity": qty, "quantity_fulfilled": fulfilled, "unit": unit, "delivery_date": None}]
+    return {"commitment_id": cid, "revision": revision, "status": status, "known_local": pd.Timestamp(known) if known else pd.NaT,
+            "cancelled_local": pd.Timestamp(cancelled) if cancelled else pd.NaT, "snapshot": {"header": header, "lines": lines},
+            "commitment_type": ctype, "customer_id": 10, "currency": "USD"}
+
+
+UNITS = {5: "unidad"}
+
+
+def test_state_follows_the_p3_rule_last_version_known_at_or_before_the_cutoff():
+    """Regla P3 (CommitmentAsOf): última revisión con known_at no nulo y ≤ corte; cumplido tal como se conocía entonces."""
+    revs = pd.DataFrame([_rev(1, 1, "confirmed", "2026-05-01 08:00", fulfilled=10), _rev(1, 2, "partially_fulfilled", "2026-05-20 09:00", fulfilled=60),
+                         _rev(1, 3, "cancelled", "2026-05-30 10:00", cancelled="2026-05-30 10:00", fulfilled=60)])
+    for as_of, status, pending in ((date(2026, 5, 15), "confirmed", 90), (date(2026, 5, 25), "partially_fulfilled", 40), (date(2026, 5, 31), "cancelled", 0)):
+        st, stats = state_as_of(revs, {"ABC": 5}, UNITS, as_of)
+        assert len(st) == 1 and st.iloc[0]["status"] == status
+        lines, summary = committed_lines(st, as_of, 30, stats)
+        assert summary["committed_quantity"] == pytest.approx(pending)
+    # antes de que la fuente conociera el compromiso no existe estado (y se cuenta como no visible)
+    st, stats = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 4, 1))
+    assert st.empty and stats["not_visible_unknown_or_later"] == 1
+    # el día del known_at cuenta: el corte es el FIN del día local
+    assert len(state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 5, 1))[0]) == 1
+
+
+def test_a_version_without_known_at_is_never_visible_even_for_the_present():
+    revs = pd.DataFrame([_rev(1, 1, "confirmed", None)])
+    st, stats = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 6, 1))
+    assert st.empty and stats["not_visible_unknown_or_later"] == 1
+    _, summary = committed_lines(st, date(2026, 6, 1), 30, stats)
+    assert summary["excluded"]["unknown_or_after_cutoff"] == 1 and summary["committed_quantity"] == 0
+
+
+def test_cancellation_without_date_is_flagged_and_counts_zero_and_a_later_cancellation_does_not_apply():
+    revs = pd.DataFrame([_rev(1, 1, "cancelled", "2026-05-01"), _rev(2, 1, "cancelled", "2026-05-01", cancelled="2026-06-20", qty=50, fulfilled=0)])
+    st, stats = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 6, 1))
+    assert stats["cancellation_date_unknown"] == 1
+    _, summary = committed_lines(st, date(2026, 6, 1), 30, stats)
+    assert summary["excluded"]["cancellation_date_unknown"] == 1
+    assert summary["committed_quantity"] == pytest.approx(50)      # la cancelación del 20-jun es posterior al corte: seguía vigente
+
+
+def test_state_keeps_units_and_customers_for_the_reconciliation():
+    revs = pd.DataFrame([_rev(1, 1, "confirmed", "2026-05-01", unit="caja")])
+    st, stats = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 6, 1))
+    assert st.iloc[0]["customer_id"] == 10 and st.iloc[0]["unit"] == "caja" and st.iloc[0]["product_unit"] == "unidad"
+    assert committed_lines(st, date(2026, 6, 1), 30, stats)[1]["excluded"]["unit_mismatch"] == 1
 
 
 # ───────────────────────────── reconciliación ─────────────────────────────

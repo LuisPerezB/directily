@@ -1,22 +1,31 @@
 """Conversión de unidades explícita (tabla `unit_conversions`). Nunca se convierte en silencio.
 
-`cantidad_to = cantidad_from × factor`. Orden de búsqueda: conversión específica del producto (directa o
-inversa) y luego la general (directa o inversa). No se encadenan conversiones: sin fila ⇒ no hay conversión
-y el llamador debe tratar el dato como NO COMPARABLE.
+Mismas reglas que `App\\Services\\DataCore\\Units\\UnitConverter` de P3 (docs/architecture/v2/P3-datos.md §2.5):
+`cantidad_to = cantidad_from × factor`; normalización SOLO tipográfica (minúsculas, sin acentos, sin punto final;
+«und» y «unidad» son unidades distintas hasta que se declare su conversión); preferencia producto > general y directo >
+inverso, con la conversión vigente a la fecha (`valid_from ≤ fecha`, la más reciente); sin cadenas A→B→C. Sin
+conversión declarada ⇒ el llamador trata el dato como NO COMPARABLE (nunca se asume factor 1).
 """
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import date
 
 import pandas as pd
 
 
 def norm_unit(unit: str | None) -> str | None:
+    """Normalización tipográfica idéntica a `UnitNormalizer::normalize` (PHP): sin acentos, minúsculas, sin punto final."""
     if unit is None or (isinstance(unit, float) and pd.isna(unit)):
         return None
-    u = str(unit).strip().lower()
-    return u or None
+    raw = str(unit).strip()
+    if not raw:
+        return None
+    text = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii").lower()
+    text = re.sub(r"\s+", " ", text).rstrip(". ")
+    return text[:20] or None
 
 
 class UnitConversions:

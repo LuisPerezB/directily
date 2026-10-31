@@ -3,10 +3,10 @@
 Principios (instrucctions.md §6.G):
 - Se pronostican COSTOS UNITARIOS, nunca cantidades. Las cantidades solo ponderan el promedio mensual del costo de
   ventas; cambiar cantidades no cambia el pronóstico de compras.
-- Disponibilidad: una observación existe para el corte solo si `known_at` ≤ corte. `known_at` NULL:
-  ejecución vigente → se acepta; retroactiva → solo si el costo proviene de una compra real (se conoce en su fecha
-  `valid_from`); si no, se excluye (política `strict`) o se asume `valid_from` degradando la calidad
-  (`assume_valid_from`).
+- Disponibilidad: una observación existe para el corte solo si `known_at` ≤ corte. `known_at` NULL (regla de P3,
+  docs/architecture/v2/P3-datos.md §11): ejecución vigente → se acepta; retroactiva → NO es conocido a futuro de un corte
+  pasado y se excluye (política `strict`), o se asume `valid_from` solo si se pide explícitamente
+  (`assume_valid_from`), lo que degrada la calidad y se declara.
 - Series separadas por proveedor, moneda y unidad: nunca se mezclan.
 - Siempre se compara una referencia simple (último valor) con otros métodos en un holdout temporal posterior a la
   selección; solo se sirve otro método si mejora el MAE de selección en al menos `min_improvement`.
@@ -118,8 +118,7 @@ def build_purchase_series(history: pd.DataFrame, as_of: date, retroactive: bool,
         vf = to_date(r.valid_from)
         if vf is None:
             continue
-        fallback = vf if str(r.source) == "purchase_order" else None
-        ok, why = known_by(r.known_at, as_of, retroactive, fallback)
+        ok, why = known_by(r.known_at, as_of, retroactive)   # known_at NULL ⇒ desconocido en cortes retroactivos
         assumed = False
         if not ok and why == "unknown_availability" and null_policy == "assume_valid_from":
             ok, assumed = vf <= as_of, True
@@ -146,7 +145,7 @@ def build_purchase_series(history: pd.DataFrame, as_of: date, retroactive: bool,
                        agg["n"].astype(int).tolist())
         s.availability = {"observations": int(len(g)), "assumed_valid_from": int(g["assumed"].sum()),
                           "known_at_missing_accepted_current_run": int((g["why"] == "current_run").sum()),
-                          "evidence_valid_from": int((g["why"] == "fallback_evidence").sum())}
+                          "evidence_valid_from": 0}
         if s.availability["assumed_valid_from"]:
             s.degraded = True
             s.limitations.append(f"{s.availability['assumed_valid_from']} observación(es) sin known_at se asumieron "

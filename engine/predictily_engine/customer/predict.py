@@ -18,7 +18,7 @@ import pandas as pd
 from predictily_engine.customer.commitments import committed_by_relation, committed_lines
 from predictily_engine.customer.events import from_day
 from predictily_engine.customer.features import BASE_FEATURES, HORIZON_FEATURES, FeatureBuilder
-from predictily_engine.customer.outputs import compute_activity, top_k_products
+from predictily_engine.customer.outputs import RANKING_SOURCES, compute_activity, top_k_products
 from predictily_engine.customer.serving import enforce_nested, enforce_nested_quantity, serve_probability, serve_quantity
 
 
@@ -36,7 +36,8 @@ class PredictionOutput:
 
 
 def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_day: int, cfg: dict[str, Any],
-                commitments_state: pd.DataFrame | None = None, products_active: dict[int, bool] | None = None) -> PredictionOutput:
+                commitments_state: pd.DataFrame | None = None, products_active: dict[int, bool] | None = None,
+                commitment_stats: dict[str, int] | None = None) -> PredictionOutput:
     """artifacts: horizonte → {"prob": artefacto, "qty": artefacto} (los de producción). Solo se predicen estos horizontes."""
     horizons = sorted(artifacts)
     as_of = from_day(as_of_day)
@@ -110,11 +111,14 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
             "days_since_last_purchase": base["rel_recency_days"].to_numpy(dtype=float),
             "n_purchases": base["n_purchases_all"].to_numpy(dtype=float),
             "model_family": art_p["family"], "model_role": "primary" if art_p["kind"] == "complex" else "fallback",
-            "quality_flags": flags})
+            "quality_flags": flags,
+            # puntajes de las fuentes alternativas del ranking (no se persisten en customer_predictions)
+            "ranking_score_popularity": base["prod_buyers_90"].to_numpy(dtype=float),
+            "ranking_score_recency": -base["rel_recency_days"].to_numpy(dtype=float)})
         # comprometido (pedidos/contratos confirmados): no se suma a la esperanza
         c_rel = pd.DataFrame(columns=["customer_id", "product_id", "committed_quantity", "n_commitments"])
-        if commitments_state is not None and len(commitments_state):
-            lines, csum = committed_lines(commitments_state, as_of, h)
+        if commitments_state is not None:
+            lines, csum = committed_lines(commitments_state, as_of, h, commitment_stats)
             c_rel = committed_by_relation(lines)
             out.committed[h] = csum
         out.committed_relations[h] = c_rel
@@ -129,14 +133,21 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
         frames.append(df)
         out.served[h] = {"family": art_p["family"], "role": "primary" if art_p["kind"] == "complex" else "fallback",
                          "quantity_objective": art_q["objective"], "calibration_status": meta.get("calibration_status"),
+                         # fuente del ranking decidida en el holdout (cust-ranking-v1); sin decisión registrada: popularidad (la más segura)
+                         "ranking_source": meta.get("ranking_source") if meta.get("ranking_source") in RANKING_SOURCES else "popularity",
                          "calibration_method": art_p["calibrator"].method}
     out.predictions = pd.concat(frames, ignore_index=True)
     k = int(cfg["top_k_stored"])
     ranks = []
     for h in horizons:
-        r = top_k_products(out.predictions[out.predictions["horizon_days"] == h], k)
+        source = out.served[h]["ranking_source"]
+        score, tie = {"model": ("purchase_probability", "probability_raw"), "popularity": ("ranking_score_popularity", None),
+                      "recency": ("ranking_score_recency", None)}[source]
+        r = top_k_products(out.predictions[out.predictions["horizon_days"] == h], k, score, tie).copy()
+        r["ranking_source"] = source
+        r["ranking_score"] = r[score]
         ranks.append(r[["customer_id", "product_id", "horizon_days", "rank", "purchase_probability", "expected_quantity",
-                        "expected_amount", "currency"]])
+                        "expected_amount", "currency", "ranking_source", "ranking_score"]])
     out.rankings = pd.concat(ranks, ignore_index=True) if ranks else pd.DataFrame()
     out.summary = summary
     return out

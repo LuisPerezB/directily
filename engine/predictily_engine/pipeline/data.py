@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
 
 from predictily_engine.calendar.regions import region_for_province
 from predictily_engine.db.repository import TenantRepository
@@ -54,6 +55,8 @@ class TenantData:
     currency: str | None = None
     sector: str | None = None
     exceptional_events: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Conteos de eventos extraordinarios NO usados por desconocerse (known_at nulo) o conocerse tras el corte.
+    exceptional_stats: dict[str, int] = field(default_factory=dict)
     coverage: dict[str, Any] = field(default_factory=dict)
     coverage_limitations: list[dict[str, str]] = field(default_factory=list)
 
@@ -124,9 +127,36 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         promotions_known_on=_local_today(tenant.get("timezone")) if last is not None and cutoff >= last else None,
         currency=tenant.get("currency"),
         sector=tenant.get("sector"),
-        exceptional_events=repo.calendar_events(),
     )
+    data.exceptional_events, data.exceptional_stats = _exceptional_events(repo, cutoff)
     return _normalize(data)
+
+
+EXCEPTIONAL_LOOKAHEAD_DAYS = 180  # igual al tope del horizonte interno (inventory.MAX_INTERNAL_HORIZON)
+
+
+def _exceptional_events(repo: TenantRepository, cutoff: date) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Eventos extraordinarios del calendario conocidos al corte, leídos con el lector del core de Datos
+    (`extensions.data_core.load_calendar_events`: última revisión conocida; `known_at` nulo = desconocido, no se
+    devuelve con `as_of`). Devuelve también cuántos se dejaron fuera y por qué (nunca en silencio)."""
+    from predictily_engine.extensions.data_core import load_calendar_events
+
+    empty = (pd.DataFrame(), {"total": 0, "known_at_unknown_ignored": 0, "known_after_cutoff_ignored": 0})
+    if repo.conn.execute(text("SELECT to_regclass('calendar_events')")).scalar() is None:
+        return empty
+    start, end = cutoff + timedelta(days=1), cutoff + timedelta(days=EXCEPTIONAL_LOOKAHEAD_DAYS)
+    everything = load_calendar_events(repo.conn, repo.tenant_id, start, end, as_of=None)
+    known = load_calendar_events(repo.conn, repo.tenant_id, start, end, as_of=cutoff)
+    everything = everything[everything["category"] == "exceptional"]
+    known = known[known["category"] == "exceptional"].copy()
+    if "known_at" in known:  # a hora UTC sin zona: el corte compara contra el fin del día UTC (misma regla que el core de Datos)
+        known["known_at"] = pd.to_datetime(known["known_at"], utc=True).dt.tz_localize(None)
+    key = ["scope", "scope_ref", "code", "starts_on"]
+    unknown = everything["known_at"].isna()
+    seen = set(map(tuple, known[key].fillna("").astype(str).values.tolist())) if not known.empty else set()
+    late = ~unknown & ~everything[key].fillna("").astype(str).apply(tuple, axis=1).isin(seen)
+    return known, {"total": int(len(everything)), "known_at_unknown_ignored": int(unknown.sum()),
+                   "known_after_cutoff_ignored": int(late.sum())}
 
 
 def _local_today(timezone: str | None) -> date:

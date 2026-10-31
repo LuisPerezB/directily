@@ -434,6 +434,8 @@ popularidad, recencia y referencia. Cantidad: MAE, sesgo (Σ(pred−real)/Σreal
 sobre todas las filas** (incluye no compradores), y monto. Inactividad: tasa de «sin compras en 90 días» por estado frente a la regla ingenua de 60 días; frecuencia: MAE/sesgo
 con ventanas 90/180/365.
 
+**14.4b Fuente del ranking (`cust-ranking-v1`, ADR-P2-01).** El ranking servido de productos probables usa, por horizonte, la fuente elegida en el holdout entre probabilidad del modelo servido, popularidad y recencia por precision@5, con popularidad por defecto y margen relativo mínimo de 5 %; la fuente queda en `ranking_source` (modelos, resumen, cada fila del ranking y la API).
+
 **14.5 Coherencia.** Máximo acumulado P7 ≤ P30 ≤ P90 (sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
 
 **14.6 Reconciliación y compromisos.** agregado = Σ max(esperanza, comprometido) + comprometido fuera del modelo + residual; `inconsistent` si compradores > agregado
@@ -464,8 +466,9 @@ Detalle completo, modelo matemático y limitaciones en `docs/architecture/v2/P4-
   oferta barata que llega tarde no oculta faltantes: la demanda no atendida se penaliza y se muestra por período y causa.
 * **Costos.** Pronóstico mensual de costos unitarios por producto/proveedor/moneda/unidad con referencia (último valor),
   media móvil, deriva y Holt amortiguado; selección antes del holdout temporal y mejora mínima de 3 %; intervalos
-  empíricos solo con ≥ 8 errores. Disponibilidad por `known_at` (NULL: aceptado en ejecuciones vigentes; en
-  retroactivas solo con evidencia propia, p. ej. una compra real en su fecha). No se pronostican cantidades.
+  empíricos solo con ≥ 8 errores. Disponibilidad por `known_at` (NULL: aceptado en ejecuciones vigentes; en un corte
+  pasado NO es conocido y se excluye, salvo la política explícita `assume_valid_from`, que degrada la calidad). No se
+  pronostican cantidades.
 * **Escenarios.** Estrategias sobre el mismo corte, pronóstico, unidades y horizonte; ventas atendibles =
   min(demanda, disponible); margen sobre lo vendido; entradas clasificadas observada / pronosticada / supuesta. Simulación
   condicionada, no causal.

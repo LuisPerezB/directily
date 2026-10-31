@@ -181,11 +181,44 @@ def evaluate_activity(fb: FeatureBuilder, cutoffs: list[int], last_complete: int
     return out
 
 
-def top_k_products(pred: pd.DataFrame, k: int) -> pd.DataFrame:
-    """Los k productos más probables por comprador (horizonte ya filtrado); desempata por esperanza de cantidad."""
+RANKING_SOURCES = ("model", "popularity", "recency")
+
+
+def choose_ranking_source(ranking: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    """Regla `cust-ranking-v1`: fuente del ranking servido de productos probables.
+
+    Se elige en el holdout entre {probabilidad del modelo servido, popularidad, recencia} por precision@k (k = `ranking_primary_k`).
+    Popularidad es la fuente por defecto: otra fuente solo se sirve si supera a popularidad por un margen relativo mínimo
+    (`ranking_min_relative_margin`) y hay unidades suficientes; si varias lo cumplen, gana la de mayor precision@k (empate: el modelo).
+    El holdout aplica aquí una regla previa y versionada de una sola decisión por horizonte; no ajusta ningún modelo ni umbral.
+    """
+    k = int(cfg["ranking_primary_k"])
+    margin = float(cfg["ranking_min_relative_margin"])
+    min_units = int(cfg["ranking_min_units"])
+    key = f"precision_at_{k}"
+    values = {"model": ranking["served"].get(key), "popularity": ranking["popularity"].get(key), "recency": ranking["recency"].get(key)}
+    n_units = ranking["popularity"].get(f"n_units_precision_at_{k}") or 0
+    out: dict[str, Any] = {"rule_version": cfg["ranking_rule_version"], "metric": "precision_at_k", "primary_k": k, "relative_margin": margin,
+                           "min_units": min_units, "n_units": int(n_units), "values": values, "default": "popularity"}
+    pop = values["popularity"]
+    if pop is None or n_units < min_units:
+        out.update(source="popularity", reason="unidades insuficientes para comparar fuentes: se sirve popularidad")
+        return out
+    beating = {s: v for s, v in values.items() if s != "popularity" and v is not None and v > pop and v >= pop * (1.0 + margin)}
+    if not beating:
+        out.update(source="popularity", reason=f"ninguna fuente supera a popularidad por ≥ {margin:.0%} de precision@{k}")
+        return out
+    best = max(beating, key=lambda s: (beating[s], s == "model"))
+    out.update(source=best, reason=f"{best} supera a popularidad en precision@{k} ({beating[best]:.4f} vs {pop:.4f}, margen mínimo {margin:.0%})")
+    return out
+
+
+def top_k_products(pred: pd.DataFrame, k: int, score_col: str = "purchase_probability", tiebreak_col: str | None = None) -> pd.DataFrame:
+    """Los k productos mejor puntuados por comprador (horizonte ya filtrado). Orden: puntaje, desempate opcional y producto (determinista)."""
     if pred.empty:
         return pred.assign(rank=pd.Series(dtype=int))
-    d = pred.sort_values(["customer_id", "purchase_probability", "expected_quantity", "product_id"],
-                         ascending=[True, False, False, True], kind="mergesort")
+    by = ["customer_id", score_col] + ([tiebreak_col] if tiebreak_col else []) + ["product_id"]
+    asc = [True, False] + ([False] if tiebreak_col else []) + [True]
+    d = pred.sort_values(by, ascending=asc, kind="mergesort")
     d["rank"] = d.groupby("customer_id", sort=False).cumcount() + 1
     return d[d["rank"] <= k]

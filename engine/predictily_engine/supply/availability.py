@@ -5,11 +5,11 @@ Tres nociones de fecha (instrucctions.md §6.C): fecha efectiva del hecho, fecha
 
 1. `known_at` presente: el dato existe para un corte `as_of` solo si `known_at` (hora local de la empresa) es
    anterior o igual al fin de ese día.
-2. `known_at` NULL (desconocido):
+2. `known_at` NULL (desconocido; regla de P3, docs/architecture/v2/P3-datos.md §11):
    - ejecución vigente (no retroactiva): se acepta, es información actual de la empresa;
-   - ejecución retroactiva (corte histórico, backtest, simulación): se usa la fecha de respaldo SOLO si el
-     llamador aporta una evidencia propia del hecho (p. ej. el costo de una compra real se conoce en la fecha de
-     la compra); sin respaldo el dato queda EXCLUIDO y se cuenta como exclusión por disponibilidad desconocida.
+   - ejecución retroactiva (corte histórico, backtest, simulación): NO es conocido a futuro de un corte pasado; el
+     dato queda EXCLUIDO y se cuenta como exclusión por disponibilidad desconocida. P4 no aporta fechas de respaldo;
+     la única vía explícita es la política `assume_valid_from` del pronóstico de costos (degrada la calidad).
 La ingestión actual de un histórico no demuestra que algo se conociera antes.
 """
 
@@ -37,13 +37,11 @@ def to_date(value) -> date | None:
         return None
 
 
-def known_by(known_at, as_of: date, retroactive: bool, fallback: date | None = None) -> tuple[bool, str]:
-    """(¿existe al corte?, motivo). Motivos: known_at | current_run | fallback_evidence | unknown_availability | after_cutoff."""
+def known_by(known_at, as_of: date, retroactive: bool) -> tuple[bool, str]:
+    """(¿existe al corte?, motivo). Motivos: known_at | current_run | unknown_availability | after_cutoff."""
     k = to_date(known_at)
     if k is not None:
         return (k <= as_of, "known_at" if k <= as_of else "after_cutoff")
     if not retroactive:
         return True, "current_run"
-    if fallback is not None:
-        return (fallback <= as_of, "fallback_evidence" if fallback <= as_of else "after_cutoff")
     return False, "unknown_availability"

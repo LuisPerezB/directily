@@ -124,7 +124,7 @@ Tablas completas y lectura en `docs/04-estrategia-modelado.md` §11. No certific
 
 ```bash
 cd backend && DB_DATABASE=predictily_engine_test php artisan migrate:fresh --force && cd ../engine
-.venv/bin/python -m pytest -q     # 88 pruebas: 75 unitarias + 13 de integración (~110 s, 29-oct-2026)
+OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1 .venv/bin/python -m pytest -q     # 391 pruebas (con los cuatro paquetes de la etapa 2; 427 s con CPU compartida, 30-oct-2026)
 ```
 Las de integración se omiten si la BD de pruebas no está disponible. Cubren: escritura
 versionada, aislamiento entre dos empresas, idempotencia, 409 por concurrencia, cambio de run

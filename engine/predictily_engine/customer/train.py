@@ -37,6 +37,7 @@ from predictily_engine.customer.models import (
     ratio_interval,
     ratio_scale,
 )
+from predictily_engine.customer.outputs import choose_ranking_source
 from predictily_engine.customer.protocol import FULL_BLOCKS, LEAN_BLOCKS, REFERENCE_BLOCKS, BlockPlan, plan_blocks
 from predictily_engine.customer.serving import enforce_nested, serve_probability, serve_quantity
 
@@ -224,7 +225,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
             served_prob_art = challenger_art
     prob_info["gate"] = gate
     served_name = served_prob_art["family"]
-    p_served_hold, _ = serve_probability(served_prob_art, X[hold_rows], ref_p[hold_rows])
+    p_served_hold, raw_served_hold = serve_probability(served_prob_art, X[hold_rows], ref_p[hold_rows])
     served_metrics = probability_metrics(y[hold_rows], p_served_hold)
     ece = served_metrics["ece"]
     prob_info["served"] = {
@@ -238,19 +239,22 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
     # ── ranking del holdout (modelo servido vs referencia, popularidad y recencia) ──
     base_hold = bundle.base.loc[brow[hold_rows]]
     units = _unit_ids(cut[hold_rows], base_hold["customer_id"].to_numpy())
-    ks = [int(k) for k in cfg["ranking_eval_ks"]]
+    ks = sorted({int(k) for k in cfg["ranking_eval_ks"]} | {int(cfg["ranking_primary_k"])})
     yh = y[hold_rows]
+    by_product = -base_hold["product_id"].to_numpy(dtype=float)          # desempate determinista: producto ascendente (igual que en la predicción)
     ranking = {
-        "served": ranking_metrics(units, p_served_hold, yh, ks),
+        "served": ranking_metrics(units, p_served_hold, yh, ks, tiebreak=raw_served_hold),
         "reference": ranking_metrics(units, p_ref_hold, yh, ks, tiebreak=ref_p[hold_rows]),
-        "popularity": ranking_metrics(units, base_hold["prod_buyers_90"].to_numpy(dtype=float), yh, ks),
-        "recency": ranking_metrics(units, -base_hold["rel_recency_days"].to_numpy(dtype=float), yh, ks),
+        "popularity": ranking_metrics(units, base_hold["prod_buyers_90"].to_numpy(dtype=float), yh, ks, tiebreak=by_product),
+        "recency": ranking_metrics(units, -base_hold["rel_recency_days"].to_numpy(dtype=float), yh, ks, tiebreak=by_product),
         "definition": ("Candidatos = relaciones comprador×producto con compras previas al corte; unidad = (corte, comprador); "
                        "precision@k sobre unidades con ≥ k candidatos, recall@k sobre unidades con ≥ 1 positivo."),
     }
     if challenger_art is not None and challenger_art is not served_prob_art:   # informativo: el candidato no promovido
         p_ch_rank, _ = serve_probability(challenger_art, X[hold_rows], ref_p[hold_rows])
         ranking["challenger_not_promoted"] = ranking_metrics(units, p_ch_rank, yh, ks)
+    # ADR-P2-01 (cust-ranking-v1): fuente del ranking servido = {modelo servido, popularidad, recencia} por precision@k con margen mínimo
+    ranking["selection"] = choose_ranking_source(ranking, cfg)
     res.holdout["ranking"] = ranking
 
     # ── cantidad condicionada a compra ──

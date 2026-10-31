@@ -52,7 +52,8 @@ trait CustomerFixtures
             'result_type' => 'forecast', 'quality_status' => 'ok', 'uncertainty_source' => 'empirical_holdout', 'as_of' => $asOf,
             'horizons' => json_encode($horizons), 'horizon_start' => date('Y-m-d', strtotime($asOf.' +1 day')),
             'horizon_end' => date('Y-m-d', strtotime($asOf.' +'.max($horizons).' days')), 'target_definition' => json_encode(['event' => 'purchase']),
-            'options' => '{}', 'config_version' => str_repeat('c', 64), 'model_versions' => json_encode(['30' => ['probability' => 'v1']]),
+            'options' => '{}', 'config_version' => str_repeat('c', 64),
+            'model_versions' => json_encode(array_combine(array_map('strval', $horizons), array_map(fn ($h) => ['probability' => 'v1', 'ranking_source' => $h === 7 ? 'popularity' : 'model'], $horizons))),
             'assumptions' => json_encode(['Supuesto de prueba']), 'limitations' => json_encode(['Datos ficticios']), 'summary' => json_encode(['rows' => 12]),
             'is_current' => $current, 'triggered_by' => 'user', 'started_at' => now(), 'completed_at' => now(), 'created_at' => now(), 'updated_at' => now(),
         ]);
@@ -84,6 +85,7 @@ trait CustomerFixtures
                     'tenant_id' => $tid, 'core_run_id' => $runId, 'customer_id' => $p->customer_id, 'product_id' => $p->product_id, 'horizon_days' => $h,
                     'rank' => ($rank[$p->customer_id] - 1) % 2 + 1, 'purchase_probability' => $p->purchase_probability, 'expected_quantity' => $p->expected_quantity,
                     'expected_amount' => $p->expected_amount, 'currency' => 'USD',
+                    'ranking_source' => $h === 7 ? 'popularity' : 'model', 'ranking_score' => $h === 7 ? 40 : $p->purchase_probability,
                 ]);
             }
             $rank = [];

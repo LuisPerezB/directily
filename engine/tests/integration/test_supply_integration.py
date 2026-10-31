@@ -26,6 +26,18 @@ AUTH = {"Authorization": "Bearer test-token"}
 CUT = date(2026, 10, 26)
 
 
+@pytest.fixture(scope="module")
+def synthetic_tenant(db_engine):
+    """Empresa sintética propia de este módulo (independiente del estado compartido y del orden de las pruebas)."""
+    from loader import load_company
+
+    from predictily_engine.synthetic import generate_company
+
+    company = generate_company("ferreteria_andina", seed=42, n_products=4, start="2026-01-01", end="2026-07-31")
+    with db_engine.begin() as conn:
+        return load_company(conn, company, "P4 Sintética (ficticia)")
+
+
 def execute(client, run_id, tenant_id, job_id=None):
     return client.post(f"/v1/supply/runs/{run_id}/execute", json={"tenant_id": tenant_id, "training_job_id": job_id}, headers=AUTH)
 
@@ -203,8 +215,10 @@ def test_cost_forecast_run_respects_availability_and_stores_metrics(db_engine, c
         p = add_product(conn, t, "C1", "kg")
         s = add_supplier(conn, t, "SC")
         for k in range(18):
-            add_cost(conn, t, p, s, 10.0 + 0.5 * k, add_months(date(2025, 1, 1), k).replace(day=10))
+            d = add_months(date(2025, 1, 1), k).replace(day=10)
+            add_cost(conn, t, p, s, 10.0 + 0.5 * k, d, known_at=f"{d.isoformat()} 12:00:00-05")
         add_cost(conn, t, p, s, 999.0, date(2026, 6, 10), known_at="2026-08-01 00:00:00+00")  # conocido después del corte
+        add_cost(conn, t, p, s, 777.0, date(2026, 6, 12), known_at=None, source="import")  # sin known_at: no se conoce a futuro de un corte pasado
     rid, jid = None, None
     with db_engine.begin() as conn:
         rid, jid = add_core_run(conn, t, "cost", "forecast", {"as_of": "2026-06-30", "historical": True})
@@ -218,6 +232,7 @@ def test_cost_forecast_run_respects_availability_and_stores_metrics(db_engine, c
     assert row["points"][0]["yhat"] == pytest.approx(19.0)
     assert row["metrics"]["drift"]["holdout"]["mae"] < row["metrics"]["last_value"]["holdout"]["mae"]
     assert run["result_type"] == "forecast" and run["summary"]["availability"]["after_cutoff"] == 1
+    assert run["summary"]["availability"]["unknown_availability_excluded"] == 1
 
 
 def test_scenario_evaluation_run_persists_classified_inputs(db_engine, client, world):
@@ -241,8 +256,8 @@ def test_scenario_evaluation_run_persists_classified_inputs(db_engine, client, w
     assert ev["common_basis"]["horizon_days"] == 28 and "NO se deriva" in ev["disclaimer"]
 
 
-def test_causal_check_endpoint_never_publishes_an_effect(db_engine, client, tenants):
-    r = client.post("/v1/supply/causal/check", json={"tenant_id": tenants["A"], "request": {"treatment": "net_price", "outcome": "units"}}, headers=AUTH)
+def test_causal_check_endpoint_never_publishes_an_effect(db_engine, client, synthetic_tenant):
+    r = client.post("/v1/supply/causal/check", json={"tenant_id": synthetic_tenant, "request": {"treatment": "net_price", "outcome": "units"}}, headers=AUTH)
     assert r.status_code == 200
     body = r.json()
     assert body["result_type"] == "causal_estimate" and body["quality_status"] == "insufficient_evidence"
@@ -250,8 +265,8 @@ def test_causal_check_endpoint_never_publishes_an_effect(db_engine, client, tena
     assert body["data"]["conditional_simulation"]["available"] is True
 
 
-def test_historical_simulation_run_on_synthetic_tenant(db_engine, client, tenants):
-    A = tenants["A"]
+def test_historical_simulation_run_on_synthetic_tenant(db_engine, client, synthetic_tenant):
+    A = synthetic_tenant
     with db_engine.begin() as conn:
         rid, jid = add_core_run(conn, A, "supply", "simulate", {"days": 45})
     r = execute(client, rid, A, jid)

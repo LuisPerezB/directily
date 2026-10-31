@@ -50,6 +50,7 @@ class CustomerPredictionController extends CustomerController
 
         return CustomerPredictionResource::collection($page)->additional([
             'envelope' => CustomerEnvelope::forRun($run, $tenant, $horizon),
+            'ranking_source' => $run->model_versions[(string) $horizon]['ranking_source'] ?? null,
             'definitions' => CustomerEnvelope::DEFINITIONS,
         ])->response();
     }

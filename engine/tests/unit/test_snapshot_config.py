@@ -120,5 +120,9 @@ def test_pipeline_records_run_options_inside_the_effective_config(pipeline_resul
     assert run["seed"] == 42 and run["min_improvement"] == 0.03 and run["horizon_days"] == 90
     assert run["horizons"] == [7, 14, 30, 60, 90] and run["feature_set_version"].startswith("fs-")
     assert pipeline_result.config_version == config_hash(eff)
+    # Registro de P3 (`effective_config_record`): procedencia por clave, perfil sectorial aplicado y el hash del core.
+    assert eff["provenance"]["horizons"] == "core" and eff["profile"] is None
+    assert eff["core_config_version"] == resolve_config("demand", {}, None)[1]
+    assert eff["core_config_version"] != pipeline_result.config_version, "la huella de la ejecución incluye sus opciones"
     assert pipeline_result.summary["config_version"] == pipeline_result.config_version
     assert pipeline_result.summary["data_snapshot_hash"] == pipeline_result.snapshot.hash

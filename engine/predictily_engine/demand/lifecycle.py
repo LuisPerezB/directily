@@ -244,7 +244,7 @@ def known_events(events: pd.DataFrame | None, cutoff: pd.Timestamp) -> tuple[pd.
         return pd.DataFrame(columns=EVENT_COLUMNS), stats
     ev = events[events["category"] == "exceptional"].copy()
     stats["total"] = int(len(ev))
-    ev["known_at"] = pd.to_datetime(ev["known_at"])
+    ev["known_at"] = pd.to_datetime(ev["known_at"], utc=True).dt.tz_localize(None)  # UTC; el corte es el fin del día UTC
     end_of_cutoff = pd.Timestamp(cutoff).normalize() + pd.Timedelta(days=1)
     unknown = ev["known_at"].isna()
     late = ~unknown & (ev["known_at"] >= end_of_cutoff)

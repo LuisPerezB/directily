@@ -23,6 +23,7 @@ class CustomerProductRanking extends Model
             'purchase_probability' => 'float',
             'expected_quantity' => 'float',
             'expected_amount' => 'float',
+            'ranking_score' => 'float',
         ];
     }
 

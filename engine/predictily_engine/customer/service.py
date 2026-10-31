@@ -416,6 +416,9 @@ def _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_
                                 "promotion_passed": r.qty["gate"]["passed"]}
             item["expected_quantity"] = {"served_bias": r.holdout["expected_quantity"]["served"]["bias"],
                                          "reference_bias": r.holdout["expected_quantity"]["reference"]["bias"]}
+            sel = r.holdout["ranking"]["selection"]
+            item["ranking_source"] = sel["source"]
+            item["ranking"] = {"rule_version": sel["rule_version"], "primary_k": sel["primary_k"], "precision_at_k": sel["values"], "reason": sel["reason"]}
         horizons[str(h)] = item
     return {"horizons": horizons, "promoted": promoted, "coherence": {k: v for k, v in coherence.items() if k in ("evaluated", "rule", "pairs")},
             "dataset": bundle.meta if bundle else None, "duration_ms": duration_ms, "loading_s": round(load_s, 1),
@@ -495,7 +498,8 @@ def _persist_models(conn: Connection, tenant: dict[str, Any], run: dict[str, Any
                 hp = {"slot": _slot(h, target), "horizon_days": h, "target": target, "family": family, "tier": r.manifest.get("tier"),
                       "kind": art["kind"], "served": bool(is_served), "calibration_method": art.get("calibrator").method if art.get("calibrator") else None,
                       "gate": info.get("gate"), "neg_rate": art.get("neg_rate"), "scale": art.get("scale"),
-                      "holdout": (info["served"]["holdout"] if is_served else (info.get("challenger") or {}).get("holdout")) if info else None}
+                      "holdout": (info["served"]["holdout"] if is_served else (info.get("challenger") or {}).get("holdout")) if info else None,
+                      "ranking_source": art["meta"].get("ranking_source") if target == "probability" else None}
                 rid = _upsert_registry(conn, tenant_id, version, f"customer_{target}_{family}", status, served_role, hp,
                                        path, sha, run_id, job_id, last_complete, int(trained_rows), seed,
                                        None if (is_served or art["kind"] == "reference") else
@@ -510,6 +514,7 @@ def _persist_models(conn: Connection, tenant: dict[str, Any], run: dict[str, Any
                         "AND hyperparameters->>'slot' = :slot"), {"t": tenant_id, "id": rid, "slot": _slot(h, target)})
                     promoted.append(f"{_slot(h, target)}:{family}")
             entry[target] = slot_models
+        entry["ranking_source"] = ((r.holdout.get("ranking") or {}).get("selection") or {}).get("source")
         versions[str(h)] = entry
     return versions, promoted
 
@@ -521,6 +526,10 @@ def _artifact_meta(r: HorizonResult, target: str, family: str, served: bool) -> 
     if target == "probability" and info.get("served"):
         meta["calibration_status"] = info["served"]["calibration_status"]
         meta["holdout_ece"] = info["served"]["holdout"].get("ece")
+        # fuente del ranking (cust-ranking-v1): solo el modelo servido fue evaluado; un artefacto no servido (respaldo, candidato) usa popularidad
+        sel = (r.holdout.get("ranking") or {}).get("selection") or {}
+        meta["ranking_source"] = sel.get("source", "popularity") if served else "popularity"
+        meta["ranking_rule_version"] = sel.get("rule_version")
     return meta
 
 
@@ -587,7 +596,8 @@ def _persist_evaluations(conn: Connection, tenant_id: int, run_id: int, results:
         add("customer_expected_amount_reference", "holdout", f"h{h}:expected_amount", h, am["reference"], True, False, _metric_columns(am["reference"]), {"definition": am["definition"]})
         add("customer_expected_amount_served", "holdout", f"h{h}:expected_amount", h, am["served"], False, True, _metric_columns(am["served"]),
             {"definition": am["definition"], "price_assumption": am["price_assumption"]})
-        add("customer_ranking", "holdout", f"h{h}:ranking", h, r.holdout["ranking"], False, True, {"n_obs": r.holdout["ranking"]["served"]["n_units"]})
+        add("customer_ranking", "holdout", f"h{h}:ranking", h, r.holdout["ranking"], False, True, {"n_obs": r.holdout["ranking"]["served"]["n_units"]},
+            {"selection": r.holdout["ranking"]["selection"]})
     add("customer_coherence", "holdout", "coherence", None, coherence, False, True)
     if activity_eval.get("inactivity"):
         add("customer_inactivity", "holdout", "inactivity", None, activity_eval["inactivity"], False, True, {"n_obs": activity_eval["inactivity"]["n_customer_cutoffs"]})
@@ -664,8 +674,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         data = load_customer_data(repo, cfg, through=as_of_req)
         coverage_declared = data.coverage is not None and len(data.coverage) > 0
         complete = data.last_complete_day() if coverage_declared else None
-        commit_cur = repo.commitments() if artifacts else pd.DataFrame()
-        commit_rev = repo.commitment_revisions() if artifacts and as_of_req < today else pd.DataFrame()
+        commit_rev = repo.commitment_revisions() if artifacts else pd.DataFrame()
         sku_map = repo.product_skus() if artifacts else {}
     # fecha efectiva de las variables: si la cobertura declarada termina antes, los días siguientes son AUSENTES (no cero)
     as_of = as_of_req
@@ -690,11 +699,13 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         fb = FeatureBuilder(data, cfg, max_horizon=max(artifacts), extend_to=as_of_day)
         products_active = ({int(r.product_id): bool(r.is_active) and not bool(getattr(r, "deleted", False))
                             for r in data.products.itertuples(index=False)} if len(data.products) else None)
-        state = pd.DataFrame()
-        if len(commit_cur):
-            state = state_as_of(commit_cur, commit_rev, sku_map, as_of, today, tenant.get("timezone") or "America/Guayaquil")
+        # Estado de los compromisos a la fecha: regla de P3 (CommitmentAsOf): última versión con known_at ≤ corte; sin known_at no es visible.
+        punits = {int(r.product_id): str(r.unit) for r in data.products.itertuples(index=False) if getattr(r, "unit", None)} if len(data.products) else {}
+        state, cstats = state_as_of(commit_rev, sku_map, punits, as_of)
         progress("predicting", 40)
-        out = predict_all(fb, artifacts, as_of_day, cfg, state if len(state) else None, products_active)
+        out = predict_all(fb, artifacts, as_of_day, cfg, state, products_active, cstats)
+        for h in out.horizons:
+            model_versions[str(h)]["ranking_source"] = out.served[h]["ranking_source"]
         progress("reconciling", 70)
         with engine.connect() as conn:
             repo = CustomerRepository(conn, tenant_id)
@@ -734,7 +745,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
     progress("persisting", 90)
     snap = _snapshot(data, cfg, cfg_version, as_of, {"models": {h: v.get("probability_id") for h, v in model_versions.items()},
                                                     "quantity_models": {h: v.get("quantity_id") for h, v in model_versions.items()},
-                                                    "commitments_rows": int(len(commit_cur)), "as_of_requested": as_of_req.isoformat()})
+                                                    "commitments_revisions": int(len(commit_rev)), "as_of_requested": as_of_req.isoformat()})
     horizons_out = sorted(out.horizons) if out is not None else []
     summary: dict[str, Any] = {"horizons": horizons_out, "as_of_requested": as_of_req.isoformat(), "as_of_effective": as_of.isoformat(), "stale_data": stale,
                                "excluded_from_individual_prediction": data.excluded, "duration_ms": duration_ms_pre}
@@ -800,7 +811,7 @@ ACT_COLUMNS = ["tenant_id", "core_run_id", "customer_id", "as_of", "last_purchas
                "n_intervals", "inactivity_risk", "inactivity_status", "behavior_change", "frequency_ratio", "behavior_p_value",
                "spend_recent", "spend_prior", "spend_ratio", "currency"]
 RANK_COLUMNS = ["tenant_id", "core_run_id", "customer_id", "product_id", "horizon_days", "rank", "purchase_probability",
-                "expected_quantity", "expected_amount", "currency"]
+                "expected_quantity", "expected_amount", "currency", "ranking_source", "ranking_score"]
 REC_COLUMNS = ["tenant_id", "core_run_id", "forecast_run_id", "product_id", "horizon_days", "aggregate_quantity", "aggregate_days",
                "buyers_total_quantity", "buyers_committed_quantity", "buyers_incremental_quantity", "buyers_expected_quantity", "n_buyers",
                "committed_outside_model", "residual_quantity", "excess_quantity", "excess_ratio", "residual_share", "status", "severity"]

@@ -71,13 +71,14 @@ def test_availability_known_at_after_cutoff_is_not_used_even_if_valid_from_is_ea
 
 
 def test_null_known_at_rules_current_vs_retroactive():
+    # Regla de P3 (P3-datos.md §11): un costo sin known_at no es conocido a futuro de un corte pasado, sea cual sea su origen.
     rows = [(1, 1, None, 10.0, "USD", "kg", date(2026, 5, 10), None, "import"),
-            (2, 1, None, 11.0, "USD", "kg", date(2026, 5, 20), None, "purchase_order"),  # una compra real se conoce en su fecha
-            (3, 1, None, 12.0, "USD", "kg", date(2026, 6, 5), None, "manual")]
+            (2, 1, None, 11.0, "USD", "kg", date(2026, 5, 20), None, "purchase_order"),
+            (3, 1, None, 12.0, "USD", "kg", date(2026, 6, 5), pd.Timestamp("2026-06-05"), "manual")]
     cur, st = build_purchase_series(history(rows), CUT, retroactive=False)
-    assert st["used"] == 3 and cur[0].availability["known_at_missing_accepted_current_run"] == 3
+    assert st["used"] == 3 and cur[0].availability["known_at_missing_accepted_current_run"] == 2
     retro, st = build_purchase_series(history(rows), CUT, retroactive=True)
-    assert st["used"] == 1 and st["unknown_availability_excluded"] == 2 and retro[0].values == [11.0]
+    assert st["used"] == 1 and st["unknown_availability_excluded"] == 2 and retro[0].values == [12.0]
     assumed, st = build_purchase_series(history(rows), CUT, retroactive=True, null_policy="assume_valid_from")
     assert st["used"] == 3 and st["assumed_valid_from"] == 2 and assumed[0].degraded
     assert forecast_series(assumed[0], CUT, 3, {**CFG, "min_observations": 1})["quality_status"] in ("degraded", "insufficient_data")
@@ -87,10 +88,11 @@ def test_series_are_separate_by_supplier_currency_and_unit_and_quantities_are_ig
     rows = []
     for i in range(8):
         d = add_months(date(2025, 11, 1), i)
-        rows += [(i * 4, 1, 1, 10.0 + i, "USD", "kg", d, None, "purchase_order"),
-                 (i * 4 + 1, 1, 2, 20.0, "USD", "kg", d, None, "purchase_order"),
-                 (i * 4 + 2, 1, 1, 9.0, "EUR", "kg", d, None, "purchase_order"),
-                 (i * 4 + 3, 1, 1, 10000.0, "USD", "ton", d, None, "purchase_order")]
+        ka = pd.Timestamp(d)
+        rows += [(i * 4, 1, 1, 10.0 + i, "USD", "kg", d, ka, "purchase_order"),
+                 (i * 4 + 1, 1, 2, 20.0, "USD", "kg", d, ka, "purchase_order"),
+                 (i * 4 + 2, 1, 1, 9.0, "EUR", "kg", d, ka, "purchase_order"),
+                 (i * 4 + 3, 1, 1, 10000.0, "USD", "ton", d, ka, "purchase_order")]
     h = history(rows)
     s, _ = build_purchase_series(h, CUT, retroactive=True)
     assert len(s) == 4 and {(x.supplier_id, x.currency, x.unit) for x in s} == {(1, "USD", "kg"), (2, "USD", "kg"), (1, "EUR", "kg"), (1, "USD", "ton")}
@@ -118,7 +120,8 @@ def test_missing_months_are_filled_and_declared():
 
 def test_forecast_at_a_cutoff_does_not_change_when_later_information_is_added():
     """E2-05: perturbar costos posteriores al corte (fecha efectiva o conocimiento) no altera el pronóstico de ese corte."""
-    base = [(i, 1, 1, 10.0 + 0.5 * i, "USD", "kg", add_months(date(2025, 1, 1), i).replace(day=10), None, "purchase_order") for i in range(18)]
+    base = [(i, 1, 1, 10.0 + 0.5 * i, "USD", "kg", add_months(date(2025, 1, 1), i).replace(day=10),
+             pd.Timestamp(add_months(date(2025, 1, 1), i).replace(day=10)), "purchase_order") for i in range(18)]
     s0, _ = build_purchase_series(history(base), CUT, retroactive=True)
     f0 = forecast_series(s0[0], CUT, 3, CFG)
     noisy = base + [(100, 1, 1, 500.0, "USD", "kg", date(2026, 8, 1), pd.Timestamp("2026-06-15"), "import"),   # anunciado antes, vigente después del corte

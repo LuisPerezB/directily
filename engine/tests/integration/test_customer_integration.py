@@ -355,6 +355,14 @@ def test_commitments_and_aggregate_demand_are_reconciled_without_double_counting
             conn.execute(text(
                 "INSERT INTO commercial_commitment_items (tenant_id, commitment_id, line_number, product_id, quantity, quantity_fulfilled, unit, created_at, updated_at) "
                 "VALUES (:t, :c, 1, :p, :q, :f, :u, now(), now())"), {"t": tid, "c": cid, "p": product, "q": qty, "f": fulfilled, "u": unit})
+            # revisión como la deja el importador de P3: la regla de estado a un corte (CommitmentAsOf) lee estas versiones
+            sku = conn.execute(text("SELECT sku FROM products WHERE tenant_id = :t AND id = :p"), {"t": tid, "p": product}).scalar_one()
+            snapshot = {"header": {"commitment_type": ctype, "external_id": ext, "status": status, "expected_delivery_date": delivery, "currency": "USD"},
+                        "lines": [{"line_number": 1, "product_sku": sku, "quantity": qty, "quantity_fulfilled": fulfilled, "unit": unit, "delivery_date": None}]}
+            conn.execute(text(
+                "INSERT INTO commercial_commitment_revisions (tenant_id, commitment_id, revision, status, known_at, cancelled_at, source_hash, snapshot, recorded_at) "
+                "VALUES (:t, :c, 1, :s, :k, :x, repeat('a', 64), CAST(:snap AS jsonb), now())"),
+                {"t": tid, "c": cid, "s": status, "k": f"{known} 08:00:00-05", "x": cancelled, "snap": json.dumps(snapshot)})
         within = (env["last"] + timedelta(days=15)).isoformat()
         commit("PED-1", "order", "partially_fulfilled", big + 10, 10, within, env["last"].isoformat())             # pendiente = big
         commit("PED-2", "order", "confirmed", 500, 0, within, (env["last"] + timedelta(days=9)).isoformat())         # conocido DESPUÉS del corte
@@ -379,6 +387,7 @@ def test_commitments_and_aggregate_demand_are_reconciled_without_double_counting
     assert float(row["incremental_quantity"]) == pytest.approx(float(row["total_view_quantity"]) - big, abs=1e-3)
     summ = out["summary"]["committed"]["30"]
     assert summ["excluded"]["unknown_or_after_cutoff"] == 1 and summ["excluded"]["not_order_or_contract"] == 1 and summ["excluded"]["cancelled"] == 1
+    assert summ["commitments_not_visible_at_cutoff"] == 1           # PED-2 (conocido después del corte) no existe para este corte (regla P3)
     assert summ["excluded"]["delivery_after_horizon"] == 1 and summ["excluded"]["unit_mismatch"] == 1
     rec = {(r["product_id"], r["horizon_days"]): r for r in q(db_engine, "SELECT * FROM customer_reconciliations WHERE tenant_id = :t AND core_run_id = :r", t=tid, r=out["run_id"])}
     r1 = rec[(prod, 30)]
@@ -411,3 +420,77 @@ def test_api_execute_endpoint_requires_token_and_company(client, db_engine, env)
     caps = client.get("/v1/customer/capabilities", headers=AUTH).json()
     assert caps["horizons"] == [7, 30, 90] and "isotonic" in caps["calibration"]
     assert json.dumps(caps["target_definition"]).count("supuesto") >= 1
+
+
+# ───────────────────────────── fuente del ranking (ADR-P2-01 · cust-ranking-v1) ─────────────────────────────
+
+def test_ranking_source_is_recorded_in_models_summary_and_every_ranking_row(db_engine, env):
+    tid = env["A"]["tenant_id"]
+    train = q(db_engine, "SELECT model_versions, summary FROM core_runs WHERE id = :r", r=env["train"]["run_id"])[0]
+    out = predict_a(db_engine, env)
+    pred = q(db_engine, "SELECT model_versions, summary FROM core_runs WHERE id = :r", r=out["run_id"])[0]
+    for h, entry in pred["model_versions"].items():
+        decided = entry["ranking_source"]
+        assert decided in ("model", "popularity", "recency")
+        assert out["summary"]["served"][h]["ranking_source"] == decided
+        rows = q(db_engine, "SELECT DISTINCT ranking_source FROM customer_product_rankings WHERE tenant_id = :t AND core_run_id = :r AND horizon_days = :h", t=tid, r=out["run_id"], h=int(h))
+        assert [r["ranking_source"] for r in rows] == [decided]
+    for h, item in train["summary"]["horizons"].items():
+        if item.get("ranking_source"):
+            assert item["ranking"]["rule_version"] == "cust-ranking-v1" and item["ranking"]["primary_k"] == 5
+            assert train["model_versions"][h]["ranking_source"] == item["ranking_source"]
+    ev = q(db_engine, "SELECT extra FROM model_evaluations WHERE tenant_id = :t AND core_run_id = :r AND level_key LIKE :pat", t=tid, r=env["train"]["run_id"], pat="%:ranking")
+    assert ev and all(e["extra"]["selection"]["source"] in ("model", "popularity", "recency") for e in ev)
+
+
+def test_when_popularity_wins_the_served_ranking_is_popularity(db_engine):
+    """Con un margen exigido inalcanzable (override de empresa), ninguna fuente supera a popularidad: se sirve popularidad en todos los horizontes."""
+    world = generate_world(seed=13, n_customers=110, n_products=7, n_days=430, mean_interval_range=(20, 200))
+    with db_engine.begin() as conn:
+        env_d = load_world(conn, world, "Empresa D (ranking, ficticia)", settings={"cores": {"customer": {"ranking_min_relative_margin": 50.0, "ranking_min_units": 1}}})
+    tid = env_d["tenant_id"]
+    train = run(db_engine, tid, "train")
+    served = {h: i for h, i in train["summary"]["horizons"].items() if i["status"] in ("trained", "reference_only")}
+    assert served and all(i["ranking_source"] == "popularity" for i in served.values())
+    assert all("ninguna fuente supera a popularidad" in i["ranking"]["reason"] for i in served.values())
+    out = run(db_engine, tid, "predict", as_of=(world.start + timedelta(days=world.n_days)).isoformat())
+    assert out["status"] == "completed"
+    rows = q(db_engine, "SELECT customer_id, horizon_days, rank, ranking_source, ranking_score FROM customer_product_rankings WHERE tenant_id = :t AND core_run_id = :r "
+                        "ORDER BY customer_id, horizon_days, rank", t=tid, r=out["run_id"])
+    assert rows and {r["ranking_source"] for r in rows} == {"popularity"}
+    prev = None
+    for r in rows:
+        if prev and (prev["customer_id"], prev["horizon_days"]) == (r["customer_id"], r["horizon_days"]):
+            assert float(prev["ranking_score"]) >= float(r["ranking_score"])        # orden por popularidad (compradores distintos 90 d)
+        prev = r
+    assert {m["ranking_source"] for m in q(db_engine, "SELECT model_versions->:h AS m FROM core_runs WHERE id = :r", h=next(iter(served)), r=out["run_id"])[0].values() if isinstance(m, dict)} == {"popularity"}
+
+
+# ───────────────────────────── cobertura efectiva de P3 y madurez de etiquetas ─────────────────────────────
+
+def test_label_maturity_and_prediction_date_follow_the_effective_coverage_of_p3(db_engine):
+    """La cobertura declarada (regla P3 `effective_coverage`) manda sobre la última venta: etiquetas maduras solo hasta ahí
+    y los días posteriores son AUSENTES (la predicción se calcula a la fecha de cobertura y queda degradada)."""
+    world = generate_world(seed=17, n_customers=90, n_products=6, n_days=420, mean_interval_range=(20, 200))
+    through = world.start + timedelta(days=300)
+    with db_engine.begin() as conn:
+        e = load_world(conn, world, "Empresa E (cobertura, ficticia)", coverage_through=through.isoformat())
+    tid = e["tenant_id"]
+    train = run(db_engine, tid, "train")
+    row = q(db_engine, "SELECT evaluation_manifest, data_snapshot_id FROM core_runs WHERE id = :r", r=train["run_id"])[0]
+    assert row["evaluation_manifest"]["labels_mature_through"] == through.isoformat()
+    assert row["evaluation_manifest"]["coverage_source"] == "data_coverage"
+    for h, item in row["evaluation_manifest"]["horizons"].items():
+        if item.get("blocks"):
+            for name in ("train", "calibration", "holdout"):
+                blk = item["blocks"].get(name)
+                if blk:
+                    assert blk["label_window_to"] <= through.isoformat()      # ninguna ventana de resultado pasa la cobertura
+    snap = q(db_engine, "SELECT coverage FROM data_snapshots WHERE id = :i", i=row["data_snapshot_id"])[0]["coverage"]
+    assert snap["sales_complete_through"] == through.isoformat() and snap["basis"] == "data_coverage"
+    out = run(db_engine, tid, "predict", as_of=(world.start + timedelta(days=world.n_days)).isoformat())
+    assert out["summary"]["horizons"] == [7, 30] and train["summary"]["horizons"]["90"]["status"] == "abstained"
+    assert out["summary"]["as_of_effective"] == through.isoformat() and out["summary"]["stale_data"] is True
+    assert out["quality_status"] == "degraded"
+    lims = " ".join(q(db_engine, "SELECT limitations FROM core_runs WHERE id = :r", r=out["run_id"])[0]["limitations"])
+    assert "cobertura declarada" in lims

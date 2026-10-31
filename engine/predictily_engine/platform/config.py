@@ -58,6 +58,11 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         # ── salidas ──
         "ranking_k": 10,
         "ranking_eval_ks": [1, 3, 5, 10],
+        # ── regla de la fuente del ranking servido (cust-ranking-v1; ADR-P2-01 en docs/architecture/v2/P2-comportamiento.md) ──
+        "ranking_rule_version": "cust-ranking-v1",
+        "ranking_primary_k": 5,              # k de precision@k con el que se elige la fuente del ranking en el holdout
+        "ranking_min_relative_margin": 0.05, # una fuente distinta de popularidad debe superarla en ≥ 5 % relativo de precision@k
+        "ranking_min_units": 200,            # unidades (corte×comprador con ≥ k candidatos) mínimas; con menos se sirve popularidad
         "interval_level": 0.8,               # intervalo de la cantidad condicionada (conformal)
         "inactivity_min_intervals": 4,
         "inactivity_tolerance_fraction": 0.2, # holgura sobre los percentiles propios: fracción de la mediana de intervalos

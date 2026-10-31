@@ -10,6 +10,7 @@
 */
 
 use App\Http\Controllers\Api\Customer\CustomerEvaluationController;
+use App\Http\Controllers\Api\Customer\CustomerModelRollbackController;
 use App\Http\Controllers\Api\Customer\CustomerPredictionController;
 use App\Http\Controllers\Api\Customer\CustomerProfileController;
 use App\Http\Controllers\Api\Customer\CustomerReconciliationController;
@@ -29,3 +30,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->prefix('customer')->name('custome
         Route::get('reconciliation', [CustomerReconciliationController::class, 'index'])->name('reconciliation.index');
     });
 });
+
+// Reversión del modelo servido del Customer Core (ADR-V2-07): re-sirve una versión validada/retirada del mismo horizonte y objetivo.
+Route::middleware(['auth:sanctum', 'tenant'])->post('models/customer/rollback', [CustomerModelRollbackController::class, 'store'])
+    ->middleware(['tenant.ability:forecast.run', 'throttle:10,1'])->name('models.customer.rollback');

@@ -95,3 +95,23 @@ def test_declared_coverage_is_part_of_the_data_snapshot(small_data):
     s2 = build_snapshot(small_data, panel, cfg, kn, None, declared.as_dict())
     assert {k for k in s1.components if s1.components[k] != s2.components[k]} == {"coverage"}
     assert s1.hash != s2.hash
+
+
+def test_every_zero_day_in_the_panel_is_a_zero_observed_day_for_the_data_core():
+    """Coherencia con `classify_day` del core de Datos: dentro de la cobertura efectiva un día sin ventas es cero
+    OBSERVADO; nada fuera de ella entra al panel (sería ausente)."""
+    from predictily_engine.extensions.data_core import classify_day
+
+    company = generate_company("ferreteria_andina", seed=42, n_products=3, start="2026-06-01")
+    data = tenant_data_from_synthetic(company)
+    start = (data.sales["ds"].min() + pd.Timedelta(days=10)).date()
+    through = (data.sales["ds"].max() - pd.Timedelta(days=12)).date()
+    eff = _eff(through, start)
+    cov = SalesCoverage.from_effective(eff)
+    limited = cov.apply(tenant_data_from_synthetic(company, cutoff=cov.limit_cutoff(data.cutoff)))
+    panel = build_panel(limited)
+    sold = {(r.unique_id, r.ds) for r in panel.df[panel.df["units"] > 0].itertuples()}
+    kinds = {classify_day(eff, r.ds.date(), (r.unique_id, r.ds) in sold) for r in panel.df.itertuples()}
+    assert kinds == {"observed", "zero_observed"}, "ningún día del panel es 'absent'"
+    assert classify_day(eff, through + pd.Timedelta(days=1), False) == "absent"
+    assert classify_day(eff, start - pd.Timedelta(days=1), False) == "absent"

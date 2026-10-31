@@ -18,6 +18,7 @@ final class CustomerEnvelope
         'expected_quantity' => 'purchase_probability × quantity_if_purchase (el cero de «no compra» está incluido). No incluye pedidos confirmados: ver committed_quantity.',
         'expected_amount' => 'expected_quantity × último precio neto de la relación (supuesto explícito, sin impuestos). Es una esperanza, no una venta confirmada.',
         'committed_quantity' => 'Pendiente (cantidad − cumplida) de pedidos/contratos confirmados, conocidos a la fecha, no cancelados y con entrega dentro del horizonte. La esperanza no se suma al comprometido: la demanda del comprador es max(esperanza, comprometido).',
+        'ranking_source' => 'Fuente del ranking de productos probables, elegida en el holdout por precision@k (regla cust-ranking-v1): model (probabilidad servida), popularity (compradores distintos en 90 días) o recency (compra más reciente). Popularidad es la fuente por defecto: otra solo se sirve si la supera por un margen mínimo.',
         'inactivity' => 'Ausencia de compras respecto al patrón propio del comprador (percentiles 75/90 de sus intervalos). No es abandono definitivo.',
     ];
 

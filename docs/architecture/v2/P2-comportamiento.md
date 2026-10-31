@@ -145,9 +145,9 @@ vistas por el modelo corto: optimista). Además `E[Q_7] ≤ E[Q_30] ≤ E[Q_90]`
 - **Frecuencia** (`customer_activity.purchase_frequency_per_30d`): días de compra (cualquier producto) por 30 días en
   `frequency_lookback_days` (180). Evaluada contra los días de compra reales de los 30 días siguientes; se comparan las
   ventanas 90/180/365/histórica (en datos estacionarios las más largas ganan; se informa). A nivel relación: `median_interval_days`.
-- **Ranking top-k** (k = 10 almacenado): productos de las relaciones candidatas ordenados por probabilidad (desempate por esperanza).
-  Evaluado con precision@k y recall@k por unidad (corte × comprador) frente a **popularidad** (compradores distintos 90 d),
-  **recencia** y la **referencia**; también se informa el candidato no promovido.
+- **Ranking top-k** (k = 10 almacenado): productos de las relaciones candidatas. Su **fuente** se decide por horizonte en el holdout (ADR-P2-01,
+  abajo): probabilidad del modelo servido, popularidad (compradores distintos en 90 días) o recencia (compra más reciente). Evaluado con precision@k y
+  recall@k por unidad (corte × comprador) frente a popularidad, recencia y la referencia; también se informa el candidato no promovido.
 - **Inactividad (no es «abandono»)**: con ≥ 4 intervalos propios, `at_risk` si la brecha actual supera el P75 de sus
   intervalos e `inactive_by_pattern` si supera el P90 (ambos con holgura del 20 % de su mediana); `inactivity_risk` = percentil empírico de la brecha
   en sus propios intervalos; con menos intervalos: `insufficient_history` (riesgo nulo). Evaluada contra un resultado observable —ninguna compra de
@@ -155,16 +155,36 @@ vistas por el modelo corto: optimista). Además `E[Q_7] ≤ E[Q_30] ≤ E[Q_90]`
 - **Cambio de comportamiento**: días de compra de los últimos 90 días vs. los 90 previos (binomial exacta, p < 0,05 y razón fuera de
   [0,67; 1,5]); requiere ≥ 180 días de historia y ≥ 4 días de compra en total.
 
+### ADR-P2-01 · Fuente del ranking servido de productos probables (`cust-ranking-v1`)
+
+**Contexto.** La regla de promoción de la probabilidad (§6) se decide por Brier/log loss/ECE, que no miden la calidad de *ordenar* productos. En la demo
+ficticia el ranking del modelo servido (la referencia) quedaba por debajo de la popularidad, mientras el candidato no promovido la igualaba.
+
+**Decisión.** Por horizonte, la fuente del ranking servido se elige en el holdout entre `model` (probabilidad calibrada del modelo servido), `popularity` y
+`recency` por **precision@k** (k primario `ranking_primary_k`, 5 por defecto, sobre unidades corte×comprador con ≥ k candidatos). **Popularidad es la fuente por
+defecto**: otra solo se sirve si la supera con un margen relativo mínimo (`ranking_min_relative_margin`, 5 %) y hay ≥ `ranking_min_units` (200) unidades; si ninguna
+lo logra se sirve popularidad. Si varias lo logran gana la de mayor precision@k (empate: el modelo). Todo versionado como `cust-ranking-v1`; los parámetros
+están en `customer` de `CORE_DEFAULTS` y son sobrescribibles por empresa (`settings.cores.customer`). Como la regla de promoción, es **una sola decisión previa y
+versionada por horizonte**: el holdout no ajusta ningún modelo ni umbral.
+
+**Registro.** `ranking.selection` (valores de precision@k de cada fuente, margen, motivo) en `model_evaluations` (`h{H}:ranking`, `extra.selection`); `ranking_source` en
+`core_runs.model_versions[H]` y `summary` (entrenamiento y predicción), en `model_registry.hyperparameters` y en el metadato del artefacto; y en **cada fila** de
+`customer_product_rankings` (`ranking_source`, `ranking_score`: probabilidad, compradores distintos o −días desde la última compra). Un artefacto no servido
+(respaldo validado, candidato) o sin decisión registrada usa popularidad (su ranking no se evaluó). La API lo muestra en `/customer/predictions` (`ranking_source` del horizonte) y en
+`/customer/customers/{id}/profile` (`ranking_sources`, y por ítem). Desempate determinista (modelo: probabilidad sin calibrar; popularidad/recencia: producto ascendente).
+**Prueba**: `test_the_served_ranking_uses_the_decided_source`, `test_popularity_is_the_default_ranking_source_unless_another_beats_it_by_the_margin` y
+`test_when_popularity_wins_the_served_ranking_is_popularity` (un margen inalcanzable por empresa ⇒ popularidad en todos los horizontes, filas ordenadas por popularidad).
+
 ## 9. Compromisos y reconciliación (E2-11, E2-23)
 
-**Demanda comprometida** (leída de `commercial_commitments`/`items`/`revisions`, escritas por P3): líneas de `order` o `contract`
-en estado `confirmed` o `partially_fulfilled`, conocidas al corte (`known_at ≤ corte`; sin `known_at` solo cuenta la ingestión cuando el
-corte es el presente), no canceladas al corte (cancelar después del corte no las excluye), con entrega en `(corte, corte+H]`
-(fecha de la línea o de la cabecera). Pendiente = `max(0, cantidad − cumplida)`. Quedan fuera, con motivo contado: cotizaciones,
-abiertos sin confirmar, vencidos/cumplidos, entrega sin fecha, vencida o posterior al horizonte, **otra unidad distinta de la del
-producto** (P3 convierte con factores declarados; aquí no se convierte en silencio), conocimiento desconocido. Para cortes pasados se
-reconstruye con la última revisión conocida (`commercial_commitment_revisions`); los compromisos sin revisiones usan su estado actual
-(limitación: sin historial de cumplimiento).
+**Demanda comprometida** (leída de `commercial_commitment_revisions`/`commercial_commitments`, escritas por P3). El **estado a un corte** es la regla de P3
+(`CommitmentAsOf`, docs/architecture/v2/P3-datos.md §2.3), reproducida sin cambios en `customer/commitments.py::state_as_of`: (1) versiones visibles = revisiones con
+`known_at` **no nulo** y ≤ corte (fin del día local de `as_of`; sin ninguna, el compromiso no existe a ese corte, ni siquiera para hoy); (2) se usa la última versión visible
+(cabecera, líneas y cumplido tal como se conocían); (3) cancelado si `cancelled_at ≤ corte` (una cancelación posterior no aplica); estado cancelado sin fecha ⇒ `cancellation_date_unknown`,
+pendiente 0; (4) pendiente = `max(0, cantidad − cumplida)`, 0 si está cancelado. Sobre esa vista, el Customer Core cuenta como comprometido solo `order`/`contract` en estado
+`confirmed`/`partially_fulfilled` con entrega en `(corte, corte+H]` (fecha de la línea o de la cabecera). Quedan fuera, con motivo contado: no visibles al corte, cotizaciones, abiertos sin confirmar,
+vencidos/cumplidos, cancelaciones (con fecha o de fecha desconocida), entrega sin fecha, vencida o posterior al horizonte y **otra unidad distinta de la del producto** (P3 convierte con factores declarados al
+importar; aquí no se convierte en silencio).
 
 **Política de no duplicación.** El histórico de ventas ya contiene los pedidos entregados, así que la esperanza probabilística ya
 «contempla» el comprometido típico. La demanda atribuida a una relación es `max(esperanza, comprometido)` =
@@ -196,8 +216,12 @@ las vistas agregada y por comprador. Los intervalos del agregado no se suman dí
 - **`predict`**: carga los modelos en `production` (verifica SHA-256 y compatibilidad), recalcula las variables **a la fecha** (la recencia
   cambia cada día sin ventas nuevas), predice, aplica coherencia, calcula comprometido, ranking, actividad y reconciliación. No entrena (probado: el
   registro no cambia). Si el artefacto del ganador falla, sirve la **referencia validada** del mismo slot y lo declara (`limitations`, `model_role = fallback`).
-  La **reversión** a una versión validada es un cambio de estado en `model_registry` (la siguiente predicción sirve la versión en `production`).
+  La **reversión** (`POST /api/v1/models/customer/rollback {model_registry_id}`, ability `forecast.run`, auditoría `models.customer_rolled_back`) re-sirve una versión `validated`/`retired` íntegra: el modelo debe
+  ser de la empresa y del core `customer` (404 si no), con slot válido, horizonte dentro del plan (402), esquema de variables compatible y SHA-256 verificado cuando el archivo es visible desde el backend (409
+  `rollback_artifact_mismatch` si no coincide; si no es visible, lo verifica el motor al cargar y cae a la referencia validada). Marca `retired` la versión en producción **del mismo slot** (`hyperparameters.slot`) y la elegida
+  pasa a `production`; la siguiente `predict` la usa (verificado de extremo a extremo contra la BD del motor).
   Sin modelo en producción: la corrida termina `completed` con `quality_status = insufficient_data` y cero filas (abstención).
+- **Cobertura y madurez**: la cobertura de ventas es la **efectiva de P3** (`effective_coverage`: declaración del usuario sin fuente > mínimo `complete_through`/máximo `complete_from` entre fuentes > ninguna); sin cobertura, la última venta. Ninguna ventana de resultado pasa de ella (probado).
 - **Fecha efectiva**: si la cobertura declarada termina antes de la fecha pedida, las variables se calculan a esa fecha (los días siguientes son
   ausentes, no cero) y el resultado es `degraded`; sin cobertura declarada y ventas con > `stale_data_days` (7) de atraso también.
 - **Idempotencia**: una corrida completada devuelve su resumen; una en ejecución reciente → 409; una vencida (`stale_run_seconds`) se retoma
@@ -208,8 +232,8 @@ las vistas agregada y por comprador. Los intervalos del agregado no se suman dí
 
 ## 11. Contratos
 
-Backend `/api/v1/customer/*` (abilities `forecast.view` / `forecast.run`) y rutas del motor `/v1/customer/*`: `docs/06-contratos-integracion.md` §3.15 y §4.6.
-Tablas: `customer_predictions`, `customer_product_rankings`, `customer_activity`, `customer_reconciliations` (+ `core_runs`, `model_registry`,
+Backend `/api/v1/customer/*` y `POST /api/v1/models/customer/rollback` (abilities `forecast.view` / `forecast.run`) y rutas del motor `/v1/customer/*`: `docs/06-contratos-integracion.md` §3.15 y §4.6.
+Tablas (migraciones `2026_02_03_000100` y `_000200`): `customer_predictions`, `customer_product_rankings` (con `ranking_source` y `ranking_score`), `customer_activity`, `customer_reconciliations` (+ `core_runs`, `model_registry`,
 `model_evaluations`, `data_snapshots` de la plataforma). Envoltura ADR-V2-03 en toda respuesta: `result_type` `forecast` (predicciones, reconciliación) o
 `evaluation` (entrenamiento); `uncertainty_source = empirical_holdout`; `quality_status` `ok | degraded | insufficient_data`.
 Horizontes: plan ∩ {7, 30, 90}; un horizonte fuera del plan responde 402 y la corrida que se abstuvo de un horizonte responde 422 `horizon_not_available`.
@@ -227,7 +251,9 @@ Horizontes: plan ∩ {7, 30, 90}; un horizonte fuera del plan responde 402 y la 
 | E2-21 | `test_customer_models.py::test_insufficient_data_abstains_*`, `test_customer_integration.py::test_insufficient_history_abstains_explicitly`; Laravel: `horizon_not_available`, plan Básico 7/30 |
 | E2-22 | `test_customer_models.py`: monto = esperanza × precio supuesto; frecuencia, inactividad (por patrón, historial insuficiente), cambio de comportamiento, ranking (a mano), evaluación frente a la referencia ingenua |
 | E2-23 | `test_customer_commitments.py`: `known_at` posterior, cancelación antes/después del corte, entrega fuera de H, cotizaciones, unidades, reconstrucción por revisiones |
-| E2-24 (customer) | registro con SHA-256/`artifact_compat`, un solo `production` por slot, reversión por estado, artefacto roto ⇒ referencia validada, funciona sin LLM |
+| E2-24 (customer) | registro con SHA-256/`artifact_compat`, un solo `production` por slot; **reversión**: `CustomerModelRollbackTest` (restaura retirada/validada, solo su slot, auditoría, rechazo por SHA-256 alterado, esquema incompatible, plan, 404 otra empresa/core, 403 visor) + `test_rollback_to_a_validated_version_is_served_by_the_next_prediction`; artefacto roto ⇒ referencia validada; funciona sin LLM |
+| Ranking (ADR-P2-01) | `test_customer_models.py::test_popularity_is_the_default_ranking_source_unless_another_beats_it_by_the_margin`, `test_the_served_ranking_uses_the_decided_source`; `test_customer_integration.py::test_when_popularity_wins_the_served_ranking_is_popularity`, `test_ranking_source_is_recorded_in_models_summary_and_every_ranking_row`; `CustomerResultsApiTest` (API muestra `ranking_source`) |
+| Cobertura P3 | `test_customer_integration.py::test_label_maturity_and_prediction_date_follow_the_effective_coverage_of_p3` |
 | E2-05/06 (customer) | `test_features_ignore_everything_after_the_cutoff`, `test_blocks_are_chronological_and_separated_by_h_days`, manifiesto con fechas y política del holdout |
 | E2-07 (customer) | `CustomerJobsAndSchedulingTest`: predicción diaria y entrenamiento semanal usan los horizontes del plan (Básico 7/30) |
 
@@ -252,7 +278,7 @@ Inactividad (mundo con churn, 2.572 observaciones comprador×corte): tasa base d
 recall 35,3 %; la regla ingenua «sin compras en 60 días» marca 304 con precisión 45,1 % y recall 47,4 % y su AUC (0,87) supera al del riesgo por patrón propio (0,79). **La definición por patrón
 propio no supera a la regla simple en este generador**; se informa tal cual.
 
-**(b) Demo Ferretería Andina** (`tests/customer_demo_report.py`, semilla 42, 99.334 líneas, 62 productos, 2024-10-27 → 2026-10-26; carga + entrenamiento 91 s + predicción 6,7 s con 4 hilos;
+**(b) Demo Ferretería Andina** (`tests/customer_demo_report.py`, semilla 42, 99.334 líneas, 62 productos, 2024-10-27 → 2026-10-26; entrenamiento ≈ 91–125 s y predicción ≈ 7 s con 4 hilos;
 JSON completo en `P2-demo-ferreteria-andina.json`). El comprador de cada factura es aleatorio: **no hay señal de recompra**, por eso modelo ≈ referencia ≈ climatología.
 
 | H | Nivel | Servido (prob.) | Brier modelo / ref / climat. | log loss ref → mejor | PR-AUC ref → mejor | ECE servido | n holdout (positivos) |
@@ -264,9 +290,9 @@ JSON completo en `P2-demo-ferreteria-andina.json`). El comprador de cada factura
 Cantidad condicionada (MAE ref → servido; todas promovidas por mejorar ≥ 3 %): H7 3,146 → 2,936 (Poisson); H30 3,589 → 3,208 (Gamma); H90 4,553 → 3,742 (Gamma); sesgo −14 % → −12 % / −18 % → −12 % / −23 % → −6 %.
 Esperanza incondicional (incluye no compradores; sesgo = Σ(pred−real)/Σreal): H7 −23,4 % → −22,8 %; H30 −31,2 % → −26,9 %; H90 −30,0 % → −3,5 % (referencia → servido). Monto esperado (sesgo): H7 −10,0 % → +1,7 %; H30 −21,2 % → −11,8 %; H90 −15,8 % → −9,0 %.
 
-Ranking (recall@3 / recall@10), H = 90: servido 0,215 / 0,577; referencia 0,146 / 0,468; popularidad 0,229 / 0,578; recencia 0,138 / 0,475 (el modelo iguala a la popularidad y supera a la referencia/recencia). En H = 7 y 30 el servido es la
-referencia (0,129 / 0,417 y 0,139 / 0,462), por debajo de la popularidad (0,234 / 0,576 y 0,241 / 0,593); el **candidato no promovido** sí la iguala (0,242 / 0,562 y 0,233 / 0,592). Esto es una
-**observación abierta**: la regla de promoción se decide por Brier/log loss/ECE de la probabilidad, no por la calidad de ordenación; una regla de promoción específica del ranking queda pendiente.
+Ranking (precision@5 en el holdout; regla `cust-ranking-v1`): H7 modelo servido (referencia) 0,0139, recencia 0,0161, **popularidad 0,0234**; H30 0,0638 / 0,0645 / **0,0944**; H90 0,2477 / 0,1788 / **0,2598**.
+Ninguna fuente supera a popularidad por ≥ 5 %, así que **se sirve popularidad en los tres horizontes** (`ranking_source = popularity`). El candidato no promovido la iguala en H7/H30 (0,0233 y 0,0948): en estos datos,
+sin señal de recompra por comprador, la popularidad es el mejor ordenamiento disponible y ahora es el que se sirve.
 
 Coherencia: tasa de violación P30 > P90 6,4 % (Brier 0,13920 → 0,13926 con la corrección, efecto neto despreciable), P7 > P30 0 %; en la predicción diaria se corrige el 5,2 % de las filas de H = 90 (corrección media 0,0009).
 Inactividad (demo): las tres categorías tienen la misma tasa de «sin compras en 90 días» (2,3–2,6 % frente a la base 2,4 %; AUC 0,50): coherente con compradores aleatorios.
@@ -284,7 +310,7 @@ Compradores genéricos: 14.202 líneas (45 % de las unidades de los últimos 180
 - La inactividad «por patrón» no supera a la regla ingenua de 60 días en el generador con churn (se informa); no hay umbral calibrado por empresa.
 - Retención de predicciones diarias por número de corridas (30), no por antigüedad; no hay evaluación vs. realizados de las predicciones
   pasadas (operación `evaluate` pendiente: el motor ya expone las etiquetas maduras para hacerla).
-- El rollback de modelos (`POST /models/customer/rollback`, plataforma) debe operar por `hyperparameters.slot`; hoy la reversión es un cambio de estado.
+- La reversión no revalida el ranking de la versión restaurada: usa la fuente registrada en su artefacto (popularidad si fue un respaldo o candidato).
 - `docs/openapi/predictily-api.yaml` no incluye aún estas rutas (pendiente de la integración).
 
 ## 15. Qué necesita la UI (P5)
@@ -294,7 +320,7 @@ con `expected_amount` etiquetado «supuesto», `quality_flags` y el estado de ca
 horizonte sin modelo → 422 `horizon_not_available`, comprador genérico o sin historial → `fallback`); ficha del comprador
 (`/customers/{id}/profile`): frecuencia, ranking, inactividad con su definición «no es abandono», cambio de comportamiento;
 pantalla de evaluación (curva de calibración con `n` por grupo, Brier/log loss/PR-AUC frente a la referencia, ranking vs. popularidad, manifiesto de fechas);
-conciliación por producto con componentes y `inconsistent` destacado; botones Entrenar/Predecir (`POST /customer/runs`, 202 + sondeo de `/customer/runs/{id}`).
+conciliación por producto con componentes y `inconsistent` destacado; mostrar `ranking_source` del ranking (popularidad/modelo/recencia) y botón de reversión por versión (`POST /models/customer/rollback`); botones Entrenar/Predecir (`POST /customer/runs`, 202 + sondeo de `/customer/runs/{id}`).
 
 ## 16. Reproducir
 
