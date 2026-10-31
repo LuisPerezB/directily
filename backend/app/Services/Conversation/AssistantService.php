@@ -117,7 +117,7 @@ final class AssistantService
                 foreach ($calls as $call) {
                     $usage['tool_calls']++;
                     $result = $this->tools->execute($call['name'], $call['arguments'], $context);
-                    $figures[] = ['tool' => $call['name'], 'arguments' => $call['arguments']] + $result->toArray();
+                    $figures[] = ['tool' => $call['name'], 'arguments' => $call['arguments'] === [] ? (object) [] : $call['arguments']] + $result->toArray();
                     $messages[] = ['role' => 'tool', 'tool_name' => $call['name'], 'content' => $this->forProvider($result, (int) ($limits['max_tool_result_chars'] ?? 12000))];
                 }
             }

@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Conversation;
 
 use App\Enums\TenantRole;
+use App\Models\Tenant;
+use App\Models\User;
 use App\Services\Conversation\Exceptions\ProviderException;
+use App\Services\Conversation\ProviderResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -13,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Monolog\Handler\TestHandler;
 use Tests\Feature\Analytics\Support\AnalyticsFixtures;
 use Tests\Feature\Conversation\Support\FakeConversationProvider as Fake;
+use Tests\Feature\Conversation\Support\SeedsCustomerCatalogOnExistingTenant;
 use Tests\Feature\Conversation\Support\SeedsSupplyPlan;
 use Tests\Feature\Conversation\Support\UsesFakeProvider;
 use Tests\Feature\Customer\Support\CustomerFixtures;
@@ -27,6 +31,7 @@ class AssistantApiTest extends TestCase
     use AnalyticsFixtures;
     use CustomerFixtures;
     use RefreshDatabase;
+    use SeedsCustomerCatalogOnExistingTenant;
     use SeedsSupplyPlan;
     use UsesFakeProvider;
 
@@ -40,7 +45,7 @@ class AssistantApiTest extends TestCase
         ]);
     }
 
-    /** @return array{0: \App\Models\Tenant, 1: \App\Models\User, 2: array<string, mixed>} */
+    /** @return array{0: Tenant, 1: User, 2: array<string, mixed>} */
     private function demandTenant(TenantRole $role = TenantRole::Viewer): array
     {
         [$tenant, $user] = $this->createTenantWithUser($role);
@@ -79,7 +84,7 @@ class AssistantApiTest extends TestCase
 
         $res = $api->postJson('/api/v1/assistant/messages', ['message' => '¿Cuánto venderé?'])
             ->assertStatus(503)->assertJsonPath('code', 'assistant_disabled')->assertJsonPath('reason', 'missing_api_key');
-        $this->assertStringNotContainsString('api_key', strtolower($res->getContent()));
+        $this->assertSame(['message', 'code', 'reason'], array_keys($res->json()));   // sin configuración ni secretos en la respuesta
         Http::assertNothingSent();
         // Un 503 no consume la cuota del usuario.
         $this->assertSame(0, $api->getJson('/api/v1/assistant/status')->json('data.usage_today.count'));
@@ -91,9 +96,11 @@ class AssistantApiTest extends TestCase
         config(['conversation.enabled' => false, 'conversation.ollama.api_key' => 'clave-ficticia-de-prueba']);
         [$tenant, $user] = $this->createTenantWithUser();
         $api = $this->actingAsTenantUser($user, $tenant);
-        $api->getJson('/api/v1/assistant/status')->assertOk()->assertJsonPath('data.enabled', false)->assertJsonPath('data.reason', 'disabled_by_config');
-        $api->postJson('/api/v1/assistant/messages', ['message' => 'hola'])->assertStatus(503)->assertJsonPath('reason', 'disabled_by_config');
+        $status = $api->getJson('/api/v1/assistant/status')->assertOk()->assertJsonPath('data.enabled', false)->assertJsonPath('data.reason', 'disabled_by_config');
+        $res = $api->postJson('/api/v1/assistant/messages', ['message' => 'hola'])->assertStatus(503)->assertJsonPath('reason', 'disabled_by_config');
         Http::assertNothingSent();
+        // La clave nunca aparece en ninguna respuesta.
+        $this->assertStringNotContainsString('clave-ficticia-de-prueba', $status->getContent().$res->getContent());
     }
 
     public function test_plan_can_exclude_the_assistant(): void
@@ -130,7 +137,7 @@ class AssistantApiTest extends TestCase
         [$tenant, $user] = $this->demandTenant();
         $provider = $this->fakeProvider([
             Fake::tool('dashboard_summary', ['horizon' => 30]),
-            function (array $messages): \App\Services\Conversation\ProviderResponse {
+            function (array $messages): ProviderResponse {
                 $r = Fake::lastToolResult($messages);
 
                 return Fake::text(sprintf(
@@ -234,6 +241,7 @@ class AssistantApiTest extends TestCase
         $api = $this->actingAsTenantUser($user, $tenant);
         $none = $api->postJson('/api/v1/assistant/messages', ['message' => '¿Qué debo comprar?'])->assertOk();
         $this->assertSame('no_data', $none->json('data.figures.0.status'));
+        $this->assertStringContainsString('"arguments":{}', $none->getContent());   // argumentos vacíos como objeto JSON, no como lista
         $this->assertStringContainsString('Aún no hay un plan', $none->json('data.figures.0.message'));
 
         $this->seedSupplyPlan($tenant, $cat);
@@ -354,13 +362,15 @@ class AssistantApiTest extends TestCase
         $product = $askA('product_forecast', ['product' => 'Reservado']);
         $this->assertSame('no_data', $product->json('data.figures.0.status'));
         $this->assertSame(0, $product->json('data.figures.0.data.total_matches'));
-        $this->assertStringNotContainsString('Reservado', $product->getContent());
+        $this->assertSame([], $product->json('data.figures.0.data.products'));
+        $this->assertStringNotContainsString('Producto Reservado de B', $product->getContent());
 
         // product_id de B: la validación acotada a la empresa lo rechaza antes de consultar.
         $foreignProductId = $catB['products']['p1'];
         $byId = $askA('product_forecast', ['product_id' => $foreignProductId]);
         $this->assertSame('invalid_arguments', $byId->json('data.figures.0.status'));
-        $this->assertStringNotContainsString('Reservado', $byId->getContent());
+        $this->assertNull($byId->json('data.figures.0.data'));
+        $this->assertStringNotContainsString('Producto Reservado de B', $byId->getContent());
 
         $plan = $askA('supply_plan', []);
         $this->assertSame('no_data', $plan->json('data.figures.0.status'));
@@ -513,22 +523,5 @@ class AssistantApiTest extends TestCase
         $this->assertNotContains('customer_predictions', array_column($provider->calls[0]['tools'], 'name'));
         $this->assertSame('tool_not_allowed', $res->json('data.figures.0.status'));
         $this->assertNull($res->json('data.figures.0.data'));
-    }
-
-    /** Catálogo del Customer Core de un tenant que ya tiene otro catálogo de demanda (códigos de sucursal/sku propios). */
-    private function seedCustomerCatalogFor(\App\Models\Tenant $tenant, string $customerCode = 'CLI-0001'): array
-    {
-        $now = now();
-        $tid = $tenant->id;
-        $branch = (int) DB::table('branches')->where('tenant_id', $tid)->value('id');
-        $products = ['p1' => (int) DB::table('products')->where('tenant_id', $tid)->where('sku', 'P1-SKU')->value('id'), 'p2' => (int) DB::table('products')->where('tenant_id', $tid)->where('sku', 'P2-SKU')->value('id')];
-        $customers = [];
-        foreach (['c1' => [$customerCode, 'company', false], 'c2' => ['CLI-0002', 'person', false], 'c3' => ['9999999999999', 'final_consumer', true]] as $key => [$code, $type, $generic]) {
-            $customers[$key] = (int) DB::table('customers')->insertGetId([
-                'tenant_id' => $tid, 'external_code' => $code, 'customer_type' => $type, 'is_generic' => $generic, 'created_at' => $now, 'updated_at' => $now,
-            ]);
-        }
-
-        return ['branch' => $branch, 'products' => $products, 'customers' => $customers];
     }
 }

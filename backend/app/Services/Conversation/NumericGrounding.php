@@ -20,7 +20,7 @@ final class NumericGrounding
     private const EPS = 1e-9;
 
     /**
-     * @param  list<mixed>  $sources  arreglos/cadenas/números con los datos permitidos
+     * @param  list<mixed>  $sources  arreglos/cadenas/números con los datos permitidos (los decimales ≤ 1 admiten forma porcentual)
      * @return list<string> números del texto sin respaldo, tal como están escritos
      */
     public static function ungrounded(string $text, array $sources): array
@@ -29,7 +29,7 @@ final class NumericGrounding
         foreach ($sources as $source) {
             self::collect($source, $allowed);
         }
-        $allowed = array_values(array_unique(array_map(fn (float $v) => round($v, 9), $allowed)));
+        $allowed = array_values(array_unique($allowed, SORT_REGULAR));
 
         $missing = [];
         foreach (self::extract($text) as $token) {
@@ -56,13 +56,13 @@ final class NumericGrounding
         return $tokens;
     }
 
-    /** @param list<float> $allowed */
+    /** @param list<array{0: float, 1: bool}> $allowed [valor, admite forma porcentual] */
     private static function isGrounded(string $token, array $allowed): bool
     {
         foreach (self::candidates($token) as [$value, $decimals]) {
-            foreach ($allowed as $a) {
+            foreach ($allowed as [$a, $percentable]) {
                 if (abs(round($a, $decimals) - $value) < self::EPS
-                    || abs(round($a * 100, $decimals) - $value) < self::EPS) {
+                    || ($percentable && abs(round($a * 100, $decimals) - $value) < self::EPS)) {
                     return true;
                 }
                 // Truncado en lugar de redondeado (p. ej. 0,2399 → 0,23).
@@ -112,22 +112,29 @@ final class NumericGrounding
         return $out !== [] ? $out : [[(float) str_replace($sep, '', $token), 0]];
     }
 
-    /** @param list<float> $allowed */
+    /**
+     * Solo las razones numéricas (decimales con |v| ≤ 1: probabilidades, WAPE, variaciones) admiten su forma porcentual (×100);
+     * enteros, cantidades y números extraídos de textos (fechas, SKU) no.
+     *
+     * @param  list<array{0: float, 1: bool}>  $allowed
+     */
     private static function collect(mixed $value, array &$allowed): void
     {
-        if (is_int($value) || is_float($value)) {
-            $allowed[] = (float) $value;
+        if (is_float($value)) {
+            $allowed[] = [$value, abs($value) <= 1.0];
+        } elseif (is_int($value)) {
+            $allowed[] = [(float) $value, false];
         } elseif (is_string($value)) {
             foreach (self::numbersIn($value) as $n) {
-                $allowed[] = $n;
+                $allowed[] = [$n, false];
             }
         } elseif (is_array($value)) {
             // El tamaño de una lista es un dato que la herramienta ya entrega implícitamente (p. ej. «3 productos»).
-            $allowed[] = (float) count($value);
+            $allowed[] = [(float) count($value), false];
             foreach ($value as $key => $item) {
                 if (is_string($key)) {
                     foreach (self::numbersIn($key) as $n) {
-                        $allowed[] = $n;
+                        $allowed[] = [$n, false];
                     }
                 }
                 self::collect($item, $allowed);

@@ -3,7 +3,7 @@ import type { CustomerPrediction, CustomerReconciliationRow, ReconciliationStatu
 import { DASH, formatCurrency } from './format'
 
 /** Importe esperado: SIEMPRE una estimación con supuesto de precio, nunca una venta confirmada. */
-export function formatExpectedAmount(amount: CustomerPrediction['expected_amount'] | null | undefined, fallbackCurrency = 'USD'): string {
+export function formatExpectedAmount(amount: { value: number | null; currency: string | null } | null | undefined, fallbackCurrency = 'USD'): string {
   if (!amount || amount.value == null) return DASH
   return formatCurrency(amount.value, amount.currency ?? fallbackCurrency, 2)
 }

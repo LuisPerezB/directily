@@ -10,6 +10,10 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import ErrorBarsChart from '@/components/charts/ErrorBarsChart.vue'
 import ComparisonChart from '@/components/charts/ComparisonChart.vue'
 import ProductPicker from '@/components/forecast/ProductPicker.vue'
+import ProtocolManifest from '@/components/accuracy/ProtocolManifest.vue'
+import ExtendedMetrics from '@/components/accuracy/ExtendedMetrics.vue'
+import DemandModels from '@/components/accuracy/DemandModels.vue'
+import QualityBadge from '@/components/ui/QualityBadge.vue'
 import { accuracyApi, exportsApi, forecastApi } from '@/api'
 import { errorMessage, isApiError } from '@/api/errors'
 import type { AccuracyByGroup, Product } from '@/api/types'
@@ -18,6 +22,7 @@ import { useCatalogStore } from '@/stores/catalog'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
 import { formatDate, formatNumber, formatPercent, formatChange } from '@/utils/format'
+import { bandLabelParams } from '@/utils/accuracy'
 
 const { t, te } = useI18n()
 const catalog = useCatalogStore()
@@ -38,6 +43,13 @@ const improvement = computed(() => {
   return (selected.value.wape - baseline.value.wape) / baseline.value.wape
 })
 const byHorizon = computed(() => s.value?.backtest?.by_horizon ?? [])
+const byHorizonTotal = computed(() => s.value?.backtest?.by_horizon_total ?? [])
+const independentHoldout = computed(() => s.value?.backtest?.evaluation_scope === 'holdout')
+const supportRows = computed(() => Object.values(s.value?.horizon_support ?? {}).sort((x, y) => x.horizon - y.horizon))
+function bandLabel(h: { level_key?: string; horizon_days: number }): string {
+  const p = bandLabelParams(h)
+  return p.key === 'accuracy.bandLabel' ? t('accuracy.bandLabel', { from: p.from, to: p.to }) : t('accuracy.horizonLabel', { n: p.n })
+}
 // Origen de las métricas principales: período final reservado (holdout) o, si la historia no
 // alcanzó, las mismas ventanas que eligieron el modelo (optimista).
 const scope = computed(() => s.value?.backtest?.evaluation_scope ?? null)
@@ -79,7 +91,7 @@ async function exportCsv(): Promise<void> {
   }
 }
 
-const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backtest', 'holdout', 'realized']
+const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backtest', 'holdout', 'realized', 'mase', 'rmsse', 'pinball', 'manifest']
 </script>
 
 <template>
@@ -137,11 +149,74 @@ const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backte
         <h2 class="section-title mb-1">{{ t('accuracy.byHorizon') }}</h2>
         <p class="text-sm text-fg-muted mb-3">{{ t('accuracy.byHorizonText') }}</p>
         <ErrorBarsChart
-          :categories="byHorizon.map((h) => t('accuracy.horizonLabel', { n: h.horizon_days }))"
+          :categories="byHorizon.map((h) => bandLabel(h))"
           :selected="byHorizon.map((h) => h.wape)"
           :baseline="byHorizon.map((h) => h.baseline_wape)"
           :title="t('accuracy.byHorizon')"
         />
+      </section>
+
+      <section v-if="byHorizonTotal.length" class="card p-4 sm:p-6" data-test="horizon-totals">
+        <h2 class="section-title mb-1">{{ t('accuracy.horizonTotalTitle') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('accuracy.horizonTotalText') }}</p>
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="sr-only">{{ t('accuracy.horizonTotalTitle') }}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{{ t('common.horizon') }}</th>
+                <th scope="col" class="num">{{ t('accuracy.totalError') }}</th>
+                <th scope="col" class="num">{{ t('accuracy.baseline') }}</th>
+                <th scope="col" class="num">{{ t('accuracy.bias') }}</th>
+                <th scope="col" class="num">{{ t('accuracy.totalErrorMoney') }}</th>
+                <th scope="col" class="num">{{ t('accuracy.observations') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in byHorizonTotal" :key="h.horizon_days">
+                <td>{{ t('common.days', { n: h.horizon_days }) }}</td>
+                <td class="num">{{ formatPercent(h.wape) }}</td>
+                <td class="num">{{ formatPercent(h.baseline_wape) }}</td>
+                <td class="num">{{ formatChange(h.bias) }}</td>
+                <td class="num">{{ h.money ? formatPercent(h.money.wape) : '—' }}</td>
+                <td class="num">{{ formatNumber(h.n_obs, 0) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card p-4 sm:p-6">
+        <h2 class="section-title mb-1">{{ t('extended.title') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('extended.subtitle') }}</p>
+        <ExtendedMetrics :metrics="selected" :baseline="baseline" :p50="s.p50" :independent-holdout="independentHoldout" />
+      </section>
+
+      <section class="card p-4 sm:p-6">
+        <h2 class="section-title mb-1">{{ t('manifest.title') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('manifest.subtitle') }}</p>
+        <ProtocolManifest :manifest="s.evaluation_manifest" />
+      </section>
+
+      <section v-if="supportRows.length" class="card p-4 sm:p-6" data-test="horizon-support-table">
+        <h2 class="section-title mb-1">{{ t('horizonSupport.tableTitle') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('horizonSupport.tableText') }}</p>
+        <div class="table-wrap">
+          <table class="table">
+            <caption class="sr-only">{{ t('horizonSupport.tableTitle') }}</caption>
+            <thead><tr><th scope="col">{{ t('common.horizon') }}</th><th scope="col">{{ t('common.status') }}</th><th scope="col">{{ t('horizonSupport.why') }}</th></tr></thead>
+            <tbody>
+              <tr v-for="h in supportRows" :key="h.horizon">
+                <td>{{ t('common.days', { n: h.horizon }) }}</td>
+                <td><QualityBadge :status="h.status === 'ok' ? 'ok' : h.status === 'degraded' ? 'degraded' : h.status === 'insufficient_data' ? 'insufficient_data' : null" /> <span class="text-xs text-fg-muted ml-1">{{ t(`horizonSupport.status.${h.status}`) }}</span></td>
+                <td>
+                  <ul v-if="h.reasons?.length" class="list-disc pl-4 m-0"><li v-for="(r, i) in h.reasons" :key="i">{{ typeof r === 'string' ? r : r.message }}</li></ul>
+                  <span v-else class="text-fg-muted">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="grid gap-4 lg:grid-cols-2">
@@ -258,6 +333,11 @@ const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backte
         <p v-else-if="!completedRuns.length" class="text-sm text-fg-muted">{{ t('forecasts.noRuns') }}</p>
       </section>
     </template>
+
+    <section v-if="s && !noData" class="card p-4 sm:p-6">
+      <h2 class="section-title mb-1">{{ t('modelRegistry.title') }}</h2>
+      <DemandModels :runs="runs.data.value?.data ?? []" @rolled-back="() => { runs.execute(); summary.execute() }" />
+    </section>
 
     <section class="card p-4 sm:p-6">
       <h2 class="section-title mb-3">{{ t('accuracy.glossaryTitle') }}</h2>

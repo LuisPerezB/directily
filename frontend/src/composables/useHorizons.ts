@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTenantStore } from '@/stores/tenant'
 import { HORIZONS } from '@/utils/constants'
@@ -16,7 +16,7 @@ export function useHorizonSelection<H extends number = (typeof HORIZONS)[number]
   const tenant = useTenantStore()
   const allowed = computed<H[]>(() => allowedHorizons(domain, tenant.tenant?.plan?.limits))
   const options = computed(() => allowed.value.map((h) => ({ value: h, label: t('common.days', { n: h }) })))
-  const horizon = ref(pickHorizon(allowed.value, preferred ?? tenant.tenant?.settings?.default_horizon_days ?? 30) ?? domain[0]!) as { value: H }
+  const horizon = ref(pickHorizon(allowed.value, preferred ?? tenant.tenant?.settings?.default_horizon_days ?? 30) ?? domain[0]!) as Ref<H>
 
   watch(allowed, (list) => {
     if (list.length && !list.includes(horizon.value)) {

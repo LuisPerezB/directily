@@ -11,13 +11,13 @@ import ProductPicker from '@/components/forecast/ProductPicker.vue'
 import ScenarioResults from '@/components/forecast/ScenarioResults.vue'
 import { scenariosApi } from '@/api'
 import { errorMessage, isApiError } from '@/api/errors'
-import type { Horizon, Product, SavedScenario, ScenarioResult } from '@/api/types'
+import type { Product, SavedScenario, ScenarioResult } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
+import { useHorizonSelection } from '@/composables/useHorizons'
 import { useCatalogStore } from '@/stores/catalog'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
 import { formatDateTime } from '@/utils/format'
-import { HORIZONS } from '@/utils/constants'
 import { DEFAULT_SCENARIO_FORM, LIMITS, assumptionsToForm, formToAssumptions, isNeutral } from '@/utils/scenario'
 
 const { t } = useI18n()
@@ -26,7 +26,7 @@ const tenant = useTenantStore()
 const ui = useUiStore()
 const canRun = computed(() => tenant.can('scenarios.run'))
 
-const horizon = ref<Horizon>(30)
+const { horizon, options: horizonOptions, hasHorizons } = useHorizonSelection(undefined, 30)
 const branchId = ref<number | null>(null)
 const categoryId = ref<number | null>(null)
 const product = ref<Product | null>(null)
@@ -39,7 +39,6 @@ const saving = ref(false)
 const toDelete = ref<SavedScenario | null>(null)
 
 const saved = useAsync(() => scenariosApi.list())
-const horizonOptions = computed(() => HORIZONS.map((h) => ({ value: h, label: t('common.days', { n: h }) })))
 
 function request() {
   return {
@@ -77,7 +76,7 @@ async function save(): Promise<void> {
 }
 
 function load(s: SavedScenario): void {
-  horizon.value = s.horizon_days
+  horizon.value = s.horizon_days as typeof horizon.value
   branchId.value = s.filters?.branch_id ?? null
   categoryId.value = s.filters?.category_id ?? null
   product.value = null
@@ -136,7 +135,8 @@ const sliders = computed(() => [
       <form class="card p-4 sm:p-6 flex flex-col gap-5" @submit.prevent="simulate">
         <fieldset class="flex flex-col gap-4 border-0 p-0 m-0" :disabled="!canRun">
           <legend class="section-title mb-2">{{ t('scenarios.scope') }}</legend>
-          <SegmentedControl v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+          <SegmentedControl v-if="hasHorizons" v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+          <p v-else class="text-sm text-fg-muted m-0">{{ t('horizonSupport.noneInPlan') }}</p>
           <div>
             <label class="label" for="s-branch">{{ t('filters.branch') }}</label>
             <select id="s-branch" v-model="branchId" class="select">

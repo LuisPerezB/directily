@@ -9,15 +9,18 @@ import TrendIndicator from '@/components/ui/TrendIndicator.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import HorizonSupportNotice from '@/components/forecast/HorizonSupportNotice.vue'
+import CaseLabelBadge from '@/components/forecast/CaseLabelBadge.vue'
 import { catalogApi, exportsApi, forecastApi } from '@/api'
 import { errorMessage, isApiError } from '@/api/errors'
-import type { CategoryForecastRow, Horizon, Product, ProductForecastRow } from '@/api/types'
+import type { CategoryForecastRow, Product, ProductForecastRow } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
+import { useHorizonSelection } from '@/composables/useHorizons'
 import { useCatalogStore } from '@/stores/catalog'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
 import { formatCurrency, formatDate, formatNumber, formatPercent } from '@/utils/format'
-import { HORIZONS } from '@/utils/constants'
+import { horizonSupportView } from '@/utils/envelope'
 
 const { t, te } = useI18n()
 const catalog = useCatalogStore()
@@ -25,7 +28,7 @@ const tenant = useTenantStore()
 const ui = useUiStore()
 
 const tab = ref<'products' | 'categories'>('products')
-const horizon = ref<Horizon>(30)
+const { horizon, options: horizonOptions, hasHorizons } = useHorizonSelection(undefined, 30)
 const branchId = ref<number | null>(null)
 const categoryId = ref<number | null>(null)
 const search = ref('')
@@ -55,7 +58,9 @@ const catalogPage = ref(1)
 const catalogList = useAsync(() => catalogApi.products({ page: catalogPage.value, per_page: 25, search: search.value || undefined }), { watch: [catalogPage], immediate: false })
 watch(noForecast, (v) => v && void catalogList.execute(), { immediate: true })
 
-const horizonOptions = computed(() => HORIZONS.map((h) => ({ value: h, label: t('common.days', { n: h }) })))
+const support = computed(() => horizonSupportView(tab.value === 'products' ? products.data.value?.horizon_support : categories.data.value?.horizon_support))
+// Con un horizonte sin respaldo las cifras se marcan y no se muestran rangos.
+const unsupported = computed(() => support.value?.showAsComplete === false)
 
 function modelLabel(f: string | null | undefined): string {
   if (!f) return '—'
@@ -75,6 +80,7 @@ const productColumns = computed<Column<ProductForecastRow>[]>(() => [
   { key: 'forecast_revenue', label: t('products.revenue'), align: 'right', sortable: true, sortKey: 'revenue', format: (r) => formatCurrency(r.forecast_revenue, tenant.currency, 0) },
   { key: 'model_family', label: t('products.model'), format: (r) => modelLabel(r.model_family) },
   { key: 'demand_class', label: t('products.demandClass'), format: (r) => classLabel(r.demand_class) },
+  { key: 'case_label', label: t('products.caseLabel') },
   { key: 'wape', label: t('products.error'), align: 'right', format: (r) => formatPercent(r.wape) },
 ])
 const categoryColumns = computed<Column<CategoryForecastRow>[]>(() => [
@@ -115,7 +121,8 @@ async function exportCsv(): Promise<void> {
     <TabsNav v-model="tab" :tabs="[{ key: 'products', label: t('products.tabProducts') }, { key: 'categories', label: t('products.tabCategories') }]" :label="t('products.title')" id-prefix="prod" />
 
     <section class="card p-4 sm:p-5 flex flex-wrap items-end gap-4" :aria-label="t('filters.title')">
-      <SegmentedControl v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+      <SegmentedControl v-if="hasHorizons" v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+      <span v-else class="text-sm text-fg-muted">{{ t('horizonSupport.noneInPlan') }}</span>
       <div class="min-w-[10rem]">
         <label class="label" for="p-branch">{{ t('filters.branch') }}</label>
         <select id="p-branch" v-model="branchId" class="select">
@@ -149,15 +156,18 @@ async function exportCsv(): Promise<void> {
         <PaginationBar v-model:page="catalogPage" :meta="catalogList.data.value?.meta ?? null" />
       </template>
       <template v-else>
+        <HorizonSupportNotice class="m-2" :support="products.data.value?.horizon_support" :horizon="horizon" />
         <DataTable v-model:sort="sort" :columns="productColumns" :rows="products.data.value?.data ?? []" :row-key="(r) => r.product.id" :loading="products.loading.value" :caption="t('products.tabProducts')">
           <template #cell-product_name="{ row }">
             <span class="font-medium block">{{ row.product.name }}</span>
             <span class="text-xs text-fg-muted">{{ row.product.sku }}</span>
           </template>
           <template #cell-forecast_units="{ row }">
-            <span class="font-semibold">{{ formatNumber(row.forecast_units, 0) }}</span>
-            <span v-if="row.lo_80 != null && row.hi_80 != null" class="block text-xs text-fg-muted">{{ formatNumber(row.lo_80, 0) }}–{{ formatNumber(row.hi_80, 0) }}</span>
+            <span class="font-semibold" :class="unsupported ? 'text-fg-muted italic' : ''">{{ formatNumber(row.forecast_units, 0) }}</span>
+            <span v-if="unsupported" class="block text-xs text-fg-muted">{{ t('horizonSupport.unsupportedCell') }}</span>
+            <span v-else-if="row.lo_80 != null && row.hi_80 != null" class="block text-xs text-fg-muted">{{ formatNumber(row.lo_80, 0) }}–{{ formatNumber(row.hi_80, 0) }}</span>
           </template>
+          <template #cell-case_label="{ row }"><CaseLabelBadge v-if="row.case_label" :label="row.case_label" /><span v-else class="text-fg-muted">—</span></template>
           <template #cell-change_pct="{ row }">
             <TrendIndicator :trend="row.trend" :change="row.change_pct" />
             <span v-if="row.low_base" class="block text-xs text-fg-muted" :title="t('products.lowBaseHint')">{{ t('products.lowBase') }}</span>
@@ -170,10 +180,12 @@ async function exportCsv(): Promise<void> {
 
     <section v-else id="prod-panel" role="tabpanel" aria-labelledby="prod-categories" class="card p-2 sm:p-4">
       <ErrorState v-if="categories.error.value" :error="categories.error.value" @retry="categories.execute" />
-      <DataTable v-else v-model:sort="catSort" :columns="categoryColumns" :rows="categories.data.value?.data ?? []" :row-key="(r) => r.category?.id ?? 0" :loading="categories.loading.value" :caption="t('products.tabCategories')" :empty-text="t('products.noForecastTitle')">
+      <HorizonSupportNotice v-if="!categories.error.value" class="m-2" :support="categories.data.value?.horizon_support" :horizon="horizon" />
+      <DataTable v-if="!categories.error.value" v-model:sort="catSort" :columns="categoryColumns" :rows="categories.data.value?.data ?? []" :row-key="(r) => r.category?.id ?? 0" :loading="categories.loading.value" :caption="t('products.tabCategories')" :empty-text="t('products.noForecastTitle')">
         <template #cell-forecast_units="{ row }">
-          <span class="font-semibold">{{ formatNumber(row.forecast_units, 0) }}</span>
-          <span v-if="row.lo_80 != null && row.hi_80 != null" class="block text-xs text-fg-muted">{{ formatNumber(row.lo_80, 0) }}–{{ formatNumber(row.hi_80, 0) }}</span>
+          <span class="font-semibold" :class="unsupported ? 'text-fg-muted italic' : ''">{{ formatNumber(row.forecast_units, 0) }}</span>
+          <span v-if="unsupported" class="block text-xs text-fg-muted">{{ t('horizonSupport.unsupportedCell') }}</span>
+          <span v-else-if="row.lo_80 != null && row.hi_80 != null" class="block text-xs text-fg-muted">{{ formatNumber(row.lo_80, 0) }}–{{ formatNumber(row.hi_80, 0) }}</span>
         </template>
         <template #cell-change_pct="{ row }"><TrendIndicator :trend="row.trend" :change="row.change_pct" /></template>
       </DataTable>

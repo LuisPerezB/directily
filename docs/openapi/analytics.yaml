@@ -189,7 +189,7 @@ paths:
       summary: Resumen ejecutivo imprimible
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Horizon' }, { $ref: '#/components/parameters/BranchId' }]
       responses:
-        '200': { description: Reporte JSON con highlights, KPIs, riesgos, precisión y advertencias }
+        '200': { description: 'Reporte JSON con highlights, KPIs, riesgos, precisión y advertencias' }
   /accuracy/summary:
     get:
       tags: [Precisión]

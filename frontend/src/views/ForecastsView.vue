@@ -9,17 +9,23 @@ import InlineNotice from '@/components/ui/InlineNotice.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import ForecastChart from '@/components/charts/ForecastChart.vue'
+import HorizonSupportNotice from '@/components/forecast/HorizonSupportNotice.vue'
+import EnvelopePanel from '@/components/forecast/EnvelopePanel.vue'
+import CaseLabelBadge from '@/components/forecast/CaseLabelBadge.vue'
+import QualityBadge from '@/components/ui/QualityBadge.vue'
 import RunForecastPanel from '@/components/forecast/RunForecastPanel.vue'
 import ProductPicker from '@/components/forecast/ProductPicker.vue'
 import { exportsApi, forecastApi } from '@/api'
 import { errorMessage, isApiError } from '@/api/errors'
-import type { Granularity, Horizon, Product } from '@/api/types'
+import type { Granularity, Product } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
+import { useHorizonSelection } from '@/composables/useHorizons'
 import { useCatalogStore } from '@/stores/catalog'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
 import { formatDate, formatDateTime, formatNumber, formatCurrency } from '@/utils/format'
-import { GRANULARITIES, HORIZONS } from '@/utils/constants'
+import { GRANULARITIES } from '@/utils/constants'
+import { distinctCaseLabels, horizonSupportView } from '@/utils/envelope'
 import type { Metric } from '@/utils/series'
 
 const { t, te } = useI18n()
@@ -31,7 +37,7 @@ const branchId = ref<number | null>(null)
 const categoryId = ref<number | null>(null)
 const product = ref<Product | null>(null)
 const granularity = ref<Granularity>('day')
-const horizon = ref<Horizon>(30)
+const { horizon, options: horizonOptions, hasHorizons } = useHorizonSelection(undefined, 30)
 const historyDays = ref(90)
 const metric = ref<Metric>('units')
 const runId = ref<number | null>(null)
@@ -74,7 +80,10 @@ const totals = computed(() => {
   }
 })
 const granularityOptions = computed(() => GRANULARITIES.map((g) => ({ value: g, label: t(`granularity.${g}`) })))
-const horizonOptions = computed(() => HORIZONS.map((h) => ({ value: h, label: t('common.days', { n: h }) })))
+const support = computed(() => horizonSupportView(data.value?.meta?.horizon_support))
+// Sin respaldo suficiente la cifra se marca como provisional: sin bandas, sin mediana y con aviso.
+const provisional = computed(() => support.value?.hideIntervals === true)
+const caseLabels = computed(() => distinctCaseLabels(data.value?.forecast))
 const metricOptions = computed(() => [
   { value: 'units' as Metric, label: t('forecasts.metricUnits') },
   { value: 'revenue' as Metric, label: t('forecasts.metricRevenue') },
@@ -153,7 +162,8 @@ function onFinished(): void {
       </div>
       <div class="md:col-span-2 xl:col-span-4 flex flex-wrap items-center gap-3">
         <SegmentedControl v-model="granularity" :options="granularityOptions" :label="t('common.granularity')" />
-        <SegmentedControl v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+        <SegmentedControl v-if="hasHorizons" v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+        <span v-else class="text-sm text-fg-muted">{{ t('horizonSupport.noneInPlan') }}</span>
         <SegmentedControl v-model="metric" :options="metricOptions" :label="t('forecasts.metric')" />
         <label class="flex items-center gap-2 text-sm">
           <span class="text-fg-muted">{{ t('forecasts.historyDays') }}</span>
@@ -183,16 +193,25 @@ function onFinished(): void {
           </div>
           <dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
             <dt class="text-fg-muted">{{ t('forecasts.totalForecast', { n: horizon }) }}</dt>
-            <dd class="m-0 font-semibold tabular text-right">{{ formatNumber(totals.units, 0) }} {{ t('chart.units') }}</dd>
+            <dd class="m-0 font-semibold tabular text-right" :class="provisional ? 'text-fg-muted italic' : ''" data-test="series-total">
+              {{ formatNumber(totals.units, 0) }} {{ t('chart.units') }}<span v-if="provisional" class="block text-xs font-normal">{{ t('horizonSupport.provisionalTotal') }}</span>
+            </dd>
             <template v-if="totals.hasRevenue">
               <dt class="text-fg-muted">{{ t('forecasts.totalRevenue') }}</dt>
               <dd class="m-0 font-semibold tabular text-right">{{ formatCurrency(totals.revenue, tenant.currency, 0) }}</dd>
             </template>
           </dl>
         </div>
+        <div class="flex flex-wrap items-center gap-2 mb-3" data-test="series-quality">
+          <QualityBadge :status="data.envelope?.quality_status" />
+          <CaseLabelBadge v-for="c in caseLabels" :key="c" :label="c" />
+        </div>
+        <HorizonSupportNotice class="mb-3" :support="data.meta?.horizon_support" :horizon="horizon">
+          <RouterLink v-if="support?.needsNewRun && tenant.can('forecast.run')" :to="{ name: 'forecasts' }" class="font-semibold text-brand-strong block mt-1">{{ t('horizonSupport.runHint') }}</RouterLink>
+        </HorizonSupportNotice>
         <InlineNotice v-if="data.history.length === 0" kind="info" class="mb-3">{{ t('forecasts.noHistory') }}</InlineNotice>
         <InlineNotice v-if="data.meta && !data.meta.intervals_available && data.forecast.length" kind="info" class="mb-3">{{ t('forecasts.noIntervals') }}</InlineNotice>
-        <ForecastChart :history="data.history" :forecast="data.forecast" :metric="metric" :granularity="granularity" :currency="tenant.currency" :title="data.node.label || t('forecasts.title')" :height="380" />
+        <ForecastChart :history="data.history" :forecast="data.forecast" :metric="metric" :granularity="granularity" :currency="tenant.currency" :title="data.node.label || t('forecasts.title')" :height="380" :provisional="provisional" />
         <dl v-if="data.meta" class="mt-5 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4 text-sm border-t border-line pt-4">
           <div><dt class="text-fg-muted">{{ t('forecasts.version') }}</dt><dd class="m-0 font-semibold">{{ data.meta.run_version ? `v${data.meta.run_version}` : '—' }}</dd></div>
           <div><dt class="text-fg-muted">{{ t('forecasts.generatedAt') }}</dt><dd class="m-0 font-semibold">{{ formatDateTime(data.meta.generated_at, tenant.timezone) }}</dd></div>
@@ -212,6 +231,7 @@ function onFinished(): void {
             <dd class="m-0">{{ data.meta.price_assumption }}</dd>
           </div>
         </dl>
+        <EnvelopePanel class="mt-4" :envelope="data.envelope" />
         <p class="hint mt-3">{{ t('forecasts.howToRead') }}</p>
         <p v-for="(note, i) in data.meta?.notes ?? []" :key="i" class="hint mt-1">{{ note }}</p>
       </template>

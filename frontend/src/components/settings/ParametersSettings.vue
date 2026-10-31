@@ -8,6 +8,7 @@ import type { ForecastSchedule, Horizon } from '@/api/types'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
 import { HORIZONS } from '@/utils/constants'
+import { allowedHorizons } from '@/utils/horizons'
 
 /** Parámetros de inventario y pronóstico (tenants.settings). Valores como % en el formulario. */
 const { t } = useI18n()
@@ -16,6 +17,11 @@ const ui = useUiStore()
 const canEdit = computed(() => tenant.can('settings.manage'))
 const form = reactive({ service_level: 95, review_period_days: 7, default_lead_time_days: 7, forecast_schedule: 'weekly' as ForecastSchedule, default_horizon_days: 30 as Horizon, stockout_risk_threshold: 30 })
 const saving = ref(false)
+// Horizontes del plan; el valor ya guardado se conserva visible aunque el plan cambie.
+const horizonChoices = computed(() => {
+  const list = allowedHorizons(HORIZONS, tenant.tenant?.plan?.limits)
+  return list.includes(form.default_horizon_days) ? list : [...list, form.default_horizon_days].sort((a, b) => a - b)
+})
 
 watch(
   () => tenant.tenant?.settings,
@@ -83,7 +89,7 @@ async function save(): Promise<void> {
       <FormField id="p-hz" :label="t('settings.defaultHorizon')">
         <template #default>
           <select id="p-hz" v-model.number="form.default_horizon_days" class="select">
-            <option v-for="h in HORIZONS" :key="h" :value="h">{{ t('common.days', { n: h }) }}</option>
+            <option v-for="h in horizonChoices" :key="h" :value="h">{{ t('common.days', { n: h }) }}</option>
           </select>
         </template>
       </FormField>

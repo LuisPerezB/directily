@@ -10,6 +10,7 @@ import UsersSettings from '@/components/settings/UsersSettings.vue'
 import PrivacySettings from '@/components/settings/PrivacySettings.vue'
 import PlanUsage from '@/components/settings/PlanUsage.vue'
 import AuditLog from '@/components/settings/AuditLog.vue'
+import EffectiveConfigSettings from '@/components/settings/EffectiveConfigSettings.vue'
 import { useTenantStore } from '@/stores/tenant'
 import type { Ability } from '@/utils/abilities'
 
@@ -21,6 +22,7 @@ const tenant = useTenantStore()
 const ALL: { key: string; ability?: Ability }[] = [
   { key: 'empresa' },
   { key: 'parametros' },
+  { key: 'modulos' },
   { key: 'sucursales' },
   { key: 'usuarios', ability: 'users.manage' },
   { key: 'privacidad' },
@@ -44,6 +46,7 @@ const active = computed({
     <section id="settings-panel" role="tabpanel" :aria-labelledby="`settings-${active}`" class="card p-4 sm:p-6">
       <CompanySettings v-if="active === 'empresa'" />
       <ParametersSettings v-else-if="active === 'parametros'" />
+      <EffectiveConfigSettings v-else-if="active === 'modulos'" />
       <BranchesSettings v-else-if="active === 'sucursales'" />
       <UsersSettings v-else-if="active === 'usuarios'" />
       <PrivacySettings v-else-if="active === 'privacidad'" />

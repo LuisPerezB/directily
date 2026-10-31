@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import DataTable, { type Column } from '@/components/ui/DataTable.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -10,6 +11,13 @@ import InlineNotice from '@/components/ui/InlineNotice.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import TabsNav from '@/components/ui/TabsNav.vue'
+import SqlSourceForm from '@/components/datasources/SqlSourceForm.vue'
+import DataCoveragePanel from '@/components/datasources/DataCoveragePanel.vue'
+import DataQualityPanel from '@/components/datasources/DataQualityPanel.vue'
+import CalendarPanel from '@/components/datasources/CalendarPanel.vue'
+import CommitmentsPanel from '@/components/datasources/CommitmentsPanel.vue'
+import WarehousesUnitsPanel from '@/components/datasources/WarehousesUnitsPanel.vue'
 import { dataSourcesApi, importsApi } from '@/api'
 import { errorMessage } from '@/api/errors'
 import type { DataSource, DataSourceType, ImportJob } from '@/api/types'
@@ -17,12 +25,21 @@ import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
 import { useUiStore } from '@/stores/ui'
 import { formatBytes, formatDateTime } from '@/utils/format'
+import { buildSqlPayload, emptySqlForm, defaultPort, isSqlConnector, sqlFieldErrors, type SqlFormState } from '@/utils/sqlSource'
 
+const props = defineProps<{ tab?: string }>()
 const { t } = useI18n()
+const router = useRouter()
 const tenant = useTenantStore()
 const ui = useUiStore()
 const canManage = computed(() => tenant.can('datasources.manage'))
 
+const TABS = ['fuentes', 'cobertura', 'calidad', 'calendario', 'compromisos', 'almacenes'] as const
+const tabs = computed(() => TABS.map((key) => ({ key, label: t(`sources.tabs.${key}`) })))
+const active = computed({
+  get: () => (TABS.includes(props.tab as (typeof TABS)[number]) ? props.tab! : 'fuentes'),
+  set: (key: string) => void router.replace({ name: 'data-sources', params: { tab: key === 'fuentes' ? undefined : key } }),
+})
 const sources = useAsync(() => dataSourcesApi.list())
 const connectors = useAsync(() => dataSourcesApi.connectors())
 const importsPage = ref(1)
@@ -38,18 +55,43 @@ const toDelete = ref<DataSource | null>(null)
 const copied = ref(false)
 
 const connectorOptions = computed(() => (connectors.data.value ?? []).filter((c) => c.status !== 'planned'))
+const sqlForm = ref<SqlFormState>(emptySqlForm('sql_postgresql', tenant.timezone))
+const sqlErrors = ref<Record<string, string>>({})
+const isSql = computed(() => form.type === 'connector' && isSqlConnector(form.connector_key))
+const selectedConnector = computed(() => connectors.data.value?.find((c) => c.key === form.connector_key) ?? null)
+const untestedSelected = computed(() => selectedConnector.value?.verification === 'implemented_untested' || selectedConnector.value?.status === 'implemented_untested')
+function onConnectorChange(): void {
+  if (isSqlConnector(form.connector_key)) {
+    sqlForm.value = { ...sqlForm.value, connector_key: form.connector_key ?? 'sql_postgresql', port: defaultPort(form.connector_key) }
+  }
+}
 
 async function create(): Promise<void> {
   creating.value = true
   createError.value = null
+  sqlErrors.value = {}
   try {
+    if (isSql.value) {
+      sqlForm.value.connector_key = form.connector_key ?? 'sql_postgresql'
+      sqlForm.value.name = form.name
+      const created = await dataSourcesApi.create(buildSqlPayload(sqlForm.value, 'create'))
+      sqlForm.value = emptySqlForm(form.connector_key ?? 'sql_postgresql', tenant.timezone)
+      showCreate.value = false
+      form.name = ''
+      await sources.execute()
+      // Una fuente SQL se termina de configurar (consultas autorizadas y sincronización) en su asistente.
+      ui.notify(created.status === 'active' ? t('sources.created') : t('sources.createdInactive', { reason: created.last_error ?? '' }), created.status === 'active' ? 'success' : 'warning')
+      void router.push({ name: 'sql-source', params: { id: String(created.id) } })
+      return
+    }
     await dataSourcesApi.create({ type: form.type, name: form.name.trim(), connector_key: form.type === 'connector' ? form.connector_key : null })
     showCreate.value = false
     form.name = ''
     await sources.execute()
     ui.notify(t('sources.created'), 'success')
   } catch (e) {
-    createError.value = errorMessage(e, t)
+    sqlErrors.value = sqlFieldErrors(e)
+    createError.value = Object.keys(sqlErrors.value).length ? t('sql.fixFields') : errorMessage(e, t)
   } finally {
     creating.value = false
   }
@@ -117,6 +159,9 @@ const importColumns = computed<Column<ImportJob>[]>(() => [
       </div>
     </header>
 
+    <TabsNav v-model="active" :tabs="tabs" :label="t('sources.title')" id-prefix="ds" />
+
+    <template v-if="active === 'fuentes'">
     <InlineNotice kind="info">{{ t('sources.principle') }}</InlineNotice>
 
     <section class="card p-4 sm:p-6">
@@ -132,6 +177,7 @@ const importColumns = computed<Column<ImportJob>[]>(() => [
           </span>
           <StatusBadge domain="source" :value="s.status" />
           <template v-if="canManage">
+            <RouterLink v-if="isSqlConnector(s.connector_key)" :to="{ name: 'sql-source', params: { id: String(s.id) } }" class="btn btn-secondary btn-sm" data-test="configure-sql"><AppIcon name="settings" :size="15" /> {{ t('sources.configureSql') }}</RouterLink>
             <button v-if="s.type === 'rest_api'" type="button" class="btn btn-ghost btn-sm" @click="createToken(s)"><AppIcon name="key" :size="15" /> {{ t('sources.createToken') }}</button>
             <button type="button" class="btn btn-ghost btn-sm" :aria-label="t('common.delete')" @click="toDelete = s"><AppIcon name="trash" :size="15" /></button>
           </template>
@@ -150,6 +196,10 @@ const importColumns = computed<Column<ImportJob>[]>(() => [
             <h3 class="font-semibold text-sm m-0">{{ c.name }}</h3>
             <StatusBadge domain="connector" :value="c.status" />
           </div>
+          <p v-if="c.verification" class="m-0 flex flex-wrap items-center gap-1 text-xs text-fg-muted" data-test="connector-verification">
+            {{ t('sources.verification') }}: <StatusBadge domain="verification" :value="c.verification" />
+          </p>
+          <p v-if="c.status === 'implemented_untested'" class="m-0 text-xs text-warning" data-test="untested-warning">{{ t('sources.untestedWarning') }}</p>
           <p class="text-sm text-fg-muted m-0">{{ c.description }}</p>
           <p v-if="c.entity_types?.length" class="text-xs text-fg-muted m-0">{{ t('sources.entities', { list: c.entity_types.join(', ') }) }}</p>
         </article>
@@ -168,6 +218,13 @@ const importColumns = computed<Column<ImportJob>[]>(() => [
       </template>
     </section>
 
+    </template>
+    <DataCoveragePanel v-else-if="active === 'cobertura'" class="card p-4 sm:p-6" />
+    <DataQualityPanel v-else-if="active === 'calidad'" class="card p-4 sm:p-6" />
+    <CalendarPanel v-else-if="active === 'calendario'" class="card p-4 sm:p-6" />
+    <CommitmentsPanel v-else-if="active === 'compromisos'" class="card p-4 sm:p-6" />
+    <WarehousesUnitsPanel v-else class="card p-4 sm:p-6" />
+
     <AppModal :open="showCreate" :title="t('sources.add')" @close="showCreate = false">
       <form id="ds-form" class="flex flex-col gap-4" @submit.prevent="create">
         <div>
@@ -185,12 +242,14 @@ const importColumns = computed<Column<ImportJob>[]>(() => [
         </div>
         <div v-if="form.type === 'connector'">
           <label class="label" for="ds-conn">{{ t('sources.connector') }}</label>
-          <select id="ds-conn" v-model="form.connector_key" class="select" required>
+          <select id="ds-conn" v-model="form.connector_key" class="select" required @change="onConnectorChange">
             <option :value="null" disabled>{{ t('common.select') }}</option>
-            <option v-for="c in connectorOptions" :key="c.key" :value="c.key">{{ c.name }}</option>
+            <option v-for="c in connectorOptions" :key="c.key" :value="c.key">{{ c.name }}{{ c.status === 'implemented_untested' ? ` · ${t('status.connector.implemented_untested')}` : '' }}</option>
           </select>
           <p class="hint mt-1">{{ t('sources.connectorHint') }}</p>
+          <InlineNotice v-if="untestedSelected" kind="warning" class="mt-2" data-test="untested-modal">{{ t('sql.untested') }}</InlineNotice>
         </div>
+        <SqlSourceForm v-if="isSql" v-model="sqlForm" :errors="sqlErrors" hide-name />
         <p v-if="createError" class="field-error" role="alert">{{ createError }}</p>
       </form>
       <template #footer>

@@ -20,6 +20,8 @@
 | Exposición del motor | Acceso directo a FastAPI | Red Docker interna sin puertos publicados + token Bearer comparado en tiempo constante |
 | Pérdida de datos | Falla de disco, error humano | Respaldos diarios con rotación y restauración probada |
 | Exposición de PII en logs | Correos o cédulas en trazas | Procesador de logs que enmascara PII; prohibido registrar cuerpos de petición |
+| Conector SQL usado para escribir o para alcanzar la red interna (SSRF) | Una consulta autorizada con `DELETE`, o un host `169.254.169.254` / `10.x` interno de Predictily | Cuenta de solo lectura + validador de una sola `SELECT` + transacción de solo lectura + `PREDICTILY_SQL_ALLOWED_HOSTS` (§13) |
+| Fuga de datos hacia un proveedor LLM o cifras inventadas por el modelo | El asistente cita cifras de otra empresa, calcula por su cuenta o recibe datos personales | Herramientas de lista blanca por empresa, abilities y plan, verificación numérica, saneamiento de PII, desactivación sin clave (§14) |
 
 ## 2. Aislamiento multi-tenant: defensa en profundidad
 
@@ -220,3 +222,111 @@ Regla adicional: una empresa nunca puede quedar sin al menos un propietario.
 4. Escaneo de vulnerabilidades de imágenes (Trivy) en CI.
 5. Cifrado por empresa (claves por tenant) para datos sensibles.
 6. Pruebas de penetración externas antes del lanzamiento comercial.
+
+## 13. Conectores SQL de solo lectura (etapa 2 · ADR-V2-13)
+
+Los conectores SQL (PostgreSQL probado contra una base de pruebas; MySQL/MariaDB y SQL Server implementados, pendientes de prueba con servidor)
+extraen filas de la base del ERP del cliente y las pasan por el **mismo** pipeline de importación. El detalle técnico está en
+`docs/architecture/v2/P3-datos.md` §4; aquí se fijan los requisitos de seguridad que debe cumplir quien los opera.
+
+### 13.1 Cuenta de solo lectura (obligatoria)
+- Pedir al cliente (o crear) **una cuenta dedicada con permiso únicamente de lectura** sobre las vistas o tablas que alimentarán el mapeo. El
+  validador de consultas (una sola sentencia `SELECT`, sin escritura, sin múltiples sentencias) **no sustituye** a esa cuenta: es la segunda barrera.
+- PostgreSQL: `CREATE ROLE predictily_ro LOGIN PASSWORD '…'; GRANT CONNECT ON DATABASE erp TO predictily_ro; GRANT USAGE ON SCHEMA public TO predictily_ro;
+  GRANT SELECT ON <vistas/tablas> TO predictily_ro; ALTER ROLE predictily_ro SET default_transaction_read_only = on;` (el conector además abre la
+  transacción en modo solo lectura con `statement_timeout`).
+- MySQL/MariaDB: `GRANT SELECT ON erp.<vistas> TO 'predictily_ro'@'<host de Predictily>';` (el conector usa una transacción de solo lectura).
+- SQL Server: miembro solo de `db_datareader` (o `GRANT SELECT` por objeto). **SQL Server no tiene modo de solo lectura por transacción**: la
+  garantía es el validador más la cuenta; por eso el conector figura como `implemented_untested`.
+- Preferir **vistas** dedicadas (columnas mínimas: sin datos personales que el pronóstico no necesite) a tablas completas del ERP.
+- Las credenciales se guardan cifradas (`data_sources.credentials_encrypted`), la API nunca las devuelve, no aparecen en errores, `last_error`, logs ni
+  auditoría, y **no se incluyen en la exportación LOPDP** (tampoco la `config` de conexión de la fuente).
+
+### 13.2 Destinos permitidos: `PREDICTILY_SQL_ALLOWED_HOSTS` y redes privadas
+| Entorno | Configuración recomendada |
+|---|---|
+| **SaaS público multiempresa** | Definir **siempre** `PREDICTILY_SQL_ALLOWED_HOSTS` (hosts exactos, separados por comas) y, cuando los ERP sean alcanzables por Internet con TLS, `PREDICTILY_SQL_DENY_PRIVATE=true`. Sin lista, un administrador de empresa podría apuntar el conector a hosts internos (SSRF). Cada alta de un cliente exige añadir su host a la lista tras verificarlo con él. |
+| **ERP detrás de VPN / red privada del cliente** | Mantener `PREDICTILY_SQL_DENY_PRIVATE=false` (valor por defecto) y restringir con `PREDICTILY_SQL_ALLOWED_HOSTS` al host o IP **privada** del ERP de ese cliente, alcanzable solo por el túnel (WireGuard/IPsec) desde el servidor que ejecuta los trabajos de la cola `imports`. Preferir un túnel por cliente; nunca abrir el puerto de la base a Internet. |
+| **Instalación dedicada de un solo cliente** | Igual que la anterior; la lista de hosts puede incluir únicamente el ERP de la empresa. |
+
+Reglas comunes: siempre se bloquean las direcciones de metadatos de nube (`169.254.0.0/16`), `0.0.0.0`, multicast y `fe80::`; el host se compara con
+la lista en minúsculas. **Límite conocido**: la comprobación resuelve el nombre al validar y vuelve a resolverlo al conectar (no cubre *DNS rebinding*);
+por eso en SaaS público se recomienda una lista de hosts exactos controlada por Predictily y, si es posible, IP fijas. Usar TLS en la conexión a la base
+(`sslmode=verify-full` en PostgreSQL) cuando el trayecto no sea un túnel cifrado. Otros topes: `PREDICTILY_SQL_MAX_ROWS` (filas por sincronización) y
+paginación por cursor.
+
+### 13.3 Datos personales y auditoría
+- La consulta puede traer datos de compradores: se importan solo los campos mapeados, la cédula/RUC se convierte a HMAC, la vista previa enmascara los
+  códigos de comprador y rige la minimización de §8.3. Antes de habilitar un conector con datos de clientes, realizar la EIPD (§8.8).
+- Se auditan `datasource.created|updated|deleted`, `datasource.mapping_created|approved|deactivated` y `datasource.sync_requested|completed|failed`.
+  Una versión de consulta nace **sin aprobar**: solo la aprobada y activa sincroniza (separación entre quien redacta y quien autoriza la consulta,
+  ambos con `datasources.manage`).
+
+## 14. Capa conversacional opcional (etapa 2 · ADR-V2-12)
+
+El asistente (`POST /api/v1/assistant/messages`, `GET /api/v1/assistant/status`) permite consultar en lenguaje natural resultados **ya calculados**.
+No es parte de ningún core: sin proveedor, o con el servicio desactivado, los cuatro cores (Datos, Demanda, Comportamiento de compra y Abastecimiento)
+funcionan igual (prueba `CoresWorkWithoutAssistantTest`; ningún módulo de los cores ni del motor referencia la capa conversacional:
+`CoresDoNotDependOnAssistantTest`).
+
+### 14.1 Qué puede hacer el modelo y qué no
+- **No calcula**: no suma, promedia, convierte ni proyecta. Las cifras de la respuesta están en `figures`, tal como las devolvió cada herramienta con su
+  envoltura de procedencia (corrida, fecha de corte, horizonte, calidad). El texto del modelo solo las explica; si contiene cifras que no proceden de las
+  herramientas (verificación numérica conservadora, no formal), el texto se **descarta** (`ungrounded_rejected`) y se devuelven solo las cifras.
+- **Sin herramienta aplicable** (o sin permiso) la respuesta es fija: «No puedo responder…»; nunca texto libre del modelo.
+- **Herramientas de lista blanca, solo lectura** (`dashboard_summary`, `product_forecast`, `forecast_accuracy`, `inventory_recommendations`,
+  `customer_predictions`, `supply_plan`): llaman a los servicios internos de resultados dentro de la empresa activa (`TenantContext`), exigen la **misma
+  habilidad** que la ruta equivalente (rol y, si hay token Bearer, también la habilidad del token) y el **mismo plan** (un horizonte fuera del plan se
+  rechaza sin revelar datos). No aceptan `tenant_id` ni claves fuera de su esquema, no disparan cálculos y no escriben.
+- Los resultados de las herramientas y el texto del usuario son **datos, no instrucciones** (mitigación de inyección de instrucciones): el sistema no
+  concede capacidades por lo que diga el modelo, solo por la lista blanca y las abilities.
+
+### 14.2 Qué se envía al proveedor y qué nunca
+| Se envía | Nunca se envía |
+|---|---|
+| Instrucciones fijas, fecha de hoy, el mensaje del usuario y un historial corto (hasta 6 mensajes) con correos, cédula/RUC y tokens **enmascarados** (`PiiMasker`) | Nombre o RUC de la empresa, nombres/correos de usuarios, credenciales, tokens, clave del proveedor |
+| Resultados de las herramientas **saneados** y acotados en tamaño: códigos y nombres de producto, sucursales, cifras agregadas y su procedencia | Nombre, correo, cédula/RUC o dirección de compradores (solo el **código externo** cuando la herramienta de compradores está activa) |
+
+El proveedor es un **subencargado** del tratamiento: debe constar en el contrato de encargo (§8.1), su ubicación puede implicar transferencia internacional
+(§8.7) y debe realizarse la EIPD (§8.8) antes de activarlo para una empresa. Antes de producción hay que verificar con el proveedor elegido, por contrato,
+que no usa los datos enviados para entrenar sus modelos y dónde los procesa; Predictily no puede garantizarlo técnicamente.
+
+### 14.3 Configuración y desactivación
+Variables (solo en el `.env` del servidor, permisos 600; nunca en el repositorio, imágenes, logs ni respuestas):
+`CONVERSATION_ENABLED`, `CONVERSATION_PROVIDER` (`ollama_cloud` | `none`), `CONVERSATION_BASE_URL`, `CONVERSATION_API_KEY`, `CONVERSATION_MODEL`,
+`CONVERSATION_TIMEOUT_SECONDS`, `CONVERSATION_DEADLINE_SECONDS`, `CONVERSATION_MAX_MESSAGE_CHARS`, `CONVERSATION_RATE_PER_MINUTE`,
+`CONVERSATION_DAILY_LIMIT`, `CONVERSATION_CUSTOMER_TOOLS` (ver `backend/config/conversation.php`). Rotar la clave = cambiar la variable y reiniciar.
+- **Sin `CONVERSATION_API_KEY` el servicio queda desactivado** y no se hace ninguna llamada de red: `POST /assistant/messages` responde 503
+  `assistant_disabled` (con `reason`) y `GET /assistant/status` informa `enabled=false`.
+- Desactivar para todos: `CONVERSATION_ENABLED=false` o `CONVERSATION_PROVIDER=none`. Desactivar para una empresa: `plan_overrides.features.assistant=false`
+  (superadministrador, `PATCH /admin/tenants/{uuid}`) o un plan sin esa capacidad (`402`). Retirar el acceso a datos de compradores: `CONVERSATION_CUSTOMER_TOOLS=false`.
+- Con `APP_ENV` de producción el endpoint del proveedor debe ser `https://`.
+
+### 14.4 Límites, registro y auditoría
+- Por mensaje: tamaño máximo (`CONVERSATION_MAX_MESSAGE_CHARS`, 1000 por defecto), máximo 3 rondas de herramientas y 3 llamadas por ronda, resultado de
+  herramienta acotado, tiempo por llamada y tiempo total. Tasa por usuario/empresa (`CONVERSATION_RATE_PER_MINUTE`, 429 `assistant_rate_limited`) y tope diario
+  por empresa (`CONVERSATION_DAILY_LIMIT`, 429 `assistant_quota_exceeded`); las claves de caché llevan el prefijo `tenant:{id}:`.
+- **No se registra el contenido** de la conversación ni de las herramientas en logs ni en auditoría. Se audita `assistant.message` (estado, herramientas
+  usadas y su resultado, rondas, tokens, tamaño del mensaje, duración, cantidad de cifras descartadas) y `assistant.provider_error` (motivo y estado HTTP).
+  Los errores del proveedor nunca incluyen el cuerpo de su respuesta, la clave ni la conversación.
+- Pendiente: desactivación por empresa desde la interfaz de configuración (requiere ampliar el esquema de `tenants.settings`).
+
+## 15. Retención de artefactos de la etapa 2
+
+Todas las tablas nuevas llevan `tenant_id` con eliminación en cascada, de modo que la purga definitiva de una empresa (30 días tras la solicitud,
+`predictily:purge`) elimina sus ejecuciones, huellas, predicciones, planes y demás resultados. La exportación LOPDP (`POST /tenant/export`) incluye ahora
+todas esas tablas (nunca credenciales ni la configuración de conexión de las fuentes) y una prueba exige que cualquier tabla con `tenant_id` esté
+clasificada como exportada o excluida con motivo (`TenantDataExporter::TABLES` / `NOT_EXPORTED`).
+
+| Artefacto | Dónde | Retención |
+|---|---|---|
+| Exportaciones ZIP | disco privado `tenants/{id}/exports` | 7 días (**implementado**, `predictily:purge`) |
+| Bitácora de auditoría (incluye `assistant.*` y `datasource.*`) | `audit_logs` | 24 meses; IP 12 meses (**implementado** para los 24 meses) |
+| Empresa eliminada: filas de todas las tablas | PostgreSQL | cascada por `tenant_id` (**implementado**); desaparece de los respaldos al expirar la rotación |
+| Ejecuciones y resultados (`core_runs`, `customer_*`, `supply_plans`, `cost_forecasts`, `scenario_evaluations`) | PostgreSQL | **Política objetivo**: conservar el detalle de las últimas 12 ejecuciones por core y empresa y, de las anteriores, sus métricas, manifiestos y huellas. **Pendiente de implementar**: hoy no hay depuración automática |
+| Huellas de datos (`data_snapshots`) y configuración efectiva de cada ejecución | PostgreSQL | mientras exista una ejecución que las referencie (reproducibilidad); son hashes y recuentos, sin filas de negocio |
+| Artefactos de modelos (motor, `storage/artifacts/{tenant_id}`) | volumen `engine-artifacts` | **Política objetivo**: conservar el modelo en producción y las 2 versiones `validated`/`retired` más recientes (necesarias para la reversión verificada por SHA-256); eliminar `candidate`/`failed` con más de 30 días. **Pendiente de implementar**: no existe limpieza automática ni eliminación de los artefactos de una empresa purgada; hasta entonces, al purgar una empresa debe borrarse manualmente `artifacts/{tenant_id}` en el volumen del motor |
+| Planes de abastecimiento, simulaciones y escenarios guardados | PostgreSQL | iguales a las ejecuciones; son sugerencias, no compromisos |
+| Calendario público (`tenant_id` NULL) | PostgreSQL | no pertenece a ninguna empresa: se conserva y no se exporta |
+
+Las copias de seguridad siguen §10 (`BACKUP_RETENTION_DAYS`); el volumen `engine-artifacts` se respalda porque la reversión de modelos depende de él.

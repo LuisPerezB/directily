@@ -14,13 +14,15 @@ import DataTable, { type Column } from './DataTable.vue'
 import ErrorState from './ErrorState.vue'
 import EmptyState from './EmptyState.vue'
 import FormField from './FormField.vue'
+import ProductPicker from '@/components/forecast/ProductPicker.vue'
+import type { Product } from '@/api/types'
 import { errorMessage, isApiError } from '@/api/errors'
 import { useUiStore } from '@/stores/ui'
 
 export interface FieldDef {
   key: string
   label: string
-  type: 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'textarea'
+  type: 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'textarea' | 'product'
   required?: boolean
   hint?: string
   options?: { value: string | number; label: string }[]
@@ -52,10 +54,18 @@ const props = withDefaults(
     emptyText?: string
     addLabel?: string | null
     rowLabel?: (row: R) => string
+    /** Textos de la confirmación de «eliminar» cuando la acción es otra (p. ej. cancelar un evento). */
+    removeTitle?: string
+    removeText?: string
+    removeConfirm?: string
+    /** Permite ocultar acciones por fila (p. ej. eventos públicos de solo lectura). */
+    rowActions?: (row: R) => { edit: boolean; remove: boolean }
+    /** Valores adicionales del formulario (p. ej. las líneas de una receta) que se unen al cuerpo enviado. */
+    extraPayload?: (form: Record<string, unknown>) => Record<string, unknown>
   }>(),
   { description: null, loading: false, canWrite: false, defaults: () => ({}), emptyTitle: '', emptyText: '', addLabel: null },
 )
-const emit = defineEmits<{ changed: []; retry: [] }>()
+const emit = defineEmits<{ changed: []; retry: []; opened: [row: R | null] }>()
 const { t } = useI18n()
 const ui = useUiStore()
 const uid = Math.random().toString(36).slice(2, 7)
@@ -67,6 +77,12 @@ const busy = ref(false)
 const fieldErrors = ref<Record<string, string>>({})
 const formError = ref<string | null>(null)
 const toDelete = ref<R | null>(null)
+// Los campos de producto guardan el id en el formulario y el objeto (para mostrar su nombre) aparte.
+const productObjs = reactive<Record<string, Product | null>>({})
+function setProduct(key: string, p: Product | null): void {
+  productObjs[key] = p
+  form[key] = p?.id ?? ''
+}
 
 const visibleFields = computed(() => props.fields.filter((f) => !f.createOnly || editing.value === null))
 const tableColumns = computed<Column<R>[]>(() => (props.canWrite && (props.update || props.remove) ? [...props.columns, { key: '__actions', label: '' }] : props.columns))
@@ -81,9 +97,11 @@ function openCreate(): void {
   editing.value = null
   for (const k of Object.keys(form)) delete form[k]
   Object.assign(form, fresh())
+  for (const k of Object.keys(productObjs)) delete productObjs[k]
   fieldErrors.value = {}
   formError.value = null
   open.value = true
+  emit('opened', null)
 }
 
 function openEdit(row: R): void {
@@ -93,9 +111,14 @@ function openEdit(row: R): void {
   const values: Record<string, unknown> = {}
   for (const f of props.fields) values[f.key] = base[f.key] ?? (f.type === 'checkbox' ? true : f.type === 'number' ? null : '')
   Object.assign(form, values)
+  for (const k of Object.keys(productObjs)) delete productObjs[k]
+  for (const f of props.fields) {
+    if (f.type === 'product') productObjs[f.key] = (base[`${f.key}__obj`] as Product | undefined) ?? null
+  }
   fieldErrors.value = {}
   formError.value = null
   open.value = true
+  emit('opened', row)
 }
 
 /** Vacío → null (desconocido); números → número; el resto, texto sin espacios sobrantes. */
@@ -105,13 +128,14 @@ function payload(): Record<string, unknown> {
     const v = form[f.key]
     if (f.type === 'checkbox') out[f.key] = Boolean(v)
     else if (f.type === 'number') out[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
+    else if (f.type === 'product') out[f.key] = v === '' || v === null || v === undefined ? null : Number(v)
     else if (f.type === 'select') out[f.key] = v === '' || v === null || v === undefined ? null : v
     else {
       const text = typeof v === 'string' ? v.trim() : v
       out[f.key] = text === '' ? null : text
     }
   }
-  return out
+  return { ...out, ...(props.extraPayload ? props.extraPayload(form) : {}) }
 }
 
 async function submit(): Promise<void> {
@@ -180,8 +204,8 @@ const deleteName = computed(() => (toDelete.value && props.rowLabel ? props.rowL
         </template>
         <template #cell-__actions="{ row }">
           <span class="inline-flex gap-1">
-            <button v-if="update" type="button" class="btn btn-ghost btn-sm" @click="openEdit(row)">{{ t('common.edit') }}</button>
-            <button v-if="remove" type="button" class="btn btn-ghost btn-sm" :aria-label="t('common.delete')" @click="toDelete = row"><AppIcon name="trash" :size="15" /></button>
+            <button v-if="update && (rowActions?.(row).edit ?? true)" type="button" class="btn btn-ghost btn-sm" @click="openEdit(row)">{{ t('common.edit') }}</button>
+            <button v-if="remove && (rowActions?.(row).remove ?? true)" type="button" class="btn btn-ghost btn-sm" :aria-label="removeConfirm ?? t('common.delete')" :title="removeConfirm ?? t('common.delete')" @click="toDelete = row"><AppIcon name="trash" :size="15" /></button>
           </span>
         </template>
       </DataTable>
@@ -196,6 +220,7 @@ const deleteName = computed(() => (toDelete.value && props.rowLabel ? props.rowL
                 <option value="">{{ t('common.select') }}</option>
                 <option v-for="o in f.options ?? []" :key="String(o.value)" :value="o.value">{{ o.label }}</option>
               </select>
+              <ProductPicker v-else-if="f.type === 'product'" :id="`crud-${uid}-${f.key}`" :model-value="productObjs[f.key] ?? null" @update:model-value="(p) => setProduct(f.key, p)" />
               <label v-else-if="f.type === 'checkbox'" class="flex items-center gap-2 text-sm min-h-10">
                 <input :id="`crud-${uid}-${f.key}`" v-model="form[f.key]" type="checkbox" :aria-describedby="describedby" /> {{ t('common.yes') }}
               </label>
@@ -226,6 +251,6 @@ const deleteName = computed(() => (toDelete.value && props.rowLabel ? props.rowL
       </template>
     </AppModal>
 
-    <ConfirmDialog :open="toDelete !== null" :title="t('crud.deleteTitle')" :message="t('crud.deleteText', { name: deleteName })" danger :busy="busy" :confirm-label="t('common.delete')" @confirm="confirmRemove" @cancel="toDelete = null" />
+    <ConfirmDialog :open="toDelete !== null" :title="removeTitle ?? t('crud.deleteTitle')" :message="removeText ? removeText.replace('{name}', deleteName) : t('crud.deleteText', { name: deleteName })" danger :busy="busy" :confirm-label="removeConfirm ?? t('common.delete')" @confirm="confirmRemove" @cancel="toDelete = null" />
   </section>
 </template>
