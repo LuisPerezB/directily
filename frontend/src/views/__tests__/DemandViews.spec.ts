@@ -81,6 +81,19 @@ describe('Pronósticos: horizonte, respaldo y casos especiales', () => {
     expect(badges[0]!.text()).toBe('Producto nuevo: respaldo por categoría')
   })
 
+  it('lista las series sin pronóstico (abstención) de la ejecución vigente, sin inventar un cero', async () => {
+    api.series.mockResolvedValue(series(support('ok')))
+    api.runs.mockResolvedValue({ data: [{ id: 1, version: 1, run_type: 'production', status: 'completed', triggered_by: 'user', horizon_days: 90, cutoff_date: '2026-10-01', is_current: true, created_at: '2026-10-01T00:00:00Z',
+      summary: { special_cases: { label_counts: { new_product_category_median: 2 }, no_recent_sales: { abstained: 7, after_days: 180 }, discontinued: { explicit_zero: 1, abstained: 3 }, branch_closed_declared: { branches: [], explicit_zero: 0, abstained: 0 } } } }], meta: { current_page: 1, per_page: 20, total: 1, last_page: 1 } })
+    const w = mount(ForecastsView, { global: { plugins: [setupTenant('analyst')], stubs } })
+    await flushPromises()
+    const box = w.get('[data-test="abstentions"]')
+    expect(box.text()).toContain('10 series sin pronóstico')
+    expect(box.text()).toContain('7 series activas sin ventas hace más de 180 días')
+    expect(box.text()).toContain('3 productos descontinuados')
+    expect(box.text()).not.toContain('sucursales cerradas')
+  })
+
   it('not_computed ofrece generar un pronóstico solo a quien puede ejecutarlo', async () => {
     api.series.mockResolvedValue(series(support('not_computed')))
     const analyst = mount(ForecastsView, { global: { plugins: [setupTenant('analyst')], stubs } })

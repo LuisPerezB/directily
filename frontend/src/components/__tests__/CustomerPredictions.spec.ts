@@ -155,7 +155,7 @@ describe('Compradores: evaluación', () => {
     await flushPromises()
     expect(w.get('[data-test="tier"]').text()).toBe('Sin entrenar')
     expect(w.text()).toContain('Menos de 100 compras positivas para entrenar.')
-    expect(w.get('[data-test="no-metrics"]').exists()).toBe(true)
+    expect(w.find('[data-test="no-metrics"]').exists()).toBe(true)
     expect(w.find('[data-test="probability-metrics"]').exists()).toBe(false)
   })
 

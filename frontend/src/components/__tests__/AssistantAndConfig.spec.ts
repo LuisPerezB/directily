@@ -192,7 +192,7 @@ describe('Configuración efectiva por módulo', () => {
     const w = mountConfig()
     await flushPromises()
     await w.get('[data-key="review_period_days"] button').trigger('click')
-    expect(w.get('[data-key="review_period_days"] [data-test="will-restore"]').exists()).toBe(true)
+    expect(w.find('[data-key="review_period_days"] [data-test="will-restore"]').exists()).toBe(true)
     await w.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
     expect(api.saveOverrides).toHaveBeenCalledWith('demand', {})

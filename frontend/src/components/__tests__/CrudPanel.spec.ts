@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Component } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ApiError } from '@/api/errors'
 import { setupTenant } from '@/test/helpers'
@@ -13,7 +14,7 @@ const columns = [{ key: 'name', label: 'Nombre' }, { key: 'amount', label: 'Mont
 const rows: Row[] = [{ id: 1, name: 'Presupuesto octubre', amount: 500 }]
 
 function mountPanel(props: Record<string, unknown> = {}) {
-  return mount(CrudPanel as never, { props: { title: 'Presupuestos', columns, rows, fields, canWrite: true, ...props }, global: { plugins: [setupTenant('admin')] } })
+  return mount(CrudPanel as unknown as Component, { props: { title: 'Presupuestos', columns, rows, fields, canWrite: true, ...props }, global: { plugins: [setupTenant('admin')] } })
 }
 
 describe('CrudPanel (formularios de configuración)', () => {

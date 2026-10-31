@@ -27,7 +27,7 @@ const { can } = useAbility()
 const catalog = useCatalogStore()
 const product = ref<Product | null>(null)
 const form = reactive({
-  branch_id: null as number | null, treatment: 'precio', outcome: 'unidades vendidas', unit_of_analysis: 'producto-sucursal-semana', estimand: 'efecto promedio del precio', horizon_days: 28 as number | null,
+  branch_id: null as number | null, treatment: '', outcome: '', unit_of_analysis: '', estimand: '', horizon_days: null as number | null,
   population: '', price_change_pct: null as number | null,
   controlled: [] as string[], unobserved: [] as string[], assumptions: [] as string[],
 })
@@ -67,12 +67,12 @@ const reqLabel = (id: string, fallback: string): string => (te(`supply.causal.re
       <div><label class="label" for="ca-product">{{ t('filters.product') }}</label><ProductPicker id="ca-product" v-model="product" /></div>
       <div><label class="label" for="ca-branch">{{ t('filters.branch') }}</label><select id="ca-branch" v-model="form.branch_id" class="select"><option :value="null">{{ t('filters.allBranches') }}</option><option v-for="b in catalog.branches" :key="b.id" :value="b.id">{{ b.name }}</option></select></div>
       <div><label class="label" for="ca-price">{{ t('supply.causal.priceChange') }}</label><input id="ca-price" v-model.number="form.price_change_pct" type="number" step="1" min="-95" max="500" class="input" :placeholder="t('supply.causal.optional')" /></div>
-      <div><label class="label" for="ca-treatment">{{ t('supply.causal.treatment') }}</label><input id="ca-treatment" v-model="form.treatment" class="input" maxlength="100" /></div>
-      <div><label class="label" for="ca-outcome">{{ t('supply.causal.outcome') }}</label><input id="ca-outcome" v-model="form.outcome" class="input" maxlength="100" /></div>
-      <div><label class="label" for="ca-unit">{{ t('supply.causal.unit') }}</label><input id="ca-unit" v-model="form.unit_of_analysis" class="input" maxlength="100" /></div>
-      <div><label class="label" for="ca-estimand">{{ t('supply.causal.estimand') }}</label><input id="ca-estimand" v-model="form.estimand" class="input" maxlength="100" /></div>
-      <div><label class="label" for="ca-horizon">{{ t('supply.causal.horizon') }}</label><input id="ca-horizon" v-model.number="form.horizon_days" type="number" min="1" max="365" class="input" /></div>
-      <div><label class="label" for="ca-pop">{{ t('supply.causal.population') }}</label><input id="ca-pop" v-model="form.population" class="input" maxlength="200" /></div>
+      <div><label class="label" for="ca-treatment">{{ t('supply.causal.treatment') }}</label><input id="ca-treatment" v-model="form.treatment" class="input" maxlength="100" :placeholder="t('supply.causal.examples.treatment')" /></div>
+      <div><label class="label" for="ca-outcome">{{ t('supply.causal.outcome') }}</label><input id="ca-outcome" v-model="form.outcome" class="input" maxlength="100" :placeholder="t('supply.causal.examples.outcome')" /></div>
+      <div><label class="label" for="ca-unit">{{ t('supply.causal.unit') }}</label><input id="ca-unit" v-model="form.unit_of_analysis" class="input" maxlength="100" :placeholder="t('supply.causal.examples.unit')" /></div>
+      <div><label class="label" for="ca-estimand">{{ t('supply.causal.estimand') }}</label><input id="ca-estimand" v-model="form.estimand" class="input" maxlength="100" :placeholder="t('supply.causal.examples.estimand')" /></div>
+      <div><label class="label" for="ca-horizon">{{ t('supply.causal.horizon') }}</label><input id="ca-horizon" v-model.number="form.horizon_days" type="number" min="1" max="365" class="input" :placeholder="t('supply.causal.examples.horizon')" /></div>
+      <div><label class="label" for="ca-pop">{{ t('supply.causal.population') }}</label><input id="ca-pop" v-model="form.population" class="input" maxlength="200" :placeholder="t('supply.causal.examples.population')" /></div>
       <fieldset class="border-0 p-0 m-0"><legend class="label">{{ t('supply.causal.controlled') }}</legend><label v-for="c in OBSERVABLE" :key="c" class="flex items-center gap-2 text-sm"><input v-model="form.controlled" type="checkbox" :value="c" /> {{ t(`supply.causal.confounders.${c}`) }}</label></fieldset>
       <fieldset class="border-0 p-0 m-0"><legend class="label">{{ t('supply.causal.unobserved') }}</legend><label v-for="c in UNOBSERVABLE" :key="c" class="flex items-center gap-2 text-sm"><input v-model="form.unobserved" type="checkbox" :value="c" /> {{ t(`supply.causal.confounders.${c}`) }}</label></fieldset>
       <fieldset class="border-0 p-0 m-0"><legend class="label">{{ t('supply.causal.assumptions') }}</legend><label v-for="c in ASSUMPTIONS" :key="c" class="flex items-center gap-2 text-sm"><input v-model="form.assumptions" type="checkbox" :value="c" /> {{ t(`supply.causal.assumptionNames.${c}`) }}</label><p class="hint m-0">{{ t('supply.causal.assumptionsHint') }}</p></fieldset>

@@ -20,3 +20,29 @@ export function splitHorizonSupport(support: Record<string, HorizonSupport> | nu
     unsupported: all.filter((h) => h.status !== 'ok' && h.status !== 'degraded'),
   }
 }
+
+export interface AbstentionSummary {
+  total: number
+  noRecentSales: number
+  discontinued: number
+  branchClosed: number
+  afterDays: number | null
+  /** Series con una cifra marcada (producto nuevo, historia escasa, descontinuado en cero...): no son abstenciones. */
+  labelled: Record<string, number>
+}
+
+/**
+ * Series SIN pronóstico (abstención) de una ejecución: no tienen filas, así que la interfaz las cuenta aparte
+ * (`summary.special_cases`). Ausente o ejecución antigua → null (no se inventan conteos).
+ */
+export function abstentionSummary(summary: Record<string, unknown> | null | undefined): AbstentionSummary | null {
+  const sc = summary?.special_cases as Record<string, Record<string, unknown>> | undefined
+  if (!sc || typeof sc !== 'object') return null
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  const noRecentSales = n(sc.no_recent_sales?.abstained)
+  const discontinued = n(sc.discontinued?.abstained)
+  const branchClosed = n(sc.branch_closed_declared?.abstained)
+  const labelCounts = (sc.label_counts ?? {}) as Record<string, unknown>
+  const labelled = Object.fromEntries(Object.entries(labelCounts).filter(([, v]) => n(v) > 0).map(([k, v]) => [k, n(v)]))
+  return { total: noRecentSales + discontinued + branchClosed, noRecentSales, discontinued, branchClosed, afterDays: typeof sc.no_recent_sales?.after_days === 'number' ? (sc.no_recent_sales.after_days as number) : null, labelled }
+}

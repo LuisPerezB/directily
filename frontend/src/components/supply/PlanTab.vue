@@ -2,6 +2,7 @@
 /** Crear un plan de compras (horizonte, objetivo, presupuesto vía configuración), seguir el trabajo y revisar sus resultados. */
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import DataTable, { type Column } from '@/components/ui/DataTable.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
@@ -97,6 +98,10 @@ const solverOf = (r: SupplyRun): string | null => (r.summary?.solver_status as s
       <FormField id="pl-period" :label="t('supply.plan.periodDays')">
         <template #default><select id="pl-period" v-model.number="form.period_days" class="select"><option v-for="p in [1, 7, 14, 30]" :key="p" :value="p">{{ t('common.days', { n: p }) }}</option></select></template>
       </FormField>
+      <p class="hint m-0 sm:col-span-2 lg:col-span-4" data-test="plan-data-hint">
+        {{ t('supply.plan.dataHint') }}
+        <RouterLink :to="{ name: 'supply', params: { tab: 'configuracion' } }" class="font-semibold">{{ t('supply.plan.dataHintLink') }}</RouterLink>
+      </p>
       <details class="sm:col-span-2 lg:col-span-4">
         <summary class="cursor-pointer text-sm text-fg-muted hover:text-fg">{{ t('supply.plan.advanced') }}</summary>
         <p class="hint mt-2">{{ t('supply.plan.advancedHint') }}</p>

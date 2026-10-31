@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bandLabelParams, horizonBand, splitHorizonSupport } from '../accuracy'
+import { abstentionSummary, bandLabelParams, horizonBand, splitHorizonSupport } from '../accuracy'
 import { buildForecastChartData } from '../series'
 import type { ForecastPoint, HistoryPoint, HorizonSupport } from '@/api/types'
 
@@ -43,5 +43,22 @@ describe('mediana (P50) en la serie', () => {
 
   it('en ingresos no hay mediana', () => {
     expect(buildForecastChartData(history, [point('2026-10-02', 3)], 'revenue').hasP50).toBe(false)
+  })
+})
+
+describe('series sin pronóstico (abstención)', () => {
+  it('suma las abstenciones del resumen de casos especiales y conserva los conteos de series marcadas', () => {
+    const s = abstentionSummary({ special_cases: {
+      label_counts: { new_product_category_median: 4, discontinued_zero: 2, sparse_history: 0 }, no_recent_sales: { abstained: 7, after_days: 180 },
+      discontinued: { explicit_zero: 2, abstained: 3, lookback_days: 365 }, branch_closed_declared: { branches: [2], explicit_zero: 1, abstained: 1 },
+    } })!
+    expect(s.total).toBe(11)
+    expect(s.noRecentSales).toBe(7)
+    expect(s.afterDays).toBe(180)
+    expect(s.labelled).toEqual({ new_product_category_median: 4, discontinued_zero: 2 })
+  })
+  it('una ejecución antigua sin el resumen no inventa conteos', () => {
+    expect(abstentionSummary({})).toBeNull()
+    expect(abstentionSummary(null)).toBeNull()
   })
 })

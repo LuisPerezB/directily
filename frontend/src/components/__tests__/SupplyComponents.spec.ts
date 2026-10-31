@@ -178,6 +178,19 @@ describe('Verificación causal', () => {
     expect(body.unobserved_confounders_acknowledged).toEqual([])
   })
 
+  it('la definición del efecto no viene prellenada: lo que no se declara no se da por cumplido', async () => {
+    api.causalCheck.mockResolvedValue({ data: check, envelope: envelope({ quality_status: 'insufficient_evidence' }) })
+    const w = mount(CausalTab, { global: { plugins: [setupTenant('analyst')] } })
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    const body = api.causalCheck.mock.calls[0]![0]
+    expect(body.treatment).toBeNull()
+    expect(body.outcome).toBeNull()
+    expect(body.horizon_days).toBeNull()
+    expect(body.confounders_controlled).toEqual([])
+    expect(body.identification_assumptions_acknowledged).toEqual([])
+  })
+
   it('sin permiso de ejecución no ofrece el formulario', () => {
     const w = mount(CausalTab, { global: { plugins: [setupTenant('viewer')] } })
     expect(w.find('[data-test="causal-check"]').exists()).toBe(false)

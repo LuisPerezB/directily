@@ -28,12 +28,12 @@ const events = useAsync(() => dataCoreApi.calendar({ scope: scope.value || undef
 const rows = computed(() => events.data.value?.data ?? [])
 
 const fields = computed<FieldDef[]>(() => [
-  { key: 'scope', label: t('calendar.fields.scope'), type: 'select', required: true, options: SCOPES.map((s) => ({ value: s, label: t(`calendar.scopes.${s}`) })), hint: t('calendar.hints.scope') },
-  { key: 'scope_ref', label: t('calendar.fields.scopeRef'), type: 'text', maxlength: 80, hint: t('calendar.hints.scopeRef') },
-  { key: 'code', label: t('calendar.fields.code'), type: 'text', required: true, maxlength: 80 },
+  { key: 'scope', label: t('calendar.fields.scope'), type: 'select', required: true, createOnly: true, options: SCOPES.map((s) => ({ value: s, label: t(`calendar.scopes.${s}`) })), hint: t('calendar.hints.scope') },
+  { key: 'scope_ref', label: t('calendar.fields.scopeRef'), type: 'text', maxlength: 80, createOnly: true, hint: t('calendar.hints.scopeRef') },
+  { key: 'code', label: t('calendar.fields.code'), type: 'text', required: true, maxlength: 80, createOnly: true },
   { key: 'name', label: t('calendar.fields.name'), type: 'text', required: true, maxlength: 200 },
   { key: 'category', label: t('calendar.fields.category'), type: 'select', required: true, options: CATEGORIES.map((c) => ({ value: c, label: t(`calendar.categories.${c}`) })) },
-  { key: 'starts_on', label: t('calendar.fields.startsOn'), type: 'date', required: true },
+  { key: 'starts_on', label: t('calendar.fields.startsOn'), type: 'date', required: true, createOnly: true },
   { key: 'ends_on', label: t('calendar.fields.endsOn'), type: 'date' },
   { key: 'status', label: t('calendar.fields.status'), type: 'select', options: ['planned', 'confirmed', 'cancelled'].map((s) => ({ value: s, label: t(`status.calendar.${s}`) })) },
   { key: 'known_at', label: t('calendar.fields.knownAt'), type: 'date', hint: t('calendar.hints.knownAt') },
@@ -48,7 +48,13 @@ const columns = computed(() => [
   { key: 'known_at', label: t('calendar.fields.knownAt') },
 ])
 const cancelEvent = (e: CalendarEvent): Promise<unknown> => dataCoreApi.cancelCalendarEvent(e.id)
-const rowActions = (e: CalendarEvent): { edit: boolean; remove: boolean } => ({ edit: false, remove: !e.is_public && e.status !== 'cancelled' })
+const editable = (e: CalendarEvent): boolean => !e.is_public && e.status !== 'cancelled'
+const rowActions = (e: CalendarEvent): { edit: boolean; remove: boolean } => ({ edit: editable(e), remove: editable(e) })
+// Cambiar un evento crea una REVISIÓN (el historial se conserva); la identidad (alcance, código, inicio) no cambia.
+// Los campos vacíos no se envían: sin una nueva fecha de conocimiento, la API toma el momento del cambio (no se borra lo anterior).
+const updateEvent = (id: number, p: Record<string, unknown>): Promise<unknown> =>
+  dataCoreApi.updateCalendarEvent(id, Object.fromEntries(Object.entries(p).filter(([, v]) => v !== null && v !== '')) as never)
+const eventToForm = (e: CalendarEvent): Record<string, unknown> => ({ ...e, known_at: e.known_at ? e.known_at.slice(0, 10) : '' })
 async function create(payload: Record<string, unknown>): Promise<unknown> {
   return dataCoreApi.createCalendarEvent(payload as unknown as CalendarEventPayload)
 }
@@ -73,6 +79,8 @@ async function create(payload: Record<string, unknown>): Promise<unknown> {
       :error="events.error.value"
       :can-write="can('catalog.manage')"
       :create="create"
+      :update="updateEvent"
+      :to-form="eventToForm"
       :remove="cancelEvent"
       :row-actions="rowActions"
       :remove-title="t('calendar.cancelTitle')"

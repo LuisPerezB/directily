@@ -222,6 +222,18 @@ describe('Calendario y compromisos', () => {
     expect(w.text()).toContain('público')
   })
 
+  it('solo los eventos propios y vigentes se pueden editar (revisión) o cancelar; el calendario público es de solo lectura', async () => {
+    api.calendar.mockResolvedValue({ data: [event(), event({ id: 2, is_public: true, name: 'Navidad' }), event({ id: 3, status: 'cancelled', name: 'Cancelado' })], meta: { as_of: null, rule: 'latest_revision' } })
+    const w = mount(CalendarPanel, { global: { plugins: [setupTenant('analyst')] } })
+    await flushPromises()
+    const rows = w.findAll('tbody tr')
+    expect(rows[0]!.text()).toContain('Editar')
+    expect(rows[1]!.text()).not.toContain('Editar')
+    expect(rows[2]!.text()).not.toContain('Editar')
+    expect(rows[0]!.find('button[aria-label="Cancelar evento"]').exists()).toBe(true)
+    expect(rows[1]!.find('button[aria-label="Cancelar evento"]').exists()).toBe(false)
+  })
+
   const commitment = (over: Partial<Commitment> = {}): Commitment => ({
     id: 9, commitment_type: 'order', external_id: 'PED-001', status: 'confirmed', issued_at: '2026-10-01T10:00:00Z', known_at: null, known_at_unknown: true, valid_from: null, valid_to: null, expected_delivery_date: '2026-11-05',
     cancelled_at: null, cancellation_date_unknown: false, currency: 'USD', customer_id: 3, branch_id: 1, items: [{ line_number: 1, product_id: 4, quantity: 10, quantity_fulfilled: 4, pending: 6, unit: 'saco', unit_price: 8, delivery_date: '2026-11-05' }], pending_total: 6, ...over,

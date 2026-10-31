@@ -556,7 +556,14 @@
     "runsText": "Cada ejecución queda registrada con su versión, fecha de corte y modelo.",
     "type": "Tipo",
     "noRuns": "Todavía no hay ejecuciones.",
-    "historyOnly": "Ventas registradas: {label}"
+    "historyOnly": "Ventas registradas: {label}",
+    "abstentions": {
+      "title": "{n} series sin pronóstico",
+      "text": "Estas series no tienen cifra: Predictily se abstiene en lugar de inventar un cero cuando no sabe si la demanda volvió.",
+      "noRecentSales": "{n} series activas sin ventas hace más de {days} días.",
+      "discontinued": "{n} productos descontinuados que no vendieron en el último año.",
+      "branchClosed": "{n} series de sucursales cerradas sin historia reciente."
+    }
   },
   "products": {
     "title": "Productos y categorías",
@@ -2226,7 +2233,9 @@
       "offersTitle": "Comparación de ofertas",
       "offersSummary": "{received} ofertas recibidas: {comparable} comparables y {excluded} excluidas.",
       "excludedOffer": "Oferta {id} del producto {product}",
-      "productionNotConfigured": "Producción no configurada: sin recetas, el plan solo incluye compras. Esto no bloquea la reposición."
+      "productionNotConfigured": "Producción no configurada: sin recetas, el plan solo incluye compras. Esto no bloquea la reposición.",
+      "dataHint": "El presupuesto de compra, las capacidades de almacén, los mínimos y las condiciones de cada proveedor se toman de los datos que usted cargó.",
+      "dataHintLink": "Ver y editar los datos del plan"
     },
     "shortfall": {
       "lead_time": "El proveedor tarda más de lo que se puede esperar",
@@ -2496,7 +2505,15 @@
         "identification": "Supuestos de identificación",
         "estimator": "Estimador con rangos y límites"
       },
-      "goScenarios": "Ir a escenarios"
+      "goScenarios": "Ir a escenarios",
+      "examples": {
+        "treatment": "Ejemplo: precio de venta",
+        "outcome": "Ejemplo: unidades vendidas",
+        "unit": "Ejemplo: producto por sucursal y semana",
+        "estimand": "Ejemplo: efecto promedio de +5 % de precio",
+        "horizon": "Ejemplo: 28",
+        "population": "Ejemplo: productos de ferretería general"
+      }
     },
     "simulation": {
       "notRealTitle": "No reemplaza la validación con datos reales",

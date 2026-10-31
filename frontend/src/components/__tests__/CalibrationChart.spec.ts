@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount as rawMount, type ComponentMountingOptions } from '@vue/test-utils'
+import { mount as rawMount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 
 vi.mock('vue-echarts', () => ({ default: { name: 'VChart', props: ['option'], template: '<div data-test="vchart" />' } }))
@@ -8,7 +8,7 @@ import CalibrationChart from '../charts/CalibrationChart.vue'
 import type { CalibrationBin } from '@/api/types'
 
 // El gráfico consulta el tema (store de interfaz): se monta con Pinia.
-const mount = (c: unknown, o: ComponentMountingOptions<never> = {}) => rawMount(c as never, { ...o, global: { plugins: [createPinia()] } })
+const mount = (_c: unknown, o: { props: { bins: CalibrationBin[] | null; title: string } }) => rawMount(CalibrationChart, { props: o.props, global: { plugins: [createPinia()] } })
 const bin = (p: number, o: number, n: number): CalibrationBin => ({ mean_predicted: p, observed_rate: o, n, observed_lo95: o * 0.8, observed_hi95: o * 1.2 })
 
 describe('CalibrationChart', () => {
@@ -32,7 +32,7 @@ describe('CalibrationChart', () => {
 
   it('sin curva dice que no existe en lugar de dibujar un gráfico vacío', () => {
     const w = mount(CalibrationChart, { props: { bins: [], title: 'Curva' } })
-    expect(w.get('[data-test="calibration-empty"]').exists()).toBe(true)
+    expect(w.find('[data-test="calibration-empty"]').exists()).toBe(true)
     expect(w.find('[data-test="vchart"]').exists()).toBe(false)
     expect(mount(CalibrationChart, { props: { bins: null, title: 'Curva' } }).find('[data-test="calibration-empty"]').exists()).toBe(true)
   })

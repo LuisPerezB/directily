@@ -26,6 +26,7 @@ import { useUiStore } from '@/stores/ui'
 import { formatDate, formatDateTime, formatNumber, formatCurrency } from '@/utils/format'
 import { GRANULARITIES } from '@/utils/constants'
 import { distinctCaseLabels, horizonSupportView } from '@/utils/envelope'
+import { abstentionSummary } from '@/utils/accuracy'
 import type { Metric } from '@/utils/series'
 
 const { t, te } = useI18n()
@@ -63,6 +64,7 @@ watch(categoryId, () => {
   if (product.value && categoryId.value && product.value.category?.id !== categoryId.value) product.value = null
 })
 
+const abstentions = computed(() => abstentionSummary((runs.data.value?.data ?? []).find((r) => r.is_current)?.summary))
 const noForecast = computed(() => {
   const e = series.error.value
   if (isApiError(e) && e.status === 404) return true
@@ -235,6 +237,16 @@ function onFinished(): void {
         <p class="hint mt-3">{{ t('forecasts.howToRead') }}</p>
         <p v-for="(note, i) in data.meta?.notes ?? []" :key="i" class="hint mt-1">{{ note }}</p>
       </template>
+    </section>
+
+    <section v-if="abstentions && abstentions.total > 0" class="card p-4 sm:p-6" data-test="abstentions">
+      <h2 class="section-title mb-1">{{ t('forecasts.abstentions.title', { n: abstentions.total }) }}</h2>
+      <p class="text-sm text-fg-muted mb-2">{{ t('forecasts.abstentions.text') }}</p>
+      <ul class="list-disc pl-5 m-0 text-sm">
+        <li v-if="abstentions.noRecentSales">{{ t('forecasts.abstentions.noRecentSales', { n: abstentions.noRecentSales, days: abstentions.afterDays ?? 180 }) }}</li>
+        <li v-if="abstentions.discontinued">{{ t('forecasts.abstentions.discontinued', { n: abstentions.discontinued }) }}</li>
+        <li v-if="abstentions.branchClosed">{{ t('forecasts.abstentions.branchClosed', { n: abstentions.branchClosed }) }}</li>
+      </ul>
     </section>
 
     <section class="card p-4 sm:p-6">
