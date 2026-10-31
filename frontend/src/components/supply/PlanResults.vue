@@ -35,6 +35,7 @@ const cutoff = computed(() => planCutoff(plan.value))
 const linesSummary = computed(() => data.value?.lines_summary ?? { total: 0, shown: 0, matched: 0, truncated: false })
 const shortfallsSummary = computed(() => data.value?.shortfalls_summary ?? { total: 0, shown: 0, matched: 0, truncated: false })
 const branches = computed(() => data.value?.branches ?? [])
+const ageText = computed(() => (cutoff.value.ageDays === 1 ? t('supply.plan.ageOneDay') : t('supply.plan.ageDays', { n: formatNumber(cutoff.value.ageDays ?? 0, 0) })))
 const causes = computed(() => infeasibilityCauses(data.value?.infeasibility))
 const excluded = computed(() => (data.value?.offers ?? []).filter((o) => o.status !== 'comparable'))
 const binding = computed(() => (data.value?.constraints ?? []).filter((c) => c.binding))
@@ -71,7 +72,7 @@ const prodNotConfigured = computed(() => data.value?.production?.status === 'not
         </div>
 
         <InlineNotice v-if="cutoff.isStale" kind="warning" :title="t('supply.plan.staleTitle')" data-test="plan-stale">
-          {{ t('supply.plan.stale', { date: formatDate(cutoff.asOf, 'long'), age: t('supply.plan.ageDays', cutoff.ageDays ?? 0) }) }}
+          {{ t('supply.plan.stale', { date: formatDate(cutoff.asOf, 'long'), age: ageText }) }}
         </InlineNotice>
 
         <dl v-if="hasPlan" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 m-0" data-test="plan-totals">

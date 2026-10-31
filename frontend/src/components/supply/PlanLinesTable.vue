@@ -36,7 +36,7 @@ const query = computed<PlanLinesQuery>(() => ({
   actionable_now: onlyNow.value || undefined,
   sort: sort.value ?? undefined,
 }))
-const result = useAsync(() => supplyApi.planLines(props.runId, query.value), { watch: [query], debounce: 250 })
+const result = useAsync(() => supplyApi.planLines(props.runId, query.value), { watch: [query], debounce: 250, immediate: props.summary.total > 0 })
 const rows = computed(() => result.data.value?.data ?? [])
 const filtered = computed(() => branchId.value !== null || search.value.trim() !== '' || onlyNow.value)
 const money = (v: number | null | undefined, d = 2): string => formatCurrency(v, props.currency ?? tenant.currency, d)

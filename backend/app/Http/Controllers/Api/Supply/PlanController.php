@@ -275,9 +275,9 @@ class PlanController extends SupplyController
     private function linesQuery(SupplyPlan $plan, array $f): Builder
     {
         return SupplyPlanLine::query()->select('supply_plan_lines.*')
-            ->leftJoin('products', 'products.id', '=', 'supply_plan_lines.product_id')
-            ->leftJoin('branches', 'branches.id', '=', 'supply_plan_lines.branch_id')
-            ->leftJoin('suppliers', 'suppliers.id', '=', 'supply_plan_lines.supplier_id')
+            ->leftJoin('products', fn ($j) => $j->on('products.id', '=', 'supply_plan_lines.product_id')->on('products.tenant_id', '=', 'supply_plan_lines.tenant_id'))
+            ->leftJoin('branches', fn ($j) => $j->on('branches.id', '=', 'supply_plan_lines.branch_id')->on('branches.tenant_id', '=', 'supply_plan_lines.tenant_id'))
+            ->leftJoin('suppliers', fn ($j) => $j->on('suppliers.id', '=', 'supply_plan_lines.supplier_id')->on('suppliers.tenant_id', '=', 'supply_plan_lines.tenant_id'))
             ->where('supply_plan_lines.supply_plan_id', $plan->id)
             ->with(['product:id,sku,name', 'branch:id,code,name', 'supplier:id,code,name'])
             ->when(! empty($f['actionable_now']), fn ($q) => $q->where('supply_plan_lines.actionable_now', true))
@@ -291,8 +291,8 @@ class PlanController extends SupplyController
     private function shortfallsQuery(SupplyPlan $plan, array $f): Builder
     {
         return SupplyPlanShortfall::query()->select('supply_plan_shortfalls.*')
-            ->leftJoin('products', 'products.id', '=', 'supply_plan_shortfalls.product_id')
-            ->leftJoin('branches', 'branches.id', '=', 'supply_plan_shortfalls.branch_id')
+            ->leftJoin('products', fn ($j) => $j->on('products.id', '=', 'supply_plan_shortfalls.product_id')->on('products.tenant_id', '=', 'supply_plan_shortfalls.tenant_id'))
+            ->leftJoin('branches', fn ($j) => $j->on('branches.id', '=', 'supply_plan_shortfalls.branch_id')->on('branches.tenant_id', '=', 'supply_plan_shortfalls.tenant_id'))
             ->where('supply_plan_shortfalls.supply_plan_id', $plan->id)
             ->with(['product:id,sku,name', 'branch:id,code,name'])
             ->when(! empty($f['branch_id']), fn ($q) => $q->where('supply_plan_shortfalls.branch_id', (int) $f['branch_id']))

@@ -117,6 +117,10 @@ class SupplyRunsApiTest extends TestCase
             ->assertJsonPath('data.shortfalls.0.reason', 'lead_time')->assertJsonPath('data.constraints.0.family', 'budget')
             ->assertJsonPath('data.production.status', 'not_configured')->assertJsonPath('data.comparison_coverage.offers_excluded', 1);
         $this->assertStringContainsString('no envía pedidos', $r->json('data.plan.note'));
+        // fecha de corte frente a hoy, resumen de líneas y de faltantes (el detalle ya no trae las listas completas)
+        $r->assertJsonPath('data.plan.as_of', '2026-10-26')->assertJsonPath('data.lines_summary.total', 1)->assertJsonPath('data.lines_summary.actionable_now', 1)
+            ->assertJsonPath('data.shortfalls_summary.total', 1)->assertJsonPath('data.shortfalls_summary.unmet_units', 60)->assertJsonPath('data.branches.0.name', 'Matriz Quito');
+        $this->assertIsInt($r->json('data.plan.as_of_age_days'));
         $this->actingAsTenantUser($user, $tenant)->getJson("/api/v1/supply/plans/{$runId}?actionable_now=1")->assertJsonCount(1, 'data.lines');
         $this->actingAsTenantUser($user, $tenant)->getJson('/api/v1/supply/plans')->assertOk()->assertJsonPath('data.0.id', $runId);
     }

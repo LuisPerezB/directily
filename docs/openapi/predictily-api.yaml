@@ -8586,6 +8586,8 @@ components:
     SupplyPlanShortfall:
       type: object
       properties:
+        id:
+          type: integer
         branch_id:
           type: integer
         branch:

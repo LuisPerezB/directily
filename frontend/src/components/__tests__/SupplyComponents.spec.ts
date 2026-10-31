@@ -72,37 +72,256 @@ describe('SolverStatus: nunca «óptimo» si no lo es', () => {
 })
 
 describe('PlanResults', () => {
-  it('muestra las líneas con proveedor, fechas de emisión y recepción, costo, restricciones y lo que se puede emitir hoy', async () => {
+  it('muestra las líneas con proveedor, fechas de emisión y recepción, costo, restricciones y lo que se emite al corte', async () => {
     api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
-    const w = mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
+    mockTables()
+    const w = mountResults()
     await flushPromises()
     expect(w.get('[data-test="no-orders-notice"]').text()).toContain('no envía pedidos ni compromete fondos')
     expect(w.get('[data-test="solver-label"]').text()).toBe('Factible con brecha')
     const rows = w.findAll('[data-test="plan-lines"] tbody tr')
     expect(rows).toHaveLength(2)
-    expect(rows[0]!.attributes('data-actionable')).toBe('true')
     expect(rows[0]!.text()).toContain('Cementos del Sur')
-    expect(rows[0]!.text()).toContain('Emitir hoy')
+    expect(rows[0]!.text()).toContain('Emitir al corte')
     expect(rows[0]!.text()).toMatch(/1\.?620/)
     expect(rows[0]!.text()).toContain('pallet')
     expect(rows[0]!.get('[data-test="binding"]').text()).toBe('Presupuesto')
     expect(rows[0]!.text()).toContain('Menor costo puesto en bodega')
     expect(w.findAll('[data-test="actionable-now"]')).toHaveLength(1)
+    expect(w.get('[data-test="lines-count"]').text()).toBe('(2 líneas, 1 para emitir al corte del plan)')
   })
 
-  it('la demanda no atendida se explica con su causa y los costos asumidos se rotulan como supuestos', async () => {
+  it('el detalle no pide las listas completas: pide la primera página de líneas y de demanda no atendida (25 filas)', async () => {
     api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
-    const w = mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
+    mockTables()
+    mountResults()
     await flushPromises()
-    expect(w.get('[data-test="shortfall-reason"]').text()).toBe('El proveedor tarda más de lo que se puede esperar')
-    expect(w.get('[data-test="shortfalls"]').text()).toContain('Clavos')
-    expect(w.get('[data-test="unmet-total"]').text()).toBe('40')
-    expect(w.get('[data-test="plan-totals"]').text()).toContain('supuesto, no costo observado')
+    expect(api.plan).toHaveBeenCalledTimes(1)
+    expect(api.plan.mock.calls[0]).toEqual([3])
+    expect(api.planLines).toHaveBeenCalledWith(3, { page: 1, per_page: 25 })
+    expect(api.planShortfalls).toHaveBeenCalledWith(3, { page: 1, per_page: 25 })
+  })
+
+  describe('fecha de corte', () => {
+    it('muestra «Datos hasta» con la fecha de corte y avisa que el plan se calculó con datos anteriores a hoy', async () => {
+      api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      expect(w.get('[data-test="plan-cutoff"]').text()).toContain('Datos hasta 26 de octubre de 2026')
+      const stale = w.get('[data-test="plan-stale"]')
+      expect(stale.text()).toContain('26 de octubre de 2026')
+      expect(stale.text()).toContain('5 días antes de hoy')
+      expect(stale.text()).toContain('generarlo de nuevo con datos actuales')
+    })
+
+    it('con el corte en un solo día de antigüedad habla en singular', async () => {
+      api.plan.mockResolvedValue({ data: detail({}, { as_of: '2026-10-30', as_of_age_days: 1 }), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      expect(w.get('[data-test="plan-stale"]').text()).toContain('1 día antes de hoy')
+    })
+
+    it('las líneas del día de corte dicen «Emitir al corte» (nunca «hoy») si el plan es de datos anteriores, con el motivo en el título', async () => {
+      api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      const badge = w.get('[data-test="actionable-now"]')
+      expect(badge.text()).toBe('Emitir al corte')
+      expect(badge.attributes('data-kind')).toBe('cutoff')
+      expect(badge.attributes('title')).toContain('fecha de corte del plan (26 de octubre de 2026), no hoy')
+      expect(w.text()).not.toContain('Emitir hoy')
+      expect(w.text()).not.toContain('Emitir ya')
+      expect(w.get('[data-test="filter-only-now"]').element.parentElement!.textContent).toContain('Solo lo que se emite al corte del plan')
+    })
+
+    it('si el corte es hoy, las líneas del día de corte dicen «Emitir ya», sin aviso de desactualizado', async () => {
+      api.plan.mockResolvedValue({ data: detail({}, { as_of: '2026-10-31', as_of_age_days: 0 }), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      expect(w.get('[data-test="plan-cutoff"]').text()).toContain('Datos hasta 31 de octubre de 2026')
+      expect(w.find('[data-test="plan-stale"]').exists()).toBe(false)
+      const badge = w.get('[data-test="actionable-now"]')
+      expect(badge.text()).toBe('Emitir ya')
+      expect(badge.attributes('data-kind')).toBe('now')
+      expect(w.get('[data-test="lines-count"]').text()).toBe('(2 líneas, 1 para emitir ya)')
+      expect(w.get('[data-test="filter-only-now"]').element.parentElement!.textContent).toContain('Solo lo que puedo emitir ya')
+    })
+
+    it('sin fecha de corte no afirma que sea de hoy: rotula «Emitir al corte» y lo declara', async () => {
+      api.plan.mockResolvedValue({ data: detail({}, { as_of: null, as_of_age_days: null }), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      expect(w.find('[data-test="plan-cutoff"]').exists()).toBe(false)
+      expect(w.get('[data-test="plan-cutoff-unknown"]').text()).toContain('no declara su fecha de corte')
+      expect(w.find('[data-test="plan-stale"]').exists()).toBe(false)
+      expect(w.get('[data-test="actionable-now"]').text()).toBe('Emitir al corte')
+    })
+  })
+
+  describe('paginación y filtros en el servidor', () => {
+    it('con miles de líneas solo dibuja la página (25 filas) y pagina con la barra', async () => {
+      api.plan.mockResolvedValue({ data: detail({ lines_summary: { total: 1358, shown: 20, matched: 1358, truncated: true, actionable_now: 40 } }), envelope: envelope() })
+      const many = Array.from({ length: 25 }, (_, i) => line({ id: i + 1, product_id: i + 1, product: { id: i + 1, sku: `S-${i + 1}`, name: `Producto ${i + 1}` } }))
+      api.planLines.mockImplementation((_id: number, q: { page?: number }) => Promise.resolve(pageOf(many.map((l) => ({ ...l, id: (q.page ?? 1) * 100 + (l.id ?? 0) })), 1358, q.page ?? 1)))
+      api.planShortfalls.mockResolvedValue(pageOf([shortfall()]))
+      const w = mountResults()
+      await flushPromises()
+      expect(w.findAll('[data-test="plan-lines"] tbody tr')).toHaveLength(25)
+      expect(w.get('[data-test="lines-count"]').text()).toContain('1.358 líneas')
+      const nav = w.get('[data-test="plan-lines-section"] nav')
+      expect(nav.text()).toContain('1–25 de 1.358')
+      expect(nav.text()).toContain('Página 1 de 55')
+      await nav.get('button[aria-label="Página siguiente"]').trigger('click')
+      await vi.waitFor(() => expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 2, per_page: 25 }))
+      await flushPromises()
+      expect(w.get('[data-test="plan-lines-section"] nav').text()).toContain('Página 2 de 55')
+    })
+
+    describe('filtros de las líneas', () => {
+      beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }) })
+      const settle = async (): Promise<void> => { await vi.advanceTimersByTimeAsync(300); await flushPromises() }
+
+      it('filtra por sucursal, búsqueda de producto y «solo al corte», vuelve a la página 1 y puede quitar los filtros', async () => {
+        api.plan.mockResolvedValue({ data: detail({ lines_summary: { total: 80, shown: 20, matched: 80, truncated: true, actionable_now: 3 } }), envelope: envelope() })
+        api.planLines.mockImplementation((_id: number, q: { page?: number }) => Promise.resolve(pageOf(defaultLines(), 80, q.page ?? 1)))
+        api.planShortfalls.mockResolvedValue(pageOf([shortfall()]))
+        const w = mountResults()
+        await flushPromises()
+
+        const nav = () => w.get('[data-test="plan-lines-section"] nav')
+        await nav().get('button[aria-label="Página siguiente"]').trigger('click')
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 2, per_page: 25 })
+
+        await w.get('[data-test="filter-branch"]').setValue(2)
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, branch_id: 2 })
+
+        await w.get('[data-test="filter-search"]').setValue('  cemento ')
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, branch_id: 2, search: 'cemento' })
+
+        await w.get('[data-test="filter-only-now"]').setValue(true)
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, branch_id: 2, search: 'cemento', actionable_now: true })
+
+        await w.get('[data-test="clear-filters"]').trigger('click')
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25 })
+        expect(w.find('[data-test="clear-filters"]').exists()).toBe(false)
+        // las opciones de sucursal salen del propio plan
+        expect(w.get('[data-test="filter-branch"]').findAll('option').map((o) => o.text())).toEqual(['Todas las sucursales', 'Matriz', 'Norte'])
+      })
+
+      it('escribir varias letras seguidas hace una sola consulta (espera a que termine de escribir)', async () => {
+        api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
+        mockTables()
+        const w = mountResults()
+        await flushPromises()
+        api.planLines.mockClear()
+        const input = w.get('[data-test="filter-search"]')
+        for (const text of ['c', 'ce', 'cem']) { await input.setValue(text); await vi.advanceTimersByTimeAsync(100) }
+        await settle()
+        expect(api.planLines).toHaveBeenCalledTimes(1)
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, search: 'cem' })
+      })
+
+      it('ordena en el servidor al pulsar el encabezado de una columna', async () => {
+        api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
+        mockTables()
+        const w = mountResults()
+        await flushPromises()
+        const header = w.findAll('[data-test="plan-lines"] th').find((th) => th.text().includes('Costo de la línea'))!
+        await header.get('button').trigger('click')
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, sort: '-line_cost' })
+        await header.get('button').trigger('click')
+        await settle()
+        expect(api.planLines).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, sort: 'line_cost' })
+      })
+
+      it('sin coincidencias lo dice, y un error de la API se muestra con reintento', async () => {
+        api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
+        mockTables()
+        const w = mountResults()
+        await flushPromises()
+        api.planLines.mockResolvedValue(pageOf([], 0))
+        await w.get('[data-test="filter-search"]').setValue('zzz')
+        await settle()
+        expect(w.get('[data-test="plan-lines"]').text()).toContain('Ninguna línea coincide con los filtros')
+        api.planLines.mockRejectedValue(new ApiError(500, { message: 'El servidor falló.' }, 'x'))
+        await w.get('[data-test="filter-search"]').setValue('zzzz')
+        await settle()
+        expect(w.find('[data-test="plan-lines"]').exists()).toBe(false)
+        expect(w.get('[data-test="plan-lines-section"]').text()).toContain('Reintentar')
+        // el resto del plan sigue visible
+        expect(w.find('[data-test="plan-totals"]').exists()).toBe(true)
+      })
+    })
+
+    it('un plan sin líneas no muestra tabla ni filtros ni consulta las líneas', async () => {
+      api.plan.mockResolvedValue({ data: detail({ lines_summary: { total: 0, shown: 0, matched: 0, truncated: false, actionable_now: 0 } }), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      expect(w.get('[data-test="no-lines"]').text()).toContain('no sugiere compras')
+      expect(w.find('[data-test="plan-lines"]').exists()).toBe(false)
+      expect(w.find('[data-test="lines-filters"]').exists()).toBe(false)
+      expect(api.planLines).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('demanda no atendida', () => {
+    it('se explica con su causa; los totales vienen del resumen del servidor, no de las filas de la página', async () => {
+      api.plan.mockResolvedValue({ data: detail({ shortfalls_summary: { total: 300, shown: 20, matched: 300, truncated: true, unmet_units: 4000, demand_units: 20000 } }), envelope: envelope() })
+      api.planLines.mockResolvedValue(pageOf(defaultLines()))
+      api.planShortfalls.mockImplementation((_id: number, q: { page?: number }) => Promise.resolve(pageOf([shortfall()], 300, q.page ?? 1)))
+      const w = mountResults()
+      await flushPromises()
+      expect(w.get('[data-test="shortfall-reason"]').text()).toBe('El proveedor tarda más de lo que se puede esperar')
+      expect(w.get('[data-test="shortfalls"]').text()).toContain('Clavos')
+      expect(w.get('[data-test="shortfalls-summary"]').text()).toMatch(/4\.000 unidades en total \(20\s?% de la demanda del plan\)/)
+      expect(w.get('[data-test="shortfalls"] nav').text()).toContain('1–25 de 300')
+      expect(w.get('[data-test="unmet-total"]').text()).toBe('40')
+      expect(w.get('[data-test="plan-totals"]').text()).toContain('supuesto, no costo observado')
+    })
+
+    it('filtra por sucursal y producto en el servidor', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      await w.get('[data-test="shortfall-filter-branch"]').setValue(2)
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(api.planShortfalls).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, branch_id: 2 })
+      await w.get('[data-test="shortfall-filter-search"]').setValue('clavo')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(api.planShortfalls).toHaveBeenLastCalledWith(3, { page: 1, per_page: 25, branch_id: 2, search: 'clavo' })
+    })
+
+    it('si el plan atiende toda la demanda lo dice y no consulta la tabla', async () => {
+      api.plan.mockResolvedValue({ data: detail({ shortfalls_summary: { total: 0, shown: 0, matched: 0, truncated: false, unmet_units: 0, demand_units: 0 } }), envelope: envelope() })
+      mockTables()
+      const w = mountResults()
+      await flushPromises()
+      expect(w.get('[data-test="shortfalls"]').text()).toContain('atiende toda la demanda pronosticada')
+      expect(w.find('[data-test="shortfalls-table"]').exists()).toBe(false)
+      expect(api.planShortfalls).not.toHaveBeenCalled()
+    })
   })
 
   it('lista las ofertas excluidas con su motivo y declara la producción sin configurar', async () => {
     api.plan.mockResolvedValue({ data: detail(), envelope: envelope() })
-    const w = mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
+    mockTables()
+    const w = mountResults()
     await flushPromises()
     expect(w.get('[data-test="excluded-offers"]').text()).toContain('Falta una tasa de cambio explícita')
     expect(w.get('[data-test="offers-coverage"]').text()).toContain('2 ofertas recibidas: 1 comparables y 1 excluidas')
@@ -111,7 +330,8 @@ describe('PlanResults', () => {
 
   it('muestra la calidad, las limitaciones y los supuestos de la envoltura', async () => {
     api.plan.mockResolvedValue({ data: detail(), envelope: envelope({ quality_status: 'degraded' }) })
-    const w = mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
+    mockTables()
+    const w = mountResults()
     await flushPromises()
     expect(w.get('[data-test="quality-badge"]').text()).toBe('Con reservas')
     expect(w.get('[data-test="envelope-limitations"]').text()).toContain('Solo ventas perdidas')
@@ -121,7 +341,7 @@ describe('PlanResults', () => {
   it('infactible: bloque con causas ordenadas, requisito y plan de máxima cobertura; sin tabla de líneas', async () => {
     api.plan.mockResolvedValue({
       data: detail({
-        lines: [], shortfalls: [],
+        lines_summary: { total: 0, shown: 0, matched: 0, truncated: false, actionable_now: 0 }, shortfalls_summary: { total: 0, shown: 0, matched: 0, truncated: false, unmet_units: 0, demand_units: 0 },
         infeasibility: { message: 'Con cobertura obligatoria no existe un plan que respete todas las restricciones.', alternatives: [], structural: { family: 'structural', label: 'plazos de entrega', unmet_even_without_constraints: 10 }, causes: [
           { family: 'budget', label: 'presupuesto de compra', units_recovered: 5, unmet_with_constraint: 60, unmet_if_relaxed: 55 },
           { family: 'storage', label: 'capacidad de almacenamiento', units_recovered: 45, unmet_with_constraint: 60, unmet_if_relaxed: 15, required: [{ needed: 900, declared: 500 }] }] },
@@ -129,7 +349,8 @@ describe('PlanResults', () => {
       }, { solver_status: 'infeasible', mip_gap: null, total_purchase_cost: null, is_optimal: false }),
       envelope: envelope({ quality_status: 'degraded' }),
     })
-    const w = mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
+    mockTables()
+    const w = mountResults()
     await flushPromises()
     expect(w.get('[data-test="solver-label"]').text()).toBe('Sin plan posible')
     const block = w.get('[data-test="infeasibility"]')
@@ -139,16 +360,20 @@ describe('PlanResults', () => {
     expect(causes[0]!.text()).toContain('se necesitan 900 y se declararon 500')
     expect(block.get('[data-test="alternative-plan"]').text()).toContain('máxima cobertura')
     expect(w.find('[data-test="plan-lines"]').exists()).toBe(false)
+    expect(api.planLines).not.toHaveBeenCalled()
   })
 
   it('sin plan (datos insuficientes): abstención explícita y calidad visible', async () => {
-    api.plan.mockResolvedValue({ data: detail({ plan: null, lines: [], shortfalls: [], run: { id: 3, error_message: 'No hay un pronóstico de demanda completado.' } as never }), envelope: envelope({ quality_status: 'insufficient_data', limitations: ['No hay un pronóstico de demanda completado.'] }) })
-    const w = mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
+    api.plan.mockResolvedValue({ data: detail({ plan: null, run: { id: 3, error_message: 'No hay un pronóstico de demanda completado.' } as never }), envelope: envelope({ quality_status: 'insufficient_data', limitations: ['No hay un pronóstico de demanda completado.'] }) })
+    mockTables()
+    const w = mountResults()
     await flushPromises()
     expect(w.get('[data-test="plan-abstention"]').text()).toContain('No hay plan')
     expect(w.text()).toContain('No hay un pronóstico de demanda completado.')
     expect(w.find('[data-test="plan-lines"]').exists()).toBe(false)
+    expect(w.find('[data-test="plan-cutoff"]').exists()).toBe(false)
     expect(w.get('[data-test="quality-badge"]').text()).toBe('Datos insuficientes')
+    expect(api.planLines).not.toHaveBeenCalled()
   })
 })
 

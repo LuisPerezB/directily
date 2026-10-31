@@ -291,7 +291,9 @@ El resultado muestra:
   *sin plan posible*. Cuando no es óptimo probado, un aviso lo recuerda.
 - **Qué comprar**: producto, sucursal, proveedor, cantidad (y en la unidad de la oferta), fecha sugerida de **emisión**
   y de **recepción**, costo, las **restricciones** que la limitan (presupuesto, capacidad del proveedor, almacén...) y
-  **por qué** se eligió ese proveedor. Las líneas marcadas **Emitir hoy** son las que conviene pedir ahora.
+  **por qué** se eligió ese proveedor. Las líneas marcadas **Emitir al corte** tienen como fecha de emisión la fecha de corte del plan (el último día con
+  datos). Solo cuando el corte es hoy se muestran como **Emitir ya**; si el plan se calculó con datos de días
+  anteriores, la pantalla muestra «Datos hasta …» y sugiere regenerarlo antes de pedir.
 - **Demanda no atendida**: cuánto no se cubre, en qué período y **por qué** (plazo de entrega, presupuesto, capacidad,
   almacén, falta de oferta comparable...).
 - **Sin plan posible**: con cobertura obligatoria, un bloque explica las causas ordenadas por impacto, cuánto habría que

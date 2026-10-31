@@ -25,7 +25,8 @@ final class SupplyPlanTool extends ReadTool
     public function description(): string
     {
         return 'Plan de abastecimiento vigente ya calculado por el optimizador (solo sugerencias, no pedidos): líneas con proveedor, cantidad, fecha sugerida de emisión, '
-            .'recepción prevista y costo; demanda no atendida con su causa; y restricciones activas. Puede filtrarse por producto o por acciones para hoy.';
+            .'recepción prevista y costo; demanda no atendida con su causa; y restricciones activas. Puede filtrarse por producto o por las líneas que se emiten en la '
+            .'fecha de corte del plan (que no siempre es hoy: compárela con la fecha de corte de la envoltura).';
     }
 
     public function parameters(): array
