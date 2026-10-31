@@ -1,8 +1,57 @@
 # 00 · Registro de avance
 
-Estado por componente al 2026-10-28. Leyenda: ✅ implementado y probado · 🟡 implementado, pruebas
-parciales · ⏳ pendiente · 🔌 interfaz desacoplada (requiere credenciales o servicio externo; NO se
-presenta como activa).
+Estado por componente al 2026-10-28, más la sección de la etapa 2 (31-oct-2026). Leyenda: ✅
+implementado y probado · 🟡 implementado, pruebas parciales · ⏳ pendiente · 🔌 interfaz desacoplada
+(requiere credenciales o servicio externo; NO se presenta como activa) · 🧪 comprobado solo con datos
+sintéticos.
+
+## Etapa 2 · core común (rama `etapa-2/core`, 31-oct-2026)
+
+Instrucción: `instrucctions.md` §6 (core común primero; personalización por rubro/empresa aparte).
+Plan, decisiones (ADR-V2-01..13) y riesgos: `docs/architecture/PREDICTILY_V2_GAP_ANALYSIS.md`.
+Requisito → código → prueba → evidencia: `docs/architecture/PREDICTILY_V2_ACCEPTANCE_MATRIX.md`.
+Detalle por paquete: `docs/architecture/v2/P1-demanda.md`, `P2-comportamiento.md`, `P3-datos.md`,
+`P4-decisiones.md`, `P5b-plataforma.md`.
+
+| Verificación | Resultado |
+|---|---|
+| Motor `pytest` (BD recién migrada) | ✅ 418 pruebas |
+| Backend `php artisan test` (PostgreSQL) | ✅ 437 pruebas, 2 omitidas (contratos MySQL/SQL Server sin servidor) |
+| Frontend (type-check, lint, vitest, build) | ✅ 298 pruebas |
+| `e2e/mvp_acceptance.py` (compatibilidad etapa 1) | ✅ 32/32 |
+| `e2e/stage2_acceptance.py` (API real + cola + motor + PostgreSQL) | 🧪 252/252 (1 aviso de diseño documentado) |
+| OpenAPI unificada | 131 rutas / 182 operaciones (`docs/openapi/predictily-api.yaml`; etapa 2 en `v2.yaml`) |
+| Esquema | 8 migraciones aditivas y reversibles `2026_02_0x`, 27 tablas nuevas |
+
+| Componente (etapa 2) | Estado | Notas |
+|---|---|---|
+| Plataforma: `core_runs`, envoltura común de resultados, `data_snapshots`, `data_coverage` (ausente ≠ cero) | ✅ | Demanda conserva `forecast_runs` |
+| Registro de modelos candidate/validated/production/retired/failed + role; reversión con SHA-256 verificado | ✅ | Demanda y Customer Core |
+| Configuración por precedencia (core → perfil sectorial → empresa) y registro de extensiones | ✅ | Claves desconocidas rechazadas; `config_version` en cada ejecución |
+| Demanda: horizontes 7/14/30/60/90 con abstención, manifiesto del protocolo, MASE/RMSSE/pinball | 🧪 | |
+| Customer Core: probabilidad de compra 7/30/90, cantidad, monto (supuesto), frecuencia, ranking `cust-ranking-v1`, inactividad, calibración, reconciliación con demanda, compromisos al corte | 🧪 | Genéricos y anónimos excluidos |
+| Abastecimiento: balance fechado, planificador MILP (HiGHS), proveedores, presupuesto, capacidades, producción genérica | 🧪 | Sin recetas ⇒ `not_configured` |
+| Costos, escenarios (simulación condicional) y contrato causal (`insufficient_evidence`) | 🧪 | Sin estimadores causales activos |
+| Simulación histórica de operación | 🔌 | Solo demo ficticia; falta histórico real autorizado |
+| Conector SQL solo lectura (consultas autorizadas, transacción READ ONLY, política de hosts) | 🧪 / 🔌 | PostgreSQL de punta a punta; MySQL y SQL Server `implemented_untested` |
+| Calendario con alcance, unidades y conversiones explícitas, almacenes, tres fechas (`known_at`) | 🧪 | |
+| Asistente conversacional opcional (herramientas en lista blanca, cifras solo de herramientas) | 🔌 | Desactivado sin clave (503); los cores no dependen de él |
+| Interfaz: Clientes, Abastecimiento, Fuentes de datos, asistente | ✅ | Revisión visual Playwright sin errores |
+| Exportación LOPDP de las tablas nuevas | ✅ | |
+
+**Validado con datos reales:** nada todavía. La importación del histórico de Resgasa desde Soyoda y la
+validación comercial siguen pendientes de una sesión con acceso a la red del cliente (VPN).
+
+Correcciones encontradas durante la integración (cada una con prueba de regresión): mapas JSON
+serializados como listas (`JsonMap`), compromisos sin `known_at` invisibles (regla
+`COALESCE(known_at, ingestión)`), ranking por debajo de la referencia de popularidad (regla de
+selección en holdout), historia corta en el calibrador conformal, ejecuciones históricas que
+desplazaban a la vigente, corte de compromisos en medianoche UTC, ruta de artefactos sin resolver,
+reintentos contados dos veces, plan de abastecimiento sin paginar.
+
+Incidente: el commit `cea7fcf` incluyó un archivo de entorno de pruebas del sandbox (`backend/.env.e2e`,
+sin credenciales de producción). Se retiró, se agregaron reglas `.env.*` a `.gitignore` y se rotó la
+`APP_KEY` del sandbox. El historial no se reescribió.
 
 ## Verificación global
 
