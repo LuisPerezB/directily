@@ -3,6 +3,8 @@
  * Fuente: docs/06-contratos-integracion.md §3. Mantener sincronizado con el contrato.
  */
 
+import type { DemandManifest, HorizonSupport, P50Decision, QualityStatus, ResultEnvelope } from './types.v2'
+
 // ─── Genéricos ──────────────────────────────────────────────────────────────
 
 export type ISODate = string // YYYY-MM-DD
@@ -40,7 +42,9 @@ export interface ApiErrorBody {
 }
 
 export type Granularity = 'day' | 'week' | 'month'
-export type Horizon = 7 | 30 | 90
+export type Horizon = 7 | 14 | 30 | 60 | 90
+/** Horizontes del Customer Core (compra): 7, 30 y 90 días. */
+export type CustomerHorizon = 7 | 30 | 90
 
 // ─── Autenticación y cuenta ─────────────────────────────────────────────────
 
@@ -409,11 +413,14 @@ export interface DataSource {
   id: number
   type: DataSourceType
   connector_key: string | null
+  connector?: { name: string; status: ConnectorStatus } | null
   name: string
   status: 'active' | 'inactive' | 'error'
   last_synced_at: ISODateTime | null
   last_error: string | null
   config: Record<string, unknown>
+  /** Las credenciales nunca se devuelven: solo si existen. */
+  has_credentials?: boolean
 }
 
 export interface DataSourcePayload {
@@ -424,12 +431,19 @@ export interface DataSourcePayload {
   credentials?: Record<string, string>
 }
 
+export type ConnectorStatus = 'available' | 'requires_credentials' | 'implemented_untested' | 'planned'
+/** Qué se comprobó de verdad: nunca se infiere del estado. */
+export type ConnectorVerification = 'tested' | 'tested_with_test_database' | 'implemented_untested' | 'not_verified' | 'planned'
+
 export interface Connector {
   key: string
   name: string
   description: string
-  status: 'available' | 'requires_credentials' | 'planned'
+  status: ConnectorStatus
+  verification?: ConnectorVerification
   entity_types: string[]
+  credential_keys?: string[]
+  driver_available?: boolean
 }
 
 // ─── Pronósticos y trabajos ────────────────────────────────────────────────
@@ -473,6 +487,12 @@ export interface ForecastRun {
   completed_at: ISODateTime | null
   created_at: ISODateTime
   training_job?: TrainingJob | null
+  config_version?: string | null
+  data_snapshot_id?: number | null
+  effective_config?: Record<string, unknown> | null
+  /** Solo en el detalle (GET /forecast-runs/{id}). */
+  evaluation_manifest?: DemandManifest | null
+  envelope?: ResultEnvelope | null
 }
 
 export interface CreateForecastRunPayload {
@@ -499,6 +519,13 @@ export interface ForecastPoint {
   lo_95: number | null
   hi_95: number | null
   revenue: number | null
+  /** Mediana (P50): solo si el motor la evaluó y mejoró a la media; null en caso contrario. */
+  p50?: number | null
+  /** Respaldo del horizonte al que pertenece el punto (etapa 2). */
+  quality_status?: QualityStatus | null
+  /** Caso especial de la serie: producto nuevo, descontinuado, sucursal cerrada/abierta, evento extraordinario... */
+  case_label?: string | null
+  period_days?: number
 }
 
 export interface ForecastSeriesMeta {
@@ -514,14 +541,17 @@ export interface ForecastSeriesMeta {
   models: Record<string, number>
   price_assumption: string | null
   intervals_available: boolean
+  horizon_support?: HorizonSupport | null
 }
 
 export interface ForecastSeries {
   node: { key: string; level: NodeLevel; label: string }
   granularity: Granularity
+  horizon?: number
   history: HistoryPoint[]
   forecast: ForecastPoint[]
   meta: ForecastSeriesMeta | null
+  envelope?: ResultEnvelope | null
 }
 
 export interface ForecastSeriesQuery {
@@ -550,6 +580,16 @@ export interface ProductForecastRow {
   model_family: string | null
   demand_class: string | null
   wape: number | null
+  /** Caso especial de la serie (producto nuevo, descontinuado...); null = regular. */
+  case_label?: string | null
+}
+
+/** Listados de pronóstico: la paginación estándar más el respaldo del horizonte pedido. */
+export interface ForecastListPage<R> extends Paginated<R> {
+  run?: { id: number; version: number; generated_at: ISODateTime | null; cutoff_date: ISODate | null } | null
+  horizon?: number
+  horizon_support?: HorizonSupport | null
+  message?: string
 }
 
 export interface CategoryForecastRow {
@@ -624,6 +664,7 @@ export interface DataStatus {
 
 export interface DashboardSummary {
   horizon: number
+  horizon_support?: HorizonSupport | null
   run: { id: number; version: number; generated_at: ISODateTime | null; cutoff_date: ISODate | null } | null
   kpis: DashboardKpis
   top_increasing: DashboardProductChange[]
@@ -635,6 +676,24 @@ export interface DashboardSummary {
 
 // ─── Precisión ─────────────────────────────────────────────────────────────
 
+export interface MoneyMetrics {
+  currency: string
+  wape: number | null
+  mae: number | null
+  bias: number | null
+  actual_total: number | null
+  forecast_total: number | null
+  n_obs: number
+}
+
+export interface MetricSample {
+  n_obs: number
+  n_series?: number
+  n_windows?: number
+  n_scored_intervals?: number
+  exclusions?: Record<string, number>
+}
+
 export interface MetricSet {
   wape: number | null
   mae: number | null
@@ -642,12 +701,36 @@ export interface MetricSet {
   bias: number | null
   coverage_80?: number | null
   coverage_95?: number | null
+  /** Etapa 2: errores escalados (menor que 1 = mejor que el naive estacional de entrenamiento). */
+  mase?: number | null
+  rmsse?: number | null
+  /** Pinball de P10/P50/P90; P50 null si no se publicó. Solo con período final independiente. */
+  pinball?: { p10: number | null; p50: number | null; p90: number | null } | null
+  interval_width?: { '80': number | null; '95': number | null } | null
+  /** Dinero aparte de las unidades. */
+  money?: MoneyMetrics | null
+  sample?: MetricSample | null
+  n_obs?: number
 }
 
 export interface AccuracyByHorizon {
   horizon_days: number
+  /** Tramos de evaluación diaria: h1-7, h8-14, h15-30, h31-60, h61-90 (ejecuciones nuevas). */
+  level_key?: string
   wape: number | null
   baseline_wape: number | null
+  n_obs?: number
+}
+
+/** Error del TOTAL de H días (el que importa al comprar), por horizonte. */
+export interface AccuracyHorizonTotal {
+  horizon_days: number
+  wape: number | null
+  baseline_wape: number | null
+  bias: number | null
+  mae: number | null
+  money: MoneyMetrics | null
+  n_obs: number
 }
 
 export interface AccuracyByGroup {
@@ -684,6 +767,7 @@ export interface AccuracySummary {
     /** Métricas secundarias (optimistas) de las ventanas que eligieron el modelo. */
     selection_windows?: { selected: MetricSet | null; baseline: MetricSet | null; n_windows: number; cutoffs: ISODate[] } | null
     by_horizon: AccuracyByHorizon[]
+    by_horizon_total?: AccuracyHorizonTotal[]
     by_demand_class: AccuracyByGroup[]
     by_branch: AccuracyByGroup[]
     models: AccuracyModelRow[]
@@ -696,6 +780,10 @@ export interface AccuracySummary {
     by_run: { run_id: number; version: number; wape: number | null; n_obs: number }[]
   } | null
   explanation: string[]
+  /** Etapa 2 (aditivo). */
+  evaluation_manifest?: DemandManifest | null
+  horizon_support?: Record<string, HorizonSupport> | null
+  p50?: P50Decision | null
 }
 
 export interface ComparisonPoint {
@@ -730,14 +818,30 @@ export interface ModelEvaluation {
   n_windows: number
 }
 
+/** Estados del registro: nuevos (etapa 2) y legados (aún aceptados por el filtro de la API). */
+export type ModelStatus = 'candidate' | 'validated' | 'production' | 'retired' | 'failed'
+export type ModelRole = 'primary' | 'fallback'
+
 export interface ModelRegistryEntry {
   id: number
   version: string
   model_family: string
+  label?: string
   strategy_level: string
-  status: 'candidate' | 'production' | 'fallback' | 'archived' | 'rejected'
+  scope?: string
+  status: ModelStatus
+  /** Estado de la etapa 1 equivalente (fallback, archived, rejected...). */
+  legacy_status?: string | null
+  core?: 'demand' | 'customer' | string | null
+  role?: ModelRole | null
   demand_class: string | null
+  hyperparameters?: Record<string, unknown> | null
+  forecast_run_id?: number | null
+  artifact_sha256?: string | null
+  validated_at?: ISODateTime | null
   trained_at: ISODateTime | null
+  promoted_at?: ISODateTime | null
+  retired_at?: ISODateTime | null
   training_data_from: ISODate | null
   training_data_to: ISODate | null
   series_count: number
@@ -918,3 +1022,6 @@ export interface AdminPlan {
   monthly_price_usd: number | null
   is_active: boolean
 }
+
+// ─── Etapa 2 ───────────────────────────────────────────────────────────────
+export * from './types.v2'

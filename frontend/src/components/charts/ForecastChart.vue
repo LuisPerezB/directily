@@ -19,13 +19,18 @@ const props = withDefaults(
     height?: number
     title: string
     showTable?: boolean
+    /** El horizonte no tiene respaldo suficiente: se dibuja como provisional (línea punteada fina, sin bandas ni mediana). */
+    provisional?: boolean
   }>(),
-  { metric: 'units', granularity: 'day', currency: 'USD', height: 340, showTable: true },
+  { metric: 'units', granularity: 'day', currency: 'USD', height: 340, showTable: true, provisional: false },
 )
 const { t } = useI18n()
 const palette = useChartPalette()
 
-const data = computed(() => buildForecastChartData(props.history, props.forecast, props.metric))
+const built = computed(() => buildForecastChartData(props.history, props.forecast, props.metric))
+// Sin respaldo suficiente no se dibujan bandas de incertidumbre ni mediana: serían una precisión que no existe.
+const data = computed(() => (props.provisional ? { ...built.value, hasIntervals: false, hasP50: false } : built.value))
+const forecastLabel = computed(() => (props.provisional ? t('chart.forecastProvisional') : t('chart.forecast')))
 const unitLabel = computed(() => (props.metric === 'units' ? t('chart.units') : t('chart.dollars')))
 const ariaLabel = computed(() => `${props.title}. ${describeSeries(data.value, unitLabel.value)}`)
 
@@ -53,7 +58,8 @@ const option = computed<EChartsCoreOption>(() => {
       textStyle: { color: p.muted },
       data: [
         ...(d.history.some((v) => v !== null) ? [t('chart.history')] : []),
-        ...(d.yhat.some((v) => v !== null) ? [t('chart.forecast')] : []),
+        ...(d.yhat.some((v) => v !== null) ? [forecastLabel.value] : []),
+        ...(d.hasP50 ? [t('chart.median')] : []),
         ...(d.hasIntervals ? [t('chart.interval80'), t('chart.interval95')] : []),
         ...(stockoutPoints.some((v) => v !== null) ? [t('chart.stockout')] : []),
       ],
@@ -68,7 +74,8 @@ const option = computed<EChartsCoreOption>(() => {
         const lines = [`<strong>${formatDate(d.dates[i] ?? '')}</strong>`]
         if (d.history[i] !== null) lines.push(`${t('chart.history')}: <b>${fmt(d.history[i])}</b>${d.stockout[i] ? ` · ${t('chart.stockout')}` : ''}`)
         if (d.yhat[i] !== null) {
-          lines.push(`${t('chart.forecast')}: <b>${fmt(d.yhat[i])}</b>`)
+          lines.push(`${forecastLabel.value}: <b>${fmt(d.yhat[i])}</b>`)
+          if (d.p50[i] != null) lines.push(`${t('chart.median')}: <b>${fmt(d.p50[i])}</b>`)
           const lo80 = d.lo80[i]
           const b80 = d.band80[i]
           if (lo80 != null && b80 != null) lines.push(`${t('chart.interval80')}: ${fmt(lo80)} – ${fmt(lo80 + b80)}`)
@@ -121,11 +128,16 @@ const option = computed<EChartsCoreOption>(() => {
       },
       {
         ...lineBase,
-        name: t('chart.forecast'),
+        name: forecastLabel.value,
         data: d.yhat,
-        lineStyle: { color: p.forecast, width: 2.5, type: 'dashed' },
-        itemStyle: { color: p.forecast },
+        lineStyle: props.provisional
+          ? { color: p.muted, width: 1.5, type: 'dotted' }
+          : { color: p.forecast, width: 2.5, type: 'dashed' },
+        itemStyle: { color: props.provisional ? p.muted : p.forecast },
       },
+      ...(d.hasP50
+        ? [{ ...lineBase, name: t('chart.median'), data: d.p50, lineStyle: { color: p.violet, width: 2, type: 'solid' }, itemStyle: { color: p.violet } }]
+        : []),
       {
         type: 'scatter',
         name: t('chart.stockout'),
@@ -154,7 +166,8 @@ const option = computed<EChartsCoreOption>(() => {
             <tr>
               <th scope="col">{{ t('chart.date') }}</th>
               <th scope="col" class="num">{{ t('chart.history') }}</th>
-              <th scope="col" class="num">{{ t('chart.forecast') }}</th>
+              <th scope="col" class="num">{{ forecastLabel }}</th>
+              <th v-if="data.hasP50" scope="col" class="num">{{ t('chart.median') }}</th>
               <th v-if="data.hasIntervals" scope="col" class="num">{{ t('chart.interval80') }}</th>
             </tr>
           </thead>
@@ -163,6 +176,7 @@ const option = computed<EChartsCoreOption>(() => {
               <td>{{ formatDate(date) }}</td>
               <td class="num">{{ fmt(data.history[i]) }}</td>
               <td class="num">{{ fmt(data.yhat[i]) }}</td>
+              <td v-if="data.hasP50" class="num">{{ fmt(data.p50[i]) }}</td>
               <td v-if="data.hasIntervals" class="num">
                 <template v-if="data.lo80[i] != null && data.band80[i] != null">{{ fmt(data.lo80[i]) }} – {{ fmt((data.lo80[i] ?? 0) + (data.band80[i] ?? 0)) }}</template>
                 <template v-else>—</template>
