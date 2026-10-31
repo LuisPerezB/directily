@@ -7,7 +7,7 @@ Fuente de los casos: `instrucctions.md` §6.J. Estados: ✅ comprobado (prueba a
 
 | ID | Caso | Paquete | Código | Prueba | Evidencia | Estado | Datos reales |
 |---|---|---|---|---|---|---|---|
-| E2-01 | Compatibilidad etapa 1 | todos | migraciones aditivas `2026_02_0x`; contratos etapa 1 intactos (cambios aditivos) | suites completas + `e2e/mvp_acceptance.py` | P1: E2E 32/32 en BD propia; integración final §Ejecución | 🧪 | — |
+| E2-01 | Compatibilidad etapa 1 | todos | migraciones aditivas `2026_02_0x`; contratos etapa 1 intactos (cambios aditivos) | suites completas + `e2e/mvp_acceptance.py` | `mvp_acceptance.py` 32/32 sobre el stack integrado (31-oct, tras P8) | ✅ | — |
 | E2-02 | Recepción tardía | PR #1 | `inventory/recommendations.py` | `test_inventory_validation.py` | `docs/validation/2026-10-29/probe-results-after-fixes.json` | ✅ | — |
 | E2-03 | Horizonte físico | PR #1 | `inventory/recommendations.py`, `pipeline/core.py` | `test_inventory_validation.py` | ídem | ✅ | — |
 | E2-04 | Incertidumbre ausente | PR #1 | `inventory/recommendations.py` | `test_inventory_validation.py` | ídem | ✅ | — |
@@ -30,11 +30,37 @@ Fuente de los casos: `instrucctions.md` §6.J. Estados: ✅ comprobado (prueba a
 | E2-21 | Horizontes del core | P1 + P2 | demanda 7/14/30/60/90 con abstención; compra 7/30/90 | `test_horizons.py`, `DemandV2ApiTest`, `PlanHorizonSchedulingTest`, `test_customer_models.py` | `insufficient_data` explícito si no hay evidencia | 🧪 | — |
 | E2-22 | Salidas Customer (monto, frecuencia, ranking, inactividad) | P2 | `customer/outputs.py`, `cust-ranking-v1` | `test_customer_models.py`, `CustomerResultsApiTest` | definiciones y referencias; monto como supuesto; ranking por evidencia | 🧪 | — |
 | E2-23 | Compromisos comerciales sin doble conteo | P2 + P3 | `CommitmentAsOf` (PHP) y `customer/commitments.py`: `COALESCE(known_at, ingestión)` | `CommitmentsImportTest`, `test_customer_commitments.py` | cancelaciones y fechas respetan el corte; comprometido no se re-suma | 🧪 | — |
-| E2-24 | Registro, reversión y autonomía sin LLM | P1 + P2 + P5b | estados candidate/validated/production/retired/failed + role; `POST /models/{demand,customer}/rollback` | `DemandV2ApiTest`, `CustomerModelRollbackTest`, pruebas de P5b | reversión con SHA-256 verificado; cores sin proveedor LLM | 🟡 | — |
+| E2-24 | Registro, reversión y autonomía sin LLM | P1 + P2 + P5b + P8 | estados candidate/validated/production/retired/failed + role; `POST /models/{demand,customer}/rollback`; `ModelArtifactVerifier` | `DemandV2ApiTest`, `CustomerModelRollbackTest`, `test_artifact_paths`, `CoresWorkWithoutAssistantTest` | reversión con SHA-256 verificado por el backend; asistente 503 sin clave y cores operativos (`stage2_acceptance.py`) | 🧪 | — |
 | E2-25 | Conector SQL solo lectura | P3 | `Connectors/Sql/*` (`SqlQueryGuard`, READ ONLY) | `SqlSourceSyncTest` | PostgreSQL de punta a punta; MySQL/SQL Server `implemented_untested` | 🧪 | ERP real pendiente |
 | E2-26 | Proveedores y fechas | P4 | `supply/offers.py`, `planner.py` | `test_supply_offers.py` | oferta tardía no oculta faltantes; unidades/monedas explícitas | 🧪 | — |
 
+## Ejecución integrada (31-oct-2026, rama `etapa-2/core`)
+
+| Verificación | Resultado |
+|---|---|
+| Motor (`pytest`, BD recién migrada) | 418 aprobadas |
+| Backend (`php artisan test`) | 437 aprobadas, 2 omitidas (contratos MySQL/SQL Server sin servidor) |
+| Frontend (type-check, lint, vitest, build) | 298 aprobadas, build correcto |
+| `e2e/mvp_acceptance.py` (etapa 1) | 32/32 |
+| `e2e/stage2_acceptance.py` (etapa 2, API real + cola + motor + PostgreSQL) | 252/252, 1 aviso de diseño (conciliación a 90 días con agregado incompleto: se reporta, no se inventa residual) |
+| Revisión visual Playwright (7 vistas) | sin errores JS/API, sin desborde horizontal |
+
+Evidencia: `docs/architecture/v2/evidence/stage2-acceptance-2026-10-31*.log`.
+
 ## Capacidades por nivel de validación
 
-Se completa al cierre: implementadas · comprobadas solo con sintéticos · validadas con datos reales ·
-dependencias externas pendientes.
+**Implementadas y comprobadas solo con datos sintéticos (🧪):** todo el core común de la etapa 2:
+demanda 7/14/30/60/90 con protocolo y manifiesto; Customer Core (probabilidad, cantidad, monto
+supuesto, frecuencia, ranking, inactividad, calibración, reconciliación, compromisos); abastecimiento
+(balance fechado, planificador MILP, proveedores, producción genérica); costos; escenarios; contrato
+causal; conector SQL PostgreSQL; configuración por precedencia y extensiones; asistente opcional.
+
+**Validadas con datos reales:** ninguna todavía.
+
+**Implementadas sin prueba con servidor real (`implemented_untested`):** conectores MySQL/MariaDB y
+SQL Server; proveedor Ollama Cloud del asistente (sin clave).
+
+**Dependencias externas pendientes:** acceso autorizado al histórico de Resgasa en Soyoda (red del
+cliente/VPN) para E2-20 y la validación comercial; clave del proveedor LLM si se desea el asistente;
+estimadores causales (requieren evidencia de variación de precios); módulos sectoriales (fuera de
+alcance por instrucción).
