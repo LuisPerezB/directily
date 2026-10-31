@@ -263,3 +263,34 @@ datos posteriores al corte.
 Administración (conectores, calidad, modelos, entrenamiento, costos, auditoría), además de las
 existentes (Demanda, Abastecimiento/Radar de Reposición, Clientes). Toda cifra muestra fecha de
 corte, unidad, incertidumbre, cobertura y si el dato es real, simulado o de demostración.
+
+## ADR-V25-23 · Tiempo de conocimiento y versiones de documentos de venta
+
+**Contexto.** La auditoría del 31-oct-2026 (`docs/roadmap/audit/2026-10-31/`) halló defectos HIGH en
+datos, demanda, cliente y conectores: el motor leía las ventas por fecha de evento y con el estado
+ACTUAL del documento; una venta cargada tarde o una anulación posterior reescribían los cortes pasados,
+y un reintento con una versión anterior sobrescribía la nueva. Es una fuga temporal: viola la regla de
+mayor precedencia de la V2.5 (§0.5).
+
+**Decisión** (migración `2026_03_01_000100_add_sales_knowledge_time_and_revisions`):
+
+- Cada versión de un documento tiene una ventana de conocimiento `[known_from, known_until)`. La versión
+  vigente vive en `sales`/`sale_items` (`version_known_from`, `current_revision`); las reemplazadas en
+  `sales_document_revisions` y `sale_item_revisions` con `known_until` = `known_from` de su reemplazo.
+- `sales.ingestion_mode`: `backfill` (carga histórica declarada en el onboarding: se asume conocida desde
+  el inicio de su día de negocio; supuesto registrado en el manifiesto del dataset; sin historial de
+  estados de la fuente, el estado final se asume desde ese día) o `incremental` (conocida desde su
+  ingestión en Predictily; un documento que llega tarde no es visible en cortes anteriores a su llegada).
+  Todo camino de escritura fija el modo explícitamente; por defecto, la primera carga de ventas de una
+  empresa o fuente es `backfill` y las siguientes `incremental`, con posibilidad de declararlo.
+- Visibilidad al corte C: `known_from < medianoche local (C+1)` y
+  (`known_until IS NULL` o `known_until >= medianoche local (C+1)`).
+- Orden de versiones: una versión entrante con `source_recorded_at` anterior a la almacenada se descarta
+  como `stale` (no sobrescribe). Sin marca de tiempo de la fuente gana la última ingestión y se registra.
+- Vista `sales_line_versions`: fuente única de lectura as-of de Demand y Customer Core. Cada ventana del
+  backtest se arma con los datos tal como se conocían en su corte.
+- `data_coverage_gaps`: huecos internos declarados o inferidos; sus días son `missing_source`.
+
+**Consecuencias.** Las demos y cargas existentes (backfill) conservan sus resultados; las cargas
+incrementales posteriores quedan protegidas contra fugas. La anulación sin historial de la fuente en una
+carga backfill es una limitación declarada, no un dato inventado.
