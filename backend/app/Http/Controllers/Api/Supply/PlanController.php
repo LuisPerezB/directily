@@ -4,13 +4,21 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\Supply;
 
+use App\Http\Resources\Supply\SupplyPlanLineResource;
+use App\Http\Resources\Supply\SupplyPlanShortfallResource;
 use App\Http\Resources\Supply\SupplyRunResource;
+use App\Models\Branch;
 use App\Models\CoreRun;
 use App\Models\ForecastRun;
 use App\Models\SupplyPlan;
+use App\Models\SupplyPlanLine;
+use App\Models\SupplyPlanShortfall;
 use App\Services\Supply\SupplyRunService;
 use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantRule;
+use Carbon\CarbonImmutable;
+use DateTimeImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -32,6 +40,22 @@ class PlanController extends SupplyController
         'solver_mip_gap' => ['numeric', 'min:0', 'max:0.2'],
         'use_implicit_offers' => ['boolean'],
         'diagnose_unmet' => ['boolean'],
+    ];
+
+    /** Líneas / faltantes que acompaña el detalle del plan como vista previa; el resto se pagina en `/lines` y `/shortfalls`. */
+    private const PREVIEW_LIMIT = 20;
+
+    /** Ordenamientos permitidos de las líneas (lista blanca: nunca se interpola la entrada de la persona). */
+    private const LINE_SORTS = [
+        'order_date' => 'supply_plan_lines.order_date', 'expected_receipt_date' => 'supply_plan_lines.expected_receipt_date',
+        'product' => 'products.name', 'branch' => 'branches.name', 'supplier' => 'suppliers.name',
+        'quantity' => 'supply_plan_lines.quantity', 'unit_cost' => 'supply_plan_lines.unit_cost', 'line_cost' => 'supply_plan_lines.line_cost',
+    ];
+
+    /** Ordenamientos permitidos de la demanda no atendida. */
+    private const SHORTFALL_SORTS = [
+        'period_start' => 'supply_plan_shortfalls.period_start', 'product' => 'products.name', 'branch' => 'branches.name',
+        'demand' => 'supply_plan_shortfalls.demand', 'unmet' => 'supply_plan_shortfalls.unmet', 'reason' => 'supply_plan_shortfalls.reason',
     ];
 
     public function store(Request $request, SupplyRunService $service): JsonResponse
