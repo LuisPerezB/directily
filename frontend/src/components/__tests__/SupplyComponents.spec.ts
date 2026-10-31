@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ApiError } from '@/api/errors'
 import { setupTenant } from '@/test/helpers'
-import type { CausalCheck, PlanDetail, PlanLine, ResultEnvelope, ScenarioEvaluationResult } from '@/api/types'
+import type { CausalCheck, Paginated, PlanDetail, PlanLine, PlanShortfall, ResultEnvelope, ScenarioEvaluationResult } from '@/api/types'
 
-const api = vi.hoisted(() => ({ plan: vi.fn(), causalCheck: vi.fn(), evaluateScenarios: vi.fn(), plans: vi.fn() }))
-vi.mock('@/api', async (orig) => ({ ...(await orig<typeof import('@/api')>()), supplyApi: { plan: api.plan, causalCheck: api.causalCheck, evaluateScenarios: api.evaluateScenarios, plans: api.plans } }))
+const api = vi.hoisted(() => ({ plan: vi.fn(), planLines: vi.fn(), planShortfalls: vi.fn(), causalCheck: vi.fn(), evaluateScenarios: vi.fn(), plans: vi.fn() }))
+vi.mock('@/api', async (orig) => ({
+  ...(await orig<typeof import('@/api')>()),
+  supplyApi: { plan: api.plan, planLines: api.planLines, planShortfalls: api.planShortfalls, causalCheck: api.causalCheck, evaluateScenarios: api.evaluateScenarios, plans: api.plans },
+}))
 
 import SolverStatus from '../supply/SolverStatus.vue'
 import PlanResults from '../supply/PlanResults.vue'
@@ -22,18 +25,32 @@ const line = (over: Partial<PlanLine> = {}): PlanLine => ({
   offer_id: 5, quantity: 200, unit: 'saco', offer_quantity: 4, offer_unit: 'pallet', order_date: '2026-10-27', expected_receipt_date: '2026-11-03', unit_cost: 8.1, line_cost: 1620, currency: 'USD',
   actionable_now: false, binding_constraints: [], justification: 'Menor costo puesto en bodega y llega a tiempo.', assumptions: null, ...over,
 })
+const shortfall = (over: Partial<PlanShortfall> = {}): PlanShortfall => ({
+  id: 1, branch_id: 1, branch: { id: 1, code: '001', name: 'Matriz' }, product_id: 4, product: { id: 4, sku: 'CLA-1', name: 'Clavos' }, period_start: '2026-10-27', period_end: '2026-11-02', demand: 50, unmet: 40, reason: 'lead_time', ...over,
+})
+/** Hoy en las pruebas es 31-oct-2026; por defecto el plan se calculó con datos hasta el 26-oct (5 días antes). */
 const detail = (over: Partial<PlanDetail> = {}, planOver: Record<string, unknown> = {}): PlanDetail => ({
   run: { id: 3, error_message: null } as never,
   plan: { id: 1, objective: 'min_cost', coverage_mode: 'soft', solver_status: 'feasible_with_gap', mip_gap: 0.0042, objective_value: 1000, solve_seconds: 12.4, currency: 'USD', total_purchase_cost: 5000, total_holding_cost: 300, total_shortage_penalty: 120,
-    unmet_units_total: 40, demand_units_total: 800, forecast_run_id: 9, is_optimal: false, note: 'Sugerencias.', ...planOver } as never,
-  lines: [line({ actionable_now: true, binding_constraints: [{ family: 'budget', ref: 1, period: 'x', used: 5000, limit: 5000 }] }), line({ product_id: 2, order_date: '2026-11-03' })],
-  shortfalls: [{ branch_id: 1, product_id: 4, product: { id: 4, sku: 'CLA-1', name: 'Clavos' }, period_start: '2026-10-27', period_end: '2026-11-02', demand: 50, unmet: 40, reason: 'lead_time' }],
+    unmet_units_total: 40, demand_units_total: 800, forecast_run_id: 9, is_optimal: false, note: 'Sugerencias.', as_of: '2026-10-26', today: '2026-10-31', timezone: 'America/Guayaquil', as_of_age_days: 5, ...planOver } as never,
+  lines: [], shortfalls: [],
+  lines_summary: { total: 2, shown: 2, matched: 2, truncated: false, actionable_now: 1 }, shortfalls_summary: { total: 1, shown: 1, matched: 1, truncated: false, unmet_units: 40, demand_units: 50 },
+  branches: [{ id: 1, code: '001', name: 'Matriz' }, { id: 2, code: '002', name: 'Norte' }],
   constraints: [{ family: 'budget', ref: 1, period: 'x', used: 5000, limit: 5000, binding: true }], solver: { status: 'feasible_with_gap', notes: ['Brecha dentro de la tolerancia pedida.'] }, diagnosis: null, infeasibility: null, alternative_plan: null,
   offers: [{ offer_id: 9, supplier_id: 3, product_id: 1, status: 'excluded', reasons: ['no_fx_rate'], messages: [] }, { offer_id: 5, supplier_id: 2, product_id: 1, status: 'comparable', reasons: [], messages: [] }],
   comparison_coverage: { offers_received: 2, offers_comparable: 1, offers_excluded: 1, comparable_share: 0.5 }, offer_diagnostics: [], excluded_nodes: [], production: { status: 'not_configured' }, periods: [], ...over,
 })
+const pageOf = <R,>(data: R[], total = data.length, current = 1, perPage = 25): Paginated<R> => ({ data, meta: { current_page: current, per_page: perPage, total, last_page: Math.max(1, Math.ceil(total / perPage)), from: null, to: null } })
+const defaultLines = (): PlanLine[] => [line({ id: 1, actionable_now: true, binding_constraints: [{ family: 'budget', ref: 1, period: 'x', used: 5000, limit: 5000 }] }), line({ id: 2, product_id: 2, order_date: '2026-11-03' })]
+/** Respuestas por defecto de las dos tablas paginadas; cada prueba puede sobrescribirlas. */
+function mockTables(lines: PlanLine[] = defaultLines(), shortfalls: PlanShortfall[] = [shortfall()]): void {
+  api.planLines.mockResolvedValue(pageOf(lines))
+  api.planShortfalls.mockResolvedValue(pageOf(shortfalls))
+}
+const mountResults = () => mount(PlanResults, { props: { runId: 3 }, global: { plugins: [setupTenant('analyst')] } })
 
 beforeEach(() => { for (const f of Object.values(api)) f.mockReset() })
+afterEach(() => { vi.useRealTimers() })
 
 describe('SolverStatus: nunca «óptimo» si no lo es', () => {
   it('el óptimo probado se llama así y no lleva advertencia', () => {

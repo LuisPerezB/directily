@@ -23,6 +23,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\In;
 use Laravel\Sanctum\PersonalAccessToken;
 
 /**
@@ -116,22 +117,34 @@ class PlanController extends SupplyController
         return SupplyRunResource::collection($runs);
     }
 
-    /** Plan completo: envoltura común + líneas, demanda no atendida, restricciones, alternativas e infactibilidad. */
+    /**
+     * Detalle del plan: envoltura común + cabecera con totales y fecha de corte, restricciones, alternativas e infactibilidad.
+     * Las líneas y la demanda no atendida NO se devuelven completas (un plan real tiene miles): `lines` / `shortfalls` son una
+     * vista previa de las primeras PREVIEW_LIMIT con su resumen (`lines_summary`, `shortfalls_summary`); el listado completo
+     * y paginado está en `GET /supply/plans/{id}/lines` y `/shortfalls`.
+     */
     public function show(Request $request, int $id): JsonResponse
     {
-        $run = CoreRun::query()->where('core', 'supply')->where('operation', 'plan')->with('trainingJobs')->findOrFail($id);
+        $run = $this->planRun($id);
         $envelope = $this->envelope($run, ['result_type' => 'optimized_plan']);
         $run_payload = (new SupplyRunResource($run))->resolve($request);
         $plan = SupplyPlan::query()->where('core_run_id', $run->id)->first();
         if ($plan === null) {
-            return response()->json(['data' => ['run' => $run_payload, 'plan' => null, 'lines' => [], 'shortfalls' => []], 'envelope' => $envelope]);
+            return response()->json(['data' => [
+                'run' => $run_payload, 'plan' => null, 'lines' => [], 'shortfalls' => [], 'branches' => [],
+                'lines_summary' => $this->summary(0, 0, 0) + ['actionable_now' => 0], 'shortfalls_summary' => $this->summary(0, 0, 0) + ['unmet_units' => 0.0, 'demand_units' => 0.0],
+            ], 'envelope' => $envelope]);
         }
-        $lines = $plan->lines()->with(['product:id,sku,name', 'branch:id,code,name', 'supplier:id,code,name'])
-            ->when($request->boolean('actionable_now'), fn ($q) => $q->where('actionable_now', true))
-            ->when($request->filled('product_id'), fn ($q) => $q->where('product_id', (int) $request->input('product_id')))
-            ->when($request->filled('supplier_id'), fn ($q) => $q->where('supplier_id', (int) $request->input('supplier_id')))
-            ->orderBy('order_date')->orderBy('id')->limit(5000)->get();
-        $shortfalls = $plan->shortfalls()->with(['product:id,sku,name', 'branch:id,code,name'])->orderBy('period_start')->orderBy('product_id')->limit(5000)->get();
+        $filtered = $this->linesQuery($plan, [
+            'actionable_now' => $request->boolean('actionable_now'),
+            'product_id' => $request->filled('product_id') ? (int) $request->input('product_id') : null,
+            'supplier_id' => $request->filled('supplier_id') ? (int) $request->input('supplier_id') : null,
+        ]);
+        $matched = (clone $filtered)->count();
+        $lines = $this->sortLines($filtered, null)->limit(self::PREVIEW_LIMIT)->get();
+        $linesAgg = $plan->lines()->toBase()->selectRaw('COUNT(*) AS total, COUNT(*) FILTER (WHERE actionable_now) AS actionable_now')->first();
+        $shortfallAgg = $plan->shortfalls()->toBase()->selectRaw('COUNT(*) AS total, COALESCE(SUM(unmet), 0) AS unmet, COALESCE(SUM(demand), 0) AS demand')->first();
+        $shortfalls = $this->sortShortfalls($this->shortfallsQuery($plan, []), null)->limit(self::PREVIEW_LIMIT)->get();
         $details = (array) $plan->details;
 
         return response()->json([
@@ -146,27 +159,13 @@ class PlanController extends SupplyController
                     'demand_units_total' => $plan->demand_units_total, 'forecast_run_id' => $plan->forecast_run_id,
                     'is_optimal' => $plan->solver_status === 'optimal',
                     'note' => 'Sugerencias de reposición: Predictily no envía pedidos ni compromete fondos.',
-                ],
-                'lines' => $lines->map(fn ($l) => [
-                    'id' => $l->id, 'line_type' => $l->line_type, 'branch_id' => $l->branch_id,
-                    'branch' => $l->branch ? ['id' => $l->branch->id, 'code' => $l->branch->code, 'name' => $l->branch->name] : null,
-                    'product_id' => $l->product_id,
-                    'product' => $l->product ? ['id' => $l->product->id, 'sku' => $l->product->sku, 'name' => $l->product->name] : null,
-                    'supplier_id' => $l->supplier_id,
-                    'supplier' => $l->supplier ? ['id' => $l->supplier->id, 'code' => $l->supplier->code, 'name' => $l->supplier->name] : null,
-                    'offer_id' => $l->offer_id, 'recipe_id' => $l->recipe_id, 'quantity' => $l->quantity, 'unit' => $l->unit,
-                    'offer_quantity' => $l->offer_quantity, 'offer_unit' => $l->offer_unit,
-                    'order_date' => $l->order_date?->toDateString(), 'expected_receipt_date' => $l->expected_receipt_date?->toDateString(),
-                    'unit_cost' => $l->unit_cost, 'line_cost' => $l->line_cost, 'currency' => $l->currency,
-                    'actionable_now' => (bool) $l->actionable_now, 'binding_constraints' => $l->binding_constraints,
-                    'justification' => $l->justification, 'assumptions' => JsonMap::of($l->assumptions),
-                ])->values(),
-                'shortfalls' => $shortfalls->map(fn ($s) => [
-                    'branch_id' => $s->branch_id, 'product_id' => $s->product_id,
-                    'product' => $s->product ? ['id' => $s->product->id, 'sku' => $s->product->sku, 'name' => $s->product->name] : null,
-                    'period_start' => $s->period_start?->toDateString(), 'period_end' => $s->period_end?->toDateString(),
-                    'demand' => $s->demand, 'unmet' => $s->unmet, 'reason' => $s->reason,
-                ])->values(),
+                ] + $this->cutoff($run),
+                'lines' => SupplyPlanLineResource::collection($lines)->resolve($request),
+                'lines_summary' => $this->summary((int) $linesAgg->total, $lines->count(), $matched) + ['actionable_now' => (int) $linesAgg->actionable_now],
+                'shortfalls' => SupplyPlanShortfallResource::collection($shortfalls)->resolve($request),
+                'shortfalls_summary' => $this->summary((int) $shortfallAgg->total, $shortfalls->count(), (int) $shortfallAgg->total)
+                    + ['unmet_units' => (float) $shortfallAgg->unmet, 'demand_units' => (float) $shortfallAgg->demand],
+                'branches' => $this->planBranches($plan),
                 'constraints' => $details['constraints'] ?? [],
                 // Mapas del motor (objeto JSON aunque estén vacíos); null = el bloque no aplica a este plan.
                 'solver' => JsonMap::of($details['solver'] ?? null),
@@ -184,5 +183,160 @@ class PlanController extends SupplyController
             ],
             'envelope' => $envelope,
         ]);
+    }
+
+    /**
+     * Líneas del plan, paginadas en el servidor: `?page&per_page&branch_id&product_id&supplier_id&search&actionable_now&sort`.
+     * Orden por lista blanca (`order_date`, `expected_receipt_date`, `product`, `branch`, `supplier`, `quantity`, `unit_cost`,
+     * `line_cost`; prefijo `-` para descendente); sin `sort`, primero lo emitible en la fecha de corte y luego por fecha de emisión.
+     */
+    public function lines(Request $request, int $id): AnonymousResourceCollection
+    {
+        $run = $this->planRun($id);
+        $sorts = $this->sortRule(self::LINE_SORTS);
+        $filters = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'branch_id' => ['sometimes', 'nullable', 'integer'], 'product_id' => ['sometimes', 'nullable', 'integer'], 'supplier_id' => ['sometimes', 'nullable', 'integer'],
+            'search' => ['sometimes', 'nullable', 'string', 'max:100'], 'sort' => ['sometimes', 'nullable', $sorts],
+        ]);
+        $filters['actionable_now'] = $request->boolean('actionable_now');
+        $plan = SupplyPlan::query()->where('core_run_id', $run->id)->first();
+        $query = $plan === null ? SupplyPlanLine::query()->whereRaw('1 = 0') : $this->linesQuery($plan, $filters);
+
+        return SupplyPlanLineResource::collection($this->sortLines($query, $filters['sort'] ?? null)->paginate($this->perPage($request)));
+    }
+
+    /**
+     * Demanda no atendida del plan, paginada en el servidor: `?page&per_page&branch_id&product_id&search&reason&sort`.
+     * Orden por lista blanca (`period_start`, `product`, `branch`, `demand`, `unmet`, `reason`; prefijo `-` para descendente).
+     */
+    public function shortfalls(Request $request, int $id): AnonymousResourceCollection
+    {
+        $run = $this->planRun($id);
+        $filters = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'branch_id' => ['sometimes', 'nullable', 'integer'], 'product_id' => ['sometimes', 'nullable', 'integer'],
+            'search' => ['sometimes', 'nullable', 'string', 'max:100'], 'reason' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'sort' => ['sometimes', 'nullable', $this->sortRule(self::SHORTFALL_SORTS)],
+        ]);
+        $plan = SupplyPlan::query()->where('core_run_id', $run->id)->first();
+        $query = $plan === null ? SupplyPlanShortfall::query()->whereRaw('1 = 0') : $this->shortfallsQuery($plan, $filters);
+
+        return SupplyPlanShortfallResource::collection($this->sortShortfalls($query, $filters['sort'] ?? null)->paginate($this->perPage($request)));
+    }
+
+    /** Corrida de plan de la empresa activa (404 si no existe o es de otra empresa). */
+    private function planRun(int $id): CoreRun
+    {
+        return CoreRun::query()->where('core', 'supply')->where('operation', 'plan')->with('trainingJobs')->findOrFail($id);
+    }
+
+    /**
+     * Fecha de corte del plan (`as_of`) frente a HOY en la zona horaria de la empresa. `actionable_now` de una línea significa
+     * «su fecha de emisión es la fecha de corte»; solo equivale a «emitir hoy» cuando `as_of_age_days` es 0.
+     *
+     * @return array{as_of: ?string, today: string, timezone: string, as_of_age_days: ?int}
+     */
+    private function cutoff(CoreRun $run): array
+    {
+        $timezone = $this->tenant()->timezone ?: 'America/Guayaquil';
+        $today = CarbonImmutable::now($timezone)->toDateString();
+        $asOf = $run->as_of?->toDateString();
+        $age = $asOf === null ? null : -((int) (new DateTimeImmutable($today))->diff(new DateTimeImmutable($asOf))->format('%r%a'));
+
+        return ['as_of' => $asOf, 'today' => $today, 'timezone' => $timezone, 'as_of_age_days' => $age];
+    }
+
+    /** @return array{total: int, shown: int, matched: int, truncated: bool} */
+    private function summary(int $total, int $shown, int $matched): array
+    {
+        return ['total' => $total, 'shown' => $shown, 'matched' => $matched, 'truncated' => $matched > $shown];
+    }
+
+    /** Sucursales con líneas o faltantes en el plan (para el filtro de la tabla). */
+    private function planBranches(SupplyPlan $plan): array
+    {
+        $ids = $plan->lines()->toBase()->distinct()->pluck('supply_plan_lines.branch_id')
+            ->merge($plan->shortfalls()->toBase()->distinct()->pluck('supply_plan_shortfalls.branch_id'))->unique()->values()->all();
+
+        return Branch::query()->withTrashed()->whereIn('id', $ids)->orderBy('name')->get(['id', 'code', 'name'])
+            ->map(fn (Branch $b) => ['id' => $b->id, 'code' => $b->code, 'name' => $b->name])->values()->all();
+    }
+
+    /** @param  array<string, string>  $sorts */
+    private function sortRule(array $sorts): In
+    {
+        $keys = array_keys($sorts);
+
+        return Rule::in(array_merge($keys, array_map(fn (string $k) => '-'.$k, $keys)));
+    }
+
+    /** @param  array<string, mixed>  $f */
+    private function linesQuery(SupplyPlan $plan, array $f): Builder
+    {
+        return SupplyPlanLine::query()->select('supply_plan_lines.*')
+            ->leftJoin('products', 'products.id', '=', 'supply_plan_lines.product_id')
+            ->leftJoin('branches', 'branches.id', '=', 'supply_plan_lines.branch_id')
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'supply_plan_lines.supplier_id')
+            ->where('supply_plan_lines.supply_plan_id', $plan->id)
+            ->with(['product:id,sku,name', 'branch:id,code,name', 'supplier:id,code,name'])
+            ->when(! empty($f['actionable_now']), fn ($q) => $q->where('supply_plan_lines.actionable_now', true))
+            ->when(! empty($f['branch_id']), fn ($q) => $q->where('supply_plan_lines.branch_id', (int) $f['branch_id']))
+            ->when(! empty($f['product_id']), fn ($q) => $q->where('supply_plan_lines.product_id', (int) $f['product_id']))
+            ->when(! empty($f['supplier_id']), fn ($q) => $q->where('supply_plan_lines.supplier_id', (int) $f['supplier_id']))
+            ->when(! empty($f['search']), fn ($q) => $this->searchProduct($q, (string) $f['search']));
+    }
+
+    /** @param  array<string, mixed>  $f */
+    private function shortfallsQuery(SupplyPlan $plan, array $f): Builder
+    {
+        return SupplyPlanShortfall::query()->select('supply_plan_shortfalls.*')
+            ->leftJoin('products', 'products.id', '=', 'supply_plan_shortfalls.product_id')
+            ->leftJoin('branches', 'branches.id', '=', 'supply_plan_shortfalls.branch_id')
+            ->where('supply_plan_shortfalls.supply_plan_id', $plan->id)
+            ->with(['product:id,sku,name', 'branch:id,code,name'])
+            ->when(! empty($f['branch_id']), fn ($q) => $q->where('supply_plan_shortfalls.branch_id', (int) $f['branch_id']))
+            ->when(! empty($f['product_id']), fn ($q) => $q->where('supply_plan_shortfalls.product_id', (int) $f['product_id']))
+            ->when(! empty($f['reason']), fn ($q) => $q->where('supply_plan_shortfalls.reason', (string) $f['reason']))
+            ->when(! empty($f['search']), fn ($q) => $this->searchProduct($q, (string) $f['search']));
+    }
+
+    /** Búsqueda por SKU o nombre de producto (sin distinguir mayúsculas; los comodines del texto se escapan). */
+    private function searchProduct(Builder $query, string $search): Builder
+    {
+        $term = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], trim($search)).'%';
+
+        return $query->where(fn ($q) => $q->where('products.name', 'ilike', $term)->orWhere('products.sku', 'ilike', $term));
+    }
+
+    private function sortLines(Builder $query, ?string $sort): Builder
+    {
+        return $this->applySort($query, self::LINE_SORTS, $sort, 'supply_plan_lines')
+            ?? $query->orderByDesc('supply_plan_lines.actionable_now')->orderBy('supply_plan_lines.order_date')->orderBy('supply_plan_lines.id');
+    }
+
+    private function sortShortfalls(Builder $query, ?string $sort): Builder
+    {
+        return $this->applySort($query, self::SHORTFALL_SORTS, $sort, 'supply_plan_shortfalls')
+            ?? $query->orderBy('supply_plan_shortfalls.period_start')->orderBy('supply_plan_shortfalls.product_id')->orderBy('supply_plan_shortfalls.id');
+    }
+
+    /**
+     * Ordena por una clave de la lista blanca (`clave` o `-clave`); NULL siempre al final. Devuelve null si no hay orden pedido.
+     *
+     * @param  array<string, string>  $sorts
+     */
+    private function applySort(Builder $query, array $sorts, ?string $sort, string $table): ?Builder
+    {
+        if ($sort === null || $sort === '') {
+            return null;
+        }
+        $desc = str_starts_with($sort, '-');
+        $column = $sorts[ltrim($sort, '-')] ?? null;
+        if ($column === null) {
+            return null;
+        }
+
+        return $query->orderByRaw($column.($desc ? ' DESC' : ' ASC').' NULLS LAST')->orderBy($table.'.id');
     }
 }

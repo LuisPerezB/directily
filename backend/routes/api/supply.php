@@ -40,6 +40,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->prefix('supply')->name('supply.')
     Route::middleware('tenant.ability:forecast.view')->group(function (): void {
         Route::get('plans', [PlanController::class, 'index'])->name('plans.index');
         Route::get('plans/{id}', [PlanController::class, 'show'])->whereNumber('id')->name('plans.show');
+        Route::get('plans/{id}/lines', [PlanController::class, 'lines'])->whereNumber('id')->name('plans.lines');
+        Route::get('plans/{id}/shortfalls', [PlanController::class, 'shortfalls'])->whereNumber('id')->name('plans.shortfalls');
         Route::get('cost-forecasts', [CostForecastController::class, 'index'])->name('cost-forecasts.index');
         Route::get('cost-forecasts/runs', [CostForecastController::class, 'runs'])->name('cost-forecasts.runs');
         Route::get('simulations', [SimulationController::class, 'index'])->name('simulations.index');

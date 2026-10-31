@@ -19,6 +19,7 @@ class SupplyPlanShortfallResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
+            'id' => $this->id,
             'branch_id' => $this->branch_id,
             'branch' => $this->branch ? ['id' => $this->branch->id, 'code' => $this->branch->code, 'name' => $this->branch->name] : null,
             'product_id' => $this->product_id,

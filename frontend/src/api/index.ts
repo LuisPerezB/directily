@@ -266,6 +266,10 @@ export const supplyApi = {
   plans: (params?: { status?: string; page?: number; per_page?: number }) => getPage<T.SupplyRun>('/supply/plans', params),
   plan: (id: number, params?: { actionable_now?: boolean; product_id?: number; supplier_id?: number }) =>
     http.get<T.SupplyResponse<T.PlanDetail>>(`/supply/plans/${id}`, { params: cleanParams(params as object) }).then((r) => r.data),
+  /** Líneas del plan paginadas en el servidor (el detalle solo trae una vista previa). */
+  planLines: (id: number, params?: T.PlanLinesQuery) => getPage<T.PlanLine>(`/supply/plans/${id}/lines`, params),
+  /** Demanda no atendida del plan, paginada en el servidor. */
+  planShortfalls: (id: number, params?: T.PlanShortfallsQuery) => getPage<T.PlanShortfall>(`/supply/plans/${id}/shortfalls`, params),
   requestCostForecast: (payload: { as_of?: string; historical?: boolean; null_known_at_policy?: 'strict' | 'assume_valid_from' }) =>
     postData<T.SupplyRun>('/supply/cost-forecasts', payload),
   costForecasts: (params?: { run_id?: number; product_id?: number; supplier_id?: number; quality_status?: string; page?: number; per_page?: number }) =>

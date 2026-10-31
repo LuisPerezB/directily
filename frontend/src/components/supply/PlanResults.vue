@@ -5,7 +5,7 @@
  * fechas de emisión y recepción, costo, restricciones activas y justificación; la demanda no atendida con su causa; la
  * infactibilidad con causas y alternativas; las ofertas excluidas y la producción no configurada.
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
@@ -13,25 +13,28 @@ import InlineNotice from '@/components/ui/InlineNotice.vue'
 import LoadingState from '@/components/ui/LoadingState.vue'
 import QualityBadge from '@/components/ui/QualityBadge.vue'
 import EnvelopePanel from '@/components/forecast/EnvelopePanel.vue'
+import AppIcon from '@/components/ui/AppIcon.vue'
 import SolverStatus from './SolverStatus.vue'
+import PlanLinesTable from './PlanLinesTable.vue'
+import PlanShortfallsTable from './PlanShortfallsTable.vue'
 import { supplyApi } from '@/api'
 import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
 import { formatCurrency, formatDate, formatNumber, formatPercent } from '@/utils/format'
-import { infeasibilityCauses, planTotals, shortfallTotals, solverHasPlan, sortPlanLines } from '@/utils/supply'
+import { infeasibilityCauses, planCutoff, solverHasPlan } from '@/utils/supply'
 
 const props = defineProps<{ runId: number }>()
 const { t, te } = useI18n()
 const tenant = useTenantStore()
-const onlyNow = ref(false)
-const result = useAsync(() => supplyApi.plan(props.runId, { actionable_now: onlyNow.value || undefined }), { watch: [() => props.runId, onlyNow] })
+// El detalle trae totales y resumen; las líneas y la demanda no atendida se paginan en el servidor (PlanLinesTable / PlanShortfallsTable).
+const result = useAsync(() => supplyApi.plan(props.runId), { watch: [() => props.runId] })
 const data = computed(() => result.data.value?.data ?? null)
 const envelope = computed(() => result.data.value?.envelope ?? null)
 const plan = computed(() => data.value?.plan ?? null)
-const lines = computed(() => sortPlanLines(data.value?.lines ?? []))
-const totals = computed(() => planTotals(data.value?.lines ?? []))
-const shortfalls = computed(() => data.value?.shortfalls ?? [])
-const shortfallSum = computed(() => shortfallTotals(shortfalls.value))
+const cutoff = computed(() => planCutoff(plan.value))
+const linesSummary = computed(() => data.value?.lines_summary ?? { total: 0, shown: 0, matched: 0, truncated: false })
+const shortfallsSummary = computed(() => data.value?.shortfalls_summary ?? { total: 0, shown: 0, matched: 0, truncated: false })
+const branches = computed(() => data.value?.branches ?? [])
 const causes = computed(() => infeasibilityCauses(data.value?.infeasibility))
 const excluded = computed(() => (data.value?.offers ?? []).filter((o) => o.status !== 'comparable'))
 const binding = computed(() => (data.value?.constraints ?? []).filter((c) => c.binding))
@@ -40,7 +43,6 @@ const currency = computed(() => plan.value?.currency ?? tenant.currency)
 const infeasible = computed(() => plan.value?.solver_status === 'infeasible' || !!data.value?.infeasibility?.message)
 const hasPlan = computed(() => solverHasPlan(plan.value?.solver_status))
 const money = (v: number | null | undefined, d = 2): string => formatCurrency(v, currency.value, d)
-const reasonText = (r: string | null | undefined): string => (r && te(`supply.shortfall.${r}`) ? t(`supply.shortfall.${r}`) : (r ?? t('supply.shortfall.unknown')))
 const familyText = (f: string): string => (te(`supply.families.${f}`) ? t(`supply.families.${f}`) : f)
 const offerReason = (r: string): string => (te(`supply.offerReasons.${r}`) ? t(`supply.offerReasons.${r}`) : r)
 const prodNotConfigured = computed(() => data.value?.production?.status === 'not_configured')
@@ -62,7 +64,15 @@ const prodNotConfigured = computed(() => data.value?.production?.status === 'not
           <h3 class="section-title m-0">{{ t('supply.plan.solverTitle') }}</h3>
           <SolverStatus :status="plan.solver_status" :gap="plan.mip_gap" :seconds="plan.solve_seconds" :notes="data.solver?.notes" />
           <p class="text-sm m-0">{{ t(`supply.plan.objectives.${plan.objective}`) }} · {{ t(`supply.plan.coverageModes.${plan.coverage_mode}`) }}</p>
+          <p v-if="cutoff.asOf" class="text-sm m-0 flex flex-wrap items-center gap-2" data-test="plan-cutoff">
+            <span class="badge badge-info" :title="t('supply.plan.cutoffHint')"><AppIcon name="clock" :size="14" class="mr-1" />{{ t('supply.plan.cutoff', { date: formatDate(cutoff.asOf, 'long') }) }}</span>
+          </p>
+          <p v-else class="text-sm text-fg-muted m-0" data-test="plan-cutoff-unknown">{{ t('supply.plan.cutoffUnknown') }}</p>
         </div>
+
+        <InlineNotice v-if="cutoff.isStale" kind="warning" :title="t('supply.plan.staleTitle')" data-test="plan-stale">
+          {{ t('supply.plan.stale', { date: formatDate(cutoff.asOf, 'long'), age: t('supply.plan.ageDays', cutoff.ageDays ?? 0) }) }}
+        </InlineNotice>
 
         <dl v-if="hasPlan" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 m-0" data-test="plan-totals">
           <div class="rounded-xl border border-line p-3"><dt class="text-sm text-fg-muted">{{ t('supply.plan.purchaseCost') }}</dt><dd class="m-0 text-xl font-bold tabular">{{ money(plan.total_purchase_cost, 0) }}</dd></div>
@@ -98,63 +108,12 @@ const prodNotConfigured = computed(() => data.value?.production?.status === 'not
           </div>
         </div>
 
-        <div v-if="hasPlan">
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
-            <h3 class="section-title m-0">{{ t('supply.plan.linesTitle') }} <span class="text-sm font-normal text-fg-muted">({{ t('supply.plan.linesCount', { n: totals.lines, now: totals.actionableNow }) }})</span></h3>
-            <label class="flex items-center gap-2 text-sm"><input v-model="onlyNow" type="checkbox" /> {{ t('supply.plan.onlyNow') }}</label>
-          </div>
-          <p v-if="!lines.length" class="text-sm text-fg-muted m-0" data-test="no-lines">{{ t('supply.plan.noLines') }}</p>
-          <div v-else class="table-wrap">
-            <table class="table" data-test="plan-lines">
-              <caption class="sr-only">{{ t('supply.plan.linesTitle') }}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">{{ t('common.product') }}</th><th scope="col">{{ t('common.branch') }}</th><th scope="col">{{ t('supply.plan.supplier') }}</th>
-                  <th scope="col" class="num">{{ t('supply.plan.quantity') }}</th><th scope="col">{{ t('supply.plan.issueDate') }}</th><th scope="col">{{ t('supply.plan.receiptDate') }}</th>
-                  <th scope="col" class="num">{{ t('supply.plan.unitCost') }}</th><th scope="col" class="num">{{ t('supply.plan.lineCost') }}</th><th scope="col">{{ t('supply.plan.constraints') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(l, i) in lines" :key="l.id ?? i" :data-actionable="l.actionable_now">
-                  <td><span class="font-medium block">{{ l.product?.name ?? `#${l.product_id}` }}</span><span class="text-xs text-fg-muted">{{ l.product?.sku }}</span><span v-if="l.line_type === 'production'" class="badge ml-1">{{ t('supply.plan.production') }}</span></td>
-                  <td>{{ l.branch?.name ?? '—' }}</td>
-                  <td>{{ l.supplier?.name ?? '—' }}</td>
-                  <td class="num">{{ formatNumber(l.quantity, 2) }} <span class="text-xs text-fg-muted">{{ l.unit }}</span><span v-if="l.offer_quantity != null" class="block text-xs text-fg-muted">{{ formatNumber(l.offer_quantity, 2) }} {{ l.offer_unit }}</span></td>
-                  <td>{{ formatDate(l.order_date) }}<span v-if="l.actionable_now" class="badge badge-success block w-fit mt-1" data-test="actionable-now">{{ t('supply.plan.issueToday') }}</span></td>
-                  <td>{{ formatDate(l.expected_receipt_date) }}</td>
-                  <td class="num">{{ l.unit_cost != null ? money(l.unit_cost, 4) : '—' }}</td>
-                  <td class="num">{{ l.line_cost != null ? money(l.line_cost, 2) : '—' }}</td>
-                  <td>
-                    <span v-for="(b, k) in l.binding_constraints ?? []" :key="k" class="badge badge-warning mr-1" :title="`${formatNumber(b.used, 2)} / ${formatNumber(b.limit, 2)}`" data-test="binding">{{ familyText(b.family) }}</span>
-                    <span v-if="!(l.binding_constraints ?? []).length" class="text-fg-muted">—</span>
-                    <details v-if="l.justification" class="text-xs mt-1"><summary class="cursor-pointer text-fg-muted">{{ t('supply.plan.why') }}</summary><p class="m-0 max-w-xs">{{ l.justification }}</p></details>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PlanLinesTable v-if="hasPlan" :run-id="runId" :summary="linesSummary" :branches="branches" :cutoff="cutoff" :currency="currency" />
 
         <div data-test="shortfalls">
           <h3 class="section-title mb-1">{{ t('supply.plan.shortfallsTitle') }}</h3>
-          <p v-if="!shortfalls.length" class="text-sm text-fg-muted m-0">{{ t('supply.plan.noShortfalls') }}</p>
-          <template v-else>
-            <p class="text-sm text-fg-muted mb-2">{{ t('supply.plan.shortfallsText', { units: formatNumber(shortfallSum.unmet, 0), pct: shortfallSum.share != null ? formatPercent(shortfallSum.share, 1) : '—' }) }}</p>
-            <div class="table-wrap">
-              <table class="table">
-                <caption class="sr-only">{{ t('supply.plan.shortfallsTitle') }}</caption>
-                <thead><tr><th scope="col">{{ t('common.product') }}</th><th scope="col">{{ t('supply.plan.period') }}</th><th scope="col" class="num">{{ t('supply.plan.demand') }}</th><th scope="col" class="num">{{ t('supply.plan.unmet') }}</th><th scope="col">{{ t('supply.plan.reason') }}</th></tr></thead>
-                <tbody>
-                  <tr v-for="(s, i) in shortfalls.slice(0, 200)" :key="i">
-                    <td>{{ s.product?.name ?? `#${s.product_id}` }}</td>
-                    <td>{{ formatDate(s.period_start, 'short') }} – {{ formatDate(s.period_end, 'short') }}</td>
-                    <td class="num">{{ formatNumber(s.demand, 1) }}</td><td class="num">{{ formatNumber(s.unmet, 1) }}</td>
-                    <td><span class="badge badge-warning" data-test="shortfall-reason">{{ reasonText(s.reason) }}</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </template>
+          <p v-if="!shortfallsSummary.total" class="text-sm text-fg-muted m-0">{{ t('supply.plan.noShortfalls') }}</p>
+          <PlanShortfallsTable v-else :run-id="runId" :summary="shortfallsSummary" :branches="branches" />
         </div>
 
         <div v-if="binding.length" data-test="active-constraints">

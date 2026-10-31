@@ -855,7 +855,9 @@ export interface PlanLine {
 export type ShortfallReason = 'lead_time' | 'budget' | 'supplier_capacity' | 'storage_capacity' | 'resource_capacity' | 'economic' | 'no_offer' | 'mixed'
 
 export interface PlanShortfall {
+  id?: number
   branch_id: number | null
+  branch?: { id: number; code: string; name: string } | null
   product_id: number
   product?: { id: number; sku: string; name: string } | null
   period_start: ISODate
@@ -882,6 +884,55 @@ export interface SupplyPlanSummary {
   forecast_run_id: number | null
   is_optimal: boolean
   note: string
+  /** Fecha de corte: el plan usa datos hasta ese día (null si se desconoce). */
+  as_of: ISODate | null
+  /** Hoy en la zona horaria de la empresa, según el servidor. */
+  today: ISODate
+  timezone: string
+  /** `today − as_of` en días: 0 = el plan se calculó con datos de hoy; > 0 = datos desactualizados; null = sin fecha de corte. */
+  as_of_age_days: number | null
+}
+
+/** Resumen de una lista que el detalle del plan solo trae como vista previa (el listado completo se pagina en `/lines` y `/shortfalls`). */
+export interface PlanListSummary {
+  total: number
+  shown: number
+  matched: number
+  truncated: boolean
+  /** Solo en `lines_summary`: líneas cuya emisión sugerida es la fecha de corte. */
+  actionable_now?: number
+  /** Solo en `shortfalls_summary`. */
+  unmet_units?: number
+  demand_units?: number
+}
+
+export interface PlanBranch {
+  id: number
+  code: string
+  name: string
+}
+
+/** Filtros de `GET /supply/plans/{id}/lines`. `sort`: `order_date`, `expected_receipt_date`, `product`, `branch`, `supplier`, `quantity`, `unit_cost`, `line_cost` (prefijo `-` = descendente). */
+export interface PlanLinesQuery {
+  page?: number
+  per_page?: number
+  branch_id?: number
+  product_id?: number
+  supplier_id?: number
+  search?: string
+  actionable_now?: boolean
+  sort?: string
+}
+
+/** Filtros de `GET /supply/plans/{id}/shortfalls`. `sort`: `period_start`, `product`, `branch`, `demand`, `unmet`, `reason` (prefijo `-` = descendente). */
+export interface PlanShortfallsQuery {
+  page?: number
+  per_page?: number
+  branch_id?: number
+  product_id?: number
+  search?: string
+  reason?: string
+  sort?: string
 }
 
 export interface PlanInfeasibility {
@@ -906,8 +957,14 @@ export interface PlanOfferReport {
 export interface PlanDetail {
   run: SupplyRun
   plan: SupplyPlanSummary | null
+  /** Vista previa (primeras 20); el listado completo y paginado está en `supplyApi.planLines`. */
   lines: PlanLine[]
+  lines_summary: PlanListSummary
+  /** Vista previa (primeras 20); el listado completo y paginado está en `supplyApi.planShortfalls`. */
   shortfalls: PlanShortfall[]
+  shortfalls_summary: PlanListSummary
+  /** Sucursales con líneas o faltantes en el plan (filtro de las tablas). */
+  branches: PlanBranch[]
   constraints: { family: string; ref?: string | number | null; period?: string | number | null; used: number; limit: number; binding: boolean }[]
   solver: { status: SolverStatus; detail?: string; notes?: string[]; components?: number; mip_gap?: number | null; seconds?: number } | null
   diagnosis: Record<string, unknown> | null

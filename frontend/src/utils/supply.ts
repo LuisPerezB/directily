@@ -1,4 +1,4 @@
-import type { PlanInfeasibility, PlanLine, PlanRequest, ScenarioStrategyResult, SolverStatus, CausalCheck } from '@/api/types'
+import type { CausalCheck, PlanInfeasibility, PlanRequest, ScenarioStrategyResult, SolverStatus, SupplyPlanSummary } from '@/api/types'
 import { DASH, formatPercent } from './format'
 
 /**
@@ -36,30 +36,28 @@ export function formatGap(gap: number | null | undefined): string {
   return formatPercent(gap, gap < 0.0001 ? 4 : 2)
 }
 
-/** Primero lo que se puede emitir hoy; luego por fecha de emisión. */
-export function sortPlanLines(lines: readonly PlanLine[]): PlanLine[] {
-  return lines
-    .map((l, i) => ({ l, i }))
-    .sort((a, b) => Number(b.l.actionable_now) - Number(a.l.actionable_now) || (a.l.order_date ?? '').localeCompare(b.l.order_date ?? '') || a.i - b.i)
-    .map((x) => x.l)
+/**
+ * Fecha de corte de un plan frente a HOY en la zona horaria de la empresa (calculada por la API: `as_of_age_days`).
+ * `actionable_now` de una línea significa «se emite en la fecha de corte», no «hoy»: solo es «emitir ya» si el corte es hoy.
+ */
+export interface PlanCutoff {
+  /** Último día con datos que usó el plan; null si se desconoce. */
+  asOf: string | null
+  /** Días entre la fecha de corte y hoy (0 = hoy); null si se desconoce. */
+  ageDays: number | null
+  /** El plan se calculó con datos de hoy: sus líneas del día de corte sí se pueden emitir ya. */
+  isToday: boolean
+  /** El plan se calculó con datos anteriores a hoy: conviene regenerarlo. */
+  isStale: boolean
 }
 
-export function planTotals(lines: readonly PlanLine[]): { lines: number; actionableNow: number; cost: number | null } {
-  const costs = lines.map((l) => l.line_cost).filter((c): c is number => c != null)
-  return {
-    lines: lines.length,
-    actionableNow: lines.filter((l) => l.actionable_now).length,
-    cost: costs.length ? costs.reduce((a, b) => a + b, 0) : null,
-  }
+export function planCutoff(plan: Pick<SupplyPlanSummary, 'as_of' | 'as_of_age_days'> | null | undefined): PlanCutoff {
+  const asOf = plan?.as_of ?? null
+  const age = asOf != null && typeof plan?.as_of_age_days === 'number' && Number.isFinite(plan.as_of_age_days) ? plan.as_of_age_days : null
+  return { asOf, ageDays: age, isToday: age !== null && age <= 0, isStale: age !== null && age > 0 }
 }
 
 export const SHORTFALL_REASONS = ['lead_time', 'budget', 'supplier_capacity', 'storage_capacity', 'resource_capacity', 'economic', 'no_offer', 'mixed'] as const
-
-export function shortfallTotals(rows: readonly { unmet: number; demand: number }[]): { unmet: number; demand: number; share: number | null } {
-  const unmet = rows.reduce((a, r) => a + r.unmet, 0)
-  const demand = rows.reduce((a, r) => a + r.demand, 0)
-  return { unmet, demand, share: demand > 0 ? unmet / demand : null }
-}
 
 /** Causas de infactibilidad ordenadas por demanda recuperable al relajar cada restricción. */
 export function infeasibilityCauses(inf: PlanInfeasibility | null | undefined): PlanInfeasibility['causes'] {

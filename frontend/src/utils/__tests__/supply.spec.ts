@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
-  causalCounts, classificationCounts, DEFAULT_PLAN_FORM, formatGap, infeasibilityCauses, isProvenOptimal, planRequestFromForm, planTotals,
-  shortfallTotals, solverHasPlan, solverTone, sortPlanLines, validatePlanForm,
+  causalCounts, classificationCounts, DEFAULT_PLAN_FORM, formatGap, infeasibilityCauses, isProvenOptimal, planCutoff, planRequestFromForm,
+  solverHasPlan, solverTone, validatePlanForm,
 } from '../supply'
-import type { CausalCheck, PlanLine, ScenarioStrategyResult } from '@/api/types'
-
-const line = (over: Partial<PlanLine> = {}): PlanLine => ({
-  line_type: 'purchase', branch_id: 1, product_id: 1, supplier_id: 1, offer_id: 1, quantity: 10, unit: 'saco', offer_quantity: 10, offer_unit: 'saco',
-  order_date: '2026-11-02', expected_receipt_date: '2026-11-09', unit_cost: 8, line_cost: 80, currency: 'USD', actionable_now: false, binding_constraints: [], justification: null, assumptions: null, ...over,
-})
+import type { CausalCheck, ScenarioStrategyResult } from '@/api/types'
 
 describe('estado del solver: nunca se llama óptimo a lo que no lo es', () => {
   it('solo "optimal" es un óptimo probado', () => {
@@ -40,26 +35,28 @@ describe('estado del solver: nunca se llama óptimo a lo que no lo es', () => {
   })
 })
 
-describe('líneas del plan', () => {
-  it('lo que se puede emitir hoy va primero y luego por fecha de emisión', () => {
-    const sorted = sortPlanLines([
-      line({ product_id: 1, order_date: '2026-11-09' }), line({ product_id: 2, order_date: '2026-11-02', actionable_now: true }),
-      line({ product_id: 3, order_date: '2026-11-04' }), line({ product_id: 4, order_date: '2026-10-30', actionable_now: true }),
-    ])
-    expect(sorted.map((l) => l.product_id)).toEqual([4, 2, 3, 1])
+describe('fecha de corte del plan', () => {
+  it('con el corte en hoy, las líneas del día de corte sí se pueden emitir ya', () => {
+    expect(planCutoff({ as_of: '2026-10-31', as_of_age_days: 0 })).toEqual({ asOf: '2026-10-31', ageDays: 0, isToday: true, isStale: false })
   })
 
-  it('totales: líneas, emisibles hoy y costo; sin costos conocidos el total es desconocido', () => {
-    expect(planTotals([line({ line_cost: 80, actionable_now: true }), line({ line_cost: 20 })])).toEqual({ lines: 2, actionableNow: 1, cost: 100 })
-    expect(planTotals([line({ line_cost: null })]).cost).toBeNull()
-    expect(planTotals([])).toEqual({ lines: 0, actionableNow: 0, cost: null })
+  it('con datos anteriores a hoy el plan está desactualizado y no se habla de «hoy»', () => {
+    expect(planCutoff({ as_of: '2026-10-26', as_of_age_days: 5 })).toEqual({ asOf: '2026-10-26', ageDays: 5, isToday: false, isStale: true })
   })
 
-  it('demanda no atendida: totales y proporción', () => {
-    expect(shortfallTotals([{ unmet: 10, demand: 40 }, { unmet: 0, demand: 60 }])).toEqual({ unmet: 10, demand: 100, share: 0.1 })
-    expect(shortfallTotals([]).share).toBeNull()
+  it('un corte posterior a hoy (desfase de zona) no se marca como desactualizado', () => {
+    expect(planCutoff({ as_of: '2026-11-01', as_of_age_days: -1 })).toMatchObject({ isToday: true, isStale: false })
   })
 
+  it('sin fecha de corte o sin antigüedad no se afirma que sea de hoy ni que esté desactualizado', () => {
+    for (const plan of [null, undefined, { as_of: null, as_of_age_days: null }, { as_of: '2026-10-26', as_of_age_days: null }]) {
+      expect(planCutoff(plan)).toMatchObject({ isToday: false, isStale: false, ageDays: null })
+    }
+    expect(planCutoff({ as_of: null, as_of_age_days: 3 }).ageDays).toBeNull()
+  })
+})
+
+describe('causas de infactibilidad', () => {
   it('las causas de infactibilidad se ordenan por unidades recuperables', () => {
     const causes = infeasibilityCauses({ message: 'x', alternatives: [], causes: [
       { family: 'budget', label: 'Presupuesto', units_recovered: 5, unmet_with_constraint: 50, unmet_if_relaxed: 45 },

@@ -4269,25 +4269,37 @@ paths:
       description: 'Sugerencias: Predictily no envía pedidos ni compromete fondos.
 
 
+        Devuelve la cabecera con totales y la fecha de corte (`plan.as_of`, `plan.today`, `plan.as_of_age_days`),
+        el resumen de líneas y de demanda no atendida (`lines_summary`, `shortfalls_summary`), las sucursales del
+        plan y una VISTA PREVIA acotada (las primeras 20) de `lines` y `shortfalls`: el listado completo y paginado
+        está en `GET /supply/plans/{id}/lines` y `GET /supply/plans/{id}/shortfalls`. `actionable_now` de una línea
+        significa «su fecha de emisión es la fecha de corte del plan», que solo equivale a «emitir hoy» cuando `plan.as_of_age_days`
+        es 0.
+
+
         Habilidad requerida: `forecast.view`.'
       parameters:
       - $ref: '#/components/parameters/TenantHeader'
       - $ref: '#/components/parameters/Id'
       - name: actionable_now
         in: query
+        description: Filtra la vista previa de `lines`
         schema:
           type: boolean
       - name: product_id
         in: query
+        description: Filtra la vista previa de `lines`
         schema:
           type: integer
       - name: supplier_id
         in: query
+        description: Filtra la vista previa de `lines`
         schema:
           type: integer
       responses:
         '200':
-          description: Plan, líneas, demanda no atendida, restricciones y envoltura (result_type = optimized_plan)
+          description: Plan, resumen, vista previa de líneas y demanda no atendida, restricciones y envoltura (result_type
+            = optimized_plan)
           content:
             application/json:
               schema:
@@ -4301,6 +4313,163 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+      x-ability: forecast.view
+  /supply/plans/{id}/lines:
+    get:
+      tags:
+      - Abastecimiento
+      summary: Líneas de un plan de reposición (paginadas)
+      description: 'Paginación y filtros en el servidor, siempre acotados a la empresa activa (un plan de otra empresa
+        responde 404). Sin `sort`, primero las líneas cuya emisión sugerida es la fecha de corte y luego por fecha
+        de emisión. Una corrida sin plan devuelve una página vacía.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - name: branch_id
+        in: query
+        schema:
+          type: integer
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: supplier_id
+        in: query
+        schema:
+          type: integer
+      - name: search
+        in: query
+        description: SKU o parte del nombre del producto (sin distinguir mayúsculas)
+        schema:
+          type: string
+          maxLength: 100
+      - name: actionable_now
+        in: query
+        description: Solo las líneas cuya fecha de emisión es la fecha de corte del plan (`plan.as_of`)
+        schema:
+          type: boolean
+      - name: sort
+        in: query
+        description: Lista blanca; prefijo `-` para descendente. Otro valor responde 422.
+        schema:
+          type: string
+          enum:
+          - order_date
+          - -order_date
+          - expected_receipt_date
+          - -expected_receipt_date
+          - product
+          - -product
+          - branch
+          - -branch
+          - supplier
+          - -supplier
+          - quantity
+          - -quantity
+          - unit_cost
+          - -unit_cost
+          - line_cost
+          - -line_cost
+      responses:
+        '200':
+          description: Página de líneas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SupplyPlanLine'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /supply/plans/{id}/shortfalls:
+    get:
+      tags:
+      - Abastecimiento
+      summary: Demanda no atendida de un plan de reposición (paginada)
+      description: 'Paginación y filtros en el servidor, siempre acotados a la empresa activa (un plan de otra empresa
+        responde 404). Sin `sort`, por inicio del período.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - name: branch_id
+        in: query
+        schema:
+          type: integer
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: search
+        in: query
+        description: SKU o parte del nombre del producto (sin distinguir mayúsculas)
+        schema:
+          type: string
+          maxLength: 100
+      - name: reason
+        in: query
+        description: Causa del faltante (lead_time, budget, supplier_capacity, storage_capacity, resource_capacity,
+          economic, no_offer, mixed)
+        schema:
+          type: string
+          maxLength: 40
+      - name: sort
+        in: query
+        description: Lista blanca; prefijo `-` para descendente. Otro valor responde 422.
+        schema:
+          type: string
+          enum:
+          - period_start
+          - -period_start
+          - product
+          - -product
+          - branch
+          - -branch
+          - demand
+          - -demand
+          - unmet
+          - -unmet
+          - reason
+          - -reason
+      responses:
+        '200':
+          description: Página de faltantes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SupplyPlanShortfall'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
       x-ability: forecast.view
   /supply/production/recipes:
     get:
@@ -8398,6 +8567,8 @@ components:
           type: string
         actionable_now:
           type: boolean
+          description: Su fecha de emisión es la fecha de corte del plan (plan.as_of); equivale a «emitir hoy» solo
+            si plan.as_of_age_days es 0
         binding_constraints:
           type: array
           items:
@@ -8412,9 +8583,66 @@ components:
           - object
           - 'null'
           additionalProperties: true
+    SupplyPlanShortfall:
+      type: object
+      properties:
+        branch_id:
+          type: integer
+        branch:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        product_id:
+          type: integer
+        product:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+        demand:
+          type: number
+        unmet:
+          type: number
+        reason:
+          type: string
+          description: lead_time, budget, supplier_capacity, storage_capacity, resource_capacity, no_offer, mixed
+    SupplyPlanListSummary:
+      type: object
+      description: Resumen de una lista que el detalle del plan solo muestra como vista previa
+      properties:
+        total:
+          type: integer
+          description: Total en el plan
+        shown:
+          type: integer
+          description: Elementos de la vista previa devuelta
+        matched:
+          type: integer
+          description: Elementos que cumplen los filtros de la petición
+        truncated:
+          type: boolean
+          description: true si la vista previa no incluye todo lo que cumple los filtros (use /lines o /shortfalls)
+        actionable_now:
+          type: integer
+          description: Solo en `lines_summary`; líneas con emisión en la fecha de corte
+        unmet_units:
+          type: number
+          description: Solo en `shortfalls_summary`; suma de la demanda no atendida
+        demand_units:
+          type: number
+          description: Solo en `shortfalls_summary`; suma de la demanda de esos períodos
     SupplyPlanDetail:
       type: object
-      description: 'Plan de reposición: SUGERENCIAS; Predictily no envía pedidos ni compromete fondos.'
+      description: 'Plan de reposición: SUGERENCIAS; Predictily no envía pedidos ni compromete fondos. `lines` y
+        `shortfalls` son una vista previa (las primeras 20): el listado completo y paginado está en /supply/plans/{id}/lines
+        y /supply/plans/{id}/shortfalls.'
       properties:
         run:
           $ref: '#/components/schemas/SupplyRun'
@@ -8424,39 +8652,36 @@ components:
           - 'null'
           additionalProperties: true
           description: 'Cabecera del plan: objective, coverage_mode, solver_status (optimal|feasible_with_gap|time_limit|infeasible|heuristic_fallback|not_solved),
-            mip_gap, costos, unmet_units_total, note'
+            mip_gap, costos, unmet_units_total, note. Fecha de corte: as_of (datos hasta ese día; null si se desconoce),
+            today (hoy en la zona horaria de la empresa), timezone y as_of_age_days (today - as_of: 0 = el plan
+            se calculó con datos de hoy; > 0 = datos desactualizados, conviene regenerarlo; null = sin fecha de
+            corte).'
         lines:
           type: array
+          description: Vista previa (primeras 20; ver lines_summary.truncated)
           items:
             $ref: '#/components/schemas/SupplyPlanLine'
+        lines_summary:
+          $ref: '#/components/schemas/SupplyPlanListSummary'
         shortfalls:
           type: array
+          description: Vista previa (primeras 20; ver shortfalls_summary.truncated)
+          items:
+            $ref: '#/components/schemas/SupplyPlanShortfall'
+        shortfalls_summary:
+          $ref: '#/components/schemas/SupplyPlanListSummary'
+        branches:
+          type: array
+          description: Sucursales con líneas o faltantes en el plan (para el filtro de las tablas)
           items:
             type: object
             properties:
-              branch_id:
+              id:
                 type: integer
-              product_id:
-                type: integer
-              product:
-                type:
-                - object
-                - 'null'
-                additionalProperties: true
-              period_start:
+              code:
                 type: string
-                format: date
-              period_end:
+              name:
                 type: string
-                format: date
-              demand:
-                type: number
-              unmet:
-                type: number
-              reason:
-                type: string
-                description: lead_time, budget, supplier_capacity, storage_capacity, resource_capacity, no_offer,
-                  mixed
         constraints:
           type: array
           items:
