@@ -4277,10 +4277,23 @@ paths:
         es 0.
 
 
+        `balance` (balance por nodo y período del motor; cientos de KB en un plan real) es opt-in: por defecto vale
+        `null` («no solicitado») y solo trae datos con `?include=balance`. Un valor de `include` fuera de la lista
+        blanca responde 422.
+
+
         Habilidad requerida: `forecast.view`.'
       parameters:
       - $ref: '#/components/parameters/TenantHeader'
       - $ref: '#/components/parameters/Id'
+      - name: include
+        in: query
+        description: 'Bloques pesados a incluir, separados por comas. Valores permitidos: `balance`. Otro valor
+          responde 422.'
+        schema:
+          type: string
+          maxLength: 100
+          example: balance
       - name: actionable_now
         in: query
         description: Filtra la vista previa de `lines`
@@ -4313,6 +4326,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
       x-ability: forecast.view
   /supply/plans/{id}/lines:
     get:
@@ -8719,7 +8734,11 @@ components:
           description: 'status: not_configured sin recetas'
         receipts_summary: {}
         balance:
-          type: array
+          type:
+          - array
+          - 'null'
+          description: Balance por nodo y período del motor. null = no solicitado (por defecto); con `?include=balance`,
+            la lista ([] si el plan no la trae).
           items:
             type: object
             additionalProperties: true

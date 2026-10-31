@@ -134,6 +134,47 @@ class SupplyPlanPaginationTest extends TestCase
             ->assertJsonPath('data.shortfalls_summary.truncated', true);
     }
 
+    public function test_detail_returns_balance_only_when_requested_with_include(): void
+    {
+        [$tenant, $user, , $plan] = $this->setUpPlan();
+        $balance = [['branch_id' => 1, 'product_id' => 2, 'periods' => [['period' => 0, 'demand' => 10, 'sales' => 10, 'unmet' => 0, 'receipts' => 0, 'closing' => 5]]]];
+        DB::table('supply_plans')->where('id', $plan['plan'])->update(['details' => json_encode(['balance' => $balance, 'periods' => [['period' => 0, 'start' => '2026-10-27', 'end' => '2026-11-02']]])]);
+        $api = $this->actingAsTenantUser($user, $tenant);
+        $url = "/api/v1/supply/plans/{$plan['run']}";
+
+        // por defecto: la clave existe pero vale null («no solicitado»); `periods` y el resto del detalle no cambian
+        $api->getJson($url)->assertOk()->assertJsonPath('data.balance', null)->assertJsonPath('data.periods.0.period', 0)
+            ->assertJsonPath('data.lines_summary.total', 30)->assertJsonCount(20, 'data.lines');
+        $api->getJson("$url?include=")->assertOk()->assertJsonPath('data.balance', null);
+        // con include=balance (también combinado, con espacios o repetido) trae el balance del motor
+        foreach (['balance', ' balance ', 'balance,balance'] as $include) {
+            $api->getJson("$url?include=".urlencode($include))->assertOk()->assertJsonPath('data.balance.0.branch_id', 1)->assertJsonPath('data.balance.0.periods.0.closing', 5)
+                ->assertJsonCount(1, 'data.balance')->assertJsonCount(20, 'data.lines');
+        }
+        // un plan cuyo motor no devolvió balance responde lista vacía (no null) cuando se pide
+        DB::table('supply_plans')->where('id', $plan['plan'])->update(['details' => '{}']);
+        $api->getJson("$url?include=balance")->assertOk()->assertJsonCount(0, 'data.balance')->assertJsonPath('data.balance', []);
+
+        // valores fuera de la lista blanca → 422, aunque vayan junto a uno válido; nunca se ignoran en silencio
+        foreach (['foo', 'balance,foo', 'lines', 'Balance', 'periods'] as $bad) {
+            $api->getJson("$url?include=".urlencode($bad))->assertStatus(422)->assertJsonValidationErrors(['include']);
+        }
+        $api->getJson("$url?include[]=balance")->assertStatus(422)->assertJsonValidationErrors(['include']);
+        $api->getJson("$url?include=".str_repeat('a', 101))->assertStatus(422);
+    }
+
+    public function test_a_run_without_plan_keeps_the_balance_key_in_the_detail(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Viewer);
+        $cat = $this->seedCatalog($tenant);
+        $plan = $this->withinTenant($tenant, fn () => $this->seedPlan($tenant, $cat, self::AS_OF, false));
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        $api->getJson("/api/v1/supply/plans/{$plan['run']}")->assertOk()->assertJsonPath('data.balance', null);
+        $api->getJson("/api/v1/supply/plans/{$plan['run']}?include=balance")->assertOk()->assertJsonPath('data.balance', []);
+        $api->getJson("/api/v1/supply/plans/{$plan['run']}?include=foo")->assertStatus(422);
+    }
+
     public function test_lines_are_paginated_with_standard_data_and_meta(): void
     {
         [$tenant, $user, , $plan] = $this->setUpPlan();

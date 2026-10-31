@@ -16,11 +16,11 @@ Detalle por paquete: `docs/architecture/v2/P1-demanda.md`, `P2-comportamiento.md
 | Verificación | Resultado |
 |---|---|
 | Motor `pytest` (BD recién migrada) | ✅ 418 pruebas |
-| Backend `php artisan test` (PostgreSQL) | ✅ 437 pruebas, 2 omitidas (contratos MySQL/SQL Server sin servidor) |
-| Frontend (type-check, lint, vitest, build) | ✅ 298 pruebas |
+| Backend `php artisan test` (PostgreSQL) | ✅ 449 pruebas, 2 omitidas (contratos MySQL/SQL Server sin servidor) |
+| Frontend (type-check, lint, vitest, build) | ✅ 313 pruebas |
 | `e2e/mvp_acceptance.py` (compatibilidad etapa 1) | ✅ 32/32 |
-| `e2e/stage2_acceptance.py` (API real + cola + motor + PostgreSQL) | 🧪 252/252 (1 aviso de diseño documentado) |
-| OpenAPI unificada | 131 rutas / 182 operaciones (`docs/openapi/predictily-api.yaml`; etapa 2 en `v2.yaml`) |
+| `e2e/stage2_acceptance.py` (API real + cola + motor + PostgreSQL) | 🧪 256/256 (1 aviso de diseño documentado) |
+| OpenAPI unificada | 184 operaciones, todas las rutas reales documentadas (`docs/openapi/predictily-api.yaml`; etapa 2 en `v2.yaml`) |
 | Esquema | 8 migraciones aditivas y reversibles `2026_02_0x`, 27 tablas nuevas |
 
 | Componente (etapa 2) | Estado | Notas |

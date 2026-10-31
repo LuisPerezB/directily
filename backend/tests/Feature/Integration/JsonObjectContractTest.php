@@ -174,10 +174,13 @@ class JsonObjectContractTest extends TestCase
         // null sigue siendo null (el bloque no aplica) y las listas siguen siendo listas.
         $this->assertNull($this->rawJsonAt($r, 'data.infeasibility'));
         $this->assertNull($this->rawJsonAt($r, 'data.alternative_plan'));
-        foreach (['data.lines', 'data.lines.0.binding_constraints', 'data.shortfalls', 'data.constraints', 'data.offers', 'data.balance', 'data.periods',
+        foreach (['data.lines', 'data.lines.0.binding_constraints', 'data.shortfalls', 'data.constraints', 'data.offers', 'data.periods',
             'envelope.assumptions', 'envelope.limitations', 'data.run.assumptions', 'data.run.limitations'] as $list) {
             $this->assertJsonListAt($r, $list);
         }
+        // `balance` es opt-in: null = no solicitado; con `?include=balance` es una lista (vacía si el motor no la devolvió).
+        $this->assertNull($this->rawJsonAt($r, 'data.balance'));
+        $this->assertJsonListAt($api->getJson("/api/v1/supply/plans/{$plan['run']}?include=balance")->assertOk(), 'data.balance');
     }
 
     public function test_supply_scenario_cost_forecast_and_simulation_results_serialize_their_maps_as_objects(): void

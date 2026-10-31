@@ -38,7 +38,7 @@ const detail = (over: Partial<PlanDetail> = {}, planOver: Record<string, unknown
   branches: [{ id: 1, code: '001', name: 'Matriz' }, { id: 2, code: '002', name: 'Norte' }],
   constraints: [{ family: 'budget', ref: 1, period: 'x', used: 5000, limit: 5000, binding: true }], solver: { status: 'feasible_with_gap', notes: ['Brecha dentro de la tolerancia pedida.'] }, diagnosis: null, infeasibility: null, alternative_plan: null,
   offers: [{ offer_id: 9, supplier_id: 3, product_id: 1, status: 'excluded', reasons: ['no_fx_rate'], messages: [] }, { offer_id: 5, supplier_id: 2, product_id: 1, status: 'comparable', reasons: [], messages: [] }],
-  comparison_coverage: { offers_received: 2, offers_comparable: 1, offers_excluded: 1, comparable_share: 0.5 }, offer_diagnostics: [], excluded_nodes: [], production: { status: 'not_configured' }, periods: [], ...over,
+  comparison_coverage: { offers_received: 2, offers_comparable: 1, offers_excluded: 1, comparable_share: 0.5 }, offer_diagnostics: [], excluded_nodes: [], production: { status: 'not_configured' }, balance: null, periods: [], ...over,
 })
 const pageOf = <R,>(data: R[], total = data.length, current = 1, perPage = 25): Paginated<R> => ({ data, meta: { current_page: current, per_page: perPage, total, last_page: Math.max(1, Math.ceil(total / perPage)), from: null, to: null } })
 const defaultLines = (): PlanLine[] => [line({ id: 1, actionable_now: true, binding_constraints: [{ family: 'budget', ref: 1, period: 'x', used: 5000, limit: 5000 }] }), line({ id: 2, product_id: 2, order_date: '2026-11-03' })]

@@ -983,6 +983,8 @@ export interface PlanDetail {
   offer_diagnostics: Record<string, unknown>[]
   excluded_nodes: { product_id?: number; reason?: string; [key: string]: unknown }[]
   production: { status: 'not_configured' | string; [key: string]: unknown }
+  /** Balance por nodo y período del motor: `null` = no solicitado (por defecto); solo viene con `?include=balance`. La interfaz no lo usa. */
+  balance: { branch_id: number; product_id: number; periods: Record<string, unknown>[]; [key: string]: unknown }[] | null
   periods: { period: number; start: ISODate; end: ISODate }[]
 }
 

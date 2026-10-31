@@ -1,0 +1,317 @@
+Predictily · aceptación E2E de la etapa 2 · 2026-10-31 00:01 (America/Guayaquil) · API http://127.0.0.1:8000/api/v1
+
+══ Preparación (empresa A: registro, sucursales, catálogo, ventas, inventario, plazos) ══
+[OK ] backend responde (/up)
+[OK ] [A] 1. Registro de empresario
+[OK ] [A] 1. Empresa creada — e309c275-0f37-4e9c-9bb4-54731daaee61
+[OK ] [A] 2. Configura negocio y sucursales — 3 sucursales
+[OK ] [A] importa products — 62 filas válidas (5 s acumulados)
+[OK ] [A] importa sales — 99334 filas válidas, 44269 documentos (46 s acumulados)
+[OK ] [A] importa inventory — 133302 filas válidas (79 s acumulados)
+[OK ] [A] importa lead_times — 79 filas válidas (82 s acumulados)
+[OK ] [A] el asistente conversacional está desactivado desde el inicio (todo lo siguiente corre sin LLM) — missing_api_key
+   (83 s)
+
+══ 1 · Demanda v2 (horizontes, envoltura, manifiesto, reversión) ══
+        pronóstico H=14: trabajo 220 succeeded en 50 s
+[OK ] [Demanda] ejecución con horizonte 14 completada — run 80 v1 en 50 s 
+[OK ] [Demanda] H=14: envoltura presente con config_version y data_snapshot_id — config d41eb5e87a23…, snapshot 93, core demand, tipo forecast
+[OK ] [Demanda] H=14: horizon_support coherente (calculados ≤ 14 d con respaldo; los mayores 'not_computed') — {"7": "ok", "14": "ok", "30": "not_computed", "60": "not_computed", "90": "not_computed"}
+[OK ] [Demanda] H=14: respaldo = ok cuando historia ≥ 2×H y backtest ≥ H (reglas de abstención) — (historia, requerida, backtest) {'7': (730, 14, 90), '14': (730, 28, 90)}
+[OK ] [Demanda] H=14: quality_status coherente con el respaldo por horizonte — envoltura ok, resumen ok
+[OK ] [Demanda] H=14: incertidumbre declarada y supuestos/limitaciones listados — fuente conformal, 4 supuestos, limitaciones ['coverage_undeclared', 'p50_not_published']
+[OK ] [Demanda] un trabajo ejecutado una sola vez informa attempts = 1 (lo cuenta solo el backend, una vez por intento real) — attempts = 1
+[OK ] [Demanda] H=14: /forecasts/series informa respaldo ok y quality_status por punto — 14 puntos
+[OK ] [Demanda] H=14: pedir 30 días a una ejecución de 14 → 'not_computed' (no se inventa) — [{"code": "beyond_run_horizon", "message": "La ejecuci\u00f3n v1 se calcul\u00f3 a 14 d\u00edas: no incluye 30 d\u00edas."}]
+[OK ] [Demanda] H=14: productos y dashboard traen horizon_support
+[OK ] [Demanda] H=14: /accuracy/summary expone el manifiesto del run y coincide con el de /forecast-runs/{id} — demand-protocol-v1, config d41eb5e87a23…
+[OK ] [Demanda] H=14: protocolo independiente (E2-06) — el período final no participa en decisiones y es posterior a la selección — selección hasta 2026-07-28, calibración observable 2026-07-28, final 2026-07-29→2026-10-26, comprobaciones {'holdout_not_used_for_decisions': True, 'holdout_disjoint_from_selection': True, 'selection_windows_end_before_holdout_origin': True, 'calibration_residuals_observable_at_holdout_origin': True}
+[OK ] [Demanda] H=14: maduración de etiquetas y fechas de entrenamiento registradas — evidencia selección 2026-07-28, final 2026-10-26
+[OK ] [Demanda] H=14: MASE/RMSSE presentes y positivos (seleccionado y base) con tamaño de muestra — MASE 0.8416 (naive 1.0922), RMSSE 0.7626 (naive 1.0791), n=15458
+[OK ] [Demanda] H=14: pinball P10/P90, amplitud de intervalos y dinero separado de unidades — P10 0.3719, P90 0.636, P50 None, dinero USD
+[OK ] [Demanda] H=14: evaluación por tramo (h1-7…h61-90) y error del total de H días — tramos ['h1-7', 'h15-30', 'h31-60', 'h61-90', 'h8-14'], totales [7, 14, 30, 60, 90]
+        pronóstico H=60: trabajo 221 succeeded en 48 s
+[OK ] [Demanda] ejecución con horizonte 60 completada — run 81 v2 en 48 s 
+[OK ] [Demanda] H=60: envoltura presente con config_version y data_snapshot_id — config b2411833606e…, snapshot 94, core demand, tipo forecast
+[OK ] [Demanda] H=60: horizon_support coherente (calculados ≤ 60 d con respaldo; los mayores 'not_computed') — {"7": "ok", "14": "ok", "30": "ok", "60": "ok", "90": "not_computed"}
+[OK ] [Demanda] H=60: respaldo = ok cuando historia ≥ 2×H y backtest ≥ H (reglas de abstención) — (historia, requerida, backtest) {'7': (730, 14, 90), '14': (730, 28, 90), '30': (730, 60, 90), '60': (730, 120, 90)}
+[OK ] [Demanda] H=60: quality_status coherente con el respaldo por horizonte — envoltura ok, resumen ok
+[OK ] [Demanda] H=60: incertidumbre declarada y supuestos/limitaciones listados — fuente conformal, 4 supuestos, limitaciones ['coverage_undeclared', 'p50_not_published']
+[OK ] [Demanda] H=60: nueva versión vigente y la anterior deja de serlo — v1 → v2
+[OK ] [Demanda] H=60: serie a 60 días respaldada (historia 730 d ≥ 120 d) con 60 puntos diarios — 60 puntos
+[OK ] [Demanda] H=60: /accuracy/summary expone el manifiesto del run y coincide con el de /forecast-runs/{id} — demand-protocol-v1, config b2411833606e…
+[OK ] [Demanda] H=60: protocolo independiente (E2-06) — el período final no participa en decisiones y es posterior a la selección — selección hasta 2026-07-28, calibración observable 2026-07-28, final 2026-07-29→2026-10-26, comprobaciones {'holdout_not_used_for_decisions': True, 'holdout_disjoint_from_selection': True, 'selection_windows_end_before_holdout_origin': True, 'calibration_residuals_observable_at_holdout_origin': True}
+[OK ] [Demanda] H=60: maduración de etiquetas y fechas de entrenamiento registradas — evidencia selección 2026-07-28, final 2026-10-26
+[OK ] [Demanda] H=60: MASE/RMSSE presentes y positivos (seleccionado y base) con tamaño de muestra — MASE 0.8416 (naive 1.0922), RMSSE 0.7626 (naive 1.0791), n=15458
+[OK ] [Demanda] H=60: pinball P10/P90, amplitud de intervalos y dinero separado de unidades — P10 0.3719, P90 0.636, P50 None, dinero USD
+[OK ] [Demanda] H=60: evaluación por tramo (h1-7…h61-90) y error del total de H días — tramos ['h1-7', 'h15-30', 'h31-60', 'h61-90', 'h8-14'], totales [7, 14, 30, 60, 90]
+[OK ] [Demanda] /accuracy/summary por defecto apunta a la ejecución vigente
+[OK ] [Demanda] registro de modelos: solo los de la ejecución vigente están en producción — 3 modelos, familias ['auto_ets', 'lightgbm_global', 'window_average']
+[OK ] [Demanda] reversión a la ejecución vigente → 409 rollback_already_current
+[OK ] [Demanda] reversión a una ejecución inexistente → 404
+[OK ] [Demanda] reversión sin run_id → 422
+[OK ] [Demanda] reversión de la ejecución vigente a la anterior — v2 → v1, restaurados [441, 443, 447], retirados [449, 451, 455]
+[OK ] [Demanda] tras revertir: vigente única = ejecución anterior; series, precisión y modelos apuntan a ella — vigente 80; modelos en producción de la ejecución [80]
+[OK ] [Demanda] tras revertir: los pronósticos de la ejecución restaurada son los de su corte (no se recalcula) — corte 2026-10-26
+[OK ] [Demanda] reversión con SHA-256 de los artefactos verificado por el backend (artifact_path relativo a ENGINE_ARTIFACTS_DIR) — artifacts_verified = true; 1/1 artefactos verificados
+[OK ] [Demanda] SHA-256 del artefacto restaurado lightgbm_global coincide con el registro (verificación independiente) — lightgbm_global.joblib
+[OK ] [Demanda] 'avanzar' con rollback a una ejecución más nueva → 409 rollback_target_not_previous
+        pronóstico H=90: trabajo 222 succeeded en 48 s
+[OK ] [Demanda] ejecución con horizonte 90 completada — run 82 v3 en 48 s 
+[OK ] [Demanda] H=90 (vuelta): envoltura presente con config_version y data_snapshot_id — config 7f9c6e57b479…, snapshot 95, core demand, tipo forecast
+[OK ] [Demanda] H=90 (vuelta): horizon_support coherente (calculados ≤ 90 d con respaldo; los mayores 'not_computed') — {"7": "ok", "14": "ok", "30": "ok", "60": "ok", "90": "ok"}
+[OK ] [Demanda] H=90 (vuelta): respaldo = ok cuando historia ≥ 2×H y backtest ≥ H (reglas de abstención) — (historia, requerida, backtest) {'7': (730, 14, 90), '14': (730, 28, 90), '30': (730, 60, 90), '60': (730, 120, 90), '90': (730, 180, 90)}
+[OK ] [Demanda] H=90 (vuelta): quality_status coherente con el respaldo por horizonte — envoltura ok, resumen ok
+[OK ] [Demanda] H=90 (vuelta): incertidumbre declarada y supuestos/limitaciones listados — fuente conformal, 4 supuestos, limitaciones ['coverage_undeclared', 'p50_not_published']
+[OK ] [Demanda] 'vuelta' tras la reversión: nueva ejecución vigente única y modelos en producción solo de ella — v3 vigente; modelos de la ejecución [82]
+[OK ] [Demanda] los modelos de la ejecución revertida quedan retirados (no hay dos producciones a la vez) — 3 retirados de la ejecución 80
+[OK ] [Demanda] H=90: /accuracy/summary expone el manifiesto del run y coincide con el de /forecast-runs/{id} — demand-protocol-v1, config 7f9c6e57b479…
+[OK ] [Demanda] H=90: protocolo independiente (E2-06) — el período final no participa en decisiones y es posterior a la selección — selección hasta 2026-07-28, calibración observable 2026-07-28, final 2026-07-29→2026-10-26, comprobaciones {'holdout_not_used_for_decisions': True, 'holdout_disjoint_from_selection': True, 'selection_windows_end_before_holdout_origin': True, 'calibration_residuals_observable_at_holdout_origin': True}
+[OK ] [Demanda] H=90: maduración de etiquetas y fechas de entrenamiento registradas — evidencia selección 2026-07-28, final 2026-10-26
+[OK ] [Demanda] H=90: MASE/RMSSE presentes y positivos (seleccionado y base) con tamaño de muestra — MASE 0.8416 (naive 1.0922), RMSSE 0.7626 (naive 1.0791), n=15458
+[OK ] [Demanda] H=90: pinball P10/P90, amplitud de intervalos y dinero separado de unidades — P10 0.3719, P90 0.636, P50 None, dinero USD
+[OK ] [Demanda] H=90: evaluación por tramo (h1-7…h61-90) y error del total de H días — tramos ['h1-7', 'h15-30', 'h31-60', 'h61-90', 'h8-14'], totales [7, 14, 30, 60, 90]
+[OK ] [C] empresa de historia corta creada (segunda empresa del mismo usuario) — f26fbcc8-0243-4b78-8e39-c853bab60fe2
+[OK ] [C] importa solo 45 días de ventas (historia corta) — 2914 documentos desde 2026-09-12
+        pronóstico H=30 con 45 días de historia: trabajo 224 succeeded en 2 s
+[OK ] [C] E2-21: horizonte sin historia suficiente (< 2×H) → insufficient_data con motivo history_lt_2h; no se presenta como completo — {'7': ('insufficient_data', 45, 14, ['no_backtest']), '14': ('insufficient_data', 45, 28, ['no_backtest']), '30': ('insufficient_data', 45, 60, ['history_lt_2h', 'no_backtest'])}
+[OK ] [C] E2-21: la calidad global no es 'ok' si algún horizonte calculado carece de respaldo; los demás horizontes figuran 'not_computed' — quality_status insufficient_data
+[OK ] [C] E2-21: la serie a 30 días marca cada punto y el horizonte como insufficient_data (el número existe pero no se presenta como completo) — 30 puntos; motivos ['history_lt_2h', 'no_backtest']
+[OK ] [C] E2-21: productos y precisión informan la abstención del horizonte — 2 s
+   (159 s)
+
+══ 2 · Compradores (train/predict, calibración, coherencia, conciliación) ══
+        comprador train: trabajo 225 succeeded en 75 s
+[OK ] [Compradores] train completado — run 67 v1 calidad degraded en 75 s 
+[OK ] [Compradores] train: ejecución de evaluación con envoltura, config_version y data_snapshot_id — calidad degraded, horizontes [7, 30, 90]
+[OK ] [Compradores] manifiesto del entrenamiento: horizontes 7/30/90 con nivel (tier) y estado explícitos — {'7': ('trained', 'full'), '30': ('trained', 'full'), '90': ('trained', 'full')}
+[OK ] [Compradores] H=7: bloques cronológicos y separados por ≥ H días; el holdout no usa etiquetas inmaduras (E2-10, E2-08) — bloques ['train', 'calibration', 'selection', 'holdout']; madurez hasta 2026-10-26; separación 7 d
+[OK ] [Compradores] H=7: el holdout no decide modelo, calibrador ni umbrales — ["modelo", "hiperparámetros", "variables", "calibrador", "umbrales"]
+[OK ] [Compradores] H=7: evaluación con Brier, log loss y curva de calibración (con n por tramo) sobre el holdout — Brier 0.0149 (climatología 0.0149), log loss 0.0784, ECE 0.0020, n=117402, 10 tramos
+[OK ] [Compradores] H=7: cantidad si compra, esperada y monto evaluados frente a la referencia — 2 filas de cantidad
+[OK ] [Compradores] H=30: bloques cronológicos y separados por ≥ H días; el holdout no usa etiquetas inmaduras (E2-10, E2-08) — bloques ['train', 'calibration', 'selection', 'holdout']; madurez hasta 2026-10-26; separación 30 d
+[OK ] [Compradores] H=30: el holdout no decide modelo, calibrador ni umbrales — ["modelo", "hiperparámetros", "variables", "calibrador", "umbrales"]
+[OK ] [Compradores] H=30: evaluación con Brier, log loss y curva de calibración (con n por tramo) sobre el holdout — Brier 0.0583 (climatología 0.0582), log loss 0.2331, ECE 0.0063, n=100118, 10 tramos
+[OK ] [Compradores] H=30: cantidad si compra, esperada y monto evaluados frente a la referencia — 2 filas de cantidad
+[OK ] [Compradores] H=90: bloques cronológicos y separados por ≥ H días; el holdout no usa etiquetas inmaduras (E2-10, E2-08) — bloques ['train', 'calibration', 'selection', 'holdout']; madurez hasta 2026-10-26; separación 90 d
+[OK ] [Compradores] H=90: el holdout no decide modelo, calibrador ni umbrales — ["modelo", "hiperparámetros", "variables", "calibrador", "umbrales"]
+[OK ] [Compradores] H=90: evaluación con Brier, log loss y curva de calibración (con n por tramo) sobre el holdout — Brier 0.1383 (climatología 0.1421), log loss 0.4432, ECE 0.0074, n=59221, 10 tramos
+[OK ] [Compradores] H=90: cantidad si compra, esperada y monto evaluados frente a la referencia — 2 filas de cantidad
+        comprador predict: trabajo 226 succeeded en 9 s
+[OK ] [Compradores] predict completado — run 68 v2 calidad degraded en 10 s 
+[OK ] [Compradores] predict: no entrena (registro de modelos sin cambios) y usa la configuración del entrenamiento — as_of 2026-10-31, calidad degraded
+        46521 predicciones leídas en 49 s
+[OK ] [Compradores] predicciones con envoltura: quality_status, uncertainty_source, tipo, config y snapshot — calidad degraded, incertidumbre empirical_holdout, ranking popularity
+[OK ] [Compradores] predicciones a 7, 30 y 90 días con el mismo universo comprador×producto y sin filas duplicadas — {7: 15507, 30: 15507, 90: 15507}
+[OK ] [Compradores] todas las probabilidades están en (0, 1) (ni 0 ni 1 exactos) — 0 fuera de rango
+[OK ] [Compradores] coherencia P7 ≤ P30 ≤ P90 en todos los comprador×producto — 15507 pares comparados, 0 violaciones; filas ajustadas por coherencia {7: 0, 30: 0, 90: 3257}
+[OK ] [Compradores] identidad esperada = probabilidad × cantidad_si_compra (incluye el cero de «no compra») — 0 filas fuera de tolerancia
+[OK ] [Compradores] cantidad si compra dentro de su intervalo del 80 % — 0 fuera del intervalo
+[OK ] [Compradores] expected_amount marcado como supuesto (precio supuesto explícito; no es venta confirmada) — 0 filas incoherentes; ejemplo: {'value': 1.1392, 'currency': 'USD', 'assumed_unit_price': 10.31, 'basis': 'supuesto: esperanza × último precio neto de la relación; no es una venta confirmada'}
+[OK ] [Compradores] calibration_status y rol del modelo informados en cada fila
+[OK ] [Compradores] ningún comprador genérico (consumidor final) tiene predicción individual (E2-09) — 640 compradores con predicción
+[OK ] [Compradores] el genérico no recibe predicción individual: perfil 'no_individual_prediction' con respaldo identificado y sin filas — estado no_individual_prediction; respaldo: Código genérico (consumidor final): no representa un comprador recurrente. Su demanda queda en el re
+[OK ] [Compradores] el resumen cuenta lo excluido de la predicción individual (genéricos, anónimos) sin convertirlo en un comprador — {"generic": {"lines": 14202, "units": 71090}, "modeled": {"lines": 11580, "units": 59038}, "anonymous": {"lines": 0, "units": 0}, "deleted_customer": {"lines": 0, "units": 0}, "modeled_share_units_180d": 0.45369174966187137}
+[OK ] [Compradores] perfil del comprador: frecuencia, inactividad con definición, ranking 7/30/90 con fuente — CLI-FM-56066: inactividad inactive_by_pattern, frecuencia/30 d 1.8333
+[OK ] [Compradores] E2-22: ranking de productos probables (rank 1..k, fuente y puntaje decreciente) y ordenamientos por esperada/probabilidad correctos — ranking H30 de CLI-FM-56066: [(1, 'FA-ELE-003'), (2, 'FA-PLO-006'), (3, 'FA-HIE-006')], fuente ['popularity']
+[OK ] [Compradores] E2-22: frecuencia, inactividad («no es abandono») y cambio de comportamiento con estados definidos — inactividad inactive_by_pattern (riesgo 0.9), cambio stable
+[OK ] [Compradores] conciliación H=7 (sin compromisos): agregado = compradores + comprometido fuera del modelo + residual (o inconsistencia/indisponibilidad reportada) — estados {'ok': 61}
+[OK ] [Compradores] conciliación H=30 (sin compromisos): agregado = compradores + comprometido fuera del modelo + residual (o inconsistencia/indisponibilidad reportada) — estados {'ok': 61}
+[OK ] [Compradores] conciliación H=90 (sin compromisos): agregado = compradores + comprometido fuera del modelo + residual (o inconsistencia/indisponibilidad reportada) — estados {'aggregate_incomplete': 61}
+[AVISO] [Compradores] conciliación H=90: ningún producto con agregado completo — la predicción usa as_of de hoy y el pronóstico agregado se cortó antes: cobertura del agregado < H días (límite de diseño, no se inventa residual)
+[OK ] [Compradores] una sola predicción activa a la vez → 409 customer_run_in_progress — {"message":"Ya hay una corrida de comportamiento de compra (predict) en cola o en ejecuci\u00f3n. Es
+        comprador predict (2.ª, sin ventas nuevas): trabajo 227 succeeded en 9 s
+[OK ] [Compradores] 2.ª predicción sin ventas nuevas: misma cantidad de filas por horizonte (no duplica), vigente = la nueva, la anterior se conserva intacta — filas {7: 15507, 30: 15507, 90: 15507} (anterior {7: 15507, 30: 15507, 90: 15507}); muestra de 2000 filas sin duplicados
+[OK ] [Compradores] 2.ª predicción el mismo día sin ventas nuevas reproduce las mismas probabilidades y recencias — 2000 filas comparadas
+[OK ] [Compradores] run_id inexistente no devuelve resultados — HTTP 404
+[OK ] [Compradores] horizonte fuera de {7,30,90} → 422
+        comprador predict: trabajo 228 succeeded en 9 s
+[OK ] [Compradores] predict completado — run 70 v4 calidad degraded en 9 s 
+[OK ] [Compradores] E2-18: la recencia se actualiza con la fecha sin exigir ventas nuevas (días desde la última compra a hoy − días al corte retroactivo = días transcurridos) — corte retroactivo 2026-10-27 vs 2026-10-31: diferencia de recencia [4] sobre 1500 filas
+[OK ] [Compradores] §10: un predict retroactivo (as_of pasado) queda 'historical', no se promueve ni desplaza a la predicción vigente de producción — vigentes tras el retroactivo [69] (esperada [69]); /customer/predictions sirve la corrida 69 (producción, as_of 2026-10-31)
+        comprador train: trabajo 229 succeeded en 36 s
+[OK ] [Compradores] train completado — run 71 v5 calidad degraded en 36 s 
+[OK ] [Compradores] §10: un train retroactivo queda 'historical' y no promueve modelos (el registro en producción no cambia) — 6 modelos en producción, sin cambios
+[OK ] [Compradores] §10: tras un train retroactivo, la evaluación vigente sigue siendo la del entrenamiento de producción — entrenamientos vigentes [67] (esperado [67]); /customer/evaluation sirve la corrida 67 (producción)
+   (196 s)
+
+══ 3 · Compromisos comerciales (sin doble conteo) ══
+[OK ] [Compromisos] importa el CSV de pedidos sin known_at (cotización, pedido, cancelado, cumplido) — 6 compromisos nuevos, 1 cancelados, 6 líneas
+[OK ] [Compromisos] known_at desconocido: no se rellena con la fecha de carga (queda NULL y se declara) — 6 compromisos
+[OK ] [Compromisos] E2-23: un corte anterior a la carga no ve los compromisos importados hoy sin known_at (la ingestión es cota superior del conocimiento) — corte 2026-10-28: 0 visibles
+[OK ] [Compromisos] E2-23: en el corte de hoy (as_of = fecha de la carga) los 6 compromisos son visibles con known_basis=ingestion (P3 §2.3: «sí cuenta en el corte de hoy») — GET /commitments?as_of=2026-10-31 devolvió 6 de 6 (ingestados hoy)
+[OK ] [Compromisos] estado al corte: cancelado con pendiente 0, cumplido con pendiente 0, vigente con su pendiente — pendiente A 42, C 0, F 0
+[OK ] [Compromisos] los compromisos no son ventas: el resumen de ventas no cambia — 43267 documentos
+        comprador predict: trabajo 230 succeeded en 9 s
+[OK ] [Compradores] predict completado — run 72 v6 calidad degraded en 9 s 
+[OK ] [Compromisos] la predicción vigente trata los pedidos confirmados como comprometidos (resumen por horizonte) — {'7': {'líneas': 1, 'cantidad': 3.96, 'excluidas': {'cancelled': 1, 'nothing_pending': 1, 'not_order_or_contract': 1, 'delivery_after_horizon': 2}}, '30': {'líneas': 2, 'cantidad': 45.96, 'excluidas': {'cancelled': 1, 'nothing_pending': 1, 'not_order_or_contract': 1, 'delivery_after_horizon': 1}}, '90': {'líneas': 2, 'cantidad': 45.96, 'excluidas': {'cancelled': 1, 'nothing_pending': 1, 'not_order_or_contract': 1, 'delivery_after_horizon': 1}}}
+[OK ] [Compromisos] E2-23: total = máx(esperanza, comprometido), incremento = máx(esperanza − comprometido, 0); cancelado, cotización, fuera de horizonte y cumplido no cuentan; la probabilidad no cambia — A: comprometido 42 vs esperado 1.9529 → vista 42; B (H90): comprometido 3.96, esperado 9.8906 → vista 9.8906, incremento 5.9306
+[OK ] [Compradores] conciliación H=7 (con compromisos): agregado = compradores + comprometido fuera del modelo + residual (o inconsistencia/indisponibilidad reportada) — estados {'ok': 6}
+[OK ] [Compradores] conciliación H=30 (con compromisos): agregado = compradores + comprometido fuera del modelo + residual (o inconsistencia/indisponibilidad reportada) — estados {'ok': 6}
+[OK ] [Compradores] conciliación H=90 (con compromisos): agregado = compradores + comprometido fuera del modelo + residual (o inconsistencia/indisponibilidad reportada) — estados {'aggregate_incomplete': 6}
+[OK ] [Compromisos] la conciliación contabiliza el comprometido dentro de la vista de compradores (no fuera del modelo, no sumado dos veces) — producto A: comprometido 42, fuera del modelo 0
+[OK ] [Compromisos] el pronóstico agregado de demanda no cambia (el comprometido no se suma a la demanda) — 6 productos comparados
+   (26 s)
+
+══ 4 · Abastecimiento, costos, escenarios y causalidad ══
+[OK ] [Abastecimiento] ofertas de dos proveedores (uno más barato que llega tarde) registradas con comparabilidad declarada — 7 ofertas, productos [1696, 1743, 1751, 1734]
+[OK ] [Abastecimiento] E2-26: oferta en otra unidad sin conversión y oferta en EUR sin tasa se declaran NO comparables (nunca factor 1) — unidad: ['no_unit_conversion'], moneda: ['no_fx_rate']
+[OK ] [Abastecimiento] oferta duplicada (misma clave natural) → 422 — {"message":"Ya existe un registro con la misma clave natural (revise proveedor, producto, sucursal, vigencia o
+[OK ] [Abastecimiento] un solo plan activo a la vez → 409 supply_run_in_progress — {"message":"Ya hay una corrida de supply\/plan en cola o en ejecuci\u00f3n. Espere a que termine.","
+        plan base (sin presupuesto ni capacidad): trabajo 231 succeeded en 6 s
+[OK ] [Abastecimiento] plan «base (sin presupuesto ni capacidad)» completado — run 73 en 7 s 
+[OK ] [Abastecimiento] plan «base (sin presupuesto ni capacidad)»: lectura COMPLETA paginada — 63 líneas = lines_summary.total y 23 faltantes = shortfalls_summary.total (meta.total coincide, sin filas repetidas, Σ no atendido = resumen y la vista previa del detalle son las primeras filas) — líneas 63/63 (meta 63, vista previa 20), faltantes 23/23 (meta 23, vista previa 20), Σ no atendido 592.25 vs resumen 592.25
+[OK ] [Abastecimiento] plan: estado del solver honesto (is_optimal ⇔ optimal con brecha ≤ 0,01 %), moneda y nota de que son sugerencias — estado optimal, brecha 8e-06, 732 variables, 8 componentes
+[OK ] [Abastecimiento] envoltura del plan: result_type='optimized_plan', config_version, data_snapshot_id, supuestos de penalización/mantenimiento y quality_status — calidad degraded, 7 supuestos, 1 limitaciones
+[OK ] [Abastecimiento] plan sin restricciones externas: mínimos, múltiplos, plazos, costos y balance verificados línea por línea (independiente) — 63 líneas; 
+[OK ] [Abastecimiento] E2-26: las ofertas no comparables (unidad sin conversión, EUR sin tasa) quedan excluidas con su motivo y ninguna línea las usa — excluidas [(53, ['no_unit_conversion']), (54, ['no_fx_rate'])]; cobertura 9 recibidas / 7 comparables
+[OK ] [Abastecimiento] E2-26: la oferta barata que llega tarde no oculta faltantes previos — el plan reporta la demanda no atendida antes de la llegada con causa lead_time y no declara cobertura completa — producto 1734 (única fuente, 45 d): 12 períodos con faltante antes de la llegada (≈184.9 u.); no atendido total 592.3 de 14555.3
+[OK ] [Abastecimiento] E2-26: con dos ofertas el diagnóstico por producto ordena por precio, indica el primer período disponible de la barata y la demanda sin cubrir antes de su llegada — producto 1751: oferta 51 45 d precio #1 disponible período 7 sin cubrir 0; oferta 50 3 d precio #2 disponible período 1 sin cubrir 4.5191
+[OK ] [Abastecimiento] cada línea explica su elección frente a la alternativa (justificación contrafactual) y trae proveedor/cantidad/emisión/recepción/costo — ejemplo: PROV-GEN 50 u. emitir 2026-10-26 → recibir 2026-12-10, $50.86
+[OK ] [Abastecimiento] producción genérica sin recetas: production='not_configured' y no bloquea la reposición
+[OK ] [Abastecimiento] filtros del plan (/lines paginado): actionable_now (solo la emisión de hoy), por producto y por proveedor — coinciden con el plan completo — 10 accionables de 63, 3 del producto 1751, 39 del proveedor
+[OK ] [Abastecimiento] detalle por defecto: balance es null (opt-in con ?include=balance), la vista previa tiene ≤ 20 líneas y faltantes, y un include desconocido → 422 — por defecto balance=None, 20 líneas y 20 faltantes de vista previa; con include=balance 12 nodos; include=foo → 422
+        capacidad sucursal 001: 810 u. (pico sin límite 1080, base ya comprometida 93)
+        capacidad sucursal 002: 1770 u. (pico sin límite 1686, base ya comprometida 1686)
+        capacidad sucursal 003: 516 u. (pico sin límite 688, base ya comprometida 372)
+        plan con presupuesto y capacidad: trabajo 232 succeeded en 75 s
+[OK ] [Abastecimiento] plan «con presupuesto y capacidad» completado — run 74 en 75 s 
+[OK ] [Abastecimiento] plan «con presupuesto y capacidad»: lectura COMPLETA paginada — 38 líneas = lines_summary.total y 52 faltantes = shortfalls_summary.total (meta.total coincide, sin filas repetidas, Σ no atendido = resumen y la vista previa del detalle son las primeras filas) — líneas 38/38 (meta 38, vista previa 20), faltantes 52/52 (meta 52, vista previa 20), Σ no atendido 4519.13 vs resumen 4519.13
+[OK ] [Abastecimiento] E2-13: el plan respeta el presupuesto (gasto ≤ tope, por fecha de emisión) — verificado con las líneas devueltas — gasto 2722.67 ≤ presupuesto 2722.91 (sin tope: 4950.75)
+[OK ] [Abastecimiento] E2-13: el plan respeta la capacidad de almacenamiento (pico tras recepciones por sucursal) y de proveedor — 3 capacidades de almacén, oferta con tope por período
+[OK ] [Abastecimiento] E2-13: mínimos, múltiplos, plazos, balance y faltantes del plan restringido verificados línea por línea — 38 líneas; 
+[OK ] [Abastecimiento] E2-12/13: el exceso de almacenamiento preexistente (órdenes abiertas + existencias) se informa y coincide con mi reconstrucción sin compras nuevas — 36 restricciones de almacén; con exceso preexistente: [(87, 1, 249.6), (89, 1, 22.2)]
+[OK ] [Abastecimiento] las restricciones activas informadas son coherentes (uso ≤ límite) y el estado del solver es honesto — estado time_limit, brecha 0.000174, 45 restricciones activas ['budget', 'storage_capacity', 'supplier_capacity'], no atendido 4519.1 (sin tope: 592.3)
+[OK ] [Abastecimiento] un presupuesto menor no mejora la cobertura: el no atendido no baja respecto al plan sin tope y se declara por causa — causas ['economic', 'lead_time', 'mixed', 'storage_capacity', 'supplier_capacity']
+        plan cobertura obligatoria (infactible por plazos): trabajo 233 succeeded en 45 s
+[OK ] [Abastecimiento] plan «cobertura obligatoria (infactible por plazos)» completado — run 75 en 45 s 
+[OK ] [Abastecimiento] plan «cobertura obligatoria (infactible por plazos)»: lectura COMPLETA paginada — 0 líneas = lines_summary.total y 0 faltantes = shortfalls_summary.total (meta.total coincide, sin filas repetidas, Σ no atendido = resumen y la vista previa del detalle son las primeras filas) — líneas 0/0 (meta 0, vista previa 0), faltantes 0/0 (meta 0, vista previa 0), Σ no atendido 0.00 vs resumen 0.00
+[OK ] [Abastecimiento] E2-13: con cobertura obligatoria y plazos imposibles el estado es 'infeasible' (no 'óptimo'), sin plan de compras y con causa y alternativa explicadas — estado infeasible; infactibilidad: {"causes": [{"label": "presupuesto", "family": "budget", "required": [{"needed": 4862.32, "period": "2026-10-26..2027-01-24", "declared": 2722.91, "budget_id": 9}], "units_recovered": 3889.9627, "unmet_if_relaxed": 629.1624, "unme
+[OK ] [Abastecimiento] E2-26: al declarar la conversión pallet→saco (×40) y la tasa EUR→USD (1,08) las ofertas pasan a ser comparables, con la conversión explícita — unidad: {'declared': True, 'from': 'pallet', 'to': 'saco', 'factor': 40}, moneda: {'declared': True, 'from': 'EUR', 'to': 'USD', 'rate': 1.08, 'valid_on': '2026-10-26'}
+[OK ] [Abastecimiento] listado de planes con tipo de resultado y plan vigente único — 3 planes
+        pronóstico de costos: trabajo 234 succeeded en 3 s
+[OK ] [Abastecimiento] pronóstico de costos con envoltura (core cost, forecast, config y snapshot) y calidad por serie — 62 series, calidad global degraded (3 s)
+[OK ] [Abastecimiento] costos: solo se sirve un método distinto de la referencia si mejora el MAE de selección ≥ 3 % (comprobado con las métricas devueltas); holdout reportado — 12 series con método propio, métodos ['drift', 'holt_damped', 'last_value', 'none'], referencia ['last_value']
+[OK ] [Abastecimiento] costos: las series con historia insuficiente se abstienen explícitamente (sin puntos inventados) — 1 abstenciones
+[OK ] [Abastecimiento] escenarios: entradas clasificadas observed/forecasted/assumed; los cambios de precio, descuento y demanda son supuestos; resultado condicionado — resumen {'assumed': ['demand_change', 'discount', 'plan_receipts', 'price_change', 'receipts_undated'], 'observed': ['opening_inventory', 'price_base', 'receipts_dated', 'unit_cost_base'], 'forecasted': ['demand_base', 'unit_cost_base']}; supuestos por estrategia {'base': ['receipts_undated'], 'precio': ['demand_change', 'price_change', 'receipts_undated'], 'promo': ['demand_change', 'discount', 'receipts_undated'], 'plan': ['plan_receipts', 'receipts_undated']}
+[OK ] [Abastecimiento] escenarios comparables: misma base (corte, pronóstico, horizonte, series) y, por serie, ventas atendibles + no atendido = demanda, sin cantidades ni ingresos negativos — base común: 186 series, corte 2026-10-26, demanda de la ejecución 82
+[OK ] [Abastecimiento] productos con unidades distintas: no se suman unidades (solo importes) y se declara — Productos con unidades distintas: no se suman unidades; solo importes.
+[OK ] [Abastecimiento] escenario de precio +5 % con demanda −3 % (supuestos): la demanda cae 3 % e ingresos suben entre +1,5 % y +5 % (ventas atendibles limitadas por existencias) — demanda (unidades) 10930 → 10602; ingresos base 52634 → 54677 (×1.0388)
+[OK ] [Abastecimiento] escenario de descuento 10 % + demanda +8 % con costo pronosticado: ingresos y margen coherentes (precio efectivo −10 %) — ingresos promo 48483 (base 52634), margen 11711.32
+[OK ] [Abastecimiento] escenario «ejecutar el plan»: las recepciones del plan aumentan o igualan las ventas atendibles; figura el desembolso de compras del plan — ventas atendibles (unidades) base 7955 → plan 8719; compras del plan $2722.67
+[OK ] [Abastecimiento] el margen desconocido no se presenta como cero (margen calculado o ingresos sin costo conocido declarados) — margen bruto base 16647.21 (0.3163), ranking por margen ['precio', 'plan', 'base', 'promo']
+[OK ] [Abastecimiento] escenarios: un cambio de demanda fuera de rango (−300 %) se rechaza con 422 tanto en forma de lista como escalar — lista [-3] → HTTP 422; escalar -3 → HTTP 422
+[OK ] [Abastecimiento] las evaluaciones de escenarios se consultan por listado y por id — 1 evaluaciones
+[OK ] [Abastecimiento] E2-16: verificación causal sin definir el efecto → insufficient_evidence, sin efecto publicado y estimador deshabilitado; la simulación condicionada sigue disponible — veredicto insufficient_evidence, requisitos [('effect_definition', 'not_met'), ('price_variation', 'met'), ('support', 'met'), ('confounders', 'not_met'), ('availability', 'not_met'), ('identification', 'not_met'), ('estimator', 'not_met')]
+[OK ] [Abastecimiento] E2-16: verificación causal con el efecto definido completo → insufficient_evidence, sin efecto publicado y estimador deshabilitado; la simulación condicionada sigue disponible — veredicto insufficient_evidence, requisitos [('effect_definition', 'met'), ('price_variation', 'met'), ('support', 'met'), ('confounders', 'not_met'), ('availability', 'not_met'), ('identification', 'not_met'), ('estimator', 'not_met')]
+   (134 s)
+
+══ 5 · Datos (cobertura, configuración efectiva, fuente SQL) ══
+[OK ] [Datos] catálogo de conectores: PostgreSQL probado con base de pruebas; MySQL/SQL Server 'implemented_untested' (nunca 'available') — {'sql_postgresql': ('requires_credentials', 'tested_with_test_database'), 'sql_mysql': ('implemented_untested', 'implemented_untested'), 'sql_sqlserver': ('implemented_untested', 'implemented_untested')}
+[OK ] [Datos] sin declarar, la cobertura efectiva de ventas es 'none' (todo día sin registros es ausente, no cero)
+[OK ] [Datos] cobertura con fecha futura → 422 — {"message":"La fecha de completitud no puede ser futura.","errors":{"complete_through":["L
+[OK ] [Datos] cobertura declarada de ventas: basis=declared y cobertura efectiva rule=declared_by_user — efectiva 2024-10-27→2026-10-26 (declared_by_user)
+[OK ] [Datos] reporte de calidad extendido con cobertura temporal, días sin ventas e identidad de compradores — secciones ['customer_identity', 'price_history', 'product_code_changes', 'sales_days', 'temporal_coverage', 'units'], estado warning
+[OK ] [Datos] configuración efectiva por core con procedencia por clave (core / perfil / empresa) y precedencia declarada — {'demand': {'horizons': 'core', 'service_level': 'tenant', 'review_period_days': 'tenant', 'default_lead_time_days': 'tenant', 'min_improvement': 'core', 'max_backtest_windows': 'core', 'exceptional_events_flag': 'core'}}
+[OK ] [Datos] el cambio de configuración de empresa se refleja con procedencia 'tenant' — {"key": "min_improvement", "value": 0.05, "source": "tenant"}
+[OK ] [Datos] clave desconocida o valor inválido → 422 (nunca se aplica en silencio) — invalid_config / invalid_config
+[OK ] [Datos] cambiar la configuración después no reescribe ejecuciones ya registradas (config_version intacta) — 7f9c6e57b479bab2…
+[OK ] [Datos] vaciar los valores de empresa restablece el valor del core
+[OK ] [Datos] base «ERP de origen» ficticia creada con esquema tipo ERP y 6 documentos — predictily_erp_source_e2e
+[OK ] [Datos] fuente SQL creada y prueba de conexión OK en transacción de solo lectura; las credenciales jamás se devuelven — servidor 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1); solo lectura: transaction_read_only; advertencias ['La cuenta tiene privilegios de escritura/creación en la base de datos. Predictily solo lee (transacción READ ONLY), pero se recomienda una cuenta con GRANT SELECT únicamente.']; fugas []
+[OK ] [Datos] E2-25: consultas con escritura/DDL/varias sentencias/efectos laterales son rechazadas (422 sql_query_rejected), no se crea mapeo y la base de origen no cambia — 10/10 rechazadas; mapeos 0; filas de origen {'erp_facturas': 6, 'erp_factura_lineas': 8, 'erp_clientes': 2, 'erp_productos': 3}
+[OK ] [Datos] el mapeo nace sin aprobar: no sincroniza (409 mapping_not_approved) pero su vista previa muestra campos canónicos sin importar nada — versión 1, vista previa 8 filas
+[OK ] [Datos] sincronización completa: 8 líneas extraídas, 6 documentos nuevos por el mismo importador (con anulada y nota de crédito), archivo de preparación eliminado — 8 filas, 6 documentos nuevos; ventas totales 43267 → 43271
+[OK ] [Datos] E2-25: re-sincronizar no duplica (0 nuevos, 6 sin cambios, 0 actualizados; total de documentos igual) — nuevos 0, sin cambios 6, documentos 43271 → 43271
+[OK ] [Datos] E2-25: la corrección en origen entra en la sincronización incremental (1 documento actualizado, sin duplicados, líneas reemplazadas) — actualizados 1, cantidad de la línea 1: [12]
+[OK ] [Datos] E2-25: la corrección conserva la procedencia (data_source_id) y registra la importación que la aplicó (verificación en la BD de la aplicación) — fuente 9, importación 129 (sync 129)
+[OK ] [Datos] la sincronización infiere cobertura de la fuente (basis=inferred) sin pisar la declaración del usuario (efectiva = declared_by_user) — inferida hasta 2026-10-30; efectiva 2026-10-26 (declared_by_user)
+[OK ] [Datos] historial de sincronizaciones con versión de mapeo y marca de agua — 3 sincronizaciones
+   (11 s)
+
+══ 6 · Asistente desactivado y autonomía de los cores ══
+[OK ] [Asistente] estado desactivado sin clave (enabled=false, reason=missing_api_key) y la clave/endpoint no se exponen — proveedor ollama_cloud, modelo gpt-oss:120b, herramientas 6
+[OK ] [Asistente] el aviso indica que los resultados de los cores siguen disponibles
+[OK ] [Asistente] POST /assistant/messages → 503 assistant_disabled (con motivo, sin llamadas externas) — El asistente conversacional no está disponible. Los resultados de Predictily siguen dispon
+[OK ] [Asistente] E2-24 autonomía: demanda, comportamiento y abastecimiento responden con el asistente apagado — 15507 predicciones, 3 planes
+        pronóstico de costos (asistente apagado): trabajo 239 succeeded en 5 s
+[OK ] [Asistente] E2-24 autonomía: se pueden ejecutar nuevos cálculos (costos, escenarios) tras el rechazo del asistente — 5 s
+   (6 s)
+
+══ 7 · Aislamiento entre empresas (E2-17) ══
+[OK ] [B] 1. Registro de empresario
+[OK ] [B] 1. Empresa creada — 35313063-3333-4be5-998f-1ec97dfd3f32
+[OK ] [B] 2. Configura negocio y sucursales — 2 sucursales
+[OK ] [B] importa ventas de su propia empresa — 18708 documentos
+        pronóstico H=7: trabajo 243 succeeded en 20 s
+[OK ] [Demanda] ejecución con horizonte 7 completada — run 84 v1 en 20 s 
+[OK ] [B] pronóstico propio de la empresa B (versión 1, vigente), independiente de A — ejecución 84
+        comprador predict: trabajo 244 succeeded en 3 s
+[OK ] [Compradores] predict completado — run 80 v1 calidad insufficient_data en 3 s 
+[OK ] [B] E2-17: predecir compradores sin modelos propios se abstiene (insufficient_data, 0 filas): no usa los modelos ni los datos de A — calidad insufficient_data, filas 0
+[OK ] [B] crea sus propios proveedores, ofertas, presupuesto, capacidad, compromiso, fuente y mapeo
+[OK ] [B] E2-17: no accede a ejecución de demanda — GET /forecast-runs/82 → HTTP 404
+[OK ] [B] E2-17: no accede a precisión/manifiesto de una ejecución — GET /accuracy/summary → HTTP 404
+[OK ] [B] E2-17: no accede a serie de una ejecución — GET /forecasts/series → HTTP 404
+[OK ] [B] E2-17: no accede a trabajo de A — GET /jobs/220 → HTTP 404
+[OK ] [B] E2-17: no accede a reversión hacia una ejecución de A — POST /models/demand/rollback → HTTP 404
+[OK ] [B] E2-17: no accede a entrenamiento de compradores — GET /customer/runs/67 → HTTP 404
+[OK ] [B] E2-17: no accede a predicción de compradores — GET /customer/runs/72 → HTTP 404
+[OK ] [B] E2-17: no accede a predicciones por run_id — GET /customer/predictions → HTTP 404
+[OK ] [B] E2-17: no accede a evaluación por run_id — GET /customer/evaluation → HTTP 404
+[OK ] [B] E2-17: no accede a conciliación por run_id — GET /customer/reconciliation → HTTP 404
+[OK ] [B] E2-17: no accede a perfil de un comprador de A — GET /customer/customers/255074/profile → HTTP 404
+[OK ] [B] E2-17: no accede a predicciones de un comprador de A — GET /customer/predictions → HTTP 422
+[OK ] [B] E2-17: no accede a plan de abastecimiento — GET /supply/plans/74 → HTTP 404
+[OK ] [B] E2-17: no accede a oferta de A — GET /supply/offers/46 → HTTP 404
+[OK ] [B] E2-17: no accede a edición de una oferta de A — PATCH /supply/offers/46 → HTTP 404
+[OK ] [B] E2-17: no accede a baja de una oferta de A — DELETE /supply/offers/46 → HTTP 404
+[OK ] [B] E2-17: no accede a presupuesto de A — GET /supply/budgets/9 → HTTP 404
+[OK ] [B] E2-17: no accede a capacidad de A — GET /supply/capacities/17 → HTTP 404
+[OK ] [B] E2-17: no accede a pronóstico de costos — GET /supply/cost-forecasts → HTTP 404
+[OK ] [B] E2-17: no accede a evaluación de escenarios — GET /supply/scenarios/evaluations/77 → HTTP 404
+[OK ] [B] E2-17: no accede a mapeos de la fuente de A — GET /data-sources/9/mappings → HTTP 404
+[OK ] [B] E2-17: no accede a mapeo de A — GET /data-sources/9/mappings/9 → HTTP 404
+[OK ] [B] E2-17: no accede a desactivar el mapeo de A — POST /data-sources/9/mappings/9/deactivate → HTTP 404
+[OK ] [B] E2-17: no accede a sincronizar la fuente de A — POST /data-sources/9/sync → HTTP 404
+[OK ] [B] E2-17: no accede a probar la fuente de A — POST /data-sources/9/test → HTTP 404
+[OK ] [B] E2-17: no accede a sincronizaciones de A — GET /data-sources/9/syncs → HTTP 404
+[OK ] [B] E2-17: no accede a sincronización de A — GET /syncs/13 → HTTP 404
+[OK ] [B] E2-17: no accede a compromiso de A — GET /commitments/30 → HTTP 404
+[OK ] [B] E2-17: no accede a cancelar un compromiso de A — POST /commitments/30/cancel → HTTP 404
+[OK ] [B] E2-17: no accede a producto de A — GET /products/1751 → HTTP 404
+[OK ] [B] E2-17: no revierte modelos de compradores de A — HTTP 404
+[OK ] [B] E2-17: su listado de ejecuciones de demanda no incluye nada de A — A 3 · B 1
+[OK ] [B] E2-17: su listado de ejecuciones de compradores no incluye nada de A — A 6 · B 1
+[OK ] [B] E2-17: su listado de planes no incluye nada de A — A 3 · B 0
+[OK ] [B] E2-17: su listado de ofertas no incluye nada de A — A 9 · B 1
+[OK ] [B] E2-17: su listado de presupuestos no incluye nada de A — A 1 · B 1
+[OK ] [B] E2-17: su listado de capacidades no incluye nada de A — A 3 · B 1
+[OK ] [B] E2-17: su listado de fuentes no incluye nada de A — A 1 · B 1
+[OK ] [B] E2-17: su listado de compromisos no incluye nada de A — A 6 · B 1
+[OK ] [B] E2-17: su listado de importaciones no incluye nada de A — A 9 · B 3
+[OK ] [B] E2-17: su listado de modelos no incluye nada de A — A 40 · B 8
+[OK ] [B] E2-17: su listado de pronósticos de costos no incluye nada de A — A 2 · B 0
+[OK ] [B] E2-17: su listado de escenarios no incluye nada de A — A 2 · B 0
+[OK ] [B] E2-17: su listado de proveedores no incluye nada de A — A 7 · B 1
+[OK ] [B] E2-17: sus predicciones de compradores están vacías con abstención explícita (no hereda modelos ni resultados de A) — insufficient_data
+[OK ] [B] E2-17: sus compromisos son solo los suyos — ['B-PED-1']
+[OK ] [B] E2-17: sus fuentes son solo las suyas — ['Fuente de B']
+[OK ] [B] E2-17: no puede usar el X-Tenant-ID de A — HTTP 404/404
+[OK ] [A] E2-17: tras los intentos de B, la oferta, el mapeo aprobado y el compromiso de A siguen intactos — oferta $0.5818, mapeo activo=True, compromiso confirmed
+[OK ] [A] E2-17: los recursos creados por B no aparecen en A
+   (63 s)
+
+══ Tiempos por bloque ══
+      83 s  Preparación (empresa A: registro, sucursales, catálogo, ventas, inventario, plazos)
+     159 s  1 · Demanda v2 (horizontes, envoltura, manifiesto, reversión)
+     196 s  2 · Compradores (train/predict, calibración, coherencia, conciliación)
+      26 s  3 · Compromisos comerciales (sin doble conteo)
+     134 s  4 · Abastecimiento, costos, escenarios y causalidad
+      11 s  5 · Datos (cobertura, configuración efectiva, fuente SQL)
+       6 s  6 · Asistente desactivado y autonomía de los cores
+      63 s  7 · Aislamiento entre empresas (E2-17)
+     678 s  TOTAL
+
+Resumen: 256 de 256 verificaciones OK · 0 FALLA · 1 AVISO
+  [AVISO] [Compradores] conciliación H=90: ningún producto con agregado completo — la predicción usa as_of de hoy y el pronóstico agregado se cortó antes: cobertura del agregado < H días (límite de diseño, no se inventa residual)

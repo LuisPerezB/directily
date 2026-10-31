@@ -24,6 +24,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\In;
+use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\PersonalAccessToken;
 
 /**
@@ -45,6 +46,9 @@ class PlanController extends SupplyController
 
     /** Líneas / faltantes que acompaña el detalle del plan como vista previa; el resto se pagina en `/lines` y `/shortfalls`. */
     private const PREVIEW_LIMIT = 20;
+
+    /** Bloques pesados del detalle que solo se devuelven si se piden con `?include=` (lista blanca; separados por comas). */
+    private const INCLUDES = ['balance'];
 
     /** Ordenamientos permitidos de las líneas (lista blanca: nunca se interpola la entrada de la persona). */
     private const LINE_SORTS = [
@@ -121,17 +125,19 @@ class PlanController extends SupplyController
      * Detalle del plan: envoltura común + cabecera con totales y fecha de corte, restricciones, alternativas e infactibilidad.
      * Las líneas y la demanda no atendida NO se devuelven completas (un plan real tiene miles): `lines` / `shortfalls` son una
      * vista previa de las primeras PREVIEW_LIMIT con su resumen (`lines_summary`, `shortfalls_summary`); el listado completo
-     * y paginado está en `GET /supply/plans/{id}/lines` y `/shortfalls`.
+     * y paginado está en `GET /supply/plans/{id}/lines` y `/shortfalls`. El `balance` del motor (por nodo y período; cientos de KB en un
+     * plan real) tampoco va por defecto: `balance` es `null` = «no solicitado» y solo trae datos con `?include=balance`.
      */
     public function show(Request $request, int $id): JsonResponse
     {
+        $includes = $this->includes($request);
         $run = $this->planRun($id);
         $envelope = $this->envelope($run, ['result_type' => 'optimized_plan']);
         $run_payload = (new SupplyRunResource($run))->resolve($request);
         $plan = SupplyPlan::query()->where('core_run_id', $run->id)->first();
         if ($plan === null) {
             return response()->json(['data' => [
-                'run' => $run_payload, 'plan' => null, 'lines' => [], 'shortfalls' => [], 'branches' => [],
+                'run' => $run_payload, 'plan' => null, 'lines' => [], 'shortfalls' => [], 'branches' => [], 'balance' => in_array('balance', $includes, true) ? [] : null,
                 'lines_summary' => $this->summary(0, 0, 0) + ['actionable_now' => 0], 'shortfalls_summary' => $this->summary(0, 0, 0) + ['unmet_units' => 0.0, 'demand_units' => 0.0],
             ], 'envelope' => $envelope]);
         }
@@ -178,7 +184,8 @@ class PlanController extends SupplyController
                 'excluded_nodes' => $details['report']['excluded_nodes'] ?? [],
                 'production' => JsonMap::of($details['report']['production'] ?? ['status' => 'not_configured']),
                 'receipts_summary' => JsonMap::of($details['report']['receipts_summary'] ?? null),
-                'balance' => $details['balance'] ?? [],
+                // null = no solicitado (por defecto); con `?include=balance`, la lista por nodo y período del motor ([] si el plan no la trae).
+                'balance' => in_array('balance', $includes, true) ? ($details['balance'] ?? []) : null,
                 'periods' => $details['periods'] ?? [],
             ],
             'envelope' => $envelope,
@@ -223,6 +230,23 @@ class PlanController extends SupplyController
         $query = $plan === null ? SupplyPlanShortfall::query()->whereRaw('1 = 0') : $this->shortfallsQuery($plan, $filters);
 
         return SupplyPlanShortfallResource::collection($this->sortShortfalls($query, $filters['sort'] ?? null)->paginate($this->perPage($request)));
+    }
+
+    /**
+     * Valores de `?include=` (separados por comas, sin repetir). Cualquier valor fuera de la lista blanca `INCLUDES` responde 422.
+     *
+     * @return list<string>
+     */
+    private function includes(Request $request): array
+    {
+        $request->validate(['include' => ['sometimes', 'nullable', 'string', 'max:100']]);
+        $values = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $request->query('include', ''))), fn (string $v) => $v !== '')));
+        $unknown = array_values(array_diff($values, self::INCLUDES));
+        if ($unknown !== []) {
+            throw ValidationException::withMessages(['include' => 'Valores de include no permitidos: '.implode(', ', $unknown).'. Permitidos: '.implode(', ', self::INCLUDES).'.']);
+        }
+
+        return $values;
     }
 
     /** Corrida de plan de la empresa activa (404 si no existe o es de otra empresa). */

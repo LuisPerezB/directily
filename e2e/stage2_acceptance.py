@@ -16,7 +16,7 @@ con empresas NUEVAS creadas por el propio script (datos ficticios de data/demo/)
 
 Uso:
   engine/.venv/bin/python e2e/stage2_acceptance.py --api http://127.0.0.1:8000/api/v1 \\
-      --log docs/architecture/v2/evidence/stage2-acceptance-2026-10-31.log
+      --log docs/architecture/v2/evidence/stage2-acceptance-2026-10-31-final.log
 
 Requisitos: backend + `queue:work` (colas imports, forecasting, default) + motor activos; datos demo en data/demo/;
 PostgreSQL con un rol que pueda crear bases (por defecto predictily/secret en 127.0.0.1; se puede cambiar con
@@ -911,6 +911,21 @@ def verify_plan(data: dict, offers: dict[int, dict], budgets: list[dict], caps: 
     return v
 
 
+def fetch_full_plan(a: mvp.Client, run_id: int) -> tuple[dict, dict]:
+    """Lee el plan COMPLETO. El detalle solo trae una vista previa de 20 filas en `lines` / `shortfalls` y no incluye el balance salvo
+    `?include=balance`, así que se arma el mismo `data` que consumen las verificaciones con: el detalle con balance + TODAS las líneas y
+    TODOS los faltantes recorriendo `/lines` y `/shortfalls` (per_page=100, hasta agotar `meta.last_page`).
+    Queda en `data['_preview']` la vista previa original y en `data['_meta']` los totales que informó la paginación."""
+    d = a.json("GET", f"/supply/plans/{run_id}", params={"include": "balance"})
+    data = dict(d["data"])
+    lines, last_l = get_all(a, f"/supply/plans/{run_id}/lines")
+    shortfalls, last_s = get_all(a, f"/supply/plans/{run_id}/shortfalls")
+    data["_preview"] = {"lines": data["lines"], "shortfalls": data["shortfalls"]}
+    data["_meta"] = {"lines_total": (last_l.get("meta") or {}).get("total"), "shortfalls_total": (last_s.get("meta") or {}).get("total")}
+    data["lines"], data["shortfalls"] = lines, shortfalls
+    return data, d["envelope"]
+
+
 def create_plan(a: mvp.Client, label: str, probe_conflict: bool = False, **body) -> tuple[dict, dict]:
     t0 = time.time()
     run = a.req("POST", "/supply/plans", (202,), json=body).json()["data"]
@@ -918,10 +933,24 @@ def create_plan(a: mvp.Client, label: str, probe_conflict: bool = False, **body)
         dup = a.req("POST", "/supply/plans", (409, 202), json=body)
         check("[Abastecimiento] un solo plan activo a la vez → 409 supply_run_in_progress", dup.status_code == 409 and dup.json().get("code") == "supply_run_in_progress", dup.text[:100])
     job = wait_run(a, (run.get("training_job") or {}).get("id"), f"plan {label}")
-    d = a.json("GET", f"/supply/plans/{run['id']}")
+    d = a.json("GET", f"/supply/plans/{run['id']}")   # detalle por defecto: vista previa de 20 filas y sin balance
     check(f"[Abastecimiento] plan «{label}» completado", job["status"] == "succeeded" and d["data"]["run"]["status"] == "completed",
           f"run {run['id']} en {time.time() - t0:.0f} s {job.get('error_message') or ''}")
-    return d["data"], d["envelope"]
+    data, env = fetch_full_plan(a, run["id"])
+    data["_default"] = {"balance": d["data"].get("balance", "AUSENTE"), "lines": len(d["data"]["lines"]), "shortfalls": len(d["data"]["shortfalls"])}
+    ls, ss, pv, meta = data["lines_summary"], data["shortfalls_summary"], data["_preview"], data["_meta"]
+    ids_l, ids_s = [x["id"] for x in data["lines"]], [x["id"] for x in data["shortfalls"]]
+    unmet_sum = sum(x["unmet"] for x in data["shortfalls"])
+    check(f"[Abastecimiento] plan «{label}»: lectura COMPLETA paginada — {len(ids_l)} líneas = lines_summary.total y {len(ids_s)} faltantes = shortfalls_summary.total "
+          "(meta.total coincide, sin filas repetidas, Σ no atendido = resumen y la vista previa del detalle son las primeras filas)",
+          len(ids_l) == ls["total"] == meta["lines_total"] and len(ids_s) == ss["total"] == meta["shortfalls_total"]
+          and len(set(ids_l)) == len(ids_l) and len(set(ids_s)) == len(ids_s)
+          and ls["matched"] == ls["total"] and ls["shown"] == len(pv["lines"]) and ss["shown"] == len(pv["shortfalls"])
+          and [x["id"] for x in pv["lines"]] == ids_l[:len(pv["lines"])] and [x["id"] for x in pv["shortfalls"]] == ids_s[:len(pv["shortfalls"])]
+          and close(unmet_sum, ss["unmet_units"], rel=1e-6, abs_=0.01),
+          f"líneas {len(ids_l)}/{ls['total']} (meta {meta['lines_total']}, vista previa {len(pv['lines'])}), faltantes {len(ids_s)}/{ss['total']} "
+          f"(meta {meta['shortfalls_total']}, vista previa {len(pv['shortfalls'])}), Σ no atendido {unmet_sum:.2f} vs resumen {ss['unmet_units']:.2f}")
+    return data, env
 
 
 def block_supply(a: mvp.Client) -> None:
@@ -1021,13 +1050,26 @@ def block_supply(a: mvp.Client) -> None:
     check("[Abastecimiento] producción genérica sin recetas: production='not_configured' y no bloquea la reposición",
           p1["production"]["status"] == "not_configured" and bool(p1["lines"]))
 
-    now_lines = a.json("GET", f"/supply/plans/{ids['plan1']}", params={"actionable_now": 1})["data"]["lines"]
-    px_lines = a.json("GET", f"/supply/plans/{ids['plan1']}", params={"product_id": X})["data"]["lines"]
-    sp_lines = a.json("GET", f"/supply/plans/{ids['plan1']}", params={"supplier_id": fast})["data"]["lines"]
-    check("[Abastecimiento] filtros del plan: actionable_now (solo la emisión de hoy), por producto y por proveedor",
+    # los filtros viven en el listado paginado `/lines` (el detalle solo trae una vista previa); se contrastan con el plan completo leído arriba
+    plan1_lines = f"/supply/plans/{ids['plan1']}/lines"
+    now_lines = get_all(a, plan1_lines, {"actionable_now": 1})[0]
+    px_lines = get_all(a, plan1_lines, {"product_id": X})[0]
+    sp_lines = get_all(a, plan1_lines, {"supplier_id": fast})[0]
+    ids_of = lambda rows: sorted(l["id"] for l in rows)   # noqa: E731
+    check("[Abastecimiento] filtros del plan (/lines paginado): actionable_now (solo la emisión de hoy), por producto y por proveedor — coinciden con el plan completo",
           now_lines and all(l["actionable_now"] and l["order_date"] == as_of.isoformat() for l in now_lines) and px_lines and all(l["product_id"] == X for l in px_lines)
-          and sp_lines and all(l["supplier_id"] == fast for l in sp_lines) and len(now_lines) <= len(p1["lines"]),
+          and sp_lines and all(l["supplier_id"] == fast for l in sp_lines) and len(now_lines) <= len(p1["lines"])
+          and ids_of(now_lines) == ids_of([l for l in p1["lines"] if l["actionable_now"]])
+          and ids_of(px_lines) == ids_of([l for l in p1["lines"] if l["product_id"] == X])
+          and ids_of(sp_lines) == ids_of([l for l in p1["lines"] if l["supplier_id"] == fast])
+          and len(now_lines) == p1["lines_summary"]["actionable_now"],
           f"{len(now_lines)} accionables de {len(p1['lines'])}, {len(px_lines)} del producto {X}, {len(sp_lines)} del proveedor")
+    inc_bad = a.req("GET", f"/supply/plans/{ids['plan1']}", (200, 422), params={"include": "foo"})
+    check("[Abastecimiento] detalle por defecto: balance es null (opt-in con ?include=balance), la vista previa tiene ≤ 20 líneas y faltantes, y un include desconocido → 422",
+          p1["_default"]["balance"] is None and p1["_default"]["lines"] <= 20 and p1["_default"]["shortfalls"] <= 20 and p1["_default"]["lines"] == min(20, len(p1["lines"]))
+          and isinstance(p1["balance"], list) and p1["balance"] and inc_bad.status_code == 422,
+          f"por defecto balance={p1['_default']['balance']!r}, {p1['_default']['lines']} líneas y {p1['_default']['shortfalls']} faltantes de vista previa; "
+          f"con include=balance {len(p1['balance'])} nodos; include=foo → {inc_bad.status_code}")
     # ── presupuesto y capacidades ──
     spend1 = sum(l["line_cost"] for l in p1["lines"])
     budget_amount = round(spend1 * 0.55, 2)

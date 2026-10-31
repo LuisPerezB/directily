@@ -38,14 +38,15 @@ Fuente de los casos: `instrucctions.md` §6.J. Estados: ✅ comprobado (prueba a
 
 | Verificación | Resultado |
 |---|---|
-| Motor (`pytest`, BD recién migrada) | 418 aprobadas |
-| Backend (`php artisan test`) | 437 aprobadas, 2 omitidas (contratos MySQL/SQL Server sin servidor) |
-| Frontend (type-check, lint, vitest, build) | 298 aprobadas, build correcto |
+| Motor (`pytest`, BD recién migrada) | 418 aprobadas (sin cambios en P9/P10) |
+| Backend (`php artisan test`) | 449 aprobadas, 2 omitidas (contratos MySQL/SQL Server sin servidor) |
+| Frontend (type-check, lint, vitest, build) | 313 aprobadas, build correcto |
 | `e2e/mvp_acceptance.py` (etapa 1) | 32/32 |
-| `e2e/stage2_acceptance.py` (etapa 2, API real + cola + motor + PostgreSQL) | 252/252, 1 aviso de diseño (conciliación a 90 días con agregado incompleto: se reporta, no se inventa residual) |
-| Revisión visual Playwright (7 vistas) | sin errores JS/API, sin desborde horizontal |
+| `e2e/stage2_acceptance.py` (etapa 2, API real + cola + motor + PostgreSQL) | 256/256, 1 aviso de diseño (conciliación a 90 días con agregado incompleto: se reporta, no se inventa residual). Verifica el plan de abastecimiento completo recorriendo las rutas paginadas |
+| Revisión visual Playwright (7 vistas) | sin errores JS/API, sin desborde horizontal; plan de abastecimiento paginado (P9) |
 
-Evidencia: `docs/architecture/v2/evidence/stage2-acceptance-2026-10-31*.log`.
+Evidencia: `docs/architecture/v2/evidence/stage2-acceptance-2026-10-31-final.log` (corrida vigente; las
+anteriores `-2026-10-31.log` y `-rerun.log` quedan como historial).
 
 ## Capacidades por nivel de validación
 
