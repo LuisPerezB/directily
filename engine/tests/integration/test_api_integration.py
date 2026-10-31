@@ -167,6 +167,9 @@ def test_historical_run_and_evaluate_actuals(client, db_engine, tenants):
     with db_engine.connect() as conn:
         last = conn.execute(text("SELECT MAX(sale_date) FROM sales WHERE tenant_id = :t"), {"t": a}).scalar_one()
     cutoff = (pd.Timestamp(last) - pd.Timedelta(days=30)).date().isoformat()
+    with db_engine.connect() as conn:
+        current_before = conn.execute(text("SELECT id FROM forecast_runs WHERE tenant_id = :t AND is_current"), {"t": a}).scalars().all()
+    assert len(current_before) == 1, "precondición: hay una ejecución de producción vigente"
     with db_engine.begin() as conn:
         run_id, job_id = create_run(conn, a, run_type="historical", cutoff=cutoff)
     resp = _execute(client, run_id, a, job_id)
@@ -176,6 +179,9 @@ def test_historical_run_and_evaluate_actuals(client, db_engine, tenants):
         run = conn.execute(text("SELECT is_current, run_type FROM forecast_runs WHERE id = :r"),
                            {"r": run_id}).mappings().one()
         assert not run["is_current"]
+        # Una ejecución retroactiva nunca releva a la vigente de producción.
+        current_after = conn.execute(text("SELECT id FROM forecast_runs WHERE tenant_id = :t AND is_current"), {"t": a}).scalars().all()
+    assert current_after == current_before
     with db_engine.begin() as conn:
         _, eval_job = create_run(conn, a)
         conn.execute(text("UPDATE training_jobs SET job_type = 'evaluate_actuals', forecast_run_id = NULL "

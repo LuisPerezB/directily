@@ -43,15 +43,26 @@ class ScenarioData:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
+# Variaciones como FRACCIONES (0,05 = 5 %): [mínimo, máximo] del escalar y de cada elemento de una lista por período.
+# Mismos límites que valida el backend (`ScenarioEvaluationController::PCT_LIMITS`); aquí son la última barrera: un valor
+# fuera de rango (p. ej. −3 = −300 %) daría demanda, precio o costo negativos, es decir, resultados sin sentido.
+PCT_LIMITS: dict[str, tuple[float, float]] = {
+    "price_change_pct": (-0.9, 5.0), "discount_pct": (0.0, 0.95), "cost_change_pct": (-0.9, 5.0), "demand_change_pct": (-0.95, 5.0)}
+
+
 def _series(value, n: int, name: str) -> np.ndarray:
-    """Escalar o lista por período → arreglo de longitud n."""
+    """Escalar o lista por período → arreglo de longitud n (validado contra `PCT_LIMITS`)."""
     if value is None:
         return np.zeros(n)
-    if isinstance(value, (int, float)):
-        return np.full(n, float(value))
-    arr = np.array([float(x) for x in value], dtype=float)
-    if len(arr) == 0:
+    scalar = isinstance(value, (int, float)) and not isinstance(value, bool)
+    arr = np.array([float(value)] if scalar else [float(x) for x in value], dtype=float)
+    lo, hi = PCT_LIMITS.get(name, (-math.inf, math.inf))
+    if arr.size and (not np.isfinite(arr).all() or arr.min() < lo or arr.max() > hi):
+        raise ValueError(f"{name} es una fracción (0,05 = 5 %) y debe estar entre {lo:g} y {hi:g}; se recibió {value!r}.")
+    if arr.size == 0:
         return np.zeros(n)
+    if scalar:
+        return np.full(n, arr[0])
     if len(arr) < n:  # se mantiene el último valor declarado
         arr = np.concatenate([arr, np.full(n - len(arr), arr[-1])])
     return arr[:n]

@@ -38,7 +38,7 @@ cd engine
 |---|---|---|
 | `ENGINE_DATABASE_URL` | postgresql+psycopg://predictily:secret@127.0.0.1:5432/predictily | BD compartida con Laravel |
 | `ENGINE_API_TOKEN` | dev-engine-token-change-me | Igual al del backend; **cambiar en producción** |
-| `ENGINE_ARTIFACTS_DIR` | ./storage/artifacts | Artefactos `{tenant_id}/run-{id}/lightgbm_global.joblib` |
+| `ENGINE_ARTIFACTS_DIR` | ./storage/artifacts | Artefactos `{tenant_id}/run-{id}/lightgbm_global.joblib`. `model_registry.artifact_path` se guarda **relativo** a este directorio; el backend usa la misma variable (mismo volumen, solo lectura) para verificar el SHA-256 al revertir |
 | `ENGINE_RANDOM_SEED` | 42 | Semilla (reproducibilidad) |
 | `ENGINE_N_JOBS` | 4 | Hilos de LightGBM |
 | `ENGINE_MAX_SERIES_LGBM` | 5000 | Límite de series para el modelo global |

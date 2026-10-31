@@ -49,6 +49,8 @@ x-backend-env: &backend-env
   ENGINE_URL: http://engine:8100
   ENGINE_API_TOKEN: ${ENGINE_API_TOKEN:?Defina ENGINE_API_TOKEN en .env}
   ENGINE_TIMEOUT: ${ENGINE_TIMEOUT:-900}
+  # Mismo volumen que el motor (montado en solo lectura abajo): el backend verifica el SHA-256 de los artefactos al revertir modelos.
+  ENGINE_ARTIFACTS_DIR: /data/artifacts
   FILESYSTEM_DISK: local
   PREDICTILY_DEMO_PATH: /var/www/data/demo
   SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
@@ -90,6 +92,7 @@ x-backend-service: &backend-service
   volumes:
     - backend-storage:/var/www/html/storage
     - ./data/demo:/var/www/data/demo:ro
+    - engine-artifacts:/data/artifacts:ro
   networks: [edge, internal]
   depends_on:
     postgres:

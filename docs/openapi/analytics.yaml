@@ -298,6 +298,7 @@ paths:
                       restored_model_ids: { type: array, items: { type: integer } }
                       retired_model_ids: { type: array, items: { type: integer } }
                       artifacts_verified: { type: [boolean, 'null'], description: 'true = SHA-256 verificado; null = artefactos no visibles desde el backend' }
+                      artifacts_verification: { $ref: '#/components/schemas/ArtifactVerification' }
                       note: { type: string }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Reversión no permitida (code en el cuerpo)' }

@@ -49,7 +49,7 @@ def claim_run(conn: Connection, tenant_id: int, run_id: int, job_id: int | None,
                       "WHERE id = :id AND tenant_id = :t"), {"id": run_id, "t": tenant_id})
     if job_id is not None:
         conn.execute(text(
-            "UPDATE training_jobs SET status = 'running', started_at = COALESCE(started_at, now()), attempts = attempts + 1, "
+            "UPDATE training_jobs SET status = 'running', started_at = COALESCE(started_at, now()), "
             "progress = 1, stage = 'loading_data', error_message = NULL, updated_at = now() WHERE id = :id AND tenant_id = :t"
         ), {"id": job_id, "t": tenant_id})
     return run
@@ -71,6 +71,10 @@ def complete_run(conn: Connection, tenant_id: int, run_id: int, job_id: int | No
                  effective_config: dict, snapshot_id: int | None, model_versions: dict, assumptions: list[str],
                  limitations: list[str], summary: dict, duration_ms: int, make_current: bool, core: str,
                  operation: str, horizons: list[int] | None = None) -> None:
+    # Regla única: solo una corrida `production` puede ser vigente; una `historical` (la que pidió Laravel) no cambia el
+    # `is_current` de ninguna otra, aunque el cálculo en sí no sea retroactivo.
+    run_type = conn.execute(text("SELECT run_type FROM core_runs WHERE id = :id AND tenant_id = :t"), {"id": run_id, "t": tenant_id}).scalar()
+    make_current = bool(make_current) and run_type == "production"
     if make_current:
         conn.execute(text("UPDATE core_runs SET is_current = false WHERE tenant_id = :t AND core = :c AND operation = :o "
                           "AND is_current AND id <> :id"), {"t": tenant_id, "c": core, "o": operation, "id": run_id})

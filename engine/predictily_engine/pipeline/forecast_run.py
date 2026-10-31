@@ -43,6 +43,7 @@ from predictily_engine.pipeline.core import InsufficientDataError, PipelineResul
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
 from predictily_engine.pipeline.schemas import ExecuteRequest
+from predictily_engine.platform.artifacts import to_stored_path
 from predictily_engine.platform.config import effective_config_record
 from predictily_engine.platform.snapshot import persist_snapshot
 
@@ -213,7 +214,7 @@ def _save_artifact(tenant_id: int, run_id: int, family: str, obj: Any) -> tuple[
     path = base / f"{family}.joblib"
     joblib.dump(obj, path, compress=3)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    return str(path), digest
+    return to_stored_path(path), digest      # relativa a ENGINE_ARTIFACTS_DIR (ver platform/artifacts.py)
 
 
 def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int | None, result: PipelineResult,

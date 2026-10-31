@@ -10,6 +10,7 @@ use App\Jobs\Supply\RunSupplyPlan;
 use App\Jobs\Supply\RunSupplySimulation;
 use App\Models\ForecastRun;
 use App\Models\Tenant;
+use App\Services\Supply\SupplyRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -153,5 +154,51 @@ class SupplyRunsApiTest extends TestCase
         $r = $this->actingAsTenantUser($user, $tenant)->getJson('/api/v1/supply/cost-forecasts')->assertOk();
         $r->assertJsonPath('data.0.method', 'drift')->assertJsonPath('data.0.points.0.reference', 18.5)->assertJsonPath('envelope.result_type', 'forecast')
             ->assertJsonPath('envelope.entity_keys', ['product_id', 'supplier_id']);
+    }
+
+    public function test_a_historical_cost_forecast_is_never_served_by_default(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Analyst);
+        $cat = $this->seedCatalog($tenant);
+        $now = now();
+        $seed = function (string $runType, bool $current, string $asOf, float $yhat) use ($tenant, $cat, $now): int {
+            $runId = DB::table('core_runs')->insertGetId([
+                'tenant_id' => $tenant->id, 'core' => 'cost', 'operation' => 'forecast', 'version' => (int) DB::table('core_runs')->where('tenant_id', $tenant->id)->max('version') + 1,
+                'run_type' => $runType, 'status' => 'completed', 'result_type' => 'forecast', 'quality_status' => 'ok', 'uncertainty_source' => 'empirical_holdout',
+                'as_of' => $asOf, 'options' => '{}', 'assumptions' => '[]', 'limitations' => '[]', 'is_current' => $current, 'created_at' => $now, 'updated_at' => $now]);
+            DB::table('cost_forecasts')->insert([
+                'tenant_id' => $tenant->id, 'core_run_id' => $runId, 'product_id' => $cat['products']['p1'], 'cost_source' => 'purchase_history', 'currency' => 'USD',
+                'unit' => 'kg', 'method' => 'drift', 'reference_method' => 'last_value', 'quality_status' => 'ok', 'n_obs' => 18, 'last_observed_on' => '2026-06-01',
+                'last_observed_cost' => 18.5, 'points' => json_encode([['step' => 1, 'yhat' => $yhat, 'reference' => 18.5]]), 'metrics' => '{}', 'limitations' => '[]', 'created_at' => $now]);
+
+            return $runId;
+        };
+        $production = $seed('production', false, '2026-10-26', 19.0);   // sin vigente marcada (p. ej. tras una abstención)
+        $historical = $seed('historical', false, '2026-06-30', 7.0);    // más reciente por id, pero retroactiva
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        $this->assertGreaterThan($production, $historical);
+        $api->getJson('/api/v1/supply/cost-forecasts')->assertOk()->assertJsonPath('envelope.run_id', $production)->assertJsonPath('data.0.points.0.yhat', 19);
+        $api->getJson('/api/v1/supply/cost-forecasts?run_id='.$historical)->assertOk()->assertJsonPath('envelope.run_id', $historical)->assertJsonPath('data.0.points.0.yhat', 7);
+        DB::table('core_runs')->where('id', $production)->update(['run_type' => 'historical']);
+        $api->getJson('/api/v1/supply/cost-forecasts')->assertOk()->assertJsonCount(0, 'data')->assertJsonPath('envelope.quality_status', 'insufficient_data');
+    }
+
+    public function test_the_latest_plan_is_never_a_historical_one(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Viewer);
+        $cat = $this->seedCatalog($tenant);
+        $production = $this->withinTenant($tenant, fn () => $this->seedCompletedPlan($tenant, $cat));
+        $this->assertSame($production, $this->withinTenant($tenant, fn () => app(SupplyRunService::class)->latestPlan()?->id));
+        DB::table('core_runs')->where('id', $production)->update(['is_current' => false]);
+        $historical = DB::table('core_runs')->insertGetId([   // más reciente por id, pero retroactiva
+            'tenant_id' => $tenant->id, 'core' => 'supply', 'operation' => 'plan', 'version' => 2, 'run_type' => 'historical', 'status' => 'completed',
+            'result_type' => 'optimized_plan', 'quality_status' => 'degraded', 'uncertainty_source' => 'none', 'as_of' => '2026-06-30', 'options' => '{}',
+            'assumptions' => '[]', 'limitations' => '[]', 'is_current' => false, 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->assertGreaterThan($production, $historical);
+        $this->assertSame($production, $this->withinTenant($tenant, fn () => app(SupplyRunService::class)->latestPlan()?->id));
+        DB::table('core_runs')->where('id', $production)->update(['run_type' => 'historical']);
+        $this->assertNull($this->withinTenant($tenant, fn () => app(SupplyRunService::class)->latestPlan()));
     }
 }

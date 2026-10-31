@@ -157,6 +157,15 @@ export interface P50Decision {
 
 // ─── Reversión de modelos ───────────────────────────────────────────────────
 
+export interface ArtifactVerification {
+  verified: boolean | null
+  status: 'verified' | 'partially_verified' | 'not_verifiable' | 'no_artifacts'
+  registered: number
+  checked: number
+  reason: 'artifacts_dir_not_configured' | 'artifacts_dir_not_accessible' | 'artifact_files_not_found' | null
+  message: string
+}
+
 export interface DemandRollbackResult {
   from_run_id: number
   from_version: number
@@ -169,6 +178,8 @@ export interface DemandRollbackResult {
   retired_model_ids: number[]
   /** true = SHA-256 verificado; null = no verificable desde el backend (artefacto no visible). */
   artifacts_verified: boolean | null
+  /** Detalle explícito de la verificación (motivo cuando no se pudo verificar). */
+  artifacts_verification?: ArtifactVerification
   restored_models: { id: number; model_family: string; role: string | null }[]
   note: string
 }
@@ -180,6 +191,7 @@ export interface CustomerRollbackResult {
   objective: string
   retired: { id: number; version: string; model_family: string }[]
   artifact_sha256_verified: boolean | null
+  artifact_verification?: ArtifactVerification
   ranking_source: string | null
   note: string
 }

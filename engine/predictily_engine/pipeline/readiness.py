@@ -68,7 +68,7 @@ def _job(engine, tenant_id: int, job_id: int | None, status: str, result: dict |
         if status == "running":
             conn.execute(text(
                 "UPDATE training_jobs SET status = 'running', stage = 'profiling', progress = 10, "
-                "started_at = COALESCE(started_at, now()), attempts = attempts + 1, updated_at = now() "
+                "started_at = COALESCE(started_at, now()), updated_at = now() "
                 "WHERE id = :id AND tenant_id = :tenant_id"), {"id": job_id, "tenant_id": tenant_id})
         else:
             conn.execute(text(

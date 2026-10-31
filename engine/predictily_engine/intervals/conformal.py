@@ -50,6 +50,10 @@ class ConformalCalibrator:
         self.bucketer = bucketer
         self.mode = mode
         self.group_col = group_col
+        # Sin residuos (p. ej. historia demasiado corta para un backtest) el marco llega vacío y de dtype `object`:
+        # `np.isfinite` no lo admite. Las columnas numéricas se fuerzan a float y la calibración queda vacía (sin
+        # intervalos), nunca con cuantiles inventados.
+        rows = rows.assign(**{c: pd.to_numeric(rows[c], errors="coerce").astype(float) for c in ("actual", "yhat", "scale")})
         rows = rows[np.isfinite(rows["actual"]) & np.isfinite(rows["yhat"]) & (rows["scale"] > 0)]
         e = (rows["actual"].to_numpy() - rows["yhat"].to_numpy()) / rows["scale"].to_numpy()
         frame = pd.DataFrame({"group": rows[group_col].to_numpy(), "bucket": bucketer(rows["step"].to_numpy()), "e": e})

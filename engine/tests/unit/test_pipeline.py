@@ -217,3 +217,46 @@ def test_insufficient_data_raises(small_data):
     empty.sales = small_data.sales.iloc[0:0]
     with pytest.raises(InsufficientDataError):
         run_pipeline(empty)
+
+
+@pytest.mark.parametrize("days", [30, 45, 60])
+def test_short_history_abstains_explicitly_instead_of_failing(days):
+    """E2-21: con ≤ 60 días de ventas (sin backtest posible) el pipeline COMPLETA con abstención explícita por
+    horizonte: `insufficient_data` con motivo, sin intervalos ni mediana inventados y con el respaldo identificado."""
+    from datetime import date, timedelta
+
+    from predictily_engine.pipeline.data import tenant_data_from_synthetic
+    from predictily_engine.synthetic import generate_company
+
+    end = date(2026, 10, 26)
+    start = (end - timedelta(days=days - 1)).isoformat()
+    data = tenant_data_from_synthetic(
+        generate_company("ferreteria_andina", seed=42, n_products=6, start=start, end=end.isoformat()))
+    res = run_pipeline(data, horizon=30, seed=42, n_jobs=1)
+
+    # Estado global y por horizonte: ninguno se presenta como respaldado y cada uno trae su motivo.
+    assert res.quality_status == "insufficient_data"
+    assert set(res.horizon_support) == {7, 14, 30}
+    for h, info in res.horizon_support.items():
+        assert info["status"] == "insufficient_data" and info["reasons"], h
+        assert info["history_days"] == days
+        assert any(r["code"] == "no_backtest" for r in info["reasons"]), "sin ventana de backtest no se mide el error"
+    # La regla 2×H del contrato: 30 días de historia no alcanzan para H=30, y 60 sí (solo falta el backtest).
+    assert any(r["code"] == "history_lt_2h" for r in res.horizon_support[30]["reasons"]) == (days < 60)
+    assert {f"horizon_{h}_insufficient_data" for h in (7, 14, 30)} <= {x["code"] for x in res.limitations}
+
+    # Sin intervalos inventados: el pronóstico puntual existe, pero todo límite y la mediana quedan nulos y TODA
+    # fila (y el total por horizonte) se marca como sin respaldo.
+    fv = res.forecast_values
+    assert not fv.empty and (fv["yhat"] >= 0).all() and fv["yhat"].sum() > 0
+    assert fv[["lo_80", "hi_80", "lo_95", "hi_95", "p50"]].isna().all().all()
+    assert (fv["quality_status"] == "insufficient_data").all()
+    assert set(fv.loc[fv["granularity"] == "horizon", "period_days"]) == {7, 14, 30}
+
+    # Respaldo identificado: promedio de la historia disponible, declarado en el resumen y en la selección.
+    assert set(fv.loc[fv["level"] == "series", "model_family"]) == {"window_average"}
+    assert res.summary["models"] == {"window_average": int(res.summary["series_count"])}
+    assert res.summary["uncertainty_source"] == "unknown"
+    assert res.summary["metrics"]["coverage_80"] is None and res.summary["metrics"]["selected_wape"] is None
+    assert not res.evaluations and res.summary["metrics"]["independent_holdout"] is False
+    assert any("Historia insuficiente para backtesting" in w for w in res.warnings)

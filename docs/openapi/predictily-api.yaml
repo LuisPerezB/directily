@@ -2826,6 +2826,8 @@ paths:
                         - boolean
                         - 'null'
                         description: true = SHA-256 verificado; null = artefactos no visibles desde el backend
+                      artifacts_verification:
+                        $ref: '#/components/schemas/ArtifactVerification'
                       note:
                         type: string
         '404':
@@ -8237,6 +8239,37 @@ components:
           type:
           - number
           - 'null'
+    ArtifactVerification:
+      type: object
+      description: Resultado de la verificación del SHA-256 de los artefactos al revertir (artifact_path relativo
+        a ENGINE_ARTIFACTS_DIR)
+      properties:
+        verified:
+          type:
+          - boolean
+          - 'null'
+        status:
+          type: string
+          enum:
+          - verified
+          - partially_verified
+          - not_verifiable
+          - no_artifacts
+        registered:
+          type: integer
+        checked:
+          type: integer
+        reason:
+          type:
+          - string
+          - 'null'
+          enum:
+          - artifacts_dir_not_configured
+          - artifacts_dir_not_accessible
+          - artifact_files_not_found
+          - null
+        message:
+          type: string
     CustomerRollbackResult:
       type: object
       properties:
@@ -8280,6 +8313,10 @@ components:
           type:
           - boolean
           - 'null'
+          description: true solo si el backend verificó el SHA-256 de todos los artefactos; null si no pudo (ver
+            artifact_verification)
+        artifact_verification:
+          $ref: '#/components/schemas/ArtifactVerification'
         ranking_source:
           type:
           - string
@@ -9059,31 +9096,51 @@ components:
         price_change_pct:
           oneOf:
           - type: number
+            minimum: -0.9
+            maximum: 5
           - type: array
             items:
               type: number
-          description: Escalar o lista por período
+              minimum: -0.9
+              maximum: 5
+          description: Fracción (0.05 = 5 %), escalar o lista por período; el escalar y cada elemento comparten
+            los límites -0.9..5
         discount_pct:
           oneOf:
           - type: number
+            minimum: 0
+            maximum: 0.95
           - type: array
             items:
               type: number
-          description: Escalar o lista por período
+              minimum: 0
+              maximum: 0.95
+          description: Fracción (0.05 = 5 %), escalar o lista por período; el escalar y cada elemento comparten
+            los límites 0..0.95
         cost_change_pct:
           oneOf:
           - type: number
+            minimum: -0.9
+            maximum: 5
           - type: array
             items:
               type: number
-          description: Escalar o lista por período
+              minimum: -0.9
+              maximum: 5
+          description: Fracción (0.05 = 5 %), escalar o lista por período; el escalar y cada elemento comparten
+            los límites -0.9..5
         demand_change_pct:
           oneOf:
           - type: number
+            minimum: -0.95
+            maximum: 5
           - type: array
             items:
               type: number
-          description: Escalar o lista por período
+              minimum: -0.95
+              maximum: 5
+          description: Fracción (0.05 = 5 %), escalar o lista por período; el escalar y cada elemento comparten
+            los límites -0.95..5
         use_cost_forecast:
           type: boolean
         plan_run_id:

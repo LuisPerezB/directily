@@ -103,6 +103,9 @@ cualquier consumidor, p. ej. Customer Core):
 3. Cancelado al corte si `cancelled_at ≤ corte`. Estado cancelado sin fecha ⇒ bandera `cancellation_date_unknown`, pendiente 0.
 4. Pendiente por línea = `max(0, cantidad − cumplida)`; 0 si está cancelado.
 5. Un compromiso nunca se suma a la demanda probabilística: lo reconcilia el consumidor (P2) con estas cantidades y estado.
+6. **Instante del corte** (corrección P8): un `as_of` de solo fecha (`AAAA-MM-DD`) es el **fin de ese día en la zona horaria de la empresa** (`known < as_of + 1 día`, igual que
+   el motor), no las 00:00 UTC. Así lo importado hoy sin `known_at` aparece con `as_of = hoy` (fecha local, aunque la fecha UTC ya haya cambiado) y no con ayer. Con hora explícita
+   (`2026-10-30T22:00:00-05:00`) manda ese instante; una fecha-hora sin zona se lee en la zona de la empresa. `meta` devuelve `as_of` (instante efectivo), `timezone` y `as_of_basis`.
 
 ### 2.4 Calendario (`entity_type = calendar_events`, tabla `calendar_events`)
 

@@ -140,17 +140,21 @@ class CustomerRunService
             ->whereIn('status', ['queued', 'running'])->where('created_at', '>=', $staleBefore)->latest('id')->first();
     }
 
-    /** Corrida de predicción vigente (is_current) o, en su defecto, la última completada. */
+    /**
+     * Corrida de predicción vigente (is_current) o, en su defecto, la última de PRODUCCIÓN completada. Una corrida
+     * retroactiva (`historical`) nunca se sirve por defecto: solo se consulta pidiéndola con `run_id`.
+     */
     public function latestPrediction(): ?CoreRun
     {
         return CoreRun::query()->where('core', 'customer')->where('operation', 'predict')->where('status', 'completed')
-            ->orderByDesc('is_current')->orderByDesc('id')->first();
+            ->where('run_type', 'production')->orderByDesc('is_current')->orderByDesc('id')->first();
     }
 
+    /** Igual que latestPrediction() para el entrenamiento: la evaluación vigente nunca es una retroactiva. */
     public function latestEvaluation(): ?CoreRun
     {
         return CoreRun::query()->where('core', 'customer')->where('operation', 'train')->where('status', 'completed')
-            ->orderByDesc('is_current')->orderByDesc('id')->first();
+            ->where('run_type', 'production')->orderByDesc('is_current')->orderByDesc('id')->first();
     }
 
     /** ¿Hay modelos de comportamiento en producción? (la predicción programada solo corre con modelo). */

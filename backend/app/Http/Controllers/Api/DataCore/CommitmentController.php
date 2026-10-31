@@ -40,10 +40,15 @@ final class CommitmentController extends Controller
             'as_of' => ['sometimes', 'date'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
         if (isset($data['as_of'])) {
-            $view = $this->asOf->view($this->context->require()->id, CarbonImmutable::parse($data['as_of']), array_intersect_key($data, array_flip(['type', 'product_id', 'status'])));
+            $tenant = $this->context->require();
+            $timezone = $tenant->timezone ?: 'America/Guayaquil';
+            $cutoff = CommitmentAsOf::cutoff((string) $data['as_of'], $timezone);   // AAAA-MM-DD = fin de ese día en la zona de la empresa
+            $view = $this->asOf->view($tenant->id, $cutoff, array_intersect_key($data, array_flip(['type', 'product_id', 'status'])));
 
             return response()->json(['data' => $view, 'meta' => [
-                'as_of' => CarbonImmutable::parse($data['as_of'])->toIso8601String(),
+                'as_of' => $cutoff->toIso8601String(),
+                'timezone' => $timezone,
+                'as_of_basis' => preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string) $data['as_of'])) === 1 ? 'end_of_day_company_timezone' : 'instant',
                 'rule' => 'last_version_with_effective_known_at_lte_as_of; effective_known_at=coalesce(known_at,ingested_at); known_basis=declared|ingestion; cancelled_when_cancelled_at_lte_as_of; pending=max(0,quantity-fulfilled)',
             ]]);
         }

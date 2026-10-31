@@ -43,6 +43,7 @@ from predictily_engine.db.customer_repository import CustomerRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import ProgressReporter, jdump, none_if_nan
 from predictily_engine.pipeline.errors import ConflictError, NotFoundError
+from predictily_engine.platform.artifacts import resolve_stored_path, to_stored_path
 from predictily_engine.platform.config import resolve_config
 from predictily_engine.platform.snapshot import DataSnapshot, persist_snapshot
 
@@ -100,7 +101,7 @@ def claim_run(conn: Connection, tenant_id: int, run_id: int, job_id: int | None,
                       "WHERE id = :id AND tenant_id = :t"), {"id": run_id, "t": tenant_id})
     if job_id is not None:
         conn.execute(text(
-            "UPDATE training_jobs SET status = 'running', started_at = COALESCE(started_at, now()), attempts = attempts + 1, "
+            "UPDATE training_jobs SET status = 'running', started_at = COALESCE(started_at, now()), "
             "progress = 1, stage = 'loading_data', error_message = NULL, updated_at = now() WHERE id = :id AND tenant_id = :t"
         ), {"id": job_id, "t": tenant_id})
     return None
@@ -187,7 +188,7 @@ def _save_artifact(tenant_id: int, run_id: int, name: str, obj: Any) -> tuple[st
     base.mkdir(parents=True, exist_ok=True)
     path = base / f"{name}.joblib"
     joblib.dump(obj, path, compress=3)
-    return str(path), hashlib.sha256(path.read_bytes()).hexdigest()
+    return to_stored_path(path), hashlib.sha256(path.read_bytes()).hexdigest()      # relativa a ENGINE_ARTIFACTS_DIR
 
 
 def _artifact_compat() -> dict[str, Any]:
@@ -198,10 +199,11 @@ def _artifact_compat() -> dict[str, Any]:
 
 def load_artifact(row: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     """Carga un artefacto de producción verificando sha256 y compatibilidad. Devuelve (artefacto, motivo de rechazo)."""
-    path = row.get("artifact_path")
-    if not path or not Path(path).exists():
+    stored = row.get("artifact_path")
+    path = resolve_stored_path(stored) if stored else None
+    if path is None or not path.exists():
         return None, "artifact_missing"
-    data = Path(path).read_bytes()
+    data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != row.get("artifact_sha256"):
         return None, "artifact_sha256_mismatch"
     compat = row.get("artifact_compat") or {}
@@ -339,8 +341,11 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
         model_versions, promoted = _persist_models(conn, tenant, run, job_id, results, cfg, snapshot_id, seed, last_complete, data)
         _persist_evaluations(conn, tenant_id, run_id, results, coherence, activity_eval, model_versions)
         summary = _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_s, promoted)
-        conn.execute(text("UPDATE core_runs SET is_current = false WHERE tenant_id = :t AND core = 'customer' AND operation = 'train' AND is_current "
-                          "AND id <> :id"), {"t": tenant_id, "id": run_id})
+        # Solo una corrida `production` puede ser vigente (y releva a la anterior); una `historical` no toca `is_current`.
+        production_run = run.get("run_type", "production") == "production"
+        if production_run:
+            conn.execute(text("UPDATE core_runs SET is_current = false WHERE tenant_id = :t AND core = 'customer' AND operation = 'train' "
+                              "AND is_current AND id <> :id"), {"t": tenant_id, "id": run_id})
         conn.execute(text(
             """
             UPDATE core_runs SET status = 'completed', result_type = 'evaluation', quality_status = :quality,
@@ -353,7 +358,7 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
             """), {"quality": quality, "as_of": last_complete, "horizons": jdump(horizons), "target": jdump(TARGET_DEFINITION),
                    "cv": cfg_version, "cfg": jdump({"config": cfg, "provenance": provenance}), "snap": snapshot_id,
                    "mv": jdump(model_versions), "manifest": jdump(manifest), "assumptions": jdump(assumptions),
-                   "limitations": jdump(limitations), "summary": jdump(summary), "current": run.get("run_type", "production") == "production",
+                   "limitations": jdump(limitations), "summary": jdump(summary), "current": production_run,
                    "id": run_id, "t": tenant_id})
         if job_id is not None:
             conn.execute(text(
@@ -765,11 +770,18 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
             _write_prediction_rows(conn, tenant_id, run_id, out, rec_all, forecast_run_id, as_of)
         retained = int(cfg["retain_prediction_runs"])
         for table in ("customer_predictions", "customer_product_rankings", "customer_activity", "customer_reconciliations"):
+            # La retención cuenta todas las predicciones, pero nunca borra las filas de la vigente de producción (muchas
+            # corridas retroactivas posteriores no pueden dejarla sin resultados).
             conn.execute(text(
-                f"DELETE FROM {table} WHERE tenant_id = :t AND core_run_id IN (SELECT id FROM core_runs WHERE tenant_id = :t "
-                f"AND core = 'customer' AND operation = 'predict' AND id <> :r ORDER BY id DESC OFFSET :n)"), {"t": tenant_id, "r": run_id, "n": max(retained - 1, 0)})
-        conn.execute(text("UPDATE core_runs SET is_current = false WHERE tenant_id = :t AND core = 'customer' AND operation = 'predict' AND is_current AND id <> :id"),
-                     {"t": tenant_id, "id": run_id})
+                f"DELETE FROM {table} WHERE tenant_id = :t AND core_run_id IN (SELECT old.id FROM (SELECT id, is_current FROM core_runs "
+                f"WHERE tenant_id = :t AND core = 'customer' AND operation = 'predict' AND id <> :r ORDER BY id DESC OFFSET :n) old "
+                f"WHERE NOT old.is_current)"), {"t": tenant_id, "r": run_id, "n": max(retained - 1, 0)})
+        # Solo una predicción `production` puede ser vigente: releva a la anterior aunque ella misma se abstenga (no queda
+        # «vigente» una predicción vieja que ya no representa el estado actual); una `historical` no toca `is_current`.
+        production_run = run.get("run_type", "production") == "production"
+        if production_run:
+            conn.execute(text("UPDATE core_runs SET is_current = false WHERE tenant_id = :t AND core = 'customer' AND operation = 'predict' "
+                              "AND is_current AND id <> :id"), {"t": tenant_id, "id": run_id})
         duration_ms = int((time.perf_counter() - t0) * 1000)
         summary["duration_ms"] = duration_ms
         h_end = as_of + timedelta(days=max(horizons_out)) if horizons_out else None
@@ -789,7 +801,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
                        "Probabilidades calibradas con datos temporalmente separados; no se multiplican entre horizontes (P7 ≤ P30 ≤ P90 por máximo acumulado).",
                        "El comprometido (pedidos/contratos confirmados) no se vuelve a sumar a la esperanza: demanda del comprador = max(esperanza, comprometido)."]),
                    "limitations": jdump(limitations), "summary": jdump(summary),
-                   "current": run.get("run_type", "production") == "production" and bool(horizons_out), "id": run_id, "t": tenant_id})
+                   "current": production_run and bool(horizons_out), "id": run_id, "t": tenant_id})
         if job_id is not None:
             conn.execute(text(
                 "UPDATE training_jobs SET status = 'succeeded', stage = NULL, progress = 100, finished_at = now(), duration_ms = :d, "

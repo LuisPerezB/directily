@@ -215,6 +215,29 @@ class EngineJobsTest extends TestCase
         });
     }
 
+    /** `attempts` cuenta una vez por intento real de la cola (el motor no lo suma): un reintento da 2, no 1 ni 4. */
+    public function test_a_retried_job_counts_one_attempt_per_real_attempt(): void
+    {
+        [$tenant, $run, $job] = $this->queuedRun();
+        Http::fake(['engine.test/*' => Http::sequence()
+            ->push(['detail' => 'Error inesperado'], 500)
+            ->push(['run_id' => $run->id, 'status' => 'completed', 'series_count' => 6])]);
+
+        try {
+            $this->runJob($tenant, $run, $job);                       // intento 1: error del motor, la cola reintenta
+            $this->fail('Se esperaba EngineServerException');
+        } catch (EngineServerException) {
+            $this->withinTenant($tenant, fn () => $this->assertSame(1, (int) $job->refresh()->attempts));
+        }
+        $this->runJob($tenant, $run, $job);                           // intento 2: termina
+
+        $this->withinTenant($tenant, function () use ($job) {
+            $job->refresh();
+            $this->assertSame('succeeded', $job->status);
+            $this->assertSame(2, (int) $job->attempts);
+        });
+    }
+
     public function test_connection_errors_are_retryable(): void
     {
         [$tenant, $run, $job] = $this->queuedRun();

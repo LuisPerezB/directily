@@ -20,6 +20,7 @@ from predictily_engine.customer.synthetic import generate_world
 from predictily_engine.db.customer_repository import CustomerRepository
 from predictily_engine.db.repository import TenantScopeError
 from predictily_engine.pipeline.errors import ConflictError, NotFoundError
+from predictily_engine.platform.artifacts import resolve_stored_path
 
 pytestmark = pytest.mark.integration
 AUTH = {"Authorization": "Bearer test-token"}
@@ -98,9 +99,10 @@ def test_registry_has_one_production_model_per_slot_with_verified_artifacts(db_e
         assert r["status"] in ("candidate", "validated", "production", "retired", "failed")
         assert r["role"] == "fallback" or r["hyperparameters"]["kind"] == "complex"
         if r["artifact_path"]:
-            data = Path(r["artifact_path"]).read_bytes()
+            # Regla única: la ruta se guarda RELATIVA a ENGINE_ARTIFACTS_DIR (el backend la resuelve con su propio directorio).
+            assert not Path(r["artifact_path"]).is_absolute() and r["artifact_path"].startswith(f"{tid}/customer/")
+            data = resolve_stored_path(r["artifact_path"]).read_bytes()
             assert hashlib.sha256(data).hexdigest() == r["artifact_sha256"]
-            assert str(tid) in r["artifact_path"] and "/customer/" in r["artifact_path"]
             assert r["artifact_compat"]["feature_schema_version"] and r["artifact_compat"]["libraries"]["lightgbm"]
     for r in prod:   # un modelo complejo solo está en producción si superó la regla; la referencia se sirve con rol fallback
         if r["hyperparameters"]["kind"] == "reference":
@@ -248,7 +250,7 @@ def test_company_isolation_in_runs_models_artifacts_and_results(db_engine, env):
     assert tb["status"] == "completed"
     assert prod_a == {r["id"] for r in q(db_engine, "SELECT id FROM model_registry WHERE tenant_id = :t AND status = 'production' AND core = 'customer'", t=a)}
     paths_b = [r["artifact_path"] for r in q(db_engine, "SELECT artifact_path FROM model_registry WHERE tenant_id = :t AND artifact_path IS NOT NULL", t=b)]
-    assert paths_b and all(f"/{b}/customer/" in p for p in paths_b)
+    assert paths_b and all(p.startswith(f"{b}/customer/") for p in paths_b)
     # sus predicciones jamás incluyen compradores de A
     pb2 = run(db_engine, b, "predict", as_of="2026-01-01")
     if pb2["quality_status"] != "insufficient_data":
@@ -297,7 +299,7 @@ def test_a_broken_production_artifact_falls_back_to_the_validated_reference(db_e
     if prod is None:
         pytest.skip("En esta corrida ningún horizonte sirve un modelo complejo")
     h = prod["hyperparameters"]["horizon_days"]
-    path = Path(prod["artifact_path"])
+    path = resolve_stored_path(prod["artifact_path"])
     original = path.read_bytes()
     try:
         path.write_bytes(original[:-50] + b"corrupto" * 7)               # el sha256 ya no coincide
@@ -528,3 +530,45 @@ def test_a_confirmed_order_without_known_at_counts_today_but_not_in_past_cutoffs
     assert committed and float(committed[0]["committed_quantity"]) == pytest.approx(30.0)    # 33 − 3 cumplidos, entrega dentro de 30 días
     s30 = now_run["summary"]["committed"]["30"]
     assert s30["commitments_known_by_ingestion"] >= 1 and s30["lines_known_by_ingestion"] >= 1
+
+
+# ───────────────────────────── corridas retroactivas (P8 · §10) ─────────────────────────────
+
+def _current_ids(engine, tenant_id: int) -> dict[str, list[int]]:
+    rows = q(engine, "SELECT operation, id FROM core_runs WHERE tenant_id = :t AND core = 'customer' AND is_current ORDER BY id", t=tenant_id)
+    out: dict[str, list[int]] = {"train": [], "predict": []}
+    for r in rows:
+        out[r["operation"]].append(int(r["id"]))
+    return out
+
+
+def test_historical_runs_never_displace_the_current_production_runs(db_engine, env):
+    """Regla: SOLO una ejecución `production` puede ser vigente; una retroactiva (`historical`) no cambia `is_current` de
+    ninguna otra, ni siquiera de la de producción de la misma operación, ni se vuelve vigente ella misma."""
+    tid = env["A"]["tenant_id"]
+    prod_predict = predict_a(db_engine, env)
+    before = _current_ids(db_engine, tid)
+    assert len(before["train"]) == 1 and before["predict"] == [prod_predict["run_id"]], "precondición: una vigente por operación"
+    registry = q(db_engine, "SELECT id, status FROM model_registry WHERE tenant_id = :t AND core = 'customer' ORDER BY id", t=tid)
+
+    retro_asof = (env["last"] - timedelta(days=20)).isoformat()
+    retro_predict = run(db_engine, tid, "predict", as_of=retro_asof, run_type="historical")
+    assert retro_predict["status"] == "completed"
+    assert one(db_engine, "SELECT is_current FROM core_runs WHERE id = :r", r=retro_predict["run_id"]) is False
+    assert _current_ids(db_engine, tid) == before, "el predict retroactivo no desplaza a la predicción vigente de producción"
+    # sus filas existen (se puede consultar por run_id) y las de la vigente siguen intactas
+    assert one(db_engine, "SELECT count(*) FROM customer_predictions WHERE core_run_id = :r", r=retro_predict["run_id"]) > 0
+    assert one(db_engine, "SELECT count(*) FROM customer_predictions WHERE core_run_id = :r", r=prod_predict["run_id"]) > 0
+
+    retro_train = run(db_engine, tid, "train", as_of=(env["last"] - timedelta(days=60)).isoformat(), horizons=[7], run_type="historical")
+    assert retro_train["status"] == "completed"
+    assert one(db_engine, "SELECT is_current FROM core_runs WHERE id = :r", r=retro_train["run_id"]) is False
+    assert _current_ids(db_engine, tid) == before, "el train retroactivo no desplaza a la evaluación vigente de producción"
+    assert q(db_engine, "SELECT id, status FROM model_registry WHERE tenant_id = :t AND core = 'customer' AND id <= :m ORDER BY id",
+             t=tid, m=registry[-1]["id"]) == registry, "el train retroactivo no promueve ni retira modelos del registro"
+    assert one(db_engine, "SELECT count(*) FROM model_registry WHERE tenant_id = :t AND core = 'customer' AND id > :m AND status = 'production'",
+               t=tid, m=registry[-1]["id"]) == 0
+
+    # y la siguiente de producción sí releva a la anterior de producción (una sola vigente por operación)
+    next_predict = predict_a(db_engine, env)
+    assert _current_ids(db_engine, tid)["predict"] == [next_predict["run_id"]]

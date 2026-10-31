@@ -154,6 +154,48 @@ class CustomerResultsApiTest extends TestCase
         $this->actingAsTenantUser($ua, $a)->getJson('/api/v1/customer/customers/'.$catB['customers']['c1'].'/profile')->assertStatus(404);
     }
 
+    // ── corridas retroactivas (§10): nunca se sirven por defecto ──
+    public function test_a_historical_prediction_is_never_served_instead_of_the_production_one(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser();
+        $cat = $this->seedCustomerCatalog($tenant);
+        $production = $this->seedPredictionRun($tenant, $cat, [7, 30, 90], '2026-10-30', true);
+        $historical = $this->seedPredictionRun($tenant, $cat, [7, 30, 90], '2026-10-26', false);   // más reciente por id, pero retroactiva
+        DB::table('core_runs')->where('id', $historical)->update(['run_type' => 'historical']);
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        $this->assertGreaterThan($production, $historical);
+        $api->getJson('/api/v1/customer/predictions?horizon=30')->assertOk()->assertJsonPath('envelope.run_id', $production);
+        $api->getJson('/api/v1/customer/customers/'.$cat['customers']['c1'].'/profile')->assertOk();
+        $api->getJson('/api/v1/customer/reconciliation?horizon=30')->assertOk()->assertJsonPath('envelope.run_id', $production);
+        // ...pero se puede consultar pidiéndola explícitamente.
+        $api->getJson('/api/v1/customer/predictions?horizon=30&run_id='.$historical)->assertOk()->assertJsonPath('envelope.run_id', $historical);
+
+        // Sin ninguna vigente (p. ej. la de producción se abstuvo): sigue sin servirse la retroactiva en su lugar.
+        DB::table('core_runs')->where('id', $production)->update(['is_current' => false]);
+        $api->getJson('/api/v1/customer/predictions?horizon=30')->assertOk()->assertJsonPath('envelope.run_id', $production);
+
+        // Si solo existen retroactivas, la respuesta es la abstención explícita, no una corrida histórica.
+        DB::table('core_runs')->where('id', $production)->update(['run_type' => 'historical']);
+        $this->assertNull($api->getJson('/api/v1/customer/predictions?horizon=30')->assertOk()->json('envelope.run_id'));
+    }
+
+    public function test_a_historical_training_is_never_served_as_the_current_evaluation(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser();
+        $production = $this->seedTrainingRun($tenant, [7, 30, 90], '2026-10-26');
+        DB::table('core_runs')->where('id', $production)->update(['is_current' => false]);   // el índice admite una sola vigente
+        $historical = $this->seedTrainingRun($tenant, [7, 30, 90], '2026-08-26');             // el fixture la deja vigente
+        DB::table('core_runs')->where('id', $historical)->update(['run_type' => 'historical', 'is_current' => false]);
+        DB::table('core_runs')->where('id', $production)->update(['is_current' => true]);
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        $this->assertSame($production, $api->getJson('/api/v1/customer/evaluation')->assertOk()->json('data.run_id'));
+        $this->assertSame($historical, $api->getJson('/api/v1/customer/evaluation?run_id='.$historical)->assertOk()->json('data.run_id'));
+        DB::table('core_runs')->where('id', $production)->update(['is_current' => false]);
+        $this->assertSame($production, $api->getJson('/api/v1/customer/evaluation')->assertOk()->json('data.run_id'));
+    }
+
     // ── evaluación ──
     public function test_evaluation_returns_manifest_metrics_and_curves_with_sample_sizes(): void
     {

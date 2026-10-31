@@ -289,9 +289,8 @@ def block_demand(a: mvp.Client) -> None:
     ids["demand_run14"], ids["demand_job"] = run14["id"], (run14.get("training_job") or {}).get("id")
     check_envelope_demand(run14, 14, "H=14")
     jb = a.json("GET", f"/jobs/{ids['demand_job']}")["data"]
-    if jb["attempts"] != 1:
-        warn("[Demanda] el trabajo ejecutado una sola vez informa attempts=" + str(jb["attempts"]),
-             "backend (TrainingJobRecorder::markAttempt) y motor (UPDATE … attempts = attempts + 1) incrementan el contador: cosmético, heredado de la etapa 1")
+    check("[Demanda] un trabajo ejecutado una sola vez informa attempts = 1 (lo cuenta solo el backend, una vez por intento real)",
+          jb["attempts"] == 1, f"attempts = {jb['attempts']}")
     # series / productos / dashboard: respaldo del horizonte pedido
     s14 = a.json("GET", "/forecasts/series", params={"horizon": 14})["data"]
     s30 = a.json("GET", "/forecasts/series", params={"horizon": 30})["data"]
@@ -350,12 +349,17 @@ def block_demand(a: mvp.Client) -> None:
     check("[Demanda] tras revertir: los pronósticos de la ejecución restaurada son los de su corte (no se recalcula)",
           s_after["forecast"] == s14["forecast"] and acc_after["backtest"]["selected"]["mase"] == acc14["backtest"]["selected"]["mase"],
           f"corte {s_after['meta']['cutoff_date']}")
-    av = rb.get("artifacts_verified")
+    av, av_info = rb.get("artifacts_verified"), rb.get("artifacts_verification") or {}
     if av is True:
-        check("[Demanda] reversión con SHA-256 de los artefactos verificado por el backend", True, "artifacts_verified = true")
+        check("[Demanda] reversión con SHA-256 de los artefactos verificado por el backend (artifact_path relativo a ENGINE_ARTIFACTS_DIR)", True,
+              f"artifacts_verified = true; {av_info.get('checked')}/{av_info.get('registered')} artefactos verificados")
     else:
-        warn("[Demanda] la reversión no pudo verificar el SHA-256 desde el backend (artifacts_verified = null)",
-             "el motor registra artifact_path relativo (ENGINE_ARTIFACTS_DIR=./storage/artifacts) y el backend lo resuelve contra su propio directorio; ver verificación independiente")
+        # Sin acceso al volumen de artefactos el backend debe INFORMARLO explícitamente (estado y motivo), no devolver null a secas.
+        check("[Demanda] la reversión que no pudo verificar el SHA-256 lo informa explícitamente (estado y motivo)",
+              av is None and av_info.get("status") in {"not_verifiable", "partially_verified", "no_artifacts"} and bool(av_info.get("message")),
+              f"artifacts_verification = {av_info}")
+        warn("[Demanda] la reversión no pudo verificar el SHA-256 desde el backend",
+             "el backend no ve el volumen de artefactos: configure ENGINE_ARTIFACTS_DIR (el mismo del motor) en backend/.env; ver verificación independiente")
     # verificación independiente del SHA-256 de los artefactos restaurados (si el motor corre en esta máquina)
     tenant_id = (run14.get("envelope") or {}).get("tenant_id")
     verified, missing = 0, 0

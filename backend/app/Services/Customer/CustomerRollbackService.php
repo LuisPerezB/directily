@@ -8,6 +8,7 @@ use App\Exceptions\DomainStateException;
 use App\Models\ModelRegistry;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Forecasting\ModelArtifactVerifier;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -21,15 +22,16 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  *
  * Reglas: el modelo debe ser de la empresa (de otra empresa o de otro core responde 404); estado validated|retired; slot válido;
  * horizonte incluido en el plan (402); artefacto presente, de un esquema de variables compatible y con SHA-256 íntegro —si el
- * archivo es visible desde el backend (volumen compartido) y no coincide, se rechaza (409 `rollback_artifact_mismatch`); si no es
- * visible, el motor lo verifica al predecir y sirve la referencia validada si falla—. Queda en auditoría.
+ * archivo es visible desde el backend (`engine.artifacts_dir`, volumen compartido) y no coincide, se rechaza (409
+ * `rollback_artifact_mismatch`); si no es visible, la respuesta lo informa explícitamente (`artifact_verification`) y el motor lo
+ * verifica al predecir y sirve la referencia validada si falla—. Queda en auditoría.
  */
 final class CustomerRollbackService
 {
     /** Debe coincidir con `predictily_engine.customer.FEATURE_SCHEMA_VERSION` (el motor lo exige al cargar el artefacto). */
     public const FEATURE_SCHEMA_VERSION = 'cust-fs-2026.10-v1';
 
-    public function __construct(private readonly TenantContext $context) {}
+    public function __construct(private readonly TenantContext $context, private readonly ModelArtifactVerifier $artifacts) {}
 
     /** @return array<string, mixed> */
     public function rollback(Tenant $tenant, ?User $user, int $modelRegistryId): array
@@ -58,7 +60,7 @@ final class CustomerRollbackService
                     'artifact' => $target->artifact_compat['feature_schema_version'] ?? null, 'engine' => self::FEATURE_SCHEMA_VERSION,
                 ]);
             }
-            $verified = $this->verifyArtifact($target);
+            $verified = $this->artifacts->verify([$target]);
 
             $now = CarbonImmutable::now();
             $retired = ModelRegistry::query()->where('core', 'customer')->where('status', 'production')
@@ -75,7 +77,8 @@ final class CustomerRollbackService
             'restored' => ['id' => $target->id, 'version' => $target->version, 'model_family' => $target->model_family, 'role' => $target->role, 'status' => $target->status],
             'slot' => $result['slot'], 'horizon_days' => $result['horizon'], 'objective' => $result['objective'],
             'retired' => $result['retired']->map(fn ($r) => ['id' => $r->id, 'version' => $r->version, 'model_family' => $r->model_family])->values()->all(),
-            'artifact_sha256_verified' => $result['verified'],
+            'artifact_sha256_verified' => $result['verified']['verified'],
+            'artifact_verification' => $result['verified'],
             'ranking_source' => $target->hyperparameters['ranking_source'] ?? null,
         ];
         $this->context->runAs($tenant, function () use ($target, $summary, $user): void {
@@ -83,21 +86,5 @@ final class CustomerRollbackService
         });
 
         return $summary + ['note' => 'La siguiente predicción usará esta versión; las predicciones ya generadas no cambian. Ejecute POST /customer/runs {operation: predict} para actualizarlas.'];
-    }
-
-    /** true = SHA-256 verificado · null = el archivo no es visible desde el backend (lo verifica el motor al cargar) · lanza si no coincide. */
-    private function verifyArtifact(ModelRegistry $model): ?bool
-    {
-        $path = (string) $model->artifact_path;
-        if (! is_file($path)) {
-            return null;
-        }
-        if (! hash_equals((string) $model->artifact_sha256, hash_file('sha256', $path))) {
-            throw new DomainStateException('El artefacto del modelo '.$model->version.' no coincide con su huella SHA-256: no se puede restaurar.', 'rollback_artifact_mismatch', [
-                'model_id' => $model->id,
-            ]);
-        }
-
-        return true;
     }
 }

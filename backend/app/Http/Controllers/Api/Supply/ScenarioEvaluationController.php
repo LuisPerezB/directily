@@ -29,14 +29,22 @@ use Illuminate\Validation\Rule;
  */
 class ScenarioEvaluationController extends SupplyController
 {
+    /**
+     * Límites de las variaciones, como FRACCIONES (0,05 = 5 %): [mínimo, máximo]. Valen para el escalar y para cada
+     * elemento de la lista por período (docs/06 §3.16).
+     *
+     * @var array<string, array{0: float, 1: float}>
+     */
+    public const PCT_LIMITS = [
+        'price_change_pct' => [-0.9, 5.0],
+        'discount_pct' => [0.0, 0.95],
+        'cost_change_pct' => [-0.9, 5.0],
+        'demand_change_pct' => [-0.95, 5.0],
+    ];
+
     public function evaluate(Request $request, SupplyRunService $service, SupplyEngineClient $engine, TrainingJobRecorder $jobs, SupplyRunRecorder $recorder): JsonResponse
     {
         CoreServices::assertFeature($this->tenant(), 'scenarios');
-        $pct = fn (string $min, string $max) => ['nullable', 'numeric', "min:$min", "max:$max"];
-        $series = fn (string $key, string $min, string $max) => [
-            $key => ['nullable'],
-            "$key.*" => ['numeric', "min:$min", "max:$max"],
-        ];
         $rules = [
             'name' => ['sometimes', 'nullable', 'string', 'max:150'],
             'horizon_days' => ['sometimes', 'integer', 'min:7', 'max:180'],
@@ -61,18 +69,13 @@ class ScenarioEvaluationController extends SupplyController
             'strategies.*.extra_supply.*.period' => ['required', 'integer', 'min:0', 'max:400'],
             'strategies.*.extra_supply.*.units' => ['required', 'numeric', 'min:0'],
         ];
-        // Trayectorias: escalar o lista por período.
-        foreach (['price_change_pct' => ['-0.9', '5'], 'discount_pct' => ['0', '0.95'], 'cost_change_pct' => ['-0.9', '5'], 'demand_change_pct' => ['-0.95', '5']] as $k => [$min, $max]) {
-            $rules["strategies.*.$k"] = ['sometimes', 'nullable'];
-            $rules["strategies.*.$k.*"] = ['numeric', "min:$min", "max:$max"];
+        // Trayectorias: escalar o lista por período. Son FRACCIONES (0,05 = 5 %) y el escalar y cada elemento de la lista
+        // comparten exactamente los mismos límites.
+        foreach (self::PCT_LIMITS as $field => [$min, $max]) {
+            $rules["strategies.*.$field"] = ['sometimes', 'nullable', $this->fractionRule($min, $max)];
         }
         $data = $request->validate($rules);
         foreach ($data['strategies'] as $s) {
-            foreach (['price_change_pct', 'discount_pct', 'cost_change_pct', 'demand_change_pct'] as $k) {
-                if (isset($s[$k]) && ! is_array($s[$k]) && ! is_numeric($s[$k])) {
-                    abort(422, "strategies.*.$k debe ser un número o una lista de números por período.");
-                }
-            }
             if (isset($s['plan_run_id'])) {
                 $plan = CoreRun::query()->find((int) $s['plan_run_id']);
                 if ($plan === null || $plan->core !== 'supply' || $plan->operation !== 'plan' || $plan->status !== 'completed') {
@@ -118,5 +121,31 @@ class ScenarioEvaluationController extends SupplyController
                 'request' => JsonMap::of($eval?->request), 'results' => JsonMap::of($eval?->results)],
             'envelope' => $this->envelope($run, ['result_type' => 'conditional_simulation']),
         ], $status);
+    }
+
+    /** Regla de un campo que acepta un número o una lista de números por período, todos dentro de [min, max]. */
+    private function fractionRule(float $min, float $max): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) use ($min, $max): void {
+            $label = 'El campo '.preg_replace('/^strategies\.\d+\./', '', $attribute);
+            $values = is_array($value) ? $value : [$value];
+            if (is_array($value) && ! array_is_list($value)) {
+                $fail("$label debe ser un número o una lista de números por período.");
+
+                return;
+            }
+            foreach ($values as $v) {
+                if (is_bool($v) || ! is_numeric($v)) {
+                    $fail("$label debe ser un número o una lista de números por período.");
+
+                    return;
+                }
+                if ((float) $v < $min || (float) $v > $max) {
+                    $fail(sprintf('%s es una fracción (0,05 = 5 %%) y debe estar entre %s y %s.', $label, rtrim(rtrim(number_format($min, 2, ',', ''), '0'), ','), rtrim(rtrim(number_format($max, 2, ',', ''), '0'), ',')));
+
+                    return;
+                }
+            }
+        };
     }
 }

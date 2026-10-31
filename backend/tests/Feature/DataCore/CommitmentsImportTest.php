@@ -161,6 +161,35 @@ final class CommitmentsImportTest extends TestCase
         $this->assertTrue($detail['cancellation_date_unknown']);
     }
 
+    /**
+     * E2-23: un `as_of` de solo fecha (AAAA-MM-DD) es el FIN de ese día en la zona horaria de la empresa (como en el motor),
+     * no las 00:00 UTC. Importado hoy sin `known_at` aparece con `as_of = hoy` local y no con ayer, y no depende de si la
+     * fecha UTC ya cambió (aquí son las 22:30 en Guayaquil: en UTC ya es el día siguiente).
+     */
+    public function test_a_date_only_as_of_is_the_end_of_that_day_in_the_company_timezone(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-10-30 22:30:00', 'America/Guayaquil'));   // = 2026-10-31 03:30 UTC
+        $this->importCsv('commitments', self::HEADERS, [$this->row(['external_id' => 'HOY-1', 'known_at' => ''])]);
+        $this->assertSame('2026-10-31', now()->utc()->toDateString(), 'precondición: la fecha UTC ya es la del día siguiente');
+        $ids = fn (string $asOf) => array_column($this->getJson('/api/v1/commitments?as_of='.urlencode($asOf))->assertOk()->json('data'), 'external_id');
+
+        $this->assertContains('HOY-1', $ids('2026-10-30'), 'hoy (fecha local) incluye lo importado hoy');
+        $this->assertNotContains('HOY-1', $ids('2026-10-29'), 'ayer (fecha local) no lo ve: se importó después');
+        $this->assertContains('HOY-1', $ids('2026-10-31'), 'una fecha posterior también lo ve');
+        $view = collect($this->getJson('/api/v1/commitments?as_of=2026-10-30')->json('data'))->firstWhere('external_id', 'HOY-1');
+        $this->assertSame('ingestion', $view['known_basis']);
+        $meta = $this->getJson('/api/v1/commitments?as_of=2026-10-30')->json('meta');
+        $this->assertSame('2026-10-30T23:59:59-05:00', substr($meta['as_of'], 0, 25), 'el corte efectivo es el fin del día local');
+        $this->assertSame('America/Guayaquil', $meta['timezone']);
+
+        // Con hora explícita manda el instante indicado (sin reinterpretarlo como día completo).
+        $this->assertNotContains('HOY-1', $ids('2026-10-30T22:00:00-05:00'));
+        $this->assertContains('HOY-1', $ids('2026-10-30T22:31:00-05:00'));
+        // Una fecha-hora sin zona se interpreta en la zona de la empresa, no en UTC.
+        $this->assertNotContains('HOY-1', $ids('2026-10-30 22:00:00'));
+        $this->assertContains('HOY-1', $ids('2026-10-30 22:45:00'));
+    }
+
     public function test_a_declared_known_at_makes_the_version_visible_from_that_instant_and_a_later_undeclared_version_only_from_its_ingestion(): void
     {
         $this->importCsv('commitments', self::HEADERS, [$this->row(['external_id' => 'DEC-1', 'quantity' => 40, 'known_at' => '2026-09-05 10:00:00'])]);

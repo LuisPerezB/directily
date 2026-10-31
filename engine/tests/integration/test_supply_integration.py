@@ -287,3 +287,33 @@ def test_run_of_another_core_or_tenant_cannot_be_hijacked(db_engine, client, wor
         rid, jid = add_core_run(conn, A, "scenario", "evaluate", {"strategies": [{"key": "base"}]})
     assert execute(client, rid, B, jid).status_code == 404  # otra empresa
     assert execute(client, 999999, A).status_code == 404  # inexistente
+
+
+def _current_runs(db_engine, tenant, core, operation):
+    with db_engine.connect() as conn:
+        return conn.execute(text("SELECT id FROM core_runs WHERE tenant_id = :t AND core = :c AND operation = :o AND is_current ORDER BY id"),
+                            {"t": tenant, "c": core, "o": operation}).scalars().all()
+
+
+def test_historical_supply_runs_never_become_current_nor_displace_the_production_one(db_engine, client, world):
+    """Solo una ejecución `production` puede ser vigente: un plan o pronóstico de costos `historical` (aunque su pronóstico de
+    demanda sea de producción) no se vuelve vigente ni releva a la vigente de producción."""
+    A = world["A"]
+    prod_plan, _, _ = run_plan(db_engine, client, A)
+    assert _current_runs(db_engine, A, "supply", "plan") == [prod_plan]
+    with db_engine.begin() as conn:
+        retro_plan, retro_job = add_core_run(conn, A, "supply", "plan", None, run_type="historical")
+    assert execute(client, retro_plan, A, retro_job).status_code == 200
+    with db_engine.connect() as conn:
+        done = conn.execute(text("SELECT status, run_type, is_current FROM core_runs WHERE id = :r"), {"r": retro_plan}).mappings().one()
+    assert (done["status"], done["run_type"], done["is_current"]) == ("completed", "historical", False)
+    assert _current_runs(db_engine, A, "supply", "plan") == [prod_plan], "el plan histórico no releva al de producción"
+
+    with db_engine.begin() as conn:
+        prod_cost, prod_job = add_core_run(conn, A, "cost", "forecast", {})
+    assert execute(client, prod_cost, A, prod_job).status_code == 200
+    assert _current_runs(db_engine, A, "cost", "forecast") == [prod_cost]
+    with db_engine.begin() as conn:
+        retro_cost, retro_cjob = add_core_run(conn, A, "cost", "forecast", {"as_of": "2026-06-30", "historical": True}, run_type="historical")
+    assert execute(client, retro_cost, A, retro_cjob).status_code == 200
+    assert _current_runs(db_engine, A, "cost", "forecast") == [prod_cost]

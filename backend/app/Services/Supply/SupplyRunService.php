@@ -101,9 +101,10 @@ class SupplyRunService
             ->whereIn('status', ['queued', 'running'])->where('created_at', '>=', $staleBefore)->latest('id')->first();
     }
 
+    /** Plan vigente (is_current) o, en su defecto, el último de PRODUCCIÓN completado (nunca uno retroactivo). */
     public function latestPlan(): ?CoreRun
     {
         return CoreRun::query()->where('core', 'supply')->where('operation', 'plan')->where('status', 'completed')
-            ->orderByDesc('is_current')->orderByDesc('id')->first();
+            ->where('run_type', 'production')->orderByDesc('is_current')->orderByDesc('id')->first();
     }
 }

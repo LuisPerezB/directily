@@ -212,7 +212,7 @@ las vistas agregada y por comprador. Los intervalos del agregado no se suman dí
   devoluciones, disponibilidad, promociones, configuración y reglas de elegibilidad) y `model_versions`. Cada modelo en `model_registry`
   (`core = 'customer'`, `scope = tenant`) con `hyperparameters.slot = "h{H}:probability|quantity"`, estado `production` (servido; `role`
   `primary` si es complejo, `fallback` si es la referencia), `validated` (evaluado y no promovido, incluida la referencia como respaldo) o
-  `failed`; producción anterior del mismo slot → `retired`. Artefacto joblib en `ENGINE_ARTIFACTS_DIR/{tenant}/customer/run-{id}/` con
+  `failed`; producción anterior del mismo slot → `retired`. Artefacto joblib en `ENGINE_ARTIFACTS_DIR/{tenant}/customer/run-{id}/` (`artifact_path` se guarda **relativo** a ese directorio, regla única con la demanda; corrección P8) con
   SHA-256 y `artifact_compat` (esquema de variables, hash de nombres, versiones de scikit-learn/LightGBM). Las corridas `historical`
   (corte retroactivo) nunca se promueven.
 - **`predict`**: carga los modelos en `production` (verifica SHA-256 y compatibilidad), recalcula las variables **a la fecha** (la recencia

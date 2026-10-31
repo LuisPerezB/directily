@@ -40,7 +40,7 @@ class CostForecastController extends SupplyController
             'quality_status' => ['sometimes', 'string'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
         $run = $request->filled('run_id')
             ? CoreRun::query()->where('core', 'cost')->where('status', 'completed')->findOrFail((int) $request->input('run_id'))
-            : CoreRun::query()->where('core', 'cost')->where('status', 'completed')->orderByDesc('is_current')->orderByDesc('id')->first();
+            : CoreRun::query()->where('core', 'cost')->where('status', 'completed')->where('run_type', 'production')->orderByDesc('is_current')->orderByDesc('id')->first();
         if ($run === null) {
             return response()->json(['data' => [], 'meta' => ['total' => 0],
                 'envelope' => [

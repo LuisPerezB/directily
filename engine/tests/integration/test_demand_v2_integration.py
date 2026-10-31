@@ -3,6 +3,7 @@ manifiesto, cobertura de fuentes, eventos extraordinarios, registro de modelos y
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pandas as pd
@@ -12,6 +13,7 @@ from sqlalchemy import text
 from conftest import AUTH
 from loader import create_run, load_company
 from predictily_engine.demand.manifest import verify
+from predictily_engine.platform.artifacts import resolve_stored_path
 from predictily_engine.synthetic import generate_company
 
 pytestmark = pytest.mark.integration
@@ -141,6 +143,12 @@ def test_registry_states_roles_core_and_compat(world, db_engine):
     lgbm = [r for r in reg if r["model_family"] == "lightgbm_global" and r["status"] == "production"]
     for r in lgbm:
         assert r["artifact_path"] and len(r["artifact_sha256"]) == 64 and r["artifact_compat"]["artifact_kind"] == "mlforecast_joblib"
+    # Regla única: relativa a ENGINE_ARTIFACTS_DIR (`<empresa>/run-<id>/<familia>.joblib`), verificable por el backend.
+    with_artifact = [r for r in reg if r["artifact_path"]]
+    assert with_artifact, "LightGBM entrenó: su artefacto quedó registrado"
+    for r in with_artifact:
+        assert r["artifact_path"] == f"{world['d']}/run-{world['r3']}/{r['model_family']}.joblib"
+        assert hashlib.sha256(resolve_stored_path(r["artifact_path"]).read_bytes()).hexdigest() == r["artifact_sha256"]
 
 
 def test_declared_coverage_limits_the_cutoff_and_what_follows_is_absent_not_zero(world, db_engine):
@@ -349,3 +357,35 @@ def test_writer_omits_stage2_columns_when_the_schema_has_not_been_migrated_yet(w
         finally:
             writer._COLUMN_CACHE.pop(key, None)
             tx.rollback()
+
+
+@pytest.mark.parametrize("days", [30, 45, 60])
+def test_short_history_completes_with_explicit_abstention_and_no_invented_intervals(client, db_engine, days):
+    """E2-21 (extremo a extremo con PostgreSQL): con ≤ 60 días de ventas la ejecución TERMINA (no `failed`), todos los
+    horizontes quedan `insufficient_data` con motivo, ningún valor persistido trae intervalo o mediana inventados y el
+    respaldo queda identificado en el registro de modelos."""
+    from datetime import date as date_cls
+    from datetime import timedelta
+
+    end = date_cls(2026, 10, 26)
+    co = generate_company("ferreteria_andina", seed=42, n_products=6, start=(end - timedelta(days=days - 1)).isoformat(),
+                          end=end.isoformat())
+    with db_engine.begin() as conn:
+        tenant = load_company(conn, co, f"Empresa corta {days} d (prueba ficticia)")
+    run_id, body = _run(client, db_engine, tenant)
+    assert body["status"] == "completed" and body["quality_status"] == "insufficient_data"
+    assert body["horizon_support"] == {h: "insufficient_data" for h in ("7", "14", "30", "60", "90")}
+    fv = _fv(db_engine, run_id)
+    assert not fv.empty and fv["yhat"].notna().all() and (fv["yhat"] >= 0).all()
+    assert fv[["lo_80", "hi_80", "lo_95", "hi_95", "p50"]].isna().all().all(), "sin backtest no hay intervalos que mostrar"
+    assert (fv["quality_status"] == "insufficient_data").all()
+    with db_engine.connect() as conn:
+        run = conn.execute(text("SELECT status, error_message, summary FROM forecast_runs WHERE id = :r"), {"r": run_id}).mappings().one()
+        job = conn.execute(text("SELECT status, error_message FROM training_jobs WHERE forecast_run_id = :r"), {"r": run_id}).mappings().one()
+        reg = conn.execute(text("SELECT model_family, status, role FROM model_registry WHERE forecast_run_id = :r"), {"r": run_id}).mappings().all()
+    assert run["status"] == "completed" and run["error_message"] is None and job["status"] == "succeeded"
+    support = run["summary"]["horizon_support"]
+    assert all(v["status"] == "insufficient_data" and v["reasons"] for v in support.values())
+    roles = {r["model_family"]: r["role"] for r in reg if r["status"] == "production"}
+    assert "window_average" in roles and set(roles) <= {"window_average", "seasonal_naive"}, "el respaldo queda identificado"
+    assert "lightgbm_global" not in roles, "sin backtest no se promueve un modelo complejo"

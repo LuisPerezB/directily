@@ -19,9 +19,22 @@ use Illuminate\Support\Facades\DB;
  *  3. Cancelado al corte si `cancelled_at ≤ corte`. Estado cancelado SIN fecha ⇒ `cancellation_date_unknown`: pendiente 0.
  *  4. Pendiente por línea = max(0, cantidad − cumplida); 0 si está cancelado.
  *  5. Un compromiso no es una venta ni se suma a la demanda probabilística: es una vista separada con su estado.
+ *  6. El corte de una fecha sin hora (AAAA-MM-DD) es el FIN de ese día en la zona horaria de la empresa (igual que el motor:
+ *     `known < as_of + 1 día`), nunca las 00:00 UTC; con hora explícita manda ese instante (y sin zona se lee en la de la empresa).
  */
 final class CommitmentAsOf
 {
+    /** Instante de corte de un `as_of` recibido por la API (ver regla 6). */
+    public static function cutoff(string $input, string $timezone): CarbonImmutable
+    {
+        $input = trim($input);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $input) === 1) {
+            return CarbonImmutable::createFromFormat('!Y-m-d', $input, $timezone)->endOfDay();
+        }
+
+        return CarbonImmutable::parse($input, $timezone);
+    }
+
     /**
      * @param  array{type?: string, product_id?: int, status?: string}  $filters
      * @return list<array<string, mixed>>
@@ -36,7 +49,7 @@ final class CommitmentAsOf
             .'  ON m.commitment_id = r.commitment_id AND m.revision = r.revision '
             .'JOIN commercial_commitments c ON c.tenant_id = r.tenant_id AND c.id = r.commitment_id '
             .'WHERE r.tenant_id = ? '.(isset($filters['type']) ? 'AND c.commitment_type = ? ' : '').'ORDER BY r.commitment_id LIMIT '.max(1, $limit),
-            array_values(array_filter([$tenantId, $asOf->copy()->utc()->format('Y-m-d H:i:sP'), $tenantId, $filters['type'] ?? null], fn ($v) => $v !== null)),
+            array_values(array_filter([$tenantId, $asOf->copy()->utc()->format('Y-m-d H:i:s.uP'), $tenantId, $filters['type'] ?? null], fn ($v) => $v !== null)),
         );
 
         $result = [];

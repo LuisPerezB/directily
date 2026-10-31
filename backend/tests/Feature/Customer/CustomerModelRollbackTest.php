@@ -108,6 +108,35 @@ class CustomerModelRollbackTest extends TestCase
         $this->assertNull($res->json('data.artifact_sha256_verified'));          // el motor verifica el SHA-256 al cargarlo
     }
 
+    /** Misma regla que la demanda: el motor guarda la ruta RELATIVA a ENGINE_ARTIFACTS_DIR y el backend la resuelve con `engine.artifacts_dir`. */
+    public function test_a_relative_artifact_path_is_verified_against_the_shared_artifacts_dir_and_reported_when_not_visible(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser();
+        $dir = sys_get_temp_dir().'/artifacts-'.bin2hex(random_bytes(5));
+        $stored = $tenant->id.'/customer/run-35/h30_probability_logistic.joblib';
+        mkdir(dirname($dir.'/'.$stored), 0777, true);
+        file_put_contents($dir.'/'.$stored, 'artefacto-motor');
+        $good = hash('sha256', 'artefacto-motor');
+        $old = $this->model($tenant, 'h30:probability', 'retired', 'v1', ['artifact_path' => $stored, 'artifact_sha256' => $good], false);
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        config(['engine.artifacts_dir' => null]);                       // el backend no ve el volumen: lo dice, no lo da por verificado
+        $res = $api->postJson('/api/v1/models/customer/rollback', ['model_registry_id' => $old])->assertOk();
+        $this->assertNull($res->json('data.artifact_sha256_verified'));
+        $this->assertSame(['not_verifiable', 'artifacts_dir_not_configured'], [$res->json('data.artifact_verification.status'), $res->json('data.artifact_verification.reason')]);
+        DB::table('model_registry')->where('id', $old)->update(['status' => 'retired']);
+
+        config(['engine.artifacts_dir' => $dir]);                       // mismo volumen: SHA-256 verificado
+        $res = $api->postJson('/api/v1/models/customer/rollback', ['model_registry_id' => $old])->assertOk();
+        $this->assertTrue($res->json('data.artifact_sha256_verified'));
+        $this->assertSame('verified', $res->json('data.artifact_verification.status'));
+        DB::table('model_registry')->where('id', $old)->update(['status' => 'retired', 'artifact_sha256' => str_repeat('b', 64)]);
+
+        $api->postJson('/api/v1/models/customer/rollback', ['model_registry_id' => $old])                  // el archivo no coincide
+            ->assertStatus(409)->assertJsonPath('code', 'rollback_artifact_mismatch');
+        $this->assertDatabaseHas('model_registry', ['id' => $old, 'status' => 'retired']);
+    }
+
     public function test_invalid_targets_are_rejected_with_a_reason(): void
     {
         [$tenant, $user] = $this->createTenantWithUser();

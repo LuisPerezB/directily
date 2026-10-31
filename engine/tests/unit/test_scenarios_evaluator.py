@@ -99,3 +99,19 @@ def test_inventory_never_negative_and_balance_identity_in_random_cases():
                  receipts=tuple(rng.integers(0, 40, n).astype(float)))
         r = evaluate_scenarios(d, [{"key": "s1", "demand_change_pct": float(rng.uniform(-0.5, 1.0))}])
         assert all(only(r)["coherence"].values())
+
+
+@pytest.mark.parametrize("field,bad", [("demand_change_pct", -3), ("demand_change_pct", [-3]), ("demand_change_pct", [0.1, 6.0]),
+                                       ("price_change_pct", -1.0), ("price_change_pct", [5.5]), ("cost_change_pct", -2),
+                                       ("discount_pct", 1.0), ("discount_pct", [-0.1]), ("discount_pct", float("nan"))])
+def test_out_of_range_percentages_are_rejected_for_scalars_and_lists_alike(field, bad):
+    """Las variaciones son fracciones (0,05 = 5 %): un −300 % escalar daría ingresos negativos; se rechaza igual que en lista."""
+    with pytest.raises(ValueError, match="fracción"):
+        evaluate_scenarios(data(), [{"key": "s1", field: bad}])
+
+
+def test_in_range_percentages_at_the_limits_are_accepted_and_never_produce_negative_revenue():
+    r = evaluate_scenarios(data(), [{"key": "s1", "demand_change_pct": -0.95, "price_change_pct": -0.9, "discount_pct": 0.95, "cost_change_pct": 5.0},
+                                    {"key": "s2", "demand_change_pct": [-0.95, 5.0], "price_change_pct": [5.0]}])
+    for s in r["strategies"]:
+        assert s["metrics"]["revenue"] >= 0 and s["metrics"]["attainable_sales_units"] >= 0

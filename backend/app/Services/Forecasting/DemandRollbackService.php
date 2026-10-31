@@ -12,7 +12,6 @@ use App\Models\User;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -24,11 +23,12 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  *
  * Reglas: la ejecución debe ser de la empresa (de otra empresa responde 404), de producción, completada, ANTERIOR a
  * la vigente y tener modelos retirados que restaurar; si el artefacto de un modelo es visible desde el backend
- * (volumen compartido) se verifica su SHA-256 y una discrepancia impide la reversión.
+ * (`engine.artifacts_dir`, volumen compartido) se verifica su SHA-256 y una discrepancia impide la reversión; si no lo es, la
+ * respuesta lo informa explícitamente (`artifacts_verification`, ver ModelArtifactVerifier).
  */
 final class DemandRollbackService
 {
-    public function __construct(private readonly TenantContext $context) {}
+    public function __construct(private readonly TenantContext $context, private readonly ModelArtifactVerifier $artifacts) {}
 
     /** @return array<string, mixed> */
     public function rollback(Tenant $tenant, ?User $user, int $targetRunId): array
@@ -63,7 +63,7 @@ final class DemandRollbackService
             if (! DB::table('forecast_values')->where('tenant_id', $target->tenant_id)->where('forecast_run_id', $target->id)->exists()) {
                 throw new DomainStateException('La ejecución elegida ya no conserva sus pronósticos (retención).', 'rollback_target_without_forecasts');
             }
-            $verified = $this->verifyArtifacts($restorable);
+            $verified = $this->artifacts->verify($restorable);
 
             $now = CarbonImmutable::now();
             $retired = ModelRegistry::query()->where('core', 'demand')->where('status', 'production')->get(['id', 'model_family', 'forecast_run_id']);
@@ -90,7 +90,8 @@ final class DemandRollbackService
             'to_config_version' => $to->config_version,
             'restored_model_ids' => $result['restored']->pluck('id')->all(),
             'retired_model_ids' => $result['retired']->pluck('id')->all(),
-            'artifacts_verified' => $result['verified'],
+            'artifacts_verified' => $result['verified']['verified'],
+            'artifacts_verification' => $result['verified'],
         ];
         $this->context->runAs($tenant, function () use ($to, $summary, $user): void {
             CoreServices::audit('models.demand_rolled_back', $to, $summary + ['user_id' => $user?->getKey()]);
@@ -103,34 +104,5 @@ final class DemandRollbackService
             'note' => 'La ejecución elegida conserva los pronósticos de su corte '.($to->cutoff_date?->toDateString() ?? '').
                 '; genere un nuevo pronóstico para actualizarlos con las ventas más recientes.',
         ];
-    }
-
-    /**
-     * Integridad de los artefactos visibles desde el backend (volumen compartido con el motor).
-     * true = todos verificados · null = ninguno visible (no se puede verificar desde aquí, p. ej. servidores
-     * distintos) · lanza si el SHA-256 de alguno no coincide.
-     *
-     * @param  Collection<int, ModelRegistry>  $models
-     */
-    private function verifyArtifacts($models): ?bool
-    {
-        $checked = 0;
-        foreach ($models as $model) {
-            if ($model->artifact_path === null || $model->artifact_sha256 === null) {
-                continue;
-            }
-            $path = (string) $model->artifact_path;
-            if (! is_file($path)) {
-                continue;
-            }
-            if (! hash_equals((string) $model->artifact_sha256, hash_file('sha256', $path))) {
-                throw new DomainStateException('El artefacto del modelo '.$model->version.' no coincide con su huella SHA-256: no se puede restaurar.', 'rollback_artifact_mismatch', [
-                    'model_id' => $model->id,
-                ]);
-            }
-            $checked++;
-        }
-
-        return $checked > 0 ? true : null;
     }
 }

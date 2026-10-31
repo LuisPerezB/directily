@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Supply;
 
 use App\Enums\TenantRole;
+use App\Http\Controllers\Api\Supply\ScenarioEvaluationController;
 use App\Jobs\Middleware\SetTenantContext;
 use App\Jobs\Supply\RunSupplyPlan;
 use App\Models\CoreRun;
@@ -128,6 +129,45 @@ class SupplyEngineIntegrationTest extends TestCase
         $r->assertJsonPath('envelope.result_type', 'conditional_simulation')->assertJsonPath('data.results.assumed_inputs.0', 'price_change')
             ->assertJsonPath('envelope.core', 'scenario');
         $this->actingAsTenantUser($user, $tenant)->getJson('/api/v1/supply/scenarios/evaluations/'.$r->json('data.run_id'))->assertOk();
+    }
+
+    /**
+     * Los `*_pct` son FRACCIONES (0,05 = 5 %) y el escalar se valida con los mismos límites que cada elemento de una lista:
+     * antes un escalar de −3 (−300 %) se aceptaba y devolvía ingresos negativos.
+     */
+    public function test_scenario_pct_fields_share_the_same_limits_for_scalars_and_lists(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Analyst);
+        $api = $this->actingAsTenantUser($user, $tenant);
+        $limits = ['price_change_pct' => [-0.9, 5.0], 'discount_pct' => [0.0, 0.95], 'cost_change_pct' => [-0.9, 5.0], 'demand_change_pct' => [-0.95, 5.0]];
+        $this->assertSame($limits, ScenarioEvaluationController::PCT_LIMITS);
+        // Una sola petición con 8 estrategias (los errores se reportan por estrategia y campo): 0-5 inválidas, 6-7 válidas en los extremos.
+        $each = fn (callable $make) => array_map(fn ($lim) => $make($lim[0], $lim[1]), $limits);
+        $strategies = [
+            ['key' => 's0'] + $each(fn ($min, $max) => $min - 2.0),                    // escalar muy por debajo (p. ej. −3 = −300 %)
+            ['key' => 's1'] + $each(fn ($min, $max) => $max + 0.01),                   // escalar apenas por encima
+            ['key' => 's2'] + $each(fn ($min, $max) => [$min - 0.01]),                 // lista fuera de rango
+            ['key' => 's3'] + $each(fn ($min, $max) => [$min, 0.1, $max + 3]),         // lista con un elemento fuera
+            ['key' => 's4'] + $each(fn ($min, $max) => 'mucho'),                       // no numérico
+            ['key' => 's5'] + $each(fn ($min, $max) => ['a' => 0.1]),                  // objeto, no lista
+            ['key' => 's6'] + $each(fn ($min, $max) => $min),                          // extremos válidos: escalar
+            ['key' => 's7'] + $each(fn ($min, $max) => [$min, 0.05, $max]),            // extremos válidos: lista
+        ];
+        $errors = $api->postJson('/api/v1/supply/scenarios/evaluate', ['strategies' => $strategies])->assertStatus(422)->json('errors');
+        foreach (range(0, 5) as $i) {
+            foreach (array_keys($limits) as $field) {
+                $this->assertArrayHasKey("strategies.$i.$field", $errors, "s$i $field debe rechazarse");
+            }
+        }
+        $this->assertSame([], array_filter(array_keys($errors), fn ($k) => str_starts_with($k, 'strategies.6.') || str_starts_with($k, 'strategies.7.')), 'los extremos son válidos');
+        $this->assertStringContainsString('fracción', $errors['strategies.0.demand_change_pct'][0]);
+        $this->assertStringContainsString('0,05 = 5 %', $errors['strategies.1.price_change_pct'][0]);
+
+        // Con valores válidos la petición llega al motor (aquí responde «sin pronóstico»: 422 sin errores de validación por campo).
+        Http::fake(['engine.test/*' => Http::response(['detail' => ['code' => 'insufficient_data', 'message' => 'Sin pronóstico']], 422)]);
+        $ok = $api->postJson('/api/v1/supply/scenarios/evaluate', ['strategies' => array_slice($strategies, 6)])->assertStatus(422);
+        $this->assertNull($ok->json('errors'));
+        $this->assertSame('Sin pronóstico', $ok->json('message'));
     }
 
     public function test_scenario_with_insufficient_data_is_a_422_not_a_fake_result(): void

@@ -459,4 +459,74 @@ class DemandV2ApiTest extends TestCase
         $api->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])->assertOk()->assertJsonPath('data.artifacts_verified', true);
         @unlink($file);
     }
+
+    /**
+     * El motor guarda `artifact_path` RELATIVO a ENGINE_ARTIFACTS_DIR. El backend lo resuelve con `engine.artifacts_dir` (mismo
+     * volumen): verifica el SHA-256 cuando ve el archivo y lo informa explícitamente cuando no (antes: `artifacts_verified = null`
+     * sin explicación porque buscaba la ruta relativa contra su propio directorio de trabajo).
+     */
+    public function test_rollback_resolves_the_engines_relative_artifact_path_and_reports_when_it_cannot_verify(): void
+    {
+        $dir = sys_get_temp_dir().'/artifacts-'.bin2hex(random_bytes(5));
+        mkdir($dir.'/7/run-3', 0777, true);
+        file_put_contents($dir.'/7/run-3/lightgbm_global.joblib', 'modelo-serializado');
+        $stored = '7/run-3/lightgbm_global.joblib';
+        $good = hash('sha256', 'modelo-serializado');
+        [$tenant, $user, $runs, $models] = $this->threeRuns();
+        $api = $this->actingAsTenantUser($user, $tenant);
+        $verification = fn ($r) => $r->json('data.artifacts_verification');
+
+        // 1) Backend sin ENGINE_ARTIFACTS_DIR: no verifica y lo dice (con el motivo), la reversión sigue.
+        config(['engine.artifacts_dir' => null]);
+        DB::table('model_registry')->where('id', $models[1])->update(['artifact_path' => $stored, 'artifact_sha256' => $good]);
+        $r = $api->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])->assertOk()->assertJsonPath('data.artifacts_verified', null);
+        $this->assertSame(['not_verifiable', 'artifacts_dir_not_configured', 1, 0], [$verification($r)['status'], $verification($r)['reason'], $verification($r)['registered'], $verification($r)['checked']]);
+        $this->assertStringContainsString('ENGINE_ARTIFACTS_DIR', $verification($r)['message']);
+
+        // 2) Configurado pero el archivo no está en ese volumen: tampoco verifica, motivo distinto.
+        DB::table('model_registry')->where('id', $models[1])->update(['status' => 'retired']);
+        DB::table('model_registry')->where('id', $models[2])->update(['status' => 'production']);
+        DB::table('forecast_runs')->where('id', $runs[1]->id)->update(['is_current' => false]);
+        DB::table('forecast_runs')->where('id', $runs[2]->id)->update(['is_current' => true]);
+        config(['engine.artifacts_dir' => $dir.'/otro-volumen']);
+        $r = $api->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])->assertOk();
+        $this->assertSame('artifacts_dir_not_accessible', $verification($r)['reason']);
+
+        // 3) Mismo volumen: SHA-256 verificado contra la ruta relativa.
+        DB::table('model_registry')->where('id', $models[1])->update(['status' => 'retired']);
+        DB::table('model_registry')->where('id', $models[2])->update(['status' => 'production']);
+        DB::table('forecast_runs')->where('id', $runs[1]->id)->update(['is_current' => false]);
+        DB::table('forecast_runs')->where('id', $runs[2]->id)->update(['is_current' => true]);
+        config(['engine.artifacts_dir' => $dir]);
+        $r = $api->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])->assertOk()->assertJsonPath('data.artifacts_verified', true);
+        $this->assertSame(['verified', null, 1, 1], [$verification($r)['status'], $verification($r)['reason'], $verification($r)['registered'], $verification($r)['checked']]);
+
+        // 4) Mismo volumen y el archivo cambió: se rechaza (la transacción no deja nada a medias).
+        DB::table('model_registry')->where('id', $models[1])->update(['status' => 'retired', 'artifact_sha256' => hash('sha256', 'otro')]);
+        DB::table('model_registry')->where('id', $models[2])->update(['status' => 'production']);
+        DB::table('forecast_runs')->where('id', $runs[1]->id)->update(['is_current' => false]);
+        DB::table('forecast_runs')->where('id', $runs[2]->id)->update(['is_current' => true]);
+        $api->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])->assertStatus(409)->assertJsonPath('code', 'rollback_artifact_mismatch');
+        $this->assertTrue((bool) DB::table('forecast_runs')->where('id', $runs[2]->id)->value('is_current'));
+
+        // 5) Una ruta que intenta salirse del directorio nunca se lee.
+        file_put_contents(dirname($dir).'/fuera-de-artifacts.joblib', 'modelo-serializado');
+        DB::table('model_registry')->where('id', $models[1])->update(['artifact_path' => '../fuera-de-artifacts.joblib', 'artifact_sha256' => $good]);
+        $r = $api->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])->assertOk()->assertJsonPath('data.artifacts_verified', null);
+        $this->assertSame('not_verifiable', $verification($r)['status']);
+        @unlink(dirname($dir).'/fuera-de-artifacts.joblib');
+    }
+
+    /** Filas anteriores a la regla: `storage/artifacts/<empresa>/…` (relativa al cwd del motor, con el directorio incluido) también se verifica. */
+    public function test_rollback_still_verifies_artifacts_registered_with_the_previous_cwd_relative_path(): void
+    {
+        $dir = sys_get_temp_dir().'/engine-'.bin2hex(random_bytes(5)).'/storage/artifacts';
+        mkdir($dir.'/7/run-3', 0777, true);
+        file_put_contents($dir.'/7/run-3/lightgbm_global.joblib', 'modelo-serializado');
+        config(['engine.artifacts_dir' => $dir]);
+        [$tenant, $user, $runs, $models] = $this->threeRuns();
+        DB::table('model_registry')->where('id', $models[1])->update(['artifact_path' => 'storage/artifacts/7/run-3/lightgbm_global.joblib', 'artifact_sha256' => hash('sha256', 'modelo-serializado')]);
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])
+            ->assertOk()->assertJsonPath('data.artifacts_verified', true)->assertJsonPath('data.artifacts_verification.status', 'verified');
+    }
 }

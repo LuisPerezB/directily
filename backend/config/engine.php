@@ -21,6 +21,10 @@ return [
     // Una ejecución queued/running más antigua que esto se considera vencida (no bloquea nuevas).
     'stale_run_minutes' => (int) env('ENGINE_STALE_RUN_MINUTES', 120),
     'queue' => env('ENGINE_QUEUE', 'forecasting'),
+    // Directorio de artefactos de modelos del motor (la MISMA variable ENGINE_ARTIFACTS_DIR, apuntando al mismo volumen compartido).
+    // El motor guarda `model_registry.artifact_path` relativo a este directorio; con él el backend verifica el SHA-256 al revertir
+    // modelos. Sin configurar (o sin acceso al volumen) no verifica y lo informa explícitamente: lo verifica el motor al cargar.
+    'artifacts_dir' => env('ENGINE_ARTIFACTS_DIR'),
     // Horizontes de demanda del dominio (ADR-V2-10). Que un plan los autorice es otra cosa (config/predictily.php).
     'horizons' => [7, 14, 30, 60, 90],
 ];
