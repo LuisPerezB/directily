@@ -19,7 +19,7 @@ const ui = useUiStore()
 const file = ref<File | null>(null)
 const fileError = ref<string | null>(null)
 const dragging = ref(false)
-const ENTITIES: ImportEntityType[] = ['sales', 'products', 'inventory', 'lead_times', 'branches', 'suppliers', 'promotions']
+const ENTITIES: ImportEntityType[] = ['sales', 'products', 'inventory', 'lead_times', 'branches', 'suppliers', 'promotions', 'commitments', 'calendar_events', 'unit_conversions', 'warehouses']
 
 function pick(f: File | null | undefined): void {
   fileError.value = null

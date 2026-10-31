@@ -841,7 +841,11 @@
       "lead_times": "Plazos de proveedores",
       "branches": "Sucursales",
       "suppliers": "Proveedores",
-      "promotions": "Promociones"
+      "promotions": "Promociones",
+      "commitments": "Compromisos comerciales",
+      "calendar_events": "Calendario de eventos",
+      "unit_conversions": "Conversiones de unidades",
+      "warehouses": "Almacenes"
     },
     "entityHints": {
       "sales": "Una fila por línea de factura: número de documento, fecha, producto, cantidad y precio.",
@@ -850,7 +854,11 @@
       "lead_times": "Días que tarda en llegar cada producto o proveedor.",
       "branches": "Lista de sucursales con su código de establecimiento, provincia y cantón.",
       "suppliers": "Proveedores con su código y plazo habitual de entrega.",
-      "promotions": "Promociones pasadas o planificadas: se usan como variables del pronóstico."
+      "promotions": "Promociones pasadas o planificadas: se usan como variables del pronóstico.",
+      "commitments": "Cotizaciones, pedidos confirmados y contratos, una fila por línea. No son ventas realizadas: se usan para conciliar la demanda.",
+      "calendar_events": "Feriados, temporadas y campañas con su alcance y, si se conoce, desde cuándo se conocían.",
+      "unit_conversions": "Equivalencias entre unidades (por producto o generales). Sin una conversión declarada, una unidad distinta se rechaza.",
+      "warehouses": "Un almacén por sucursal con su capacidad física; una capacidad vacía significa desconocida."
     },
     "dropTitle": "Arrastre su archivo aquí",
     "dropHint": "Formatos CSV o Excel (.xlsx), hasta {max}.",

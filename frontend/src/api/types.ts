@@ -308,7 +308,10 @@ export interface SalesSummary {
 
 // ─── Importaciones ─────────────────────────────────────────────────────────
 
-export type ImportEntityType = 'sales' | 'products' | 'inventory' | 'lead_times' | 'branches' | 'suppliers' | 'promotions'
+export type ImportEntityType =
+  | 'sales' | 'products' | 'inventory' | 'lead_times' | 'branches' | 'suppliers' | 'promotions'
+  // Etapa 2 (core de Datos): compromisos, calendario, conversiones de unidades y almacenes.
+  | 'commitments' | 'calendar_events' | 'unit_conversions' | 'warehouses'
 
 export type ImportStatus =
   | 'uploaded'

@@ -89,6 +89,11 @@ export const FALLBACK_FIELDS: Record<ImportEntityType, ImportField[]> = {
     f('category', 'Categoría', false, 'text'),
     f('known_at', 'Registrada el', false, 'date', 'Cuándo el negocio aprobó o registró la promoción (no futura). Si falta, el momento de la importación.'),
   ],
+  // Etapa 2: los campos de estas entidades los entrega GET /import-fields/{entity}; sin respuesta no se inventan.
+  commitments: [],
+  calendar_events: [],
+  unit_conversions: [],
+  warehouses: [],
 }
 
 /** Mapeo inicial: el guardado por el usuario o el sugerido por la API, limitado a columnas detectadas. */
