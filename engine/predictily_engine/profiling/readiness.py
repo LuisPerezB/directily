@@ -86,6 +86,17 @@ def compute_readiness(data: TenantData, panel: Panel) -> dict[str, Any]:
         issues.append({"code": "no_costs", "severity": "info", "count": 0,
                        "message": "Menos de la mitad de las ventas tiene costo histórico: el margen y la inversión "
                                   "estimada pueden quedar incompletos."})
+    # ADR-V25-03: días que la fuente no cubre o en que la sucursal cerró; no son ceros y no entran a las métricas.
+    day_status = panel.day_summary or {}
+    days = day_status.get("series_days") or {}
+    if days.get("missing_source"):
+        issues.append({"code": "missing_source_days", "severity": "warning", "count": int(days["missing_source"]),
+                       "message": f"{int(days['missing_source'])} días-serie sin fuente (fuera de la cobertura, en huecos o inferidos): "
+                                  "no se cuentan como cero y se excluyen de la evaluación; verifique la integración de datos."})
+    if days.get("closed"):
+        issues.append({"code": "closed_days", "severity": "info", "count": int(days["closed"]),
+                       "message": f"{int(days['closed'])} días-serie corresponden a cierres declarados en el calendario: "
+                                  "se excluyen de la evaluación."})
     if stockout_share > 0.05:
         issues.append({"code": "high_stockouts", "severity": "warning", "count": int(active["stockout_days"].sum()),
                        "message": f"{stockout_share:.0%} de los días-serie tuvieron quiebre de stock: las ventas "
@@ -113,5 +124,6 @@ def compute_readiness(data: TenantData, panel: Panel) -> dict[str, Any]:
         "has_inventory": bool(has_inventory),
         "has_costs": bool(has_costs),
         "recommended_strategy": strategy,
+        "day_status": day_status,
         "issues": issues,
     }

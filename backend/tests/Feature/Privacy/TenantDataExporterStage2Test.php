@@ -206,8 +206,16 @@ class TenantDataExporterStage2Test extends TestCase
     /** Toda tabla con `tenant_id` está clasificada: exportada o excluida con motivo. Una tabla nueva sin clasificar rompe la prueba. */
     public function test_every_tenant_table_is_classified_as_exported_or_deliberately_excluded(): void
     {
-        $tenantTables = collect(DB::select("select table_name from information_schema.columns where column_name = 'tenant_id' and table_schema = current_schema()"))
+        // Solo TABLAS base: una vista (p. ej. `sales_line_versions`, ADR-V25-23) no guarda datos propios; se deriva de tablas que sí se
+        // clasifican. Las vistas con `tenant_id` se enumeran aparte para que una nueva obligue a decidir de qué tablas se deriva.
+        $tenantTables = collect(DB::select("select c.table_name from information_schema.columns c join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name where c.column_name = 'tenant_id' and c.table_schema = current_schema() and t.table_type = 'BASE TABLE'"))
             ->pluck('table_name')->unique()->sort()->values()->all();
+        $tenantViews = collect(DB::select("select c.table_name from information_schema.columns c join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name where c.column_name = 'tenant_id' and c.table_schema = current_schema() and t.table_type = 'VIEW'"))
+            ->pluck('table_name')->unique()->sort()->values()->all();
+        $this->assertSame(['sales_line_versions'], $tenantViews, 'Vista nueva con tenant_id: confirme de qué tablas exportadas se deriva y agréguela aquí.');
+        foreach (['sale_items', 'sale_item_revisions', 'sales_document_revisions'] as $source) {
+            $this->assertArrayHasKey($source, TenantDataExporter::TABLES, "sales_line_versions se deriva de {$source}, que debe exportarse");
+        }
         $classified = array_merge(array_keys(TenantDataExporter::TABLES), array_keys(TenantDataExporter::NOT_EXPORTED));
         // Las tablas hijas (sin `tenant_id` propio) pertenecen a la empresa por su tabla padre, que sí lo tiene.
         $children = array_keys(TenantDataExporter::CHILD_TABLES);

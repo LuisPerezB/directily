@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Services\Imports\Parsing\ValueParser;
 use App\Services\Imports\Reading\TabularReader;
 use App\Services\Imports\Support\IssueCollector;
+use App\Services\Sales\IngestionResolution;
 use Generator;
 use Illuminate\Support\Facades\DB;
 
@@ -24,13 +25,17 @@ final class ImportRunContext
 
     private int $lastProgress = -1;
 
-    /** @param array<string, string|null> $mapping */
+    /**
+     * @param  array<string, string|null>  $mapping
+     * @param  ?IngestionResolution  $ingestion  modo de ingestión resuelto (solo importaciones de ventas; ADR-V25-23)
+     */
     public function __construct(
         public readonly Tenant $tenant,
         public readonly ImportJob $job,
         public readonly TabularReader $reader,
         public readonly array $mapping,
         public readonly bool $commit,
+        public readonly ?IngestionResolution $ingestion = null,
     ) {
         $this->options = array_merge(self::defaultOptions(), $job->options ?? []);
         $this->parser = new ValueParser($tenant->timezone ?: 'America/Guayaquil', $this->options);

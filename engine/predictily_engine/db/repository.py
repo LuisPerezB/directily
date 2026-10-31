@@ -3,6 +3,10 @@
 Aislamiento multi-tenant: `TenantRepository` se construye con un `tenant_id` y TODAS sus
 consultas son parametrizadas e incluyen `:tenant_id`. `_read` rechaza cualquier SQL que no
 filtre por empresa, de modo que un error de programación falla en lugar de mezclar datos.
+
+Ventas as-of (ADR-V25-23): `daily_sales(cutoff)`, `daily_returns(cutoff)`, `last_sale_date(cutoff)` y `sales_stats(cutoff)`
+devuelven lo que se CONOCÍA al corte (versión del documento vigente ese día, no su estado actual). Todas se derivan de UNA
+lectura de la vista `sales_line_versions` hasta el corte final (`sales_versions`), que el repositorio conserva mientras vive.
 """
 
 from __future__ import annotations
@@ -13,6 +17,8 @@ from typing import Any
 
 import pandas as pd
 from sqlalchemy import Connection, text
+
+from predictily_engine.data.asof import SalesVersions, knowledge_boundary, resolve_timezone, to_day, with_knowledge
 
 VALID_SALE_DOCUMENT_TYPES = ("invoice", "sales_note", "other")
 
@@ -27,6 +33,8 @@ class TenantRepository:
             raise TenantScopeError("tenant_id inválido")
         self.conn = conn
         self.tenant_id = tenant_id
+        self._versions: SalesVersions | None = None
+        self._timezone: str | None = None
 
     def analytic_reads(self) -> None:
         """Lecturas analíticas: evita nested loops (planes desastrosos con estadísticas
@@ -102,51 +110,60 @@ class TenantRepository:
             "WHERE tenant_id = :tenant_id AND deleted_at IS NULL"
         )
 
-    # ── ventas ──
-    def last_sale_date(self) -> date | None:
+    # ── ventas (as-of: lo que se conocía al corte) ──
+    def timezone(self) -> str:
+        """Zona horaria de la empresa (define la medianoche local de cada corte)."""
+        if self._timezone is None:
+            self._timezone = resolve_timezone(self.tenant().get("timezone"))
+        return self._timezone
+
+    def sales_versions(self, upto: date) -> SalesVersions:
+        """Versiones de las líneas de venta COMPLETADAS con fecha ≤ `upto` y conocidas antes de la medianoche local de
+        `upto + 1` (vista `sales_line_versions`). Es la ÚNICA lectura de ventas de una ejecución: cada vista as-of
+        (`daily_sales(c)` con c ≤ upto) se deriva de ella en pandas. Se conserva: pedir un corte menor o igual no vuelve
+        a leer; uno mayor reemplaza la lectura."""
+        final = to_day(upto)
+        if self._versions is not None and self._versions.final >= final:
+            return self._versions
+        tz = self.timezone()
+        limit = pd.Timestamp(knowledge_boundary(final, tz)).to_pydatetime()
+        df = self._read(
+            """
+            SELECT v.sale_id, v.line_number, v.branch_id, v.product_id, v.sale_date AS ds,
+                   v.quantity::float8 AS quantity, v.unit_price::float8 AS unit_price,
+                   v.discount_amount::float8 AS discount_amount, v.net_amount::float8 AS net_amount,
+                   v.unit_cost::float8 AS unit_cost, v.is_return, v.document_type, v.ingestion_mode,
+                   (v.known_from AT TIME ZONE 'UTC') AS known_from, (v.known_until AT TIME ZONE 'UTC') AS known_until
+            FROM sales_line_versions v
+            WHERE v.tenant_id = :tenant_id AND v.status = 'completed' AND v.sale_date <= :upto
+              AND v.known_from < (CAST(:limit AS timestamp) AT TIME ZONE 'UTC')
+            """,
+            upto=final.date(), limit=limit,
+        )
+        self._versions = SalesVersions(df, tz, final)
+        return self._versions
+
+    def last_sale_date(self, cutoff: date | None = None) -> date | None:
+        """Última fecha con ventas válidas. Sin `cutoff`: la conocida AHORA (estado vigente de los documentos);
+        con `cutoff`: la conocida al corte (as-of)."""
+        if cutoff is not None:
+            return self.sales_versions(cutoff).last_sale_date(cutoff)
         return self._scalar(
             "SELECT MAX(s.sale_date) FROM sales s WHERE s.tenant_id = :tenant_id AND s.status = 'completed' "
             "AND s.document_type IN ('invoice', 'sales_note', 'other')"
         )
 
     def daily_sales(self, cutoff: date) -> pd.DataFrame:
-        """Ventas válidas diarias por sucursal-producto (excluye anuladas y devoluciones)."""
-        return self._read(
-            """
-            SELECT si.branch_id, si.product_id, si.sale_date AS ds,
-                   SUM(si.quantity)::float8 AS units,
-                   SUM(si.net_amount)::float8 AS net_amount,
-                   SUM(si.quantity * si.unit_price)::float8 AS gross_amount,
-                   SUM(si.discount_amount)::float8 AS discount_amount,
-                   SUM(CASE WHEN si.unit_cost IS NOT NULL THEN si.quantity * si.unit_cost END)::float8 AS cost_amount,
-                   SUM(CASE WHEN si.unit_cost IS NOT NULL THEN si.quantity END)::float8 AS cost_units,
-                   COUNT(*) AS lines
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            WHERE si.tenant_id = :tenant_id AND s.tenant_id = :tenant_id
-              AND s.status = 'completed'
-              AND s.document_type IN ('invoice', 'sales_note', 'other')
-              AND si.is_return = false
-              AND si.sale_date <= :cutoff
-            GROUP BY si.branch_id, si.product_id, si.sale_date
-            ORDER BY si.branch_id, si.product_id, si.sale_date
-            """,
-            cutoff=cutoff,
-        )
+        """Ventas válidas diarias por sucursal-producto tal como se conocían al corte (excluye anuladas y devoluciones).
+
+        As-of: un documento cargado después del corte no aparece; uno anulado o corregido después aparece con la versión
+        que tenía ese día. Los marcos llevan la huella de las ventanas de conocimiento (`attrs`) para la huella de datos."""
+        versions = self.sales_versions(cutoff)
+        return with_knowledge(versions.sales_cells(cutoff), versions)
 
     def daily_returns(self, cutoff: date) -> pd.DataFrame:
-        return self._read(
-            """
-            SELECT si.branch_id, si.product_id, si.sale_date AS ds, SUM(si.quantity)::float8 AS units
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            WHERE si.tenant_id = :tenant_id AND s.status = 'completed'
-              AND (si.is_return = true OR s.document_type = 'credit_note')
-              AND si.sale_date <= :cutoff
-            GROUP BY si.branch_id, si.product_id, si.sale_date
-            """,
-            cutoff=cutoff,
-        )
+        """Devoluciones diarias conocidas al corte (líneas marcadas o notas de crédito)."""
+        return self.sales_versions(cutoff).return_cells(cutoff)
 
     def daily_actuals(self, date_from: date, date_to: date) -> pd.DataFrame:
         """Ventas reales (mismas reglas que el entrenamiento) para evaluar pronósticos."""
@@ -165,7 +182,10 @@ class TenantRepository:
             date_to=date_to,
         )
 
-    def sales_stats(self) -> dict[str, Any]:
+    def sales_stats(self, cutoff: date | None = None) -> dict[str, Any]:
+        """Líneas válidas, líneas con costo y rango de fechas. Con `cutoff`, lo conocido a ese corte."""
+        if cutoff is not None:
+            return self.sales_versions(cutoff).stats(cutoff)
         df = self._read(
             """
             SELECT COUNT(*) AS lines,
@@ -287,6 +307,65 @@ class TenantRepository:
             "SELECT data_source_id, branch_id, complete_from, complete_through, basis FROM data_coverage "
             "WHERE tenant_id = :tenant_id AND entity = 'sales' ORDER BY id"
         )
+
+    def _has_table(self, name: str) -> bool:
+        return self.conn.execute(text("SELECT to_regclass(:name)"), {"name": name}).scalar() is not None
+
+    def sales_coverage_gaps(self) -> pd.DataFrame:
+        """Huecos internos de la fuente de ventas (`data_coverage_gaps`, entidad `sales`; declarados o inferidos por un
+        conector): sus días son `missing_source`, nunca ceros. `branch_id` nulo = toda la empresa (o toda la fuente)."""
+        cols = ["data_source_id", "branch_id", "gap_from", "gap_to", "reason", "basis"]
+        if not self._has_table("data_coverage_gaps"):
+            return pd.DataFrame(columns=cols)
+        return self._read(
+            "SELECT data_source_id, branch_id, gap_from, gap_to, reason, basis FROM data_coverage_gaps "
+            "WHERE tenant_id = :tenant_id AND entity = 'sales' ORDER BY gap_from, id"
+        )
+
+    def closure_events(self) -> pd.DataFrame:
+        """Cierres del calendario de la empresa (`calendar_events.category = 'closure'`, última revisión de cada evento,
+        sin los cancelados) de alcance empresa (`scope = 'tenant'`) o sucursal (`scope = 'branch'`, `scope_ref = 'branch:<id>'`).
+        Devuelve `branch_id` (nulo = toda la empresa), `starts_on`, `ends_on`, `code`. Referencias de sucursal no válidas se
+        ignoran y se cuentan en `attrs['ignored']`."""
+        cols = ["branch_id", "starts_on", "ends_on", "code"]
+        if not self._has_table("calendar_events"):
+            return pd.DataFrame(columns=cols)
+        raw = self._read(
+            """
+            SELECT DISTINCT ON (scope, COALESCE(scope_ref, ''), code, starts_on)
+                   scope, scope_ref, code, starts_on, ends_on, status
+            FROM calendar_events
+            WHERE tenant_id = :tenant_id AND category = 'closure' AND scope IN ('tenant', 'branch')
+            ORDER BY scope, COALESCE(scope_ref, ''), code, starts_on, revision DESC
+            """
+        )
+        raw = raw[raw["status"] != "cancelled"] if len(raw) else raw
+        ignored = 0
+        rows = []
+        for r in raw.itertuples(index=False):
+            if r.scope == "tenant":
+                rows.append((None, r.starts_on, r.ends_on, r.code))
+                continue
+            ref = str(r.scope_ref or "")
+            if ref.startswith("branch:") and ref[7:].isdigit():
+                rows.append((int(ref[7:]), r.starts_on, r.ends_on, r.code))
+            else:
+                ignored += 1
+        out = pd.DataFrame(rows, columns=cols)
+        out.attrs["ignored"] = ignored
+        return out
+
+    def branches_by_source(self, source_ids: list[int]) -> dict[int, list[int]]:
+        """Sucursales que alimenta cada fuente de datos (según los documentos de venta que trajo)."""
+        if not source_ids:
+            return {}
+        df = self._read(
+            "SELECT DISTINCT data_source_id, branch_id FROM sales WHERE tenant_id = :tenant_id "
+            "AND data_source_id = ANY(:ids) ORDER BY 1, 2", ids=[int(i) for i in source_ids])
+        out: dict[int, list[int]] = {}
+        for r in df.itertuples(index=False):
+            out.setdefault(int(r.data_source_id), []).append(int(r.branch_id))
+        return out
 
     # ── resultados previos ──
     def current_run(self) -> dict[str, Any] | None:

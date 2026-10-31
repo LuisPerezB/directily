@@ -753,6 +753,99 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '422': {$ref: '#/components/responses/Validation'}
       x-ability: imports.manage
+  /data-coverage/gaps:
+    get:
+      tags: [Core de Datos]
+      summary: Huecos internos de cobertura de las fuentes
+      description: 'Caídas de integración, migraciones u orígenes ausentes dentro del periodo que cubre una fuente (ADR-V25-23). Los días de un hueco son `missing_source` (ADR-V25-03): nunca ceros observados. Los huecos pueden solaparse; quien los consume toma la unión. `from`/`to` devuelven los huecos que se solapan con ese rango.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {name: entity, in: query, schema: {type: string, enum: [sales, inventory, purchases, costs, promotions, customers, commitments]}}
+      - {name: data_source_id, in: query, schema: {type: integer}}
+      - {name: branch_id, in: query, schema: {type: integer}}
+      - {name: basis, in: query, schema: {type: string, enum: [declared, inferred]}}
+      - {name: from, in: query, schema: {type: string, format: date}}
+      - {name: to, in: query, schema: {type: string, format: date}}
+      - {name: per_page, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200':
+          description: Huecos de la empresa ordenados por fecha inicial
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/DataCoverageGap'}
+                  meta: {$ref: '#/components/schemas/PageMeta'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Validation'}
+      x-ability: data.view
+    post:
+      tags: [Core de Datos]
+      summary: Declarar un hueco de cobertura
+      description: 'La entidad debe estar en la lista blanca; `gap_to` ≥ `gap_from` (ambos incluidos, máximo 3660 días); `data_source_id` y `branch_id`, si se envían, deben ser de la MISMA empresa y no estar dados de baja. `basis` es siempre `declared`: `inferred` lo producen reglas documentadas, no usuarios (enviar `inferred` es 422).
+
+
+        Habilidad requerida: `imports.manage`.'
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entity: {type: string, enum: [sales, inventory, purchases, costs, promotions, customers, commitments]}
+                gap_from: {type: string, format: date}
+                gap_to: {type: string, format: date}
+                data_source_id:
+                  type: [integer, 'null']
+                branch_id:
+                  type: [integer, 'null']
+                  description: Sin sucursal = toda la empresa
+                reason:
+                  type: string
+                  enum: [integration_outage, source_missing, migration, unknown]
+                  default: unknown
+                basis: {type: string, enum: [declared]}
+                notes:
+                  type: [string, 'null']
+                  maxLength: 500
+              required: [entity, gap_from, gap_to]
+      responses:
+        '201':
+          description: Hueco declarado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/DataCoverageGap'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Validation'}
+      x-ability: imports.manage
+  /data-coverage/gaps/{id}:
+    delete:
+      tags: [Core de Datos]
+      summary: Eliminar un hueco de cobertura
+      description: 'Queda en auditoría (`data_coverage.gap_deleted`). Un hueco de otra empresa responde 404.
+
+
+        Habilidad requerida: `imports.manage`.'
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {$ref: '#/components/parameters/Id'}
+      responses:
+        '204': {description: Hueco eliminado}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+      x-ability: imports.manage
   /data-quality/extended:
     get:
       tags: [Core de Datos]
@@ -961,6 +1054,10 @@ paths:
                 mode:
                   type: string
                   enum: [full, incremental]
+                ingestion_mode:
+                  type: [string, 'null']
+                  enum: [backfill, incremental, null]
+                  description: 'Solo entidad sales (ADR-V25-23). Sin declararlo manda `options.ingestion_mode` del mapeo y, si tampoco, la regla: backfill en la primera sincronización de la fuente que trajo datos; después incremental.'
               required: [entity]
       responses:
         '202':
@@ -2820,8 +2917,31 @@ components:
           minProperties: 1
           additionalProperties: {type: string}
           description: '{campo_predictily: columna_origen}'
-        options: {type: object, additionalProperties: true}
+        options:
+          type: object
+          additionalProperties: true
+          description: 'page_size, overlap_minutes, max_rows, source_timezone, value_maps, coverage, import y, solo para sales, ingestion_mode (backfill | incremental: fija el modo de ingestión de TODAS las sincronizaciones de esta versión; ADR-V25-23)'
       required: [entity, query, field_map]
+    DataCoverageGap:
+      type: object
+      description: Hueco interno de cobertura (ADR-V25-23). Rango `[gap_from, gap_to]` con ambos extremos incluidos; sus días son `missing_source`.
+      properties:
+        id: {type: integer}
+        entity: {type: string, enum: [sales, inventory, purchases, costs, promotions, customers, commitments]}
+        data_source_id:
+          type: [integer, 'null']
+        branch_id:
+          type: [integer, 'null']
+        gap_from: {type: string, format: date}
+        gap_to: {type: string, format: date}
+        days: {type: integer, description: Días que abarca (gap_to − gap_from + 1)}
+        reason: {type: string, enum: [integration_outage, source_missing, migration, unknown]}
+        basis: {type: string, enum: [declared, inferred]}
+        notes:
+          type: [string, 'null']
+        created_by:
+          type: [integer, 'null']
+        created_at: {type: string, format: date-time}
     SourceSync:
       type: object
       properties:
@@ -2849,7 +2969,10 @@ components:
         pages: {type: integer}
         import_job_id:
           type: [integer, 'null']
-        stats: {type: object, additionalProperties: true}
+        stats:
+          type: object
+          additionalProperties: true
+          description: 'mode, rows_extracted, pages, import (estadísticas del import), note; ventas (ADR-V25-23): ingestion_mode, ingestion_mode_basis (declared | first_sync | subsequent_sync); con `source_recorded_at` mapeado: future_recorded_at (fechas de registro futuras o ilegibles, que NUNCA adelantan la marca de agua), recorded_at_unreadable, watermark_note. La marca de agua es min(máximo source_recorded_at legible, inicio de la sincronización).'
         error_message:
           type: [string, 'null']
         started_at:

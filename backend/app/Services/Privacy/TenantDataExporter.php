@@ -28,8 +28,12 @@ final class TenantDataExporter
         'customer_segments' => ['id', 'code', 'name'],
         'customers' => ['id', 'external_code', 'segment_id', 'customer_type', 'province', 'canton', 'commercial_zone', 'created_at'],
         'suppliers' => ['id', 'code', 'name', 'tax_id', 'country', 'default_lead_time_days'],
-        'sales' => ['id', 'branch_id', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total'],
+        'sales' => ['id', 'branch_id', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at'],
         'sale_items' => ['id', 'sale_id', 'line_number', 'product_id', 'branch_id', 'sale_date', 'quantity', 'unit_price', 'discount_amount', 'net_amount', 'tax_amount', 'unit_cost', 'is_return'],
+        // ── V2.5 · contrato temporal de ventas (ADR-V25-23): versiones reemplazadas de cada documento y huecos de cobertura ──
+        'sales_document_revisions' => ['id', 'sale_id', 'revision', 'document_type', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'source_recorded_at', 'known_from', 'known_until', 'import_job_id', 'superseded_by_import_job_id', 'data_source_id', 'change_kind', 'created_at'],
+        'sale_item_revisions' => ['id', 'sale_id', 'revision', 'line_number', 'product_id', 'branch_id', 'sale_date', 'quantity', 'unit_price', 'discount_amount', 'net_amount', 'tax_amount', 'unit_cost', 'is_return', 'created_at'],
+        'data_coverage_gaps' => ['id', 'entity', 'data_source_id', 'branch_id', 'gap_from', 'gap_to', 'reason', 'basis', 'notes', 'created_at', 'updated_at'],
         'inventory_snapshots' => ['id', 'branch_id', 'product_id', 'snapshot_date', 'on_hand', 'reserved', 'in_transit', 'unit_cost'],
         'supplier_lead_times' => ['id', 'supplier_id', 'product_id', 'branch_id', 'lead_time_days', 'lead_time_std_days', 'source'],
         'promotions' => ['id', 'name', 'promo_type', 'discount_pct', 'starts_on', 'ends_on', 'branch_id', 'product_id', 'category_id', 'known_at', 'deleted_at'],
@@ -197,7 +201,7 @@ final class TenantDataExporter
             $zip->addFromString('LEEME.txt', implode("\n", [
                 'Exportación de datos de la empresa '.$tenant->name,
                 'Generada: '.now($tenant->timezone)->toIso8601String(),
-                'Contenido: un CSV por tabla (UTF-8) con todos los datos de la empresa: catálogos, ventas, inventario, compras y movimientos, alertas, escenarios, indicadores externos propios, resultados de demanda y de los cores de la etapa 2 (ejecuciones, huellas de datos, cobertura, compromisos comerciales, predicciones de compra, planes de abastecimiento, costos), registro técnico de modelos, membresías y consumo.',
+                'Contenido: un CSV por tabla (UTF-8) con todos los datos de la empresa: catálogos, ventas, inventario, compras y movimientos, alertas, escenarios, indicadores externos propios, resultados de demanda y de los cores de la etapa 2 (ejecuciones, huellas de datos, cobertura y huecos de cobertura, versiones anteriores de los documentos de venta, compromisos comerciales, predicciones de compra, planes de abastecimiento, costos), registro técnico de modelos, membresías y consumo.',
                 'Quedan fuera los indicadores y el calendario públicos compartidos (no son de la empresa) y las rutas internas de archivos y artefactos del servidor.',
                 'Las cédulas/RUC de clientes no se almacenan en claro en Predictily; solo existe una huella irreversible.',
                 'No se incluyen credenciales de conectores, tokens de acceso ni la configuración de conexión de las fuentes de datos.',

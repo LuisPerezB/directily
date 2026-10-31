@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from predictily_engine.backtest.rolling import (
+    AsOfWindows,
     BacktestPlan,
     eligible_ids,
     plan_backtest,
@@ -57,6 +58,7 @@ from predictily_engine.models.statistical import forecast_statistical
 from predictily_engine.pipeline.data import TenantData
 from predictily_engine.platform.config import config_hash, effective_config_record
 from predictily_engine.platform.snapshot import DataSnapshot
+from predictily_engine.profiling.days import DayRules
 from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import Panel, build_panel
 from predictily_engine.reconciliation.hierarchy import AGG_LEVELS, aggregate, to_periods
@@ -120,7 +122,8 @@ def _noop(stage: str, pct: int) -> None:  # pragma: no cover
 
 
 def training_data_hash(panel: Panel) -> str:
-    cols = panel.df[["unique_id", "ds", "y", "stockout"]].sort_values(["unique_id", "ds"])
+    keep = ["unique_id", "ds", "y", "stockout"] + (["day_status"] if "day_status" in panel.df else [])
+    cols = panel.df[keep].sort_values(["unique_id", "ds"])
     hashed = pd.util.hash_pandas_object(cols, index=False).to_numpy()
     return hashlib.sha256(hashed.tobytes()).hexdigest()
 
@@ -161,8 +164,11 @@ def run_pipeline(
     config_version = config_hash(effective_config)
 
     progress("profiling", 10)
-    panel = build_panel(data)
+    # Semántica de días (ADR-V25-03): fuente ausente, huecos y cierres no son ceros; la regla inferida es configurable.
+    day_rules = DayRules.from_config(core_config)
+    panel = build_panel(data, day_rules)
     readiness = compute_readiness(data, panel)
+    limitations.extend(_day_limitations(panel.day_summary))
     if panel.profile.empty or not panel.profile["is_active"].any():
         raise InsufficientDataError("No hay series activas con ventas para pronosticar.",
                                     {"series_total": int(len(panel.profile))})
@@ -185,9 +191,17 @@ def run_pipeline(
     fc_horizon = max(horizon, min(MAX_INTERNAL_HORIZON, required_coverage_days(
         data.latest_inventory, data.lead_times, data.suppliers, data.effective_settings, active["unique_id"])))
     # Promociones as-of (F5): a futuro de cada corte solo lo conocido ese día (known_at / revisiones).
-    features = FeatureBuilder(panel.df, data.branches, data.promotions, (cutoff + pd.Timedelta(days=fc_horizon)).date(),
+    horizon_end = (cutoff + pd.Timedelta(days=fc_horizon)).date()
+    features = FeatureBuilder(panel.df, data.branches, data.promotions, horizon_end,
                               promotion_revisions=data.promotion_revisions,
                               promotions_known_on=data.promotions_known_on)
+    # Conocimiento as-of (ADR-V25-23): si hubo documentos tardíos, anulaciones o correcciones, cada ventana entrena con lo que
+    # se conocía en SU corte (panel, perfil y variables); sus promociones son las conocidas ese día (sin `promotions_known_on`).
+    versions = data.sales_versions
+    windows = AsOfWindows(data, panel, features,
+                          lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
+                                                    promotion_revisions=data.promotion_revisions),
+                          day_rules) if versions is not None and versions.has_dynamic else None
     plan = plan_backtest(panel, max_windows)
     full_ids = eligible_ids(panel, cutoff)
     use_lgbm = 5 <= len(full_ids) <= max_series_lgbm
@@ -204,7 +218,7 @@ def run_pipeline(
     if plan is not None:
         progress("backtesting", 20)
         bt = run_backtest(panel, features, plan, families, seed, n_jobs, use_lgbm,
-                          progress=lambda frac: progress("backtesting", 20 + int(35 * frac)))
+                          progress=lambda frac: progress("backtesting", 20 + int(35 * frac)), windows=windows)
     else:
         bt = pd.DataFrame()
         warnings.append("Historia insuficiente para backtesting (< 70 días): se usa el promedio de la historia "
@@ -487,7 +501,11 @@ def run_pipeline(
         f"Ingresos = unidades × {PRICE_ASSUMPTION}.",
         "Intervalos 80/95 % conformales con residuos del backtest del modelo servido; P10/P90 = límites del intervalo 80 %.",
         "P50 solo a nivel serie-día y únicamente si se evaluó con pinball en un período final independiente.",
-        "La historia de cada serie empieza en su primera venta; los días sin venta dentro de la cobertura son ceros observados.",
+        "La historia de cada serie empieza en su primera venta; solo los días sin venta con la fuente cubierta, la sucursal abierta y "
+        "sin quiebre de stock (`zero_confirmed`) son ceros observados: la fuente ausente (`missing_source`) y los cierres (`closed`) "
+        "se excluyen de las métricas y del perfilado de ceros, y se imputan con la media móvil de 28 días para ajustar los modelos.",
+        "Cada ventana del backtest entrena con los datos tal como se conocían en su corte; los reales con que se evalúa son la "
+        "verdad disponible al corte final (versión vigente de cada documento a esa fecha).",
     ]
     snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage)
     families_info = _families_info(served, selection, series_fc, bt, active, failed)
@@ -498,10 +516,12 @@ def run_pipeline(
         "note": ("Se sirve el respaldo porque falló el entrenamiento final del ganador: métricas, intervalos y "
                  "etiquetas corresponden al modelo servido." if failed else "Se sirve el modelo ganador del backtest."),
     }
+    knowledge = _knowledge(data, windows)
     manifest = build_manifest(
         cutoff=cutoff.date(), data_from=panel.df["ds"].min().date(), plan=plan, bt=bt, min_improvement=min_improvement,
         config_version=config_version, coverage=data.coverage or None, horizon_support=support,
-        has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info)
+        has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info,
+        day_status=panel.day_summary, knowledge=knowledge)
     summary = _summary(series_fc, forecast_values, served, evaluations, plan, readiness, recs, horizon, active, lgbm,
                        warnings, eval_served, support=support, horizons=horizons)
     summary.update({
@@ -514,6 +534,7 @@ def run_pipeline(
         "coverage": data.coverage, "limitations": limitations, "limitation_codes": [x["code"] for x in limitations],
         "assumptions": assumptions, "config_version": config_version, "data_snapshot_hash": snapshot.hash,
         "history_days": history_days, "horizon_days": horizon, "horizons_requested": list(horizons),
+        "day_status": panel.day_summary, "knowledge": knowledge,
     })
     timings["total"] = time.perf_counter() - t0
     summary["timings_seconds"] = {k: round(v, 1) for k, v in timings.items()}
@@ -530,6 +551,55 @@ def run_pipeline(
 
 
 # ───────────────────────────── auxiliares ─────────────────────────────
+
+def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
+    """Limitaciones de la semántica de días (ADR-V25-03) con sus conteos: nada se excluye o imputa en silencio."""
+    out: list[dict[str, str]] = []
+    days = day_summary.get("series_days") or {}
+    by_basis = day_summary.get("series_days_by_basis") or {}
+    total = int(day_summary.get("series_days_total") or 0)
+    missing, closed = int(days.get("missing_source", 0)), int(days.get("closed", 0))
+    imputed, not_imputable = int(day_summary.get("excluded_days_imputed", 0)), int(day_summary.get("excluded_days_not_imputable", 0))
+    tail = (f" Para ajustar los modelos se imputaron con la media móvil de 28 días de los días limpios ({imputed} imputados; "
+            f"{not_imputable} sin historia suficiente quedan con su valor observado).")
+    if missing:
+        out.append({"code": "days_missing_source", "message": (
+            f"{missing} días-serie ({missing / max(total, 1):.1%} del panel) se clasificaron `missing_source` (fuera de la cobertura "
+            "declarada de la fuente, dentro de un hueco o inferidos por la regla de actividad de la sucursal): no son ceros observados "
+            "y se excluyen de las métricas y de la proporción de ceros del perfilado." + tail)})
+    rules = day_summary.get("rules") or {}
+    engine_inferred = int((day_summary.get("branch_days") or {}).get("missing_source_engine_inferred", 0))
+    if engine_inferred:
+        out.append({"code": "days_missing_source_inferred", "message": (
+            f"{engine_inferred} sucursal-días se marcaron `missing_source` con base inferida por el motor: la sucursal no registró ninguna "
+            f"línea pese a una mediana de al menos {rules.get('infer_min_median_lines')} líneas diarias en los "
+            f"{rules.get('infer_lookback_days')} días previos ({by_basis.get('missing_source:inferred', 0)} días-serie). La regla es configurable "
+            "(`day_status_infer_gaps`) y debe aprobarse en el piloto: un cierre sin declarar en el calendario se confunde con una caída de la fuente.")})
+    if closed:
+        out.append({"code": "days_closed", "message": (
+            f"{closed} días-serie corresponden a cierres declarados en el calendario (`closure`): no son ceros observados y se excluyen "
+            "de las métricas." + tail)})
+    return out
+
+
+def _knowledge(data: TenantData, windows: AsOfWindows | None) -> dict[str, Any]:
+    """Política de conocimiento (ADR-V25-23) y lo que realmente se usó en cada ventana, para el manifiesto y el resumen."""
+    versions = data.sales_versions
+    return {
+        "policy": {
+            "visibility_rule": "una versión es visible al corte C si known_from < medianoche local (C+1) y "
+                               "(known_until es nulo o known_until >= medianoche local (C+1))",
+            "training": "cada ventana del backtest y el período final entrenan con los datos tal como se conocían en SU corte "
+                        "(panel, perfil de demanda, escalas y variables)",
+            "evaluation_actuals": "los reales con que se evalúa cada ventana son la verdad disponible al corte final",
+            "static_catalog": "inventario, catálogo y calendario no están versionados: se usa su estado vigente",
+        },
+        "source": versions.summary() if versions is not None else {
+            "versions": False, "assumption": "sin historial de versiones: cada documento se asume conocido desde su día de negocio"},
+        "as_of_windows_active": windows is not None,
+        "windows": windows.info() if windows is not None else [],
+    }
+
 
 def _node_scales_at(node_hist: pd.DataFrame, agg_bt: pd.DataFrame) -> pd.Series:
     """Escala de cada nodo al corte de cada ventana (media de 28 días previos)."""

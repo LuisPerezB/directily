@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Core;
 
+use App\Services\Sales\IngestionModeResolver;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,7 +16,7 @@ final class ImportMappingRequest extends FormRequest
         return [
             'mapping' => ['required', 'array'],
             'mapping.*' => ['nullable', 'string', 'max:255'],
-            'options' => ['sometimes', 'array:date_format,decimal_separator,thousands_separator,csv_delimiter,default_branch_code,create_missing_products,create_missing_branches,create_missing_categories,skip_invalid_rows'],
+            'options' => ['sometimes', 'array:date_format,decimal_separator,thousands_separator,csv_delimiter,default_branch_code,create_missing_products,create_missing_branches,create_missing_categories,skip_invalid_rows,ingestion_mode'],
             'options.date_format' => ['sometimes', Rule::in(['auto', 'Y-m-d', 'd/m/Y', 'm/d/Y', 'd-m-Y', 'd.m.Y', 'Y/m/d'])],
             'options.decimal_separator' => ['sometimes', Rule::in(['auto', '.', ','])],
             'options.thousands_separator' => ['sometimes', 'nullable', Rule::in(['.', ',', ' ', ''])],
@@ -25,6 +26,8 @@ final class ImportMappingRequest extends FormRequest
             'options.create_missing_branches' => ['sometimes', 'boolean'],
             'options.create_missing_categories' => ['sometimes', 'boolean'],
             'options.skip_invalid_rows' => ['sometimes', 'boolean'],
+            // Solo ventas (ADR-V25-23). Vacío/null = automático: backfill si la empresa aún no tiene ventas; si no, incremental.
+            'options.ingestion_mode' => ['sometimes', 'nullable', Rule::in(IngestionModeResolver::MODES)],
         ];
     }
 

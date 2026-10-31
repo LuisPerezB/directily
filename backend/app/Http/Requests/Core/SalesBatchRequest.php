@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Core;
 
+use App\Services\Sales\IngestionModeResolver;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /** Validación estructural del lote; las reglas de negocio las aplica SalesLineNormalizer. */
 final class SalesBatchRequest extends FormRequest
@@ -38,6 +40,8 @@ final class SalesBatchRequest extends FormRequest
             'documents.*.items.*.line_number' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'options' => ['sometimes', 'array:create_missing_products,create_missing_branches,create_missing_categories'],
             'options.*' => ['boolean'],
+            // ADR-V25-23. Sin declarar, el lote es `incremental`; `backfill` declara una carga histórica (conocida desde su día de negocio).
+            'ingestion_mode' => ['sometimes', 'nullable', Rule::in(IngestionModeResolver::MODES)],
         ];
     }
 }

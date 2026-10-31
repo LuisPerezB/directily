@@ -21,6 +21,23 @@ final class ValueParser
         'd/m/y', 'd-m-y',
     ];
 
+    /**
+     * Estados que una fuente (ERP, SRI, POS) asigna a un documento de venta vigente. Junto con `voided` y `pending` forman el
+     * vocabulario reconocido: lo que no esté en ninguna lista NO se supone completado (ver documentStatus()).
+     * Incluye el complemento de las columnas tipo bandera «Anulada» (no, n, 0, false = no anulada).
+     */
+    private const COMPLETED_STATUSES = [
+        'completed', 'complete', 'completada', 'completado', 'completa', 'done',
+        'emitida', 'emitido', 'issued', 'autorizada', 'autorizado', 'authorized', 'authorised',
+        'aprobada', 'aprobado', 'approved', 'vigente', 'activa', 'activo', 'active', 'valida', 'valido', 'valid',
+        'pagada', 'pagado', 'paid', 'cobrada', 'cobrado', 'facturada', 'facturado', 'invoiced',
+        'cerrada', 'cerrado', 'closed', 'finalizada', 'finalizado', 'finalized', 'finalised',
+        'procesada', 'procesado', 'processed', 'confirmada', 'confirmado', 'confirmed',
+        'registrada', 'registrado', 'posted', 'contabilizada', 'contabilizado', 'vendida', 'vendido', 'sold',
+        'entregada', 'entregado', 'delivered',
+        'no', 'n', '0', 'false', 'falso',
+    ];
+
     /** @param array<string, mixed> $options */
     public function __construct(private readonly string $timezone = 'America/Guayaquil', private readonly array $options = []) {}
 
@@ -225,7 +242,14 @@ final class ValueParser
         };
     }
 
-    public static function documentStatus(?string $raw): string
+    /**
+     * Estado del documento: `completed`, `voided` o `pending`.
+     *
+     * Vacío => `completed` (convención documentada: la mayoría de las fuentes solo marcan las anuladas). Un estado NO vacío
+     * que no esté en ningún vocabulario devuelve null: no se supone venta (defecto de auditoría «estados desconocidos se
+     * cuentan como venta»). Quien normaliza lo reporta como `unknown_document_status` (clase REVIEW_REQUIRED).
+     */
+    public static function documentStatus(?string $raw): ?string
     {
         if ($raw === null || trim($raw) === '') {
             return 'completed';
@@ -235,7 +259,8 @@ final class ValueParser
         return match (true) {
             in_array($k, ['anulada', 'anulado', 'void', 'voided', 'cancelada', 'cancelado', 'annulled', 'anulacion', 'si', 's', '1', 'true'], true) => 'voided',
             in_array($k, ['pendiente', 'pending', 'borrador', 'draft'], true) => 'pending',
-            default => 'completed',
+            in_array($k, self::COMPLETED_STATUSES, true) => 'completed',
+            default => null,
         };
     }
 

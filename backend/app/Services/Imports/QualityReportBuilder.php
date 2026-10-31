@@ -39,6 +39,7 @@ final class QualityReportBuilder
             'rows_total', 'rows_valid', 'rows_error', 'rows_warning', 'duplicates_in_file', 'documents_total', 'documents_valid',
             'documents_invalid', 'documents_new', 'documents_updated', 'documents_unchanged', 'voided_documents', 'return_lines',
             'date_from', 'date_to', 'missing_days', 'products_new', 'branches_new',
+            'stale_skipped', 'revisions_archived', 'updated_without_source_order', 'ingestion_mode',
         ]));
         $summary['error_rate'] = round($errorRate, 4);
 

@@ -15,15 +15,22 @@ use App\Services\Plans\PlanLimitService;
  */
 final class SalesBatchService
 {
-    public function __construct(private readonly SalesDocumentWriter $writer, private readonly PlanLimitService $plans) {}
+    public function __construct(
+        private readonly SalesDocumentWriter $writer,
+        private readonly PlanLimitService $plans,
+        private readonly IngestionModeResolver $modes,
+    ) {}
 
     /**
+     * `$ingestionMode` (backfill | incremental) es opcional: sin él, el lote es `incremental` (conocido desde que Predictily lo recibe).
+     *
      * @param  list<array<string, mixed>>  $documents
      * @param  array<string, mixed>  $options
-     * @return array{created: int, updated: int, unchanged: int, rejected: int, errors: list<array<string, mixed>>, warnings: list<array<string, mixed>>}
+     * @return array{created: int, updated: int, unchanged: int, stale_skipped: int, revisions_archived: int, updated_without_source_order: int, rejected: int, ingestion_mode: string, ingestion_mode_basis: string, errors: list<array<string, mixed>>, warnings: list<array<string, mixed>>}
      */
-    public function ingest(Tenant $tenant, array $documents, ?int $dataSourceId = null, array $options = []): array
+    public function ingest(Tenant $tenant, array $documents, ?int $dataSourceId = null, array $options = [], ?string $ingestionMode = null): array
     {
+        $ingestion = $this->modes->forBatch($ingestionMode);
         $options = array_merge(['create_missing_products' => true, 'create_missing_branches' => false, 'create_missing_categories' => true], $options);
         $parser = new ValueParser($tenant->timezone ?: 'America/Guayaquil', $options);
         $normalizer = new SalesLineNormalizer($parser, $tenant->currency ?: 'USD', $tenant->timezone ?: 'America/Guayaquil');
@@ -83,7 +90,10 @@ final class SalesBatchService
             $valid[] = $docs[0];
         }
 
-        $result = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'rejected' => count($documents) - count($valid), 'errors' => $errors, 'warnings' => array_slice($warnings, 0, 200)];
+        $result = [
+            'created' => 0, 'updated' => 0, 'unchanged' => 0, 'stale_skipped' => 0, 'revisions_archived' => 0, 'updated_without_source_order' => 0,
+            'rejected' => count($documents) - count($valid), ...$ingestion->toArray(), 'errors' => $errors, 'warnings' => array_slice($warnings, 0, 200),
+        ];
         if ($valid === []) {
             return $result;
         }
@@ -92,12 +102,15 @@ final class SalesBatchService
         }
         $this->plans->assertCan($tenant, 'max_import_rows_per_month', $lines);
 
-        $written = $this->writer->write($tenant, $valid, $catalog, ['data_source_id' => $dataSourceId]);
+        $written = $this->writer->write($tenant, $valid, $catalog, ['data_source_id' => $dataSourceId, 'ingestion_mode' => $ingestion->mode]);
         $this->plans->recordUsage($tenant, 'import_rows', $written['lines_written']);
         $this->plans->recordUsage($tenant, 'api_requests');
         $result['created'] = $written['new'];
         $result['updated'] = $written['updated'];
         $result['unchanged'] = $written['unchanged'];
+        $result['stale_skipped'] = $written['stale_skipped'];
+        $result['revisions_archived'] = $written['revisions_archived'];
+        $result['updated_without_source_order'] = $written['updated_without_source_order'];
 
         return $result;
     }

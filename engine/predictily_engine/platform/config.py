@@ -23,6 +23,14 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "min_improvement": 0.03,
         "max_backtest_windows": 3,
         "exceptional_events_flag": True,
+        # ── ADR-V25-03 · semántica de días sin transacciones ──
+        # Regla INFERIDA de días sin fuente (debe aprobarse en el piloto): un día en que una sucursal no registra NINGUNA línea,
+        # pese a que la mediana de sus líneas diarias en los `day_status_infer_lookback_days` días previos es ≥
+        # `day_status_infer_min_median_lines`, se marca `missing_source` (base `inferred`): no es un cero observado. Los huecos,
+        # coberturas y cierres DECLARADOS se aplican siempre; esta regla solo añade lo no declarado y puede apagarse.
+        "day_status_infer_gaps": True,
+        "day_status_infer_min_median_lines": 5,
+        "day_status_infer_lookback_days": 28,
     },
     "customer": {
         "horizons": [7, 30, 90],
@@ -147,6 +155,8 @@ CONFIG_CONSTRAINTS: dict[tuple[str, str], dict[str, Any]] = {
     ("demand", "default_lead_time_days"): {"min": 1, "max": 365},
     ("supply", "default_lead_time_days"): {"min": 1, "max": 365},
     ("demand", "horizons"): {"subset_of": [7, 14, 30, 60, 90], "non_empty": True},
+    ("demand", "day_status_infer_min_median_lines"): {"min": 1, "max": 100000},
+    ("demand", "day_status_infer_lookback_days"): {"min": 7, "max": 90},
     ("customer", "horizons"): {"subset_of": [7, 30, 90], "non_empty": True},
     ("cost", "horizons"): {"subset_of": [30, 90], "non_empty": True},
 }

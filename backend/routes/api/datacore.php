@@ -8,6 +8,7 @@
 use App\Http\Controllers\Api\DataCore\CalendarEventController;
 use App\Http\Controllers\Api\DataCore\CommitmentController;
 use App\Http\Controllers\Api\DataCore\DataCoverageController;
+use App\Http\Controllers\Api\DataCore\DataCoverageGapController;
 use App\Http\Controllers\Api\DataCore\DataQualityController;
 use App\Http\Controllers\Api\DataCore\SourceMappingController;
 use App\Http\Controllers\Api\DataCore\SourceSyncController;
@@ -32,6 +33,10 @@ Route::middleware(['auth:sanctum', 'throttle:api', 'tenant'])->group(function ()
     // ── Cobertura de fuentes y calidad ampliada ──
     Route::get('data-coverage', [DataCoverageController::class, 'index'])->middleware('tenant.ability:data.view');
     Route::put('data-coverage', [DataCoverageController::class, 'update'])->middleware('tenant.ability:imports.manage');
+    // Huecos internos de una fuente (ADR-V25-23): sus días son `missing_source`, nunca ceros.
+    Route::get('data-coverage/gaps', [DataCoverageGapController::class, 'index'])->middleware('tenant.ability:data.view');
+    Route::post('data-coverage/gaps', [DataCoverageGapController::class, 'store'])->middleware('tenant.ability:imports.manage');
+    Route::delete('data-coverage/gaps/{gap}', [DataCoverageGapController::class, 'destroy'])->middleware('tenant.ability:imports.manage')->whereNumber('gap');
     Route::get('data-quality/extended', [DataQualityController::class, 'extended'])->middleware('tenant.ability:data.view');
 
     // ── Calendario con alcance y estado de conocimiento ──

@@ -9,6 +9,13 @@ Información disponible al corte (F4): en cada ventana la elegibilidad, la activ
 clase de demanda se recalculan con `profile_at(panel.df, c_k)`; cada fila del backtest lleva
 la clase que su serie tenía en el corte de SU ventana (`demand_class`).
 
+Conocimiento as-of (ADR-V25-23): cada ventana (y el holdout) entrena con los datos TAL COMO SE CONOCÍAN EN SU CORTE: el panel, el
+perfil de demanda, las escalas, el precio supuesto y las variables se arman con las versiones de los documentos visibles ese día
+(`AsOfWindows`); un documento cargado tarde o una anulación posterior NO cambian lo que entrena una ventana anterior. Los reales con
+que se evalúa cada ventana son la VERDAD disponible al corte final (el panel final): se mide contra lo que de verdad ocurrió, no contra
+lo que se creía entonces. La columna `stockout` de las filas del backtest marca todo día NO evaluable (quiebre de stock, fuente
+ausente o cierre; `day_status` dice cuál): esos días se excluyen de métricas, selección y calibración.
+
 Período final reservado (F6): el plan reserva, cuando la historia alcanza, una ventana
 final `holdout` con origen `H = corte − h` y fechas objetivo (H, corte]. Las ventanas de
 selección terminan sus fechas objetivo en o antes de H, de modo que no comparten fechas con
@@ -21,16 +28,19 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from predictily_engine.data.asof import with_knowledge
 from predictily_engine.features.builder import FeatureBuilder, last_known_price
 from predictily_engine.models.ml import LightGBMGlobal
 from predictily_engine.models.registry import STATISTICAL
 from predictily_engine.models.statistical import forecast_statistical
-from predictily_engine.profiling.series import MIN_HISTORY_DAYS, Panel, profile_at
+from predictily_engine.profiling.days import DayRules, censored_days
+from predictily_engine.profiling.series import MIN_HISTORY_DAYS, Panel, build_panel, profile_at
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +107,7 @@ def series_scale(panel_df: pd.DataFrame, cutoff: pd.Timestamp, ids: list[str] | 
     df = panel_df[panel_df["ds"] <= cutoff]
     if ids is not None:
         df = df[df["unique_id"].isin(ids)]
-    clean = df[~df["stockout"]]
+    clean = df[~censored_days(df)]
     m28 = clean[clean["ds"] > cutoff - pd.Timedelta(days=28)].groupby("unique_id")["y"].mean()
     m90 = clean[clean["ds"] > cutoff - pd.Timedelta(days=90)].groupby("unique_id")["y"].mean()
     allm = df.groupby("unique_id")["y"].mean()
@@ -129,7 +139,7 @@ def seasonal_naive_scales(panel_df: pd.DataFrame, cutoff: pd.Timestamp, ids: lis
     d = d.sort_values(["unique_id", "ds"])
     uid = d["unique_id"].to_numpy()
     y = d["units"].to_numpy(float)
-    so = d["stockout"].to_numpy(bool)
+    so = censored_days(d).to_numpy(bool)
     n = len(d)
     valid = np.zeros(n, dtype=bool)
     valid[season:] = (uid[season:] == uid[:-season]) & ~so[season:] & ~so[:-season]
@@ -162,6 +172,55 @@ def eligible_ids(panel: Panel, cutoff: pd.Timestamp, profile: pd.DataFrame | Non
     return profile.loc[ok, "unique_id"].tolist()
 
 
+class AsOfWindows:
+    """Panel y variables de cada origen del backtest con los datos tal como se conocían en SU corte (ADR-V25-23).
+
+    Parte de las versiones de los documentos leídas una vez (`data.sales_versions`): para un origen `c`, si la vista as-of
+    coincide con la verdad restringida a `c` se reutiliza el panel final (mismo resultado, sin costo); si difiere (documentos
+    tardíos, anulaciones o correcciones posteriores) se reconstruye el panel con lo visible ese día, con la misma clasificación de días,
+    y sus variables (`make_features`). Las promociones de una ventana siempre son las conocidas en su propio día."""
+
+    def __init__(self, data: Any, truth: Panel, truth_features: FeatureBuilder,
+                 make_features: Callable[[pd.DataFrame], FeatureBuilder], rules: DayRules | None = None) -> None:
+        self.data = data
+        self.truth = truth
+        self.truth_features = truth_features
+        self.make_features = make_features
+        self.rules = rules
+        self._cache: dict[pd.Timestamp, tuple[Panel, FeatureBuilder | None]] = {}
+        self.log: dict[pd.Timestamp, dict[str, Any]] = {}
+
+    @property
+    def versions(self):
+        return getattr(self.data, "sales_versions", None)
+
+    def at(self, cutoff: pd.Timestamp) -> tuple[Panel, FeatureBuilder | None]:
+        cutoff = pd.Timestamp(cutoff).normalize()
+        if cutoff in self._cache:
+            return self._cache[cutoff]
+        versions = self.versions
+        diff = versions.difference(cutoff) if versions is not None and cutoff < self.truth.cutoff else {"late": 0, "superseded": 0}
+        if not (diff["late"] or diff["superseded"]):
+            result = (self.truth, self.truth_features)
+            rebuilt = False
+        else:
+            sales = with_knowledge(versions.sales_cells(cutoff), versions)
+            view = replace(self.data, cutoff=cutoff.date(), sales=sales, returns=versions.return_cells(cutoff))
+            panel = build_panel(view, self.rules, current_catalog=False)
+            # Sin ventas visibles ese día no hay series ni variables: la ventana se omite (nunca se rellena con la verdad final).
+            result = (panel, self.make_features(panel.df) if not panel.df.empty else None)
+            rebuilt = True
+        self._cache[cutoff] = result
+        self.log[cutoff] = {"origin": cutoff.date().isoformat(), "knowledge": "as_of_origin" if rebuilt else "equals_final_truth",
+                            "panel_rebuilt": bool(rebuilt), "lines_not_yet_known": int(diff["late"]),
+                            "lines_later_replaced": int(diff["superseded"])}
+        return result
+
+    def info(self) -> list[dict[str, Any]]:
+        """Una entrada por origen consultado (orden temporal): qué conocimiento usó y cuánto difería de la verdad final."""
+        return [self.log[k] for k in sorted(self.log)]
+
+
 def run_backtest(
     panel: Panel,
     features: FeatureBuilder,
@@ -171,6 +230,7 @@ def run_backtest(
     n_jobs: int,
     use_lgbm: bool,
     progress: Callable[[float], None] | None = None,
+    windows: AsOfWindows | None = None,
 ) -> pd.DataFrame:
     """Devuelve filas: unique_id, window, cutoff, ds, step, family, yhat, actual, stockout, scale,
     demand_class (clase de la serie en el corte de la ventana) e is_holdout.
@@ -178,46 +238,53 @@ def run_backtest(
     Además, por fila: `scale_mae`/`scale_mse` (escala del naive estacional 7 calculada SOLO con datos ≤ corte
     de la ventana; ver `seasonal_naive_scales`), `price_fc` (último precio neto conocido al corte, el supuesto
     con que se valoraría el pronóstico) y `price_act` (precio neto observado ese día, para valorar lo vendido):
-    permiten métricas en dinero separadas de las de unidades."""
+    permiten métricas en dinero separadas de las de unidades.
+
+    `windows` (ADR-V25-23): entrega el panel y las variables de cada origen tal como se conocían en su corte; sin él, todas
+    las ventanas usan `panel`/`features` (comportamiento previo). Los reales (`actual`, `price_act`) y la marca de día no
+    evaluable (`stockout`, `day_status`) salen SIEMPRE del panel final (`panel`): la verdad disponible al corte final."""
     stat_fams = [f for f in families if f in STATISTICAL]
     results = []
     origins = plan.origins
     for n, (k, cutoff, is_holdout) in enumerate(origins):
-        prof_k = profile_at(panel.df, cutoff)
-        ids = eligible_ids(panel, cutoff, prof_k)
+        wp, wf = windows.at(cutoff) if windows is not None else (panel, features)  # datos y variables conocidos en este corte
+        prof_k = profile_at(wp.df, cutoff)
+        ids = eligible_ids(wp, cutoff, prof_k)
         if not ids:
             continue
-        train = panel.df[(panel.df["ds"] <= cutoff) & panel.df["unique_id"].isin(ids)]
+        train = wp.df[(wp.df["ds"] <= cutoff) & wp.df["unique_id"].isin(ids)]
         preds = [forecast_statistical(train[["unique_id", "ds", "y"]], plan.horizon, stat_fams)]
         if use_lgbm and LightGBMGlobal.can_train(train):
             try:
-                tr, ref = features.training_frame(cutoff, ids)
+                tr, ref = wf.training_frame(cutoff, ids)
                 model = LightGBMGlobal(seed=seed, n_jobs=n_jobs).fit(tr)
-                preds.append(model.predict(plan.horizon, features.future_frame(cutoff, ids, plan.horizon, ref)))
+                preds.append(model.predict(plan.horizon, wf.future_frame(cutoff, ids, plan.horizon, ref)))
             except Exception:  # el backtest continúa con los estadísticos
                 log.exception("LightGBM falló en la ventana %s", cutoff.date())
         fc = pd.concat(preds, ignore_index=True)
         end = cutoff + pd.Timedelta(days=plan.horizon)
         test = panel.df[(panel.df["ds"] > cutoff) & (panel.df["ds"] <= end) & panel.df["unique_id"].isin(ids)]
-        fc = fc.merge(test[["unique_id", "ds", "units", "stockout", "price"]], on=["unique_id", "ds"], how="inner")
+        test = test.assign(stockout=censored_days(test).to_numpy())  # no evaluable: quiebre, fuente ausente o cierre
+        keep = ["unique_id", "ds", "units", "stockout", "price"] + (["day_status"] if "day_status" in test else [])
+        fc = fc.merge(test[keep], on=["unique_id", "ds"], how="inner")
         fc = fc.rename(columns={"units": "actual", "price": "price_act"})
         fc["step"] = (fc["ds"] - cutoff).dt.days.astype(int)
         fc["window"] = k
         fc["cutoff"] = cutoff
-        fc["scale"] = fc["unique_id"].map(series_scale(panel.df, cutoff, ids))
+        fc["scale"] = fc["unique_id"].map(series_scale(wp.df, cutoff, ids))
         fc["demand_class"] = fc["unique_id"].map(prof_k.set_index("unique_id")["demand_class"])
-        scales = seasonal_naive_scales(panel.df, cutoff, ids)
+        scales = seasonal_naive_scales(wp.df, cutoff, ids)
         fc["scale_mae"] = fc["unique_id"].map(scales["mae_scale"])
         fc["scale_mse"] = fc["unique_id"].map(scales["mse_scale"])
-        fc["price_fc"] = fc["unique_id"].map(last_known_price(panel.df, cutoff, ids))
+        fc["price_fc"] = fc["unique_id"].map(last_known_price(wp.df, cutoff, ids))
         fc["is_holdout"] = is_holdout
         results.append(fc)
         if progress:
             progress((n + 1) / len(origins))
     if not results:
         return pd.DataFrame(columns=["unique_id", "window", "cutoff", "ds", "step", "family", "yhat", "actual",
-                                     "stockout", "scale", "demand_class", "scale_mae", "scale_mse", "price_fc",
-                                     "price_act", "is_holdout"])
+                                     "stockout", "day_status", "scale", "demand_class", "scale_mae", "scale_mse",
+                                     "price_fc", "price_act", "is_holdout"])
     out = pd.concat(results, ignore_index=True)
     out["yhat"] = out["yhat"].astype(float)
     out["is_holdout"] = out["is_holdout"].astype(bool)

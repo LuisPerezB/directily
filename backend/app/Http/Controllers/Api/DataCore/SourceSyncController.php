@@ -10,6 +10,7 @@ use App\Models\DataSource;
 use App\Models\SourceSync;
 use App\Services\DataCore\Sync\SourceMappingService;
 use App\Services\DataCore\Sync\SourceSyncService;
+use App\Services\Sales\IngestionModeResolver;
 use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -26,8 +27,10 @@ final class SourceSyncController extends Controller
         $data = $request->validate([
             'entity' => ['required', Rule::in(SourceMappingService::ENTITIES)],
             'mode' => ['sometimes', Rule::in(['full', 'incremental'])],
+            // ADR-V25-23: solo ventas. Sin declararlo: el del mapeo y, si tampoco, backfill en la primera sincronización y luego incremental.
+            'ingestion_mode' => ['sometimes', 'nullable', Rule::in(IngestionModeResolver::MODES), 'prohibited_unless:entity,sales'],
         ]);
-        $sync = $this->syncs->request($dataSource, $data['entity'], $data['mode'] ?? 'incremental', $request->user());
+        $sync = $this->syncs->request($dataSource, $data['entity'], $data['mode'] ?? 'incremental', $request->user(), 'user', $data['ingestion_mode'] ?? null);
         SyncDataSource::dispatch($this->context->require()->id, $sync->id)->onQueue('imports');
 
         return response()->json(['data' => $this->present($sync->refresh())], 202);

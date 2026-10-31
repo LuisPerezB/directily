@@ -26,14 +26,17 @@ final class SalesLineNormalizer
         $this->maxDate = ($now ?? CarbonImmutable::now($timezone))->setTimezone($timezone)->endOfDay()->addDay();
     }
 
-    /** Clave del documento (tipo|número) o null si falta el número o el tipo es inválido. */
+    /**
+     * Clave del documento (tipo|NÚMERO) o null si falta el número. Un tipo no reconocido usa el marcador `unknown`: esas filas
+     * son error (`unknown_document_type`) y nunca comparten clave con un documento `other` válido.
+     */
     public function documentKey(array $raw): ?string
     {
         $number = $this->parser->string($raw['document_number'] ?? null, 100);
         if ($number === null) {
             return null;
         }
-        $type = ValueParser::documentType($this->parser->string($raw['document_type'] ?? null, 50)) ?? 'other';
+        $type = ValueParser::documentType($this->parser->string($raw['document_type'] ?? null, 50)) ?? 'unknown';
 
         return $type.'|'.mb_strtoupper($number);
     }
@@ -52,13 +55,20 @@ final class SalesLineNormalizer
             $issues[] = Issue::error('required', 'Falta el número de documento.', 'document_number');
         }
 
+        // Un tipo o estado NO vacío que no se reconoce ya NO se cuenta como venta (defecto de auditoría): es un error de fila de
+        // clase REVIEW_REQUIRED y el documento no se escribe hasta que alguien lo mapee. Vacío = factura / completada (convención).
         $rawType = $p->string($raw['document_type'] ?? null, 50);
         $type = ValueParser::documentType($rawType);
         if ($type === null) {
-            $issues[] = Issue::warning('unknown_document_type', "Tipo de documento no reconocido; se registrará como 'otro'.", 'document_type', $rawType);
-            $type = 'other';
+            $issues[] = Issue::error('unknown_document_type', "Tipo de documento no reconocido ('{$rawType}'): requiere revisión. Use factura, nota de venta, nota de crédito u otro, o excluya el documento (cotizaciones, proformas y guías no son ventas).", 'document_type', $rawType);
+            $type = 'other'; // marcador: la fila es un error y no se escribe
         }
-        $status = ValueParser::documentStatus($p->string($raw['status'] ?? null, 50));
+        $rawStatus = $p->string($raw['status'] ?? null, 50);
+        $status = ValueParser::documentStatus($rawStatus);
+        if ($status === null) {
+            $issues[] = Issue::error('unknown_document_status', "Estado de documento no reconocido ('{$rawStatus}'): requiere revisión. Use completada (o vacío), anulada o pendiente; un documento rechazado, reversado o no autorizado no es una venta.", 'status', $rawStatus);
+            $status = 'completed'; // marcador: la fila es un error y no se escribe
+        }
 
         $issuedAt = null;
         $hasTime = false;

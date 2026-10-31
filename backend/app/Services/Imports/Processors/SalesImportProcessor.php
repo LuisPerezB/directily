@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Imports\Processors;
 
 use App\Services\Catalog\CatalogResolver;
+use App\Services\Sales\IngestionModeResolver;
 use App\Services\Sales\SalesDocumentAssembler;
 use App\Services\Sales\SalesDocumentWriter;
 use App\Services\Sales\SalesLineNormalizer;
@@ -14,15 +15,17 @@ use Carbon\CarbonImmutable;
  * Importación de ventas línea a línea.
  * Pasada A: ubica la última fila de cada documento (permite archivos no ordenados con
  * memoria acotada). Pasada B: normaliza, valida y ensambla; cada documento completo se
- * clasifica (nuevo/actualizado/sin cambios) y, si commit=true, se escribe por lotes.
+ * clasifica (nuevo/actualizado/sin cambios/versión anterior descartada) y, si commit=true, se escribe por lotes con el
+ * modo de ingestión resuelto por ImportService (ADR-V25-23).
  */
 final class SalesImportProcessor implements ImportProcessor
 {
-    public function __construct(private readonly SalesDocumentWriter $writer) {}
+    public function __construct(private readonly SalesDocumentWriter $writer, private readonly IngestionModeResolver $modes) {}
 
     public function run(ImportRunContext $ctx): array
     {
         $tenant = $ctx->tenant;
+        $ingestion = $ctx->ingestion ?? $this->modes->forImport($tenant, $ctx->options['ingestion_mode'] ?? null);
         $normalizer = new SalesLineNormalizer($ctx->parser, $tenant->currency ?: 'USD', $tenant->timezone ?: 'America/Guayaquil');
         $catalog = new CatalogResolver($tenant, $ctx->options);
         $assembler = new SalesDocumentAssembler;
@@ -42,6 +45,8 @@ final class SalesImportProcessor implements ImportProcessor
             'rows_total' => $rowsTotal, 'rows_valid' => 0, 'rows_error' => 0, 'rows_warning' => 0, 'duplicates_in_file' => 0,
             'documents_total' => count($lastRow), 'documents_valid' => 0, 'documents_invalid' => 0,
             'documents_new' => 0, 'documents_updated' => 0, 'documents_unchanged' => 0,
+            'stale_skipped' => 0, 'revisions_archived' => 0, 'updated_without_source_order' => 0,
+            'ingestion_mode' => $ingestion->mode, 'ingestion_mode_basis' => $ingestion->basis,
             'voided_documents' => 0, 'credit_notes' => 0, 'return_lines' => 0, 'lines_valid' => 0,
             'date_from' => null, 'date_to' => null, 'missing_days' => 0,
             'products_new' => 0, 'branches_new' => 0, 'products_created' => 0, 'branches_created' => 0,
@@ -52,21 +57,38 @@ final class SalesImportProcessor implements ImportProcessor
         $normalizedPreview = [];
         $previewLimit = (int) config('predictily.imports.preview_rows', 20);
 
-        $flush = function () use (&$batch, &$stats, $ctx, $tenant, $catalog): void {
+        $flush = function () use (&$batch, &$stats, $ctx, $tenant, $catalog, $ingestion): void {
             if ($batch === []) {
                 return;
             }
             if ($ctx->commit) {
-                $result = $this->writer->write($tenant, $batch, $catalog, ['import_job_id' => $ctx->job->id, 'data_source_id' => $ctx->job->data_source_id]);
+                $result = $this->writer->write($tenant, $batch, $catalog, [
+                    'import_job_id' => $ctx->job->id, 'data_source_id' => $ctx->job->data_source_id, 'ingestion_mode' => $ingestion->mode,
+                ]);
                 $stats['documents_new'] += $result['new'];
                 $stats['documents_updated'] += $result['updated'];
                 $stats['documents_unchanged'] += $result['unchanged'];
+                $stats['stale_skipped'] += $result['stale_skipped'];
+                $stats['revisions_archived'] += $result['revisions_archived'];
+                $stats['updated_without_source_order'] += $result['updated_without_source_order'];
                 $stats['products_created'] += $result['products_created'];
                 $stats['branches_created'] += $result['branches_created'];
                 $stats['lines_written'] += $result['lines_written'];
             } else {
-                foreach ($this->writer->classify($tenant, $batch) as $state) {
-                    $stats['documents_'.$state['state']]++;
+                // Validación: proyección de lo que hará la confirmación (cada documento actualizado archiva una versión).
+                foreach ($this->writer->classify($tenant, $batch) as $class) {
+                    $stats[match ($class['state']) {
+                        SalesDocumentWriter::STATE_NEW => 'documents_new',
+                        SalesDocumentWriter::STATE_UPDATED => 'documents_updated',
+                        SalesDocumentWriter::STATE_UNCHANGED => 'documents_unchanged',
+                        SalesDocumentWriter::STATE_STALE_SKIPPED => 'stale_skipped',
+                    }]++;
+                    if ($class['state'] === SalesDocumentWriter::STATE_UPDATED) {
+                        $stats['revisions_archived']++;
+                    }
+                    if ($class['without_order']) {
+                        $stats['updated_without_source_order']++;
+                    }
                 }
             }
             $batch = [];
@@ -170,6 +192,14 @@ final class SalesImportProcessor implements ImportProcessor
         if ($stats['documents_updated'] > 0) {
             $issues[] = ['code' => 'existing_document_changed', 'severity' => 'warning', 'count' => $stats['documents_updated'],
                 'message' => "{$stats['documents_updated']} documentos ya existían con contenido distinto y se actualizarán."];
+        }
+        if ($stats['stale_skipped'] > 0) {
+            $issues[] = ['code' => 'stale_document_skipped', 'severity' => 'warning', 'count' => $stats['stale_skipped'],
+                'message' => "{$stats['stale_skipped']} documentos traen una versión ANTERIOR (fecha de registro en la fuente) a la ya guardada y no se aplicarán."];
+        }
+        if ($stats['updated_without_source_order'] > 0) {
+            $issues[] = ['code' => 'updated_without_source_order', 'severity' => 'info', 'count' => $stats['updated_without_source_order'],
+                'message' => "{$stats['updated_without_source_order']} documentos se actualizarán sin poder comparar el orden de las versiones (falta la fecha de registro en la fuente): gana la última carga."];
         }
 
         return ['stats' => $stats, 'issues' => $issues];

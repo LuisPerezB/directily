@@ -14,6 +14,7 @@ use App\Services\Imports\Fields\FieldDefinition;
 use App\Services\Imports\Fields\ImportFieldRegistry;
 use App\Services\Imports\ImportEntity;
 use App\Services\Imports\ImportService;
+use App\Services\Imports\Support\Issue;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -107,6 +108,8 @@ final class ImportController extends Controller
                 'severity' => $e->severity,
                 'message' => $e->message,
                 'raw_value' => $e->raw_value,
+                // Clase de calidad derivada del código (REVIEW_REQUIRED = tipo/estado sin reconocer; null = sin clase especial).
+                'dq_class' => Issue::dqClassFor($e->error_code),
             ]),
             'meta' => ['current_page' => $page->currentPage(), 'per_page' => $page->perPage(), 'total' => $page->total(), 'last_page' => $page->lastPage()],
         ]);
@@ -123,10 +126,10 @@ final class ImportController extends Controller
         return response()->streamDownload(function () use ($import, $tenantId): void {
             $out = fopen('php://output', 'wb');
             fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, ['fila', 'columna', 'codigo', 'severidad', 'mensaje', 'valor'], ',', '"', '');
+            fputcsv($out, ['fila', 'columna', 'codigo', 'severidad', 'mensaje', 'valor', 'clase_calidad'], ',', '"', '');
             ImportError::withoutTenantScope()->where('tenant_id', $tenantId)->where('import_job_id', $import->id)->orderBy('row_number')->orderBy('id')
                 ->lazyById(1000)->each(function (ImportError $e) use ($out): void {
-                    fputcsv($out, [$e->row_number, $e->column, $e->error_code, $e->severity, $e->message, $e->raw_value], ',', '"', '');
+                    fputcsv($out, [$e->row_number, $e->column, $e->error_code, $e->severity, $e->message, $e->raw_value, Issue::dqClassFor($e->error_code)], ',', '"', '');
                 });
             fclose($out);
         }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);

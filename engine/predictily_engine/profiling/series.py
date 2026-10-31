@@ -1,13 +1,16 @@
 """Construcción del panel diario de series y perfilado de la demanda.
 
 - Una serie = (sucursal, producto). Comienza en su primera venta y termina en el corte.
-- Días sin registro de venta = 0 unidades.
+- Días sin registro de venta = 0 unidades SOLO si la fuente cubre ese día (`zero_confirmed`). Cada día se clasifica en
+  `day_status` (ADR-V25-03, ver `profiling.days`): `sale`, `zero_confirmed`, `missing_source` (fuera de la cobertura de la
+  fuente, dentro de un hueco o inferido por la regla de actividad de la sucursal), `stockout_censored` y `closed` (cierre
+  del calendario). `day_basis` indica si un `missing_source`/`closed` es `declared` o `inferred`.
 - Quiebre de stock (stockout): cierre del día con existencias ≤ 0, o cierre del día
-  anterior ≤ 0 (el día empezó sin stock). Solo se marca si existe el snapshot.
-- La venta de un día con quiebre no refleja la demanda (censura). Para lags y modelos
-  estadísticos se imputa de forma conservadora: max(venta, media móvil de 28 días sin
-  quiebre). Esos días se excluyen de la pérdida de LightGBM y de las métricas.
-- Clasificación Syntetos-Boylan sobre los últimos 365 días sin quiebre.
+  anterior ≤ 0 (el día empezó sin stock). Solo se marca si existe el snapshot. `stockout` conserva ese significado (inventario).
+- La venta de un día con quiebre, de fuente ausente o de cierre no refleja la demanda (censura / dato ausente). Para lags y
+  modelos estadísticos se imputa de forma conservadora: max(venta, media móvil de 28 días de los días limpios). Esos días se
+  excluyen de la pérdida de LightGBM, de las métricas y de la proporción de ceros del perfilado; nunca cuentan como cero observado.
+- Clasificación Syntetos-Boylan sobre los últimos 365 días limpios (sin quiebre, fuente ausente ni cierre).
 - El perfil (actividad, clase, elegibilidad) se calcula SIEMPRE con información disponible
   a un corte (`profile_at`): el del corte final para producción y uno propio para cada
   ventana de backtest, de modo que ventas posteriores a una ventana no cambian qué series
@@ -16,12 +19,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from predictily_engine.pipeline.data import TenantData
+from predictily_engine.profiling.days import (
+    EXCLUDED_STATUSES,
+    DayRules,
+    censored_days,
+    classify_days,
+    summarize_days,
+)
 
 ADI_THRESHOLD = 1.32
 CV2_THRESHOLD = 0.49
@@ -36,9 +47,11 @@ def series_id(branch_id: int, product_id: int) -> str:
 
 @dataclass
 class Panel:
-    df: pd.DataFrame  # unique_id, branch_id, product_id, category_id, ds, units, y, stockout, price
+    df: pd.DataFrame  # unique_id, branch_id, product_id, category_id, ds, units, y, stockout, price, day_status, day_basis
     profile: pd.DataFrame  # una fila por serie
     cutoff: pd.Timestamp
+    # ADR-V25-03: series-día por estado y base, regla inferida usada, y cuántos días excluidos se imputaron (para el manifiesto)
+    day_summary: dict[str, Any] = field(default_factory=dict)
 
     @property
     def active_ids(self) -> list[str]:
@@ -63,12 +76,17 @@ def classify_demand(values: np.ndarray, history_days: int) -> tuple[str, float |
     return cls, float(adi), cv2
 
 
-def build_panel(data: TenantData) -> Panel:
+def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog: bool = True) -> Panel:
+    """Panel diario del corte `data.cutoff` con los datos de `data` (ya as-of a ese corte).
+
+    `rules`: regla inferida de días sin fuente (`DayRules.from_config`); sin ella solo se clasifica lo DECLARADO (cobertura,
+    huecos y cierres de `data`). `current_catalog`: aplica el estado actual del catálogo (`products.is_active`) a la actividad;
+    solo corresponde al corte final (ver `profile_at`)."""
     cutoff = pd.Timestamp(data.cutoff)
     sales = data.sales
     if sales.empty:
         empty = pd.DataFrame(columns=["unique_id", "branch_id", "product_id", "category_id", "ds", "units", "y",
-                                      "stockout", "price"])
+                                      "stockout", "price", "day_status", "day_basis"])
         return Panel(empty, pd.DataFrame(columns=["unique_id", "branch_id", "product_id", "is_active"]), cutoff)
 
     sales = sales[sales["ds"] <= cutoff]
@@ -106,10 +124,18 @@ def build_panel(data: TenantData) -> Panel:
     df["unique_id"] = "b" + df["branch_id"].astype(str) + "-p" + df["product_id"].astype(str)
     g = df.groupby("unique_id", sort=False)
 
-    # Imputación conservadora de días censurados
-    clean = df["units"].where(~df["stockout"])
+    # Semántica de días (ADR-V25-03): fuente ausente y cierres se excluyen igual que los quiebres y nunca son ceros observados.
+    classification = classify_days(df, data, cutoff, rules)
+    df["day_status"], df["day_basis"] = classification.status, classification.basis
+    excluded = df["day_status"].isin(EXCLUDED_STATUSES).to_numpy()
+    censored = df["stockout"].to_numpy(bool) | excluded
+
+    # Imputación conservadora de días censurados / excluidos (misma regla para quiebres, fuente ausente y cierres)
+    clean = df["units"].where(~censored)
     roll = clean.groupby(df["unique_id"], sort=False).transform(lambda s: s.shift(1).rolling(28, min_periods=7).mean())
-    df["y"] = np.where(df["stockout"], np.maximum(df["units"], roll.fillna(df["units"])), df["units"])
+    df["y"] = np.where(censored, np.maximum(df["units"], roll.fillna(df["units"])), df["units"])
+    imputed_excluded = int((excluded & roll.notna().to_numpy()).sum())
+    not_imputable = int((excluded & roll.isna().to_numpy()).sum())
 
     # Precio neto unitario observado, propagado hacia adelante
     unit_price = (df["net_amount"] / df["units"]).where(df["units"] > 0)
@@ -121,13 +147,14 @@ def build_panel(data: TenantData) -> Panel:
 
     active_products = set(data.products.loc[data.products["is_active"].astype(bool), "product_id"].astype(int)) \
         if not data.products.empty else set()
-    profile = profile_at(df, cutoff, active_products)
-    return Panel(df.drop(columns=["net_amount"]), profile, cutoff)
+    profile = profile_at(df, cutoff, active_products if current_catalog else None)
+    day_summary = summarize_days(df, classification.summary, imputed_excluded, not_imputable)
+    return Panel(df.drop(columns=["net_amount"]), profile, cutoff, day_summary)
 
 
 PROFILE_COLUMNS = ["unique_id", "branch_id", "product_id", "category_id", "first_sale_date", "last_sale_date",
                    "history_days", "nonzero_days", "total_units", "adi", "cv2", "demand_class", "stockout_days",
-                   "censored_days", "is_active"]
+                   "censored_days", "missing_source_days", "closed_days", "is_active"]
 
 
 def profile_at(df: pd.DataFrame, cutoff: pd.Timestamp, active_products: set[int] | None = None) -> pd.DataFrame:
@@ -135,8 +162,8 @@ def profile_at(df: pd.DataFrame, cutoff: pd.Timestamp, active_products: set[int]
 
     Equivale a perfilar el panel que se habría construido con corte `cutoff`: historia,
     días con venta, última venta, actividad (venta en los últimos 180 días) y clase
-    Syntetos-Boylan sobre los 365 días previos sin quiebre. Las series cuya primera venta es
-    posterior al corte no aparecen.
+    Syntetos-Boylan sobre los 365 días previos limpios (sin quiebre, fuente ausente ni cierre: esos días no cuentan como
+    ceros en la proporción de ceros). Las series cuya primera venta es posterior al corte no aparecen.
 
     `active_products` (estado actual del catálogo) solo debe pasarse en el corte final: su
     historia no está versionada y aplicarlo a un corte pasado usaría una decisión posterior
@@ -156,9 +183,17 @@ def profile_at(df: pd.DataFrame, cutoff: pd.Timestamp, active_products: set[int]
     out["last_ds"] = d.loc[sold].groupby("unique_id", sort=False)["ds"].max().reindex(out.index)
     out["censored_days"] = (d["stockout"] & (units == 0)).groupby(d["unique_id"], sort=False).sum() \
         .reindex(out.index).fillna(0)
+    if "day_status" in d:  # ADR-V25-03: días que la fuente no cubre o en que la sucursal cerró (no son ceros)
+        out["missing_source_days"] = (d["day_status"] == "missing_source").groupby(d["unique_id"], sort=False).sum() \
+            .reindex(out.index).fillna(0)
+        out["closed_days"] = (d["day_status"] == "closed").groupby(d["unique_id"], sort=False).sum() \
+            .reindex(out.index).fillna(0)
+    else:
+        out["missing_source_days"] = 0
+        out["closed_days"] = 0
 
-    # Clasificación sobre los 365 días previos al corte sin quiebre (misma regla que classify_demand)
-    recent = d[(d["ds"] >= cutoff - pd.Timedelta(days=364)) & ~d["stockout"]]
+    # Clasificación sobre los 365 días previos al corte limpios (misma regla que classify_demand)
+    recent = d[(d["ds"] >= cutoff - pd.Timedelta(days=364)) & ~censored_days(d)]
     n_recent = recent.groupby("unique_id", sort=False).size().reindex(out.index).fillna(0).to_numpy(float)
     nz = recent.loc[recent["units"] > 0].groupby("unique_id", sort=False)["units"]
     nz_n = nz.size().reindex(out.index).fillna(0).to_numpy(float)
@@ -191,6 +226,8 @@ def profile_at(df: pd.DataFrame, cutoff: pd.Timestamp, active_products: set[int]
         "adi": adi, "cv2": cv2, "demand_class": cls,
         "stockout_days": out["stockout_days"].astype(int).to_numpy(),
         "censored_days": out["censored_days"].astype(int).to_numpy(),
+        "missing_source_days": out["missing_source_days"].astype(int).to_numpy(),
+        "closed_days": out["closed_days"].astype(int).to_numpy(),
         "is_active": ~inactive,
     })
     return res.reset_index(drop=True)

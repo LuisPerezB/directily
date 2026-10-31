@@ -10,6 +10,8 @@ solo se aplica a la demanda:
 - Las ventas anteriores a `complete_from` se descartan: la serie empieza en la primera venta completa.
 - Sin ningún registro con fechas se conserva el comportamiento de la etapa 1 (ceros hasta la última venta)
   y se añade la limitación `coverage_undeclared`: la completitud de la fuente no está verificada.
+- ADR-V25-03: el panel clasifica además como `missing_source` los días de una sucursal fuera de SU cobertura
+  (`branch_through` también cubre sucursales cerradas, que no fijan el corte) y los dentro de un hueco declarado.
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+
+from predictily_engine.data.asof import with_knowledge
 
 if TYPE_CHECKING:  # pragma: no cover
     from predictily_engine.pipeline.data import TenantData
@@ -44,6 +48,10 @@ class SalesCoverage:
     through: date | None = None  # menor complete_through efectivo (empresa y sucursales activas)
     from_: date | None = None  # mayor complete_from de la empresa
     branch_from: dict[int, date] = field(default_factory=dict)
+    # ADR-V25-03: `complete_through` propio de la empresa y de cada sucursal CON cobertura propia (activa o cerrada): el
+    # panel marca `missing_source` los días posteriores. `through` (el mínimo) solo limita el corte.
+    company_through: date | None = None
+    branch_through: dict[int, date] = field(default_factory=dict)
     sources: list[dict[str, Any]] = field(default_factory=list)
     requested_cutoff: date | None = None
     effective_cutoff: date | None = None
@@ -62,10 +70,12 @@ class SalesCoverage:
         if t is not None:
             throughs.append(t)
         cov.from_ = f
+        cov.company_through = t
         for b, eff in (branches or {}).items():
             bt, bf = _d(eff.get("complete_through")), _d(eff.get("complete_from"))
             if bt is not None:
                 throughs.append(bt)
+                cov.branch_through[int(b)] = bt
             if bf is not None and bf != f:
                 cov.branch_from[int(b)] = bf
         if rows is not None and not rows.empty:
@@ -88,11 +98,15 @@ class SalesCoverage:
         `active_branches`: solo ellas pueden fijar el corte con una cobertura propia; None = todas."""
         from predictily_engine.extensions.data_core import effective_coverage
 
-        own = set(rows["branch_id"].dropna().astype(int)) if rows is not None and not rows.empty else set()
-        if active_branches is not None:
-            own &= active_branches
-        return cls.from_effective(effective_coverage(conn, tenant_id, "sales", None),
-                                  {b: effective_coverage(conn, tenant_id, "sales", b) for b in sorted(own)}, rows)
+        own_all = set(rows["branch_id"].dropna().astype(int)) if rows is not None and not rows.empty else set()
+        own = own_all if active_branches is None else own_all & active_branches
+        cov = cls.from_effective(effective_coverage(conn, tenant_id, "sales", None),
+                                 {b: effective_coverage(conn, tenant_id, "sales", b) for b in sorted(own)}, rows)
+        for b in sorted(own_all - own):  # sucursal cerrada con cobertura propia: no fija el corte, pero sus días posteriores son ausentes
+            closed_through = _d(effective_coverage(conn, tenant_id, "sales", b).get("complete_through"))
+            if closed_through is not None:
+                cov.branch_through[b] = closed_through
+        return cov
 
     def limit_cutoff(self, cutoff: date) -> date:
         self.requested_cutoff = cutoff
@@ -105,7 +119,8 @@ class SalesCoverage:
                 and self.effective_cutoff < self.requested_cutoff)
 
     def apply(self, data: "TenantData") -> "TenantData":
-        """Descarta ventas (y devoluciones) anteriores a `complete_from`: no son un histórico completo."""
+        """Descarta ventas (y devoluciones) anteriores a `complete_from`: no son un histórico completo. También de las
+        versiones con ventana de conocimiento, para que las vistas as-of de cada ventana del backtest coincidan."""
         dropped = 0
         for name in ("sales", "returns"):
             df = getattr(data, name)
@@ -121,6 +136,19 @@ class SalesCoverage:
                     dropped += int((~keep).sum())
                 setattr(data, name, df[keep].reset_index(drop=True))
         self.dropped_before_from = dropped
+        versions = getattr(data, "sales_versions", None)
+        if versions is not None and len(versions) and (self.from_ is not None or self.branch_from):
+            lines = versions.lines
+            keep_v = pd.Series(True, index=lines.index)
+            if self.from_ is not None:
+                keep_v &= lines["ds"] >= pd.Timestamp(self.from_)
+            for b, f in self.branch_from.items():
+                keep_v &= ~((lines["branch_id"] == b) & (lines["ds"] < pd.Timestamp(f)))
+            if not keep_v.all():
+                data.sales_versions = versions.restrict(keep_v.to_numpy())
+                data.sales_knowledge = data.sales_versions.summary()
+        if getattr(data, "sales_versions", None) is not None:
+            with_knowledge(data.sales, data.sales_versions)  # la huella cubre exactamente los datos que se usan
         data.coverage = self.as_dict()
         return data
 
@@ -144,6 +172,8 @@ class SalesCoverage:
                 "complete_through": self.through.isoformat() if self.through else None,
                 "complete_from": self.from_.isoformat() if self.from_ else None,
                 "branch_complete_from": {str(k): v.isoformat() for k, v in sorted(self.branch_from.items())},
+                "company_complete_through": self.company_through.isoformat() if self.company_through else None,
+                "branch_complete_through": {str(k): v.isoformat() for k, v in sorted(self.branch_through.items())},
                 "requested_cutoff": self.requested_cutoff.isoformat() if self.requested_cutoff else None,
                 "effective_cutoff": self.effective_cutoff.isoformat() if self.effective_cutoff else None,
                 "cutoff_limited": self.cutoff_limited, "rows_dropped_before_complete_from": self.dropped_before_from,

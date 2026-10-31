@@ -1435,6 +1435,183 @@ paths:
         '422':
           $ref: '#/components/responses/Validation'
       x-ability: imports.manage
+  /data-coverage/gaps:
+    get:
+      tags:
+      - Core de Datos
+      summary: Huecos internos de cobertura de las fuentes
+      description: 'Caídas de integración, migraciones u orígenes ausentes dentro del periodo que cubre una fuente
+        (ADR-V25-23). Los días de un hueco son `missing_source` (ADR-V25-03): nunca ceros observados. Los huecos
+        pueden solaparse; quien los consume toma la unión. `from`/`to` devuelven los huecos que se solapan con ese
+        rango.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: entity
+        in: query
+        schema:
+          type: string
+          enum:
+          - sales
+          - inventory
+          - purchases
+          - costs
+          - promotions
+          - customers
+          - commitments
+      - name: data_source_id
+        in: query
+        schema:
+          type: integer
+      - name: branch_id
+        in: query
+        schema:
+          type: integer
+      - name: basis
+        in: query
+        schema:
+          type: string
+          enum:
+          - declared
+          - inferred
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      responses:
+        '200':
+          description: Huecos de la empresa ordenados por fecha inicial
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DataCoverageGap'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+    post:
+      tags:
+      - Core de Datos
+      summary: Declarar un hueco de cobertura
+      description: 'La entidad debe estar en la lista blanca; `gap_to` ≥ `gap_from` (ambos incluidos, máximo 3660
+        días); `data_source_id` y `branch_id`, si se envían, deben ser de la MISMA empresa y no estar dados de baja.
+        `basis` es siempre `declared`: `inferred` lo producen reglas documentadas, no usuarios (enviar `inferred`
+        es 422).
+
+
+        Habilidad requerida: `imports.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entity:
+                  type: string
+                  enum:
+                  - sales
+                  - inventory
+                  - purchases
+                  - costs
+                  - promotions
+                  - customers
+                  - commitments
+                gap_from:
+                  type: string
+                  format: date
+                gap_to:
+                  type: string
+                  format: date
+                data_source_id:
+                  type:
+                  - integer
+                  - 'null'
+                branch_id:
+                  type:
+                  - integer
+                  - 'null'
+                  description: Sin sucursal = toda la empresa
+                reason:
+                  type: string
+                  enum:
+                  - integration_outage
+                  - source_missing
+                  - migration
+                  - unknown
+                  default: unknown
+                basis:
+                  type: string
+                  enum:
+                  - declared
+                notes:
+                  type:
+                  - string
+                  - 'null'
+                  maxLength: 500
+              required:
+              - entity
+              - gap_from
+              - gap_to
+      responses:
+        '201':
+          description: Hueco declarado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DataCoverageGap'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: imports.manage
+  /data-coverage/gaps/{id}:
+    delete:
+      tags:
+      - Core de Datos
+      summary: Eliminar un hueco de cobertura
+      description: 'Queda en auditoría (`data_coverage.gap_deleted`). Un hueco de otra empresa responde 404.
+
+
+        Habilidad requerida: `imports.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Hueco eliminado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: imports.manage
   /data-quality/extended:
     get:
       tags:
@@ -1802,6 +1979,17 @@ paths:
                   enum:
                   - full
                   - incremental
+                ingestion_mode:
+                  type:
+                  - string
+                  - 'null'
+                  enum:
+                  - backfill
+                  - incremental
+                  - null
+                  description: 'Solo entidad sales (ADR-V25-23). Sin declararlo manda `options.ingestion_mode` del
+                    mapeo y, si tampoco, la regla: backfill en la primera sincronización de la fuente que trajo
+                    datos; después incremental.'
               required:
               - entity
       responses:
@@ -2325,7 +2513,8 @@ paths:
       - $ref: '#/components/parameters/Page'
       responses:
         '200':
-          description: 'data: [{row_number, column, error_code, severity, message, raw_value}]'
+          description: 'data: [{row_number, column, error_code, severity, message, raw_value, dq_class}]; dq_class
+            = REVIEW_REQUIRED para unknown_document_type / unknown_document_status (null en los demás)'
   /imports/{import}/errors.csv:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -3153,7 +3342,23 @@ paths:
       tags:
       - Ventas
       summary: Ingesta por API REST (conector), idempotente por tipo+número de documento
-      description: Mismas reglas de normalización y validación que el importador de archivos. Máximo 500 documentos.
+      description: 'Mismas reglas de normalización y validación que el importador de archivos. Máximo 500 documentos.
+
+
+        **Versiones (ADR-V25-23).** Un documento existente con contenido distinto se reemplaza archivando antes
+        su versión vigente (cabecera y líneas) en `sales_document_revisions`/`sale_item_revisions`. Si la versión
+        entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR, se descarta (`stale_skipped`)
+        y no se escribe nada; si alguna no lo trae, gana la última ingestión (`updated_without_source_order`).
+
+
+        **Modo de ingestión.** `ingestion_mode` (`backfill` | `incremental`); por defecto `incremental`: la versión
+        es conocida desde que Predictily la recibe y un documento que llega tarde no es visible en cortes anteriores.
+        `backfill` declara una carga histórica (conocida desde el inicio de su día de negocio).
+
+
+        **Tipos y estados.** Un `document_type` o `status` NO vacío que no se reconoce no se cuenta como venta:
+        es un error del documento (`unknown_document_type` / `unknown_document_status`, `dq_class: REVIEW_REQUIRED`)
+        y no se escribe. Vacío = factura / completada.'
       requestBody:
         required: true
         content:
@@ -3163,6 +3368,24 @@ paths:
               required:
               - documents
               properties:
+                ingestion_mode:
+                  type:
+                  - string
+                  - 'null'
+                  enum:
+                  - backfill
+                  - incremental
+                  - null
+                  description: Por defecto incremental
+                options:
+                  type: object
+                  properties:
+                    create_missing_products:
+                      type: boolean
+                    create_missing_branches:
+                      type: boolean
+                    create_missing_categories:
+                      type: boolean
                 documents:
                   type: array
                   maxItems: 500
@@ -3193,6 +3416,12 @@ paths:
                         type: string
                       customer_province:
                         type: string
+                      source_recorded_at:
+                        type:
+                        - string
+                        - 'null'
+                        description: Cuándo el sistema de origen registró o modificó el documento; ordena las versiones
+                          (stale_skipped)
                       items:
                         type: array
                         items:
@@ -3226,10 +3455,11 @@ paths:
                               type: integer
       responses:
         '200':
-          description: 'data: {created, updated, unchanged, rejected, errors:[{index, item?, field, code, severity,
-            message}], warnings}'
+          description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order,
+            rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message,
+            dq_class?}], warnings}'
         '422':
-          description: Ningún documento válido o error estructural
+          description: Ningún documento válido ni descartado por versión anterior, o error estructural
   /sales/summary:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -6185,6 +6415,17 @@ components:
           type: boolean
           default: false
           description: Los documentos con alguna fila inválida se omiten completos
+        ingestion_mode:
+          type:
+          - string
+          - 'null'
+          enum:
+          - backfill
+          - incremental
+          - null
+          description: 'Solo ventas (ADR-V25-23). Vacío = automático: backfill si la empresa aún no tiene ventas
+            al iniciar la escritura (primera carga histórica); si no, incremental. Al confirmar se guarda aquí el
+            valor resuelto.'
     ImportJob:
       type: object
       properties:
@@ -6248,9 +6489,12 @@ components:
             type: object
         stats:
           type: object
-          description: rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid,
+          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid,
             documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes,
-            return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id
+            return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas
+            (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis
+            (declared | first_load | subsequent_load). En la validación las cifras de versiones son una proyección
+            de lo que hará la confirmación.'
         quality_report:
           type:
           - object
@@ -7581,10 +7825,70 @@ components:
         options:
           type: object
           additionalProperties: true
+          description: 'page_size, overlap_minutes, max_rows, source_timezone, value_maps, coverage, import y, solo
+            para sales, ingestion_mode (backfill | incremental: fija el modo de ingestión de TODAS las sincronizaciones
+            de esta versión; ADR-V25-23)'
       required:
       - entity
       - query
       - field_map
+    DataCoverageGap:
+      type: object
+      description: Hueco interno de cobertura (ADR-V25-23). Rango `[gap_from, gap_to]` con ambos extremos incluidos;
+        sus días son `missing_source`.
+      properties:
+        id:
+          type: integer
+        entity:
+          type: string
+          enum:
+          - sales
+          - inventory
+          - purchases
+          - costs
+          - promotions
+          - customers
+          - commitments
+        data_source_id:
+          type:
+          - integer
+          - 'null'
+        branch_id:
+          type:
+          - integer
+          - 'null'
+        gap_from:
+          type: string
+          format: date
+        gap_to:
+          type: string
+          format: date
+        days:
+          type: integer
+          description: Días que abarca (gap_to − gap_from + 1)
+        reason:
+          type: string
+          enum:
+          - integration_outage
+          - source_missing
+          - migration
+          - unknown
+        basis:
+          type: string
+          enum:
+          - declared
+          - inferred
+        notes:
+          type:
+          - string
+          - 'null'
+        created_by:
+          type:
+          - integer
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
     SourceSync:
       type: object
       properties:
@@ -7637,6 +7941,11 @@ components:
         stats:
           type: object
           additionalProperties: true
+          description: 'mode, rows_extracted, pages, import (estadísticas del import), note; ventas (ADR-V25-23):
+            ingestion_mode, ingestion_mode_basis (declared | first_sync | subsequent_sync); con `source_recorded_at`
+            mapeado: future_recorded_at (fechas de registro futuras o ilegibles, que NUNCA adelantan la marca de
+            agua), recorded_at_unreadable, watermark_note. La marca de agua es min(máximo source_recorded_at legible,
+            inicio de la sincronización).'
         error_message:
           type:
           - string

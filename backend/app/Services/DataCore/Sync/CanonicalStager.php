@@ -12,6 +12,7 @@ use App\Services\Connectors\Sql\ValidatedQuery;
 use App\Services\Imports\Fields\FieldDefinition;
 use App\Services\Imports\Fields\ImportFieldRegistry;
 use App\Services\Imports\ImportEntity;
+use App\Services\Imports\Parsing\ValueParser;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use DateTimeInterface;
@@ -40,9 +41,12 @@ final class CanonicalStager
     }
 
     /**
+     * `$notAfter` es la cota superior de las fechas de registro en la fuente que pueden mover la marca de agua (el inicio de la
+     * sincronización; por defecto, ahora): una fecha posterior o ilegible se cuenta como anomalía y no la adelanta.
+     *
      * @throws SqlSourceException
      */
-    public function stage(SqlSourceConnection $connection, ValidatedQuery $query, SourceMapping $mapping, Tenant $tenant, string $sourceTimezone, ?CarbonInterface $since, string $path): StagingResult
+    public function stage(SqlSourceConnection $connection, ValidatedQuery $query, SourceMapping $mapping, Tenant $tenant, string $sourceTimezone, ?CarbonInterface $since, string $path, ?CarbonInterface $notAfter = null): StagingResult
     {
         $headers = $this->headers($mapping);
         $types = [];
@@ -56,6 +60,9 @@ final class CanonicalStager
         $eventIndex = ($f = SourceMappingService::EVENT_DATE_FIELD[$mapping->entity] ?? null) !== null ? array_search($f, $headers, true) : false;
         $recordedIndex = array_search('source_recorded_at', $headers, true);
         $result = new StagingResult;
+        $tenantTimezone = $tenant->timezone ?: 'America/Guayaquil';
+        $recordedParser = new ValueParser($tenantTimezone);
+        $bound = $notAfter ?? CarbonImmutable::now();
         $handle = fopen($path, 'wb');
         if ($handle === false) {
             throw new SqlSourceException('No se pudo crear el archivo de preparación.');
@@ -70,13 +77,12 @@ final class CanonicalStager
                     if (++$result->rows > $maxRows) {
                         throw new SqlSourceException("La consulta devuelve más de {$maxRows} filas; acótela con :since o aumente max_rows en el mapeo.");
                     }
-                    $out = $this->transform($row, $headers, $types, $mapping, $columnIndex, $valueMaps, $sourceTimezone, $tenant->timezone ?: 'America/Guayaquil');
+                    $out = $this->transform($row, $headers, $types, $mapping, $columnIndex, $valueMaps, $sourceTimezone, $tenantTimezone);
                     if ($eventIndex !== false) {
                         $this->trackEvent($result, $out[$eventIndex]);
                     }
-                    $recorded = $recordedIndex !== false ? $this->parseOrNull($out[$recordedIndex], $tenant->timezone ?: 'America/Guayaquil') : null;
-                    if ($recorded !== null && ($result->maxRecordedAt === null || $recorded->greaterThan($result->maxRecordedAt))) {
-                        $result->maxRecordedAt = $recorded;
+                    if ($recordedIndex !== false && $out[$recordedIndex] !== '') {
+                        $this->trackRecorded($result, $out[$recordedIndex], $recordedParser, $bound);
                     }
                     fputcsv($handle, $out, ',', '"', '');
                 }
@@ -225,15 +231,27 @@ final class CanonicalStager
         }
     }
 
-    private function parseOrNull(string $value, string $timezone): ?CarbonImmutable
+    /**
+     * Fecha de registro en la fuente de una fila: solo una fecha legible y no posterior a `$bound` es candidata a marca de agua.
+     * Una futura o ilegible es una anomalía que se cuenta (`future_recorded_at` en las estadísticas) y no la adelanta: una sola
+     * fila con `modificado_en` = 2099 dejaría a todas las incrementales siguientes sin extraer nada.
+     */
+    private function trackRecorded(StagingResult $result, string $value, ValueParser $parser, CarbonInterface $bound): void
     {
-        if ($value === '') {
-            return null;
+        $parsed = $parser->dateTime($value);
+        if ($parsed === null) {
+            $result->unreadableRecordedAt++;
+
+            return;
         }
-        try {
-            return CarbonImmutable::parse($value, $timezone);
-        } catch (Throwable) {
-            return null;
+        $recorded = $parsed[0];
+        if ($recorded->greaterThan($bound)) {
+            $result->futureRecordedAt++;
+
+            return;
+        }
+        if ($result->maxRecordedAt === null || $recorded->greaterThan($result->maxRecordedAt)) {
+            $result->maxRecordedAt = $recorded;
         }
     }
 
