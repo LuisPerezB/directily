@@ -687,9 +687,11 @@ paths:
                   type: integer
                   enum:
                   - 7
+                  - 14
                   - 30
+                  - 60
                   - 90
-                  default: 90
+                  description: Por defecto el mayor horizonte que permita el plan
                 cutoff_date:
                   type: string
                   format: date
@@ -1366,15 +1368,140 @@ paths:
       tags:
       - Precisión
       summary: Registro de modelos de la empresa
+      description: 'Estados (ADR-V2-07): `candidate`, `validated`, `production`, `retired`, `failed`, con `role`
+        (`primary|fallback`) y `core`.
+
+        El filtro `status` acepta también los nombres de la etapa 1 (`fallback` = production + role fallback, `archived`
+        = retired,
+
+        `rejected` = validated); cada fila trae `legacy_status`.
+
+        '
       parameters:
       - $ref: '#/components/parameters/TenantHeader'
       - name: status
         in: query
         schema:
           type: string
+          enum:
+          - candidate
+          - validated
+          - production
+          - retired
+          - failed
+          - fallback
+          - archived
+          - rejected
+      - name: role
+        in: query
+        schema:
+          type: string
+          enum:
+          - primary
+          - fallback
+      - name: core
+        in: query
+        schema:
+          type: string
+          enum:
+          - demand
+          - customer
+          - supply
+          - cost
+          - scenario
+      - name: run_id
+        in: query
+        schema:
+          type: integer
       responses:
         '200':
           description: Lista paginada de model_registry
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /models/demand/rollback:
+    post:
+      tags:
+      - Precisión
+      summary: Revertir el modelo servido de la demanda a una ejecución de producción anterior
+      description: 'Re-apunta la ejecución **vigente** a una ejecución de producción completada y **anterior**;
+        restaura sus modelos
+
+        `retired`→`production` y retira los actuales. No reentrena. Habilidad `forecast.run`; queda en auditoría
+
+        (`models.demand_rolled_back`). Una ejecución de otra empresa responde 404.
+
+        Errores 409 (`code`): `no_current_run`, `rollback_already_current`, `rollback_target_not_production`,
+
+        `rollback_target_not_previous`, `rollback_target_without_models`, `rollback_target_without_forecasts`,
+
+        `rollback_artifact_mismatch`.
+
+        '
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - run_id
+              properties:
+                run_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Reversión aplicada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      from_run_id:
+                        type: integer
+                      to_run_id:
+                        type: integer
+                      to_version:
+                        type: integer
+                      to_cutoff_date:
+                        type:
+                        - string
+                        - 'null'
+                        format: date
+                      to_data_snapshot_id:
+                        type:
+                        - integer
+                        - 'null'
+                      to_config_version:
+                        type:
+                        - string
+                        - 'null'
+                      restored_model_ids:
+                        type: array
+                        items:
+                          type: integer
+                      retired_model_ids:
+                        type: array
+                        items:
+                          type: integer
+                      artifacts_verified:
+                        type:
+                        - boolean
+                        - 'null'
+                        description: true = SHA-256 verificado; null = artefactos no visibles desde el backend
+                      note:
+                        type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Reversión no permitida (code en el cuerpo)
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /product-categories:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -2297,7 +2424,9 @@ components:
         type: integer
         enum:
         - 7
+        - 14
         - 30
+        - 60
         - 90
     Delimiter:
       name: delimiter
@@ -2497,7 +2626,9 @@ components:
           type: integer
           enum:
           - 7
+          - 14
           - 30
+          - 60
           - 90
         service_level:
           type: number
@@ -2747,8 +2878,8 @@ components:
           - string
           - 'null'
           format: date-time
-          description: Cuándo el negocio conocía/registró la promoción (no futura; sin zona = zona de la
-            empresa; por defecto, el alta). El motor solo la usa a futuro de un corte si known_at ≤ corte.
+          description: Cuándo el negocio conocía/registró la promoción (no futura; sin zona = zona de la empresa;
+            por defecto, el alta). El motor solo la usa a futuro de un corte si known_at ≤ corte.
     PromotionRevision:
       type: object
       properties:
@@ -3028,6 +3159,157 @@ components:
           type:
           - integer
           - 'null'
+    HorizonSupport:
+      type: object
+      description: Respaldo de un horizonte. `insufficient_data` = historia < 2×H o backtest sin ventanas de H días
+        (no presentar como completo).
+      properties:
+        horizon:
+          type: integer
+          enum:
+          - 7
+          - 14
+          - 30
+          - 60
+          - 90
+        status:
+          type: string
+          enum:
+          - ok
+          - degraded
+          - insufficient_data
+          - not_computed
+          - unknown
+        reasons:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+        history_days:
+          type:
+          - integer
+          - 'null'
+        required_history_days:
+          type:
+          - integer
+          - 'null'
+        backtest_horizon_days:
+          type:
+          - integer
+          - 'null'
+        independent_holdout:
+          type:
+          - boolean
+          - 'null'
+        evaluated_obs:
+          type:
+          - integer
+          - 'null'
+    DemandEnvelope:
+      type: object
+      description: Envoltura común de resultados (ADR-V2-03) para la demanda. `status` = estado técnico del trabajo;
+        `quality_status` = aptitud estadística.
+      properties:
+        tenant_id:
+          type: integer
+        run_id:
+          type: integer
+        core:
+          type: string
+          enum:
+          - demand
+        run_version:
+          type: integer
+        status:
+          type: string
+        as_of:
+          type:
+          - string
+          - 'null'
+          format: date
+        horizon_start:
+          type:
+          - string
+          - 'null'
+          format: date
+        horizon_end:
+          type:
+          - string
+          - 'null'
+          format: date
+        target_definition:
+          type: object
+        entity_keys:
+          type: array
+          items:
+            type: string
+        unit:
+          type:
+          - string
+          - 'null'
+        currency:
+          type:
+          - string
+          - 'null'
+        result_type:
+          type: string
+          enum:
+          - forecast
+        model_version:
+          type:
+          - object
+          - 'null'
+        data_snapshot_id:
+          type:
+          - integer
+          - 'null'
+        config_version:
+          type:
+          - string
+          - 'null'
+        assumptions:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
+        limitation_codes:
+          type: array
+          items:
+            type: string
+        quality_status:
+          type:
+          - string
+          - 'null'
+          enum:
+          - ok
+          - degraded
+          - insufficient_data
+          - not_configured
+          - insufficient_evidence
+          - null
+        uncertainty_source:
+          type: string
+          enum:
+          - empirical_holdout
+          - conformal
+          - model
+          - unknown
+          - none
+        horizon_support:
+          description: Un HorizonSupport (series, listados) o un mapa horizonte → HorizonSupport (detalle de la
+            ejecución)
+        p50:
+          type:
+          - boolean
+          - 'null'
+          description: true si la mediana se evaluó y se publica
     ForecastRun:
       type: object
       properties:
@@ -3071,6 +3353,27 @@ components:
           type:
           - string
           - 'null'
+        config_version:
+          type:
+          - string
+          - 'null'
+          description: Hash de la configuración efectiva (etapa 2)
+        data_snapshot_id:
+          type:
+          - integer
+          - 'null'
+          description: Huella de los insumos de la ejecución (data_snapshots)
+        effective_config:
+          type:
+          - object
+          - 'null'
+        evaluation_manifest:
+          type:
+          - object
+          - 'null'
+          description: Protocolo de evaluación (solo en el detalle de la ejecución)
+        envelope:
+          $ref: '#/components/schemas/DemandEnvelope'
         is_current:
           type: boolean
         options:
@@ -3497,7 +3800,9 @@ components:
           type: integer
           enum:
           - 7
+          - 14
           - 30
+          - 60
           - 90
         filters:
           type: object

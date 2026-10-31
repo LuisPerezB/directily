@@ -82,7 +82,7 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "objective": "min_cost",             # min_cost | max_margin
         "coverage_mode": "soft",             # soft: demanda no atendida permitida y penalizada; hard: debe cubrirse
         "planning_horizon_days": 84,
-        "solver_mip_gap": 1e-3,                # «óptimo» = brecha probada ≤ 0,01 %; entre 0,01 % y 0,1 % = factible con brecha
+        "solver_mip_gap": 1e-4,                # «óptimo» = brecha probada ≤ 0,01 %; con una tolerancia mayor y brecha superior = factible con brecha
         "holding_cost_rate_annual": 0.20,    # SUPUESTO: costo anual de mantener inventario como fracción del costo
         "shortage_penalty_multiplier": 2.0,  # SUPUESTO: penalización por unidad no atendida = k × costo puesto en bodega (k > 1)
         "safety_stock_weight": 0.9,          # SUPUESTO: peso del déficit de stock de seguridad frente a una venta perdida (< 1)

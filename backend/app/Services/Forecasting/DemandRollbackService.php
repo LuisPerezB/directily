@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -109,7 +110,7 @@ final class DemandRollbackService
      * true = todos verificados · null = ninguno visible (no se puede verificar desde aquí, p. ej. servidores
      * distintos) · lanza si el SHA-256 de alguno no coincide.
      *
-     * @param  \Illuminate\Support\Collection<int, ModelRegistry>  $models
+     * @param  Collection<int, ModelRegistry>  $models
      */
     private function verifyArtifacts($models): ?bool
     {

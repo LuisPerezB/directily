@@ -99,8 +99,8 @@ Precedencia de etiqueta: cierre/descontinuado > apertura > nuevo > escasa > even
 
 ### 2.6 Cobertura de fuentes (ADR-V2-05)
 
-`data_coverage` (`entity='sales'`): el corte = mín(corte pedido, menor `complete_through` de la empresa y de las sucursales activas); las ventas anteriores a `complete_from` se descartan
-(la serie empieza en su primera venta completa). Sin ninguna fecha declarada: comportamiento de la etapa 1 + limitación `coverage_undeclared`. `summary.coverage.sales` y las limitaciones
+`data_coverage` (`entity='sales'`), resuelta con la cobertura **efectiva** del core de Datos (`extensions.data_core.effective_coverage`: declaración del usuario > mínimo entre fuentes > ninguna): el corte = mín(corte pedido, `complete_through`
+efectivo de la empresa y de las sucursales **activas** con cobertura propia; una sucursal cerrada no lo fija); las ventas anteriores a `complete_from` se descartan (la serie empieza en su primera venta completa). Sin ninguna fecha declarada: comportamiento de la etapa 1 + limitación `coverage_undeclared`. `summary.coverage.sales` y las limitaciones
 `cutoff_limited_by_coverage`, `sales_before_complete_from_ignored` lo registran. Una ejecución con corte limitado por cobertura usa lo conocido al corte para promociones y órdenes (conservador).
 
 ### 2.7 Huella y configuración (ADR-V2-04/06)
@@ -108,7 +108,7 @@ Precedencia de etiqueta: cierre/descontinuado > apertura > nuevo > escasa > even
 - `forecast_runs.data_snapshot_id` → `data_snapshots` (core `demand`): `sales, returns, inventory, prices, costs, catalog, promotions` (observadas + as-of con `known_at`), `calendar`
   (feature set, librería de feriados, eventos extraordinarios conocidos), `external_indicators`, `supply_inputs`, `config`, `eligibility`, `coverage`. Misma huella ⇒ mismo resultado con la misma semilla.
 - `config_version` = hash de `effective_config = {core: demand, config: <core→perfil→empresa>, run: {seed, horizon_days, horizons, min_improvement, max_backtest_windows, max_series_lgbm, force_families, feature_set_version}}`.
-  Claves de empresa en `tenants.settings.cores.demand.*` (`min_improvement`, `max_backtest_windows`, `exceptional_events_flag`, …); una clave desconocida **rechaza** la ejecución (422 `insufficient_data` con el motivo).
+  Claves de empresa en `tenants.settings.cores.demand.*` (`min_improvement`, `max_backtest_windows`, `exceptional_events_flag`, …); una clave desconocida **rechaza** la ejecución (422 `invalid_configuration`, el run queda `failed` con el motivo).
   `ENGINE_MIN_IMPROVEMENT` y `ENGINE_MAX_BACKTEST_WINDOWS` pasan a ser sobrescrituras del operador **solo si se definen** y quedan registradas en `run`.
 
 ### 2.8 Registro de modelos y reversión (ADR-V2-07, E2-24)
@@ -156,3 +156,34 @@ El motor omite (con aviso) las columnas de la etapa 2 si la BD aún no tiene la 
 | E2-19 | `test_served_model.py`, `test_demand_v2_integration.py::test_forced_final_failure…` | fallo forzado del LightGBM final: WAPE publicado = el del respaldo por clase (cálculo independiente), intervalos = residuos del respaldo, registro `failed`/`fallback` |
 | E2-21 (demanda) | `test_horizons.py`, `test_special_cases.py`, `DemandV2ApiTest` | cinco horizontes, abstención con motivos, evaluación del total de H días, planes y validaciones |
 | E2-24 (demanda) | `DemandV2ApiTest::test_rollback_*`, `test_snapshot_config.py`, `test_demand_v2_integration.py` | reversión con auditoría, aislamiento, integridad de artefactos; reproducibilidad (snapshot+config+semilla) |
+
+## 6. Límites y pendientes (honestos)
+
+- **Datos reales**: todo es sintético; el período final de la demo es un único origen de 90 días (sin intervalo de confianza de las métricas). La evaluación anidada con varios orígenes
+  externos (docs/04 §4) sigue pendiente.
+- **P50**: el mecanismo existe y se evalúa, pero en la demo no mejora a la media como mediana, ni en conjunto ni por clase, así que no se publica. Con demanda más sesgada podría publicarse; la decisión es automática y auditable (`summary.p50`).
+- **Casos especiales sin fecha de cierre**: el esquema no tiene fecha de cierre de sucursal; se usa `branches.is_active=false`. Los eventos extraordinarios solo se marcan: el motor no aprende su efecto.
+- **Cobertura** por empresa/sucursal (ventas); no hay cobertura por producto ni se verifica sola. Se reutiliza `extensions.data_core.effective_coverage` de P3 (declaración del usuario > mínimo entre fuentes).
+- **Reversión** solo hacia ejecuciones de producción anteriores; el SHA-256 se verifica únicamente si el artefacto es visible desde el backend (volumen compartido). El motor no recarga artefactos: los pronósticos de cada ejecución ya están persistidos y la reversión re-apunta la vigente.
+- **`evaluate-actuals`** compara el WAPE realizado por tramo con el del backtest vigente; un backtest anterior a la etapa 2 usa otros tramos (`h8-30`, `h31-90`) y esos tramos se omiten en la alerta de deriva hasta la siguiente ejecución.
+- **Frontend**: no se tocó; ver §8.
+- Ningún cálculo de la demanda usa un LLM; su ausencia no bloquea nada de este paquete.
+
+## 7. Resultados de la demo recalculados
+
+Ver `docs/04-estrategia-modelado.md` §11 («Recalculado en la etapa 2») y `docs/entrenamiento.md`: los números de precisión de la etapa 1 se conservan **exactamente** (WAPE 0,4926 vs 0,6631; sesgo −4,03 %; cobertura 85,39/97,86 %; LightGBM 94 · AutoETS 89) y se añaden MASE 0,840 (naive 1,092), RMSSE 0,764
+(1,079), pinball P10 0,371 / P90 0,635, amplitud 80 % 8,42 y 95 % 14,06 u./serie-día, dinero (WAPE 0,662; sesgo −6,0 %) y el error del total de H días (0,218 · 0,156 · 0,105 · 0,090 · 0,076 para 7/14/30/60/90). Reproducir:
+`cd engine && OMP_WAIT_POLICY=PASSIVE .venv/bin/python scripts/benchmark_demand_v2.py ferreteria_andina salida.json`.
+
+## 8. Qué necesita la UI (otro paquete)
+
+1. **Selector de horizonte** con 7/14/30/60/90, filtrado por `plan.limits.horizons` (`GET /tenant`); `settings.default_horizon_days` acepta 14 y 60.
+2. **Respaldo por horizonte**: leer `meta.horizon_support` (series), `horizon_support` (productos, categorías), `data.horizon_support` (dashboard). `insufficient_data` ⇒ aviso con `reasons[].message` y **no** presentar la cifra como completa (p. ej. estilo punteado, sin banda de intervalo);
+   `degraded` ⇒ «métricas optimistas»; `not_computed` ⇒ pedir una ejecución con ese horizonte; `unknown` ⇒ ejecución antigua.
+3. **Series**: cada punto trae `quality_status`, `case_label` (insignias: producto nuevo, descontinuado, sucursal cerrada/abierta, evento extraordinario) y `p50` (dibujar la línea solo si no es null). Las series en **abstención** no tienen filas: listar `summary.special_cases.no_recent_sales` / `discontinued.abstained`.
+   Listado de productos: columna `case_label`.
+4. **Precisión**: mostrar MASE/RMSSE (con la nota «< 1 mejora al naive de entrenamiento»), pinball P10/P90 (P50 «no publicada» si es null), amplitud de intervalos, **dinero separado de unidades** (`money`), `sample.exclusions` y los **tramos nuevos** (`h1-7…h61-90`) más `by_horizon_total` (el error del total de H días es el que importa al comprar).
+   Visor del **manifiesto** (`evaluation_manifest`): fechas de entrenamiento, selección, calibración y período final, maduración de etiquetas, nota de orígenes superpuestos.
+5. **Modelos**: estados nuevos (`status`, `role`, `core`) con `legacy_status` para compatibilidad; botón «Volver a la versión anterior» (habilidad `forecast.run`) → `POST /models/demand/rollback {run_id}`, mostrando `note` y `artifacts_verified`, y manejando los 409 por `code`.
+6. **Trazabilidad**: panel con `envelope` (limitaciones, supuestos, `quality_status`, `config_version`, `data_snapshot_id`); `GET /forecast-runs/{id}` incluye `effective_config` y `evaluation_manifest`.
+7. Los valores de `limitations[].code` útiles para avisos: `coverage_undeclared`, `cutoff_limited_by_coverage`, `fallback_served`, `p50_not_published`, `no_independent_holdout`, `horizon_{H}_insufficient_data`.

@@ -286,3 +286,61 @@ def test_invalid_company_configuration_is_rejected_before_running(world, client,
     finally:
         with db_engine.begin() as conn:
             conn.execute(text("UPDATE tenants SET settings = '{}'::jsonb WHERE id = :t"), {"t": world["d"]})
+
+
+def test_coverage_resolution_uses_the_data_core_rules_and_ignores_closed_branches(world, db_engine):
+    """`SalesCoverage.resolve` = cobertura efectiva del core de Datos: la declaración del usuario manda; una sucursal con
+    cobertura propia más atrasada limita el corte, salvo que esté cerrada (desactivada)."""
+    from predictily_engine.db.repository import TenantRepository
+    from predictily_engine.demand.coverage import SalesCoverage
+
+    with db_engine.connect() as conn:
+        tx = conn.begin()
+        try:
+            branch = conn.execute(text("SELECT MIN(id) FROM branches WHERE tenant_id = :t"), {"t": world["c"]}).scalar_one()
+            conn.execute(text("INSERT INTO data_coverage (tenant_id, entity, branch_id, complete_through, basis, created_at, "
+                              "updated_at) VALUES (:t, 'sales', :b, '2026-01-15', 'declared', now(), now())"),
+                         {"t": world["c"], "b": branch})
+            rows = TenantRepository(conn, world["c"]).sales_coverage()
+            lagging = SalesCoverage.resolve(conn, world["c"], rows, None)
+            assert lagging.limit_cutoff(world["last_c"]) == date_(2026, 1, 15)
+            closed = SalesCoverage.resolve(conn, world["c"], rows, active_branches=set())
+            assert closed.limit_cutoff(world["last_c"]) == world["through"], "sin la sucursal cerrada vale la cobertura de la empresa"
+            assert closed.as_dict()["sales"]["rule"] == "declared_by_user"
+            # Otra empresa nunca se ve afectada por estas filas.
+            other = SalesCoverage.resolve(conn, world["d"], TenantRepository(conn, world["d"]).sales_coverage(), None)
+            assert other.declared is False and other.rule == "none"
+        finally:
+            tx.rollback()
+
+
+def date_(y, m, d):
+    from datetime import date
+
+    return date(y, m, d)
+
+
+def test_writer_omits_stage2_columns_when_the_schema_has_not_been_migrated_yet(world, db_engine):
+    """Compatibilidad entre paquetes: sin la migración 2026_02_05 el motor escribe igual (sin P50, estado ni etiqueta)."""
+    from predictily_engine.db import writer
+
+    with db_engine.connect() as conn:
+        tx = conn.begin()
+        try:
+            run_id, _ = create_run(conn, world["d"])
+            full = writer.table_columns(conn, "forecast_values")
+            assert set(writer.FV_STAGE2_COLUMNS) <= full
+            key = (conn.engine.url.render_as_string(hide_password=True), "forecast_values")
+            writer._COLUMN_CACHE[key] = frozenset(full - set(writer.FV_STAGE2_COLUMNS))
+            fv = pd.DataFrame([{
+                "node_key": "total", "level": "total", "branch_id": None, "product_id": None, "category_id": None,
+                "granularity": "day", "target_date": pd.Timestamp("2030-01-01"), "period_days": 1, "horizon_step": 1,
+                "yhat": 1.0, "lo_80": 0.5, "hi_80": 1.5, "lo_95": 0.2, "hi_95": 2.0, "p50": 0.9, "model_family": None,
+                "unit_price_assumed": None, "revenue_yhat": 2.0, "quality_status": "ok", "case_label": "x"}])
+            assert writer.copy_forecast_values(conn, world["d"], run_id, fv, {}) == 1
+            row = conn.execute(text("SELECT p50, quality_status, case_label FROM forecast_values WHERE forecast_run_id = :r"),
+                               {"r": run_id}).one()
+            assert tuple(row) == (None, None, None)
+        finally:
+            writer._COLUMN_CACHE.pop(key, None)
+            tx.rollback()

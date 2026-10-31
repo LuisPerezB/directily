@@ -731,7 +731,7 @@ components:
     TenantSettings:
       type: object
       properties:
-        default_horizon_days: {type: integer, enum: [7, 30, 90]}
+        default_horizon_days: {type: integer, enum: [7, 14, 30, 60, 90]}
         service_level: {type: number, minimum: 0.5, maximum: 0.999}
         review_period_days: {type: integer}
         default_lead_time_days: {type: integer}

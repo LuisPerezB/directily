@@ -406,7 +406,44 @@ conocido × (1+cost_change_pct). Si falta costo para productos, se informa `cost
 Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calendar_events`, `unit_conversions`, `warehouses` (§2.10–2.12).
 No se actualizó `docs/openapi/predictily-api.yaml` con estas rutas (pendiente de la integración).
 
+### 3.15 Customer Core · comportamiento de compra (etapa 2 · P2) — detalle en `docs/architecture/v2/P2-comportamiento.md`
+Todas bajo `/api/v1/customer`, [T], `auth:sanctum`. Lectura `forecast.view`; entrenar/predecir `forecast.run`. Horizontes: plan ∩ {7, 30, 90} (un horizonte fuera del plan: **402**
+`plan_limit_exceeded`). Toda respuesta de resultados lleva `envelope` (ADR-V2-03): `{tenant_id, run_id, core:'customer', run_version, status, as_of, horizon_start, horizon_end,
+target_definition, entity_keys, unit:'product_unit', currency, result_type, model_version, data_snapshot_id, config_version, assumptions[], limitations[], quality_status:
+ok|degraded|insufficient_data, uncertainty_source:'empirical_holdout'}`. Sin corrida completada: 200 con `data` vacío y `envelope.quality_status = insufficient_data` (abstención explícita).
+
+| Método | Ruta | Detalle |
+|---|---|---|
+| POST | `/customer/runs` `forecast.run` | `{operation: train|predict, horizons?: [7,30,90], as_of?: AAAA-MM-DD}` → **202** `CustomerRun`. `train`: entrena y evalúa (`as_of` = corte retroactivo anterior a hoy ⇒ `run_type = historical`, no se promueve). `predict`: recalcula variables a la fecha con los modelos en producción (`as_of` por defecto hoy). Crea `core_runs` (core `customer`) + `training_jobs` (`job_type = customer_train|customer_predict`) y despacha `RunCustomerTraining`/`RunCustomerPrediction` a la cola `forecasting`. 409 `customer_run_in_progress` (una activa por operación); 402 plan; 422 validación; 429 |
+| GET | `/customer/runs?operation&status`, `/customer/runs/{id}` | `CustomerRun = {id, operation, version, run_type: production|historical, status: queued|running|completed|failed, quality_status, result_type, triggered_by, as_of, horizons, is_current, config_version, data_snapshot_id, model_versions, summary, assumptions[], limitations[], error_message, started_at, completed_at, created_at, envelope, training_job}`. Pagina; otra empresa ⇒ 404 |
+| GET | `/customer/predictions?horizon&customer_id&product_id&min_probability&order_by=probability|expected_quantity|expected_amount|quantity_if_purchase&direction&run_id&per_page&page` | corrida de predicción vigente (o `run_id`). Fila: `{customer:{id,code}, product:{id,sku,name,unit}, horizon_days, as_of, purchase_probability, calibration_status: calibrated|degraded|uncalibrated, probability_coherence_adjusted, quantity_if_purchase, quantity_interval:{lo,hi,level:0.8,method}, expected_quantity, committed_quantity, incremental_quantity, total_view_quantity, expected_amount:{value,currency,assumed_unit_price,basis}, median_interval_days, days_since_last_purchase, n_purchases, model:{family,role: primary|fallback}, quality_flags[]}` + `envelope` + `definitions`. 422 `horizon_not_available` (la corrida se abstuvo de ese horizonte); `customer_id`/`product_id` de otra empresa ⇒ 422 |
+| GET | `/customer/customers/{id}/profile?horizon` | `{customer, status: predicted|no_individual_prediction|no_candidate_relations|no_prediction_run, fallback, as_of, activity:{last_purchase_date, days_since_last_purchase, n_purchase_days, purchase_frequency_per_30d, median_interval_days, mean_interval_days, inactivity:{status: active|at_risk|inactive_by_pattern|insufficient_history, risk, interval_p75_days, interval_p90_days, n_intervals, definition}, behavior_change:{status: increase|decrease|stable|insufficient_history, frequency_ratio, p_value, spend_ratio}}, rankings:{"7":[{rank, product, purchase_probability, expected_quantity, expected_amount}], …}}`. Genérico o sin historial ⇒ `no_individual_prediction` + `fallback` (residual de la reconciliación). 404 si no es de la empresa |
+| GET | `/customer/evaluation?horizon&run_id` | entrenamiento vigente (o `run_id`): `{run_id, as_of, manifest:{protocol_version, labels_mature_through, final_holdout_policy, horizons:{H:{status, tier, blocks:{train,calibration,selection,holdout:{cutoff_from,cutoff_to,label_window_from,label_window_to,n_cutoffs}}, block_rows, block_positives, promotion, …}}, coherence}, metrics:{"h30:probability":[{model_family, evaluation_type: holdout|selection, is_baseline, is_selected, n_obs, mae, bias, wape, rmse, metrics:{brier, log_loss, pr_auc, ece, calibration_curve:[{n, mean_predicted, observed_rate, observed_lo95, observed_hi95}]}, extra}], "h30:quantity_if_purchase", "h30:expected_quantity", "h30:expected_amount", "h30:ranking", "coherence", "inactivity", "frequency"}, models, summary, notes[]}`. Solo horizontes del plan |
+| GET | `/customer/reconciliation?horizon&status=ok|inconsistent|aggregate_unavailable|aggregate_incomplete&product_id&run_id` | por producto: `{product, status, severity, aggregate_quantity, aggregate_days, buyers_total_quantity, buyers_committed_quantity, buyers_incremental_quantity, buyers_expected_quantity, n_buyers, committed_outside_model, residual_quantity, residual_share, excess_quantity, excess_ratio}` + `summary.status_counts` + `policy`. Inconsistentes primero |
+
+Tablas que lee Laravel (las escribe el motor): `customer_predictions`, `customer_product_rankings`, `customer_activity`, `customer_reconciliations` (migración `2026_02_03_000100`).
+Programación: `predictily:customer-predict` (diaria 04:20, solo empresas con modelo en producción; **no** espera ventas nuevas) y `predictily:customer-train` (domingos 02:40, omite si no hay ventas
+nuevas o hay un entrenamiento de menos de 7 días); `settings.customer_schedule = manual` las desactiva.
+
 ---
+
+### 3.16 Decisiones comunes · abastecimiento, costos y escenarios (etapa 2 · P4) — detalle en `docs/architecture/v2/P4-decisiones.md`
+Prefijo `/supply` [T]. Habilidades: `forecast.view` (leer), `forecast.run` (calcular), `catalog.manage` (configuración).
+Las recomendaciones son sugerencias: **no envían pedidos ni comprometen fondos**. Los resultados llevan la envoltura común
+`{"data": …, "envelope": {tenant_id, run_id, core, as_of, horizon_start, horizon_end, target_definition, entity_keys, unit,
+currency, result_type, model_version, data_snapshot_id, config_version, assumptions, limitations, quality_status,
+uncertainty_source}}`; `status` (técnico) ≠ `quality_status`.
+
+| Método | Ruta | Detalle |
+|---|---|---|
+| POST | `/supply/plans` [T] `forecast.run` | 202 → `core_run` (`core=supply`, `operation=plan`) + job en `forecasting`. Body: `objective` (`min_cost`\|`max_margin`), `coverage_mode` (`soft`\|`hard`), `forecast_run_id?`, `horizon_days?`, `period_days?`, `undated_receipt_policy?`, `overdue_receipt_policy?`, `priorities{product_id:peso}`, `shortage_penalties{product_id:valor}`, `config{holding_cost_rate_annual, shortage_penalty_multiplier (>1), safety_stock_weight (<1), solver_time_limit_seconds, solver_mip_gap, use_implicit_offers, diagnose_unmet}`. 409 `supply_run_in_progress` si hay un plan activo |
+| GET | `/supply/plans`, `/supply/plans/{id}` [T] `forecast.view` | corridas; el detalle (`?actionable_now=1&product_id&supplier_id`) devuelve `plan` (`solver_status`: `optimal`\|`feasible_with_gap`\|`time_limit`\|`infeasible`\|`heuristic_fallback`\|`not_solved`, `mip_gap`, costos, `unmet_units_total`), `lines[]` (proveedor, cantidad en unidad del producto y de la oferta, `order_date` = fecha sugerida de emisión, `expected_receipt_date`, `unit_cost`, `line_cost`, `actionable_now`, `binding_constraints[]`, `justification`), `shortfalls[]` (demanda no atendida por período y `reason`), `constraints[]` (uso vs límite), `diagnosis`, `infeasibility`, `alternative_plan`, `offers[]` (comparables/excluidas con motivo), `comparison_coverage`, `offer_diagnostics`, `excluded_nodes`, `production` (`not_configured` sin recetas), `balance[]`, `periods[]` y `envelope` con `result_type=optimized_plan` |
+| GET/POST/PATCH/DELETE | `/supply/offers[/{id}]` [T] | ofertas: `supplier_id, product_id, branch_id?, unit_cost, currency, unit` (obligatorios), `min_order_qty?, order_multiple?, lead_time_days?, lead_time_std_days?, capacity_per_period?, capacity_period_days, fixed_order_cost, acquisition_cost_pct, acquisition_cost_per_unit, valid_from?, valid_to?, known_at?, is_active`; lo desconocido es `null`. 422 por clave natural duplicada o referencias de otra empresa |
+| GET/POST/PATCH/DELETE | `/supply/exchange-rates`, `/supply/capacities`, `/supply/budgets`, `/supply/production/resources`, `/supply/production/recipes` [T] | tasas (`from_currency,to_currency,rate>0,valid_on,source,known_at?`), capacidad de almacén por sucursal (`capacity, capacity_unit`), presupuesto por período de emisión (`period_start, period_end, amount, currency`), recursos y recetas (`output_quantity, yield_rate∈(0,1], production_days, resource_id?, resource_usage_per_batch, lines[{input_product_id, quantity_per_batch}]`). Lectura `forecast.view`; escritura `catalog.manage` |
+| POST, GET | `/supply/cost-forecasts`, `/supply/cost-forecasts/runs` [T] | solicitar (`as_of?`, `historical?`, `null_known_at_policy` `strict`\|`assume_valid_from`) y consultar (`?run_id&product_id&supplier_id&quality_status`): `method`, `reference_method`, `points[{step,target_date,yhat,reference,lo,hi}]`, `metrics{método:{selection,holdout}}`, `availability`, `limitations` |
+| POST, GET | `/supply/scenarios/evaluate`, `/supply/scenarios/evaluations[/{id}]` [T] | síncrono (201). Body: `strategies[1..8]{key,name,price_change_pct,discount_pct,cost_change_pct,demand_change_pct (escalar o lista por período),use_cost_forecast,plan_run_id,supply_fill_rate,lead_time_delta_days,extra_supply[]}`, `horizon_days`, `filters`. Respuesta: estrategias comparadas sobre la misma base, `inputs[]` clasificados `observed`\|`forecasted`\|`assumed`, `coherence`, `ranking_by_gross_margin`; `result_type=conditional_simulation` |
+| POST | `/supply/causal/check` [T] `forecast.run` | verificación de requisitos causales; siempre `quality_status=insufficient_evidence`, `data.effect=null`, `estimator_enabled=false`; `conditional_simulation.available=true` |
+| POST, GET | `/supply/simulations`, `/supply/simulations/{id}` [T] | simulación histórica de operación (202, asíncrona): `days`, `review_days`, `as_of`, `seed`; resultado por política (`current`, `reference`, `planner`) con servicio, no atendido, sobrestock, días de inventario, costos y capital; `result_type=evaluation` |
 
 ## 4. API interna del motor (FastAPI)
 
@@ -423,7 +460,7 @@ solo en las tablas que le pertenecen (ver migración `2026_01_01_000700`). Larav
 | POST | `/v1/forecast-runs/{run_id}/execute` | ejecuta el pipeline completo (síncrono; el Job de Laravel espera con timeout `ENGINE_TIMEOUT`) |
 | POST | `/v1/tenants/{tenant_id}/readiness` | perfila series y calidad para pronóstico (rápido) |
 | POST | `/v1/tenants/{tenant_id}/evaluate-actuals` | compara pronósticos pasados con ventas reales, detecta drift |
-| GET | `/v1/capabilities` | modelos disponibles, versión del feature set, horizontes |
+| GET | `/v1/capabilities` | modelos disponibles, versión del feature set, horizontes (7/14/30/60/90), cuantiles (P10=`lo_80`, P90=`hi_80`, P50 solo si se evaluó), métricas y estados de modelo |
 
 ### 4.1 `POST /v1/forecast-runs/{run_id}/execute`
 Petición:
@@ -443,9 +480,12 @@ Comportamiento:
 4. Perfila series (`forecasting_series`), marca días censurados por quiebre de stock.
 5. Genera características, ejecuta backtesting rolling-origin de candidatos, selecciona por
    clase de demanda con baseline obligatorio y respaldo.
-6. Entrena el modelo final, pronostica `max(horizons)` días, calcula intervalos 80/95,
-   reconcilia (bottom-up) y escribe `forecast_values` para niveles `series, product, category,
-   branch, branch_category, total` en granularidad `day` (y `week`/`month` para niveles agregados).
+6. Entrena el modelo final (si falla el ganador sirve el respaldo y todo lo demás se calcula para el
+   modelo servido), pronostica `max(horizons)` días, calcula intervalos 80/95, reconcilia (bottom-up) y
+   escribe `forecast_values` para niveles `series, product, category, branch, branch_category, total` en
+   granularidad `day` (y `week`/`month` para niveles agregados) y `horizon` (totales de 7/14/30/60/90 días
+   solicitados). Cada fila lleva `quality_status` (respaldo del horizonte) y, en series, `case_label` y
+   `p50` (solo si se publicó). Horizontes sin respaldo: filas sin intervalo y `insufficient_data`.
 7. Escribe `model_registry`, `model_evaluations`, `recommendations` y `alerts`
    (`stockout_risk`), `data_quality_reports` (scope `forecasting_readiness`, con `forecast_run_id`).
    En `model_evaluations`, `evaluation_type='backtest'` son las métricas principales: las del
@@ -453,18 +493,30 @@ Comportamiento:
    `evaluation_type='selection_windows'` son las ventanas que eligieron el modelo (secundarias,
    optimistas). Ver `docs/04` §4–§5.
 8. Marca run `completed` (y `is_current=true` si `run_type='production'`, desmarcando el anterior en
-   la misma transacción) y job `succeeded` con `result`.
+   la misma transacción, y pasando a `retired` los modelos de producción anteriores) y job `succeeded` con
+   `result`. Escribe además `config_version`, `effective_config`, `data_snapshot_id` (tabla `data_snapshots`)
+   y `evaluation_manifest`.
+
+Etapa 2 · P1 (resumen; detalle en `docs/architecture/v2/P1-demanda.md`): `horizons` ⊂ {7,14,30,60,90}
+(otro valor ⇒ 422 de validación); antes de cargar, el motor resuelve la configuración efectiva
+(`demand`: core → perfil sectorial → `tenants.settings.cores.demand`; clave desconocida ⇒ 422
+`invalid_configuration`, run `failed`) y la cobertura de ventas (`data_coverage`): el corte no supera el
+menor `complete_through` efectivo; sin cobertura declarada se añade la limitación `coverage_undeclared`.
+`summary` añade `quality_status`, `uncertainty_source`, `horizon_support`, `max_supported_horizon`, `p50`,
+`served`, `special_cases`, `coverage`, `limitations[{code,message}]`, `assumptions[]`, `config_version`,
+`data_snapshot_hash`.
 
 Respuesta 200:
 ```json
 {"run_id": 12, "status": "completed", "series_count": 135, "cutoff_date": "2026-10-27",
  "selection": {"smooth": {"model_family": "lightgbm_global", "model_registry_id": 77}, "intermittent": {...}, "fallback": {"model_family": "seasonal_naive", "model_registry_id": 78}},
  "metrics": {"selected_wape": 0.23, "baseline_wape": 0.31},
- "warnings": ["12 series con menos de 28 días de historia usan promedio móvil"],
- "duration_ms": 48211}
+ "warnings": ["12 series con historia escasa o menos de 28 días usan respaldo etiquetado"],
+ "duration_ms": 48211, "quality_status": "ok",
+ "horizon_support": {"7": "ok", "14": "ok", "30": "ok", "60": "ok", "90": "ok"}}
 ```
-Errores: 404 run/tenant no coinciden · 409 run en ejecución por otro proceso · 422 datos
-insuficientes (`{"code":"insufficient_data", "message": "...", "details": {...}}`; el motor
+Errores: 404 run/tenant no coinciden · 409 run en ejecución por otro proceso · 422 configuración
+inválida (`{"code":"invalid_configuration"}`) · 422 datos insuficientes (`{"code":"insufficient_data", "message": "...", "details": {...}}`; el motor
 marca run `failed` con ese mensaje) · 500 error interno (run/job `failed`, `error_message`).
 
 ### 4.2 `POST /v1/tenants/{tenant_id}/readiness`
@@ -485,7 +537,15 @@ objetivo ya observadas, inserta/actualiza `forecast_actuals` y `model_evaluation
 ### 4.4 Estados y valores permitidos que el motor escribe
 - `training_jobs.status`: queued, running, succeeded, failed · `stage`: ver migración.
 - `forecast_runs.status`: queued, running, completed, failed.
-- `model_registry.status`: candidate, production, fallback, archived, rejected.
+- `model_registry.status` (ADR-V2-07): candidate, validated, production, retired, failed; `role`: primary |
+  fallback; `core`: demand. (Etapa 1: fallback = production + role fallback, archived = retired,
+  rejected = validated; la API deriva `legacy_status`.)
+- `model_evaluations.level` (demanda): overall, demand_class, horizon (tramos h1-7, h8-14, h15-30, h31-60,
+  h61-90), horizon_total (H7…H90), total, branch, category, product, series; `metrics` jsonb con MASE/RMSSE,
+  pinball, amplitud, dinero y muestra (`docs/04` §5).
+- `forecast_values`: `p50`, `quality_status` (ok | degraded | insufficient_data), `case_label` (migración
+  `2026_02_05_000100`); `model_family` puede ser `category_benchmark` o `declared_zero` en series con caso
+  especial.
 - `model_registry.model_family`: naive, seasonal_naive, window_average, auto_ets, croston_sba,
   adida, tsb, lightgbm_global, timesfm.
 - `forecast_values.level`: total, branch, category, branch_category, product, series;
@@ -503,7 +563,27 @@ objetivo ya observadas, inserta/actualiza `forecast_actuals` y `model_evaluation
 | GET | `/v1/data-core/calendar?tenant_id&start&end[&as_of]` | eventos de calendario (empresa + público); con `as_of`, solo lo conocido |
 | GET | `/v1/data-core/coverage?tenant_id[&entity&branch_id]` | cobertura efectiva de las fuentes |
 
+### 4.6 Rutas del Customer Core del motor (etapa 2 · P2)
+| Método | Ruta | Uso |
+|---|---|---|
+| POST | `/v1/customer/runs/{run_id}/execute` | cuerpo `{tenant_id, training_job_id?}`. Ejecuta la corrida `core_runs` (core `customer`) según su `operation` (`train` | `predict`), `horizons` y `as_of`. Idempotente: completada ⇒ devuelve el resumen; en ejecución reciente ⇒ **409**; vencida ⇒ se retoma reemplazando resultados parciales; otra empresa ⇒ **404**; error ⇒ `failed`. Respuesta `{run_id, operation, status, quality_status, as_of, horizons, summary, duration_ms}` |
+| GET | `/v1/customer/capabilities` | horizontes, operaciones, versiones del esquema de variables/etiquetas, definición de objetivos, familias de modelos y calibradores |
+
+Valores que el motor escribe (Customer Core): `core_runs.result_type` `evaluation` (train) | `forecast` (predict); `quality_status` ok | degraded | insufficient_data; `model_registry.core = 'customer'`,
+`scope = 'tenant'`, `hyperparameters.slot = "h{H}:probability|quantity"`, `kind` reference | complex, `model_family` `customer_{probability|quantity}_{reference|logistic|lgbm_small|lgbm_large|l2|l2_log1p|tweedie|gamma|poisson}`;
+`model_evaluations.core = 'customer'` con `level_key` `h{H}:probability|quantity_if_purchase|expected_quantity|expected_amount|ranking`, `coherence`, `inactivity`, `frequency` y `metrics` jsonb;
+`alerts.type` (Laravel) `customer_run_failed`. Artefactos: `ENGINE_ARTIFACTS_DIR/{tenant}/customer/run-{id}/h{H}_{target}_{familia}.joblib` (SHA-256 en el registro).
+
 ---
+
+### 4.7 Rutas de decisiones comunes del motor (etapa 2 · P4)
+Bearer interno. `POST /v1/supply/runs/{run_id}/execute` `{tenant_id, training_job_id?}` ejecuta una corrida creada por Laravel en
+`core_runs` según `(core, operation)`: `supply/plan`, `supply/simulate`, `cost/forecast`, `scenario/evaluate`. Es idempotente
+(una corrida completada se devuelve sin recalcular; el plan, sus líneas y faltantes se reescriben por corrida) y 404 si la
+corrida es de otra empresa. `POST /v1/supply/causal/check` `{tenant_id, request}` devuelve la envoltura con
+`insufficient_evidence` (sin persistir). `GET /v1/supply/capabilities` lista versiones y estados del solver. Escribe
+`supply_plans`, `supply_plan_lines`, `supply_plan_shortfalls`, `cost_forecasts`, `scenario_evaluations`, `data_snapshots`,
+`core_runs` y `training_jobs`.
 
 ## 5. Orquestación (colas de Laravel)
 
@@ -518,8 +598,9 @@ Colas Redis: `default`, `imports`, `forecasting`.
 | `RunForecastPipeline` | forecasting | llama `/execute`; `timeout=ENGINE_TIMEOUT`, `tries=2`, backoff 60 s; marca `failed` si el motor no responde |
 | `EvaluateActuals` | forecasting | llama `/evaluate-actuals` |
 | `SyncDataSource` | imports | etapa 2: extrae la consulta autorizada de una fuente SQL de solo lectura y la importa por el mismo pipeline (`tries=1`, empresa explícita); programada por `predictily:sync-sources` |
+| `RunCustomerTraining` / `RunCustomerPrediction` | forecasting | etapa 2 (P2): llaman `POST /v1/customer/runs/{id}/execute`; `tries=2`, backoff 60/180 s, `timeout=ENGINE_TIMEOUT+60`; idempotentes (una corrida completada no se reejecuta); no reintentan datos insuficientes (422) ni 401/404; si fallan marcan `core_runs` y `training_jobs` como `failed` y levantan la alerta `customer_run_failed` |
 
 Programación (`routes/console.php`): diaria 02:00 America/Guayaquil `predictily:evaluate-actuals`;
 según `settings.forecast_schedule` (daily/weekly) `predictily:schedule-forecasts`; diaria
-`predictily:purge` (retención y eliminación diferida). El entrenamiento **no** se dispara por cada
+`predictily:purge` (retención y eliminación diferida). Etapa 2 · P2: `predictily:customer-predict` (diaria 04:20) y `predictily:customer-train` (domingos 02:40), ambas en America/Guayaquil. El entrenamiento **no** se dispara por cada
 factura: solo por programación, por acción del usuario o al completar una importación inicial.

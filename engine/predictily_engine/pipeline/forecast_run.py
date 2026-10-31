@@ -23,7 +23,6 @@ from sqlalchemy import Connection, text
 
 from predictily_engine.config import FEATURE_SET_VERSION, get_settings
 from predictily_engine.demand.coverage import SalesCoverage
-from predictily_engine.extensions.data_core import effective_coverage
 from predictily_engine.db.repository import TenantRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import (
@@ -151,12 +150,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             branches = repo.branches()
             active_branches = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
                                if "is_active" in branches else set(branches["branch_id"].astype(int)))
-            cov_rows = repo.sales_coverage()
-            own_branches = sorted(set(cov_rows["branch_id"].dropna().astype(int)) & active_branches) \
-                if not cov_rows.empty else []
-            coverage = SalesCoverage.from_effective(
-                effective_coverage(conn, tenant_id, "sales", None),
-                {b: effective_coverage(conn, tenant_id, "sales", b) for b in own_branches}, cov_rows)
+            coverage = SalesCoverage.resolve(conn, tenant_id, repo.sales_coverage(), active_branches)
             cutoff = coverage.limit_cutoff(cutoff)
             data = coverage.apply(load_tenant_data(repo, cutoff))
             data.coverage_limitations = coverage.limitations()

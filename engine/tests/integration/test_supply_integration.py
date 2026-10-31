@@ -44,8 +44,8 @@ def world(db_engine):
         add_conversion(conn, A, p1, "caja", "u", 12.0)
         o1 = add_offer(conn, A, s1, p1, 3.0, "USD", "u", lead=1)
         o2 = add_offer(conn, A, s2, p1, 24.0, "EUR", "caja", lead=21, moq=10.0, multiple=1.0, capacity=50.0)
-        o3 = add_offer(conn, A, s1, p1, 2.5, "GBP", "u", lead=5)  # sin tasa: no comparable
-        o4 = add_offer(conn, A, s2, p1, 90.0, "USD", "pallet", lead=5)  # sin conversión: no comparable
+        o3 = add_offer(conn, A, s1, p1, 2.5, "GBP", "u", lead=5, valid_from=date(2026, 1, 1))  # sin tasa: no comparable
+        o4 = add_offer(conn, A, s2, p1, 90.0, "USD", "pallet", lead=5, valid_from=date(2026, 1, 2))  # sin conversión: no comparable
         bud = add_budget(conn, A, CUT, CUT, 500.0)
         B = new_tenant(conn, "P4 Empresa B (ficticia)")
         bb = add_branch(conn, B)
@@ -185,3 +185,90 @@ def test_budget_in_currency_without_rate_blocks_the_plan(db_engine, client):
         lim = conn.execute(text("SELECT limitations FROM core_runs WHERE id = :r"), {"r": rid}).scalar_one()
         assert conn.execute(text("SELECT COUNT(*) FROM supply_plan_lines WHERE tenant_id = :t"), {"t": t}).scalar_one() == 0
     assert any("tasa de cambio" in x for x in lim)
+
+
+# ───────────────────────────── costos, escenarios, simulación y causalidad ─────────────────────────────
+
+def add_cost(conn, t, product, supplier, cost, valid_from, known_at=None, source="purchase_order", currency="USD", unit="kg"):
+    conn.execute(text("INSERT INTO purchase_cost_history (tenant_id, product_id, supplier_id, unit_cost, currency, valid_from, source, known_at, unit, created_at) "
+                      "VALUES (:t, :p, :s, :c, :cur, :v, :src, CAST(:k AS timestamptz), :u, now())"),
+                 {"t": t, "p": product, "s": supplier, "c": cost, "cur": currency, "v": valid_from, "src": source, "k": known_at, "u": unit})
+
+
+def test_cost_forecast_run_respects_availability_and_stores_metrics(db_engine, client):
+    from predictily_engine.costs.forecast import add_months
+
+    with db_engine.begin() as conn:
+        t = new_tenant(conn, "P4 Costos (ficticia)")
+        p = add_product(conn, t, "C1", "kg")
+        s = add_supplier(conn, t, "SC")
+        for k in range(18):
+            add_cost(conn, t, p, s, 10.0 + 0.5 * k, add_months(date(2025, 1, 1), k).replace(day=10))
+        add_cost(conn, t, p, s, 999.0, date(2026, 6, 10), known_at="2026-08-01 00:00:00+00")  # conocido después del corte
+    rid, jid = None, None
+    with db_engine.begin() as conn:
+        rid, jid = add_core_run(conn, t, "cost", "forecast", {"as_of": "2026-06-30", "historical": True})
+    r = execute(client, rid, t, jid)
+    assert r.status_code == 200 and r.json()["quality_status"] in ("ok", "degraded")
+    with db_engine.connect() as conn:
+        row = conn.execute(text("SELECT * FROM cost_forecasts WHERE tenant_id = :t AND core_run_id = :r"), {"t": t, "r": rid}).mappings().one()
+        run = conn.execute(text("SELECT result_type, summary, as_of FROM core_runs WHERE id = :r"), {"r": rid}).mappings().one()
+    assert row["method"] == "drift" and row["reference_method"] == "last_value" and row["n_obs"] == 18
+    assert float(row["last_observed_cost"]) == pytest.approx(18.5)  # el 999 con known_at posterior no existe al corte
+    assert row["points"][0]["yhat"] == pytest.approx(19.0)
+    assert row["metrics"]["drift"]["holdout"]["mae"] < row["metrics"]["last_value"]["holdout"]["mae"]
+    assert run["result_type"] == "forecast" and run["summary"]["availability"]["after_cutoff"] == 1
+
+
+def test_scenario_evaluation_run_persists_classified_inputs(db_engine, client, world):
+    A = world["A"]
+    opts = {"horizon_days": 28, "strategies": [{"key": "base", "name": "Base"},
+                                               {"key": "promo", "name": "Precio -10 %", "price_change_pct": -0.10, "demand_change_pct": 0.15}]}
+    with db_engine.begin() as conn:
+        rid, jid = add_core_run(conn, A, "scenario", "evaluate", opts)
+    r = execute(client, rid, A, jid)
+    assert r.status_code == 200, r.text
+    with db_engine.connect() as conn:
+        ev = conn.execute(text("SELECT results FROM scenario_evaluations WHERE tenant_id = :t AND core_run_id = :r"), {"t": A, "r": rid}).scalar_one()
+        run = conn.execute(text("SELECT result_type, quality_status FROM core_runs WHERE id = :r"), {"r": rid}).mappings().one()
+    assert run["result_type"] == "conditional_simulation"
+    base = next(s for s in ev["strategies"] if s["key"] == "base")
+    promo = next(s for s in ev["strategies"] if s["key"] == "promo")
+    # 10 u. de existencias y demanda de 70 por semana: las ventas atendibles quedan limitadas por la oferta (10 u.)
+    assert base["metrics"]["attainable_sales_units"] == pytest.approx(10.0) and all(base["coherence"].values())
+    assert promo["metrics"]["attainable_sales_units"] == pytest.approx(10.0) and promo["metrics"]["unmet_units"] > base["metrics"]["unmet_units"]
+    assert {"price_change", "demand_change"} <= set(ev["assumed_inputs"])
+    assert ev["common_basis"]["horizon_days"] == 28 and "NO se deriva" in ev["disclaimer"]
+
+
+def test_causal_check_endpoint_never_publishes_an_effect(db_engine, client, tenants):
+    r = client.post("/v1/supply/causal/check", json={"tenant_id": tenants["A"], "request": {"treatment": "net_price", "outcome": "units"}}, headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["result_type"] == "causal_estimate" and body["quality_status"] == "insufficient_evidence"
+    assert body["data"]["effect"] is None and body["data"]["estimator_enabled"] is False
+    assert body["data"]["conditional_simulation"]["available"] is True
+
+
+def test_historical_simulation_run_on_synthetic_tenant(db_engine, client, tenants):
+    A = tenants["A"]
+    with db_engine.begin() as conn:
+        rid, jid = add_core_run(conn, A, "supply", "simulate", {"days": 45})
+    r = execute(client, rid, A, jid)
+    assert r.status_code == 200, r.text
+    with db_engine.connect() as conn:
+        run = conn.execute(text("SELECT summary, quality_status, result_type, limitations FROM core_runs WHERE id = :r"), {"r": rid}).mappings().one()
+    s = run["summary"]
+    assert run["result_type"] == "evaluation" and run["quality_status"] == "degraded"
+    assert set(s["policies"]) == {"current", "reference", "planner"} and s["demand_basis"] == "observed_sales_censored"
+    cur = s["policies"]["current"]
+    assert cur["sold_units"] + cur["unmet_units"] == pytest.approx(cur["demand_units"], rel=1e-6)
+    assert any("censurada" in x for x in run["limitations"])
+
+
+def test_run_of_another_core_or_tenant_cannot_be_hijacked(db_engine, client, world):
+    A, B = world["A"], world["B"]
+    with db_engine.begin() as conn:
+        rid, jid = add_core_run(conn, A, "scenario", "evaluate", {"strategies": [{"key": "base"}]})
+    assert execute(client, rid, B, jid).status_code == 404  # otra empresa
+    assert execute(client, 999999, A).status_code == 404  # inexistente

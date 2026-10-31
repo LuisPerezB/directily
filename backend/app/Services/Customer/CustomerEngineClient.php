@@ -12,6 +12,7 @@ use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -50,7 +51,7 @@ class CustomerEngineClient
         return $this->handle($response);
     }
 
-    private function request(int $timeout): \Illuminate\Http\Client\PendingRequest
+    private function request(int $timeout): PendingRequest
     {
         $request = Http::baseUrl((string) config('engine.url'))
             ->acceptJson()->asJson()->timeout($timeout)

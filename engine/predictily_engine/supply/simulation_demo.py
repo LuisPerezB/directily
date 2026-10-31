@@ -66,16 +66,18 @@ def inputs_from_company(company, days: int = 120, review_days: int = 7, seed: in
                      unit_cost=unit_cost, price=price, lead=lead, lead_std=lead_std, review_days=review_days, seed=seed)
 
 
-def run(company_slug: str, days: int, seed: int, max_series: int | None, with_budget: bool) -> dict:
+def run(company_slug: str, days: int, seed: int, max_series: int | None, with_budget: bool, budget_fraction: float = 0.85) -> dict:
     company = generate_company(company_slug, seed=42)
     inp = inputs_from_company(company, days=days, seed=seed, max_series=max_series)
     policies = [CurrentPolicy(), ReferencePolicy(), PlannerPolicy()]
     out = compare_policies(inp, policies)
     if with_budget:
         base_spend = out["policies"]["current"]["spend_per_review_mean"]
-        extra = compare_policies(inp, [PlannerPolicy(budget_per_review=0.6 * base_spend, name="planner_budget_60pct_of_current")])
+        name = f"planner_budget_{int(round(budget_fraction * 100))}pct_of_current"
+        extra = compare_policies(inp, [PlannerPolicy(budget_per_review=budget_fraction * base_spend, name=name)])
         out["policies"].update(extra["policies"])
-        out["budget_note"] = f"planner_budget_60pct_of_current: tope de {0.6 * base_spend:,.0f} por revisión (60 % del gasto medio de `current`)."
+        out["budget_note"] = (f"{name}: tope de {budget_fraction * base_spend:,.0f} por revisión ({budget_fraction:.0%} del gasto medio de `current`). "
+                              "El gasto de `current` es irregular; un tope sobre su media recorta las revisiones grandes.")
     out["company"] = {"slug": company_slug, "data": "FICTICIOS (generador sintético con semilla 42)"}
     return out
 
@@ -87,9 +89,10 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--max-series", type=int, default=None)
     ap.add_argument("--budget", action="store_true")
+    ap.add_argument("--budget-fraction", type=float, default=0.85)
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
-    res = run(a.company, a.days, a.seed, a.max_series, a.budget)
+    res = run(a.company, a.days, a.seed, a.max_series, a.budget, a.budget_fraction)
     text = json.dumps(res, ensure_ascii=False, indent=2, default=str)
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)

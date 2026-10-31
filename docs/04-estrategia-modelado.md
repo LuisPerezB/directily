@@ -406,3 +406,71 @@ externos, insumos de abastecimiento, configuración efectiva, reglas de elegibil
 `config_version` + `effective_config` (core → perfil sectorial → empresa → opciones de la ejecución). Mismo
 snapshot + configuración + semilla ⇒ mismos valores (`test_pipeline.py::test_reproducible_with_same_seed`,
 `test_snapshot_config.py`, `test_demand_v2_integration.py`).
+
+## 14. Comportamiento de compra por comprador (Customer Core, etapa 2 · P2)
+
+Detalle, definiciones y limitaciones en `docs/architecture/v2/P2-comportamiento.md`. Es un modelo **distinto** del de demanda
+agregada: la unidad es comprador × producto, y la demanda agregada y la de compradores son dos vistas de la misma demanda que
+nunca se suman (§14.6).
+
+**14.1 Objetivos (7, 30 y 90 días, con modelos propios por horizonte).** `purchase_probability` = P(≥ 1 compra válida del producto en
+`(corte, corte+H]`, todas las sucursales, sin anuladas ni notas de crédito); `quantity_if_purchase` = suma de **todas** las compras
+de la ventana dado ≥ 1; `expected_quantity` = P × cantidad; `expected_amount` = esperanza × último precio neto de la relación
+(supuesto). La etiqueta madura solo si `corte+H ≤` último día completo (cobertura o última venta); la ventana con disponibilidad
+< 80 % en la sucursal habitual se **excluye** (censura: no es un negativo). Candidatos: relaciones con compras previas; sin
+compradores genéricos ni ventas anónimas; nuevos y productos nunca comprados no tienen predicción individual (residual de la reconciliación).
+
+**14.2 Protocolo.** Cortes cada 14 días; bloques cronológicos entrenamiento | H | calibración | H | selección | H | holdout (niveles
+`full`/`lean`/`reference_only`/abstención según los datos). Calibración (isotónica por grupos o Platt) con el bloque de calibración;
+el holdout solo evalúa y aplica la regla `cust-promotion-v1`. Filas de cortes consecutivos solapadas: no independientes.
+
+**14.3 Modelos.** Probabilidad: referencia frecuencia/recencia, regresión logística, `LGBMClassifier` (dos configuraciones).
+Cantidad: referencia histórica y `LGBMRegressor` con objetivos L2, L2 sobre log1p, Tweedie, Gamma (y Poisson solo con enteros) **comparados**.
+Se sirve el complejo solo si mejora a la referencia (Brier ≥ 2 %, log loss y ECE no peores; MAE ≥ 3 % y sesgo acotado); si no, la referencia con `role = fallback`.
+
+**14.4 Métricas (holdout, por horizonte, con n y fechas).** Probabilidad: Brier (y frente a la climatología), log loss, curva de calibración por grupos
+(n ≥ 30, intervalos de Wilson), ECE, PR-AUC, ROC-AUC (secundaria). Ranking: precision@k y recall@k (k = 1, 3, 5, 10) por unidad corte×comprador frente a
+popularidad, recencia y referencia. Cantidad: MAE, sesgo (Σ(pred−real)/Σreal), WAPE (nulo si Σreal = 0), RMSE y cobertura del intervalo 80 %, **condicionada y
+sobre todas las filas** (incluye no compradores), y monto. Inactividad: tasa de «sin compras en 90 días» por estado frente a la regla ingenua de 60 días; frecuencia: MAE/sesgo
+con ventanas 90/180/365.
+
+**14.5 Coherencia.** Máximo acumulado P7 ≤ P30 ≤ P90 (sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
+
+**14.6 Reconciliación y compromisos.** agregado = Σ max(esperanza, comprometido) + comprometido fuera del modelo + residual; `inconsistent` si compradores > agregado
+(sin alterar probabilidades). Comprometido = pedidos/contratos confirmados, conocidos al corte, no cancelados, con entrega en el horizonte (pendiente = cantidad − cumplida).
+
+**14.7 Resultados medidos (ficticios).** Generador de verdad conocida (`customer/synthetic.py`): la probabilidad servida coincide con la verdad analítica por grupos
+y el modelo complejo supera a la referencia en Brier 5–16 % en H = 7/30 (con la regla de promoción aplicada); demo Ferretería Andina: ver
+`docs/architecture/v2/P2-comportamiento.md` §13 y `docs/architecture/v2/P2-demo-ferreteria-andina.json` (compradores asignados al azar ⇒ modelo ≈ referencia ≈ climatología).
+
+## 15. Decisiones comunes: abastecimiento con restricciones, costos y escenarios (etapa 2 · P4)
+
+Detalle completo, modelo matemático y limitaciones en `docs/architecture/v2/P4-decisiones.md`. Resumen metodológico:
+
+* **Balance fechado.** Existencias utilizables = existencias − reservas; cada orden abierta llega en su fecha (saldo
+  pendiente si es parcial); fecha desconocida o vencida ⇒ política explícita (`lead_time_end`, `observed_lead_time`,
+  `exclude`), nunca disponible hoy; el tránsito del snapshot no se suma a las órdenes abiertas. Retrasos observados
+  (recibido − esperado) por proveedor alimentan la variabilidad del plazo con ≥ 5 órdenes recibidas hasta el corte. El
+  vencimiento es una capacidad opcional (`not_configured` sin lotes con fecha).
+* **Planificador de reposición (MILP, `scipy.optimize.milp`/HiGHS).** Variables de compra por producto × proveedor ×
+  período de emisión (lotes enteros, mínimo binario, costo fijo), producción por lotes, existencias, demanda no atendida
+  y déficit de stock de seguridad. Restricciones: balance, mínimos y múltiplos, capacidad de proveedor, presupuesto por
+  período de emisión, almacenamiento (pico tras recepciones), recursos y plazos. Objetivo `min_cost` (compra + gastos +
+  mantenimiento + penalización por faltante, **supuestos explícitos**) o `max_margin`. Estados: `optimal`,
+  `feasible_with_gap`, `time_limit` (nunca llamado óptimo), `infeasible` (con causa y alternativas calculadas, sin plan
+  que exceda presupuesto o capacidad), `heuristic_fallback`. Todo plan se re-simula de forma independiente.
+* **Proveedores.** Unidades vía `unit_conversions`, monedas vía tasas explícitas (`exchange_rates`), gastos de
+  adquisición explícitos; sin conversión o sin tasa ⇒ no comparable y se declara la cobertura de la comparación. Una
+  oferta barata que llega tarde no oculta faltantes: la demanda no atendida se penaliza y se muestra por período y causa.
+* **Costos.** Pronóstico mensual de costos unitarios por producto/proveedor/moneda/unidad con referencia (último valor),
+  media móvil, deriva y Holt amortiguado; selección antes del holdout temporal y mejora mínima de 3 %; intervalos
+  empíricos solo con ≥ 8 errores. Disponibilidad por `known_at` (NULL: aceptado en ejecuciones vigentes; en
+  retroactivas solo con evidencia propia, p. ej. una compra real en su fecha). No se pronostican cantidades.
+* **Escenarios.** Estrategias sobre el mismo corte, pronóstico, unidades y horizonte; ventas atendibles =
+  min(demanda, disponible); margen sobre lo vendido; entradas clasificadas observada / pronosticada / supuesta. Simulación
+  condicionada, no causal.
+* **Causalidad.** Contrato de requisitos (definición del efecto, variación y soporte de precios, confusores,
+  disponibilidad, supuestos de identificación). Sin estimador habilitado: `insufficient_evidence`.
+* **Simulación histórica de operación.** Re-juego semanal de la política actual, una referencia mín-máx y el planificador
+  con información disponible a cada fecha, con la misma demanda y los mismos retrasos aleatorios. Resultados en los datos
+  demo sintéticos y su lectura en `P4-decisiones.md` §10; no validan precisión comercial.

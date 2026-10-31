@@ -12,7 +12,7 @@ def one(conn, sql: str, **p):
     return conn.execute(text(sql), p).scalar_one()
 
 
-def new_tenant(conn, name: str, currency: str = "USD", settings: dict | None = None, sector: str | None = None) -> int:
+def new_tenant(conn, name: str, currency: str = "USD", settings: dict | None = None, sector: str = "ferreteria") -> int:
     return one(conn, "INSERT INTO tenants (uuid, name, sector, currency, settings, status, created_at, updated_at) "
                      "VALUES (gen_random_uuid(), :n, :s, :c, CAST(:st AS jsonb), 'active', now(), now()) RETURNING id",
                n=name, s=sector, c=currency, st=json.dumps(settings or {}))

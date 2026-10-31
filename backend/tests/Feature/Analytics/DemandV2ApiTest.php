@@ -6,6 +6,8 @@ namespace Tests\Feature\Analytics;
 
 use App\Enums\TenantRole;
 use App\Models\ForecastRun;
+use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -23,7 +25,7 @@ class DemandV2ApiTest extends TestCase
 
     private const CUTOFF = '2026-09-30';
 
-    /** @return array{0: \App\Models\Tenant, 1: \App\Models\User, 2: array<string, mixed>} */
+    /** @return array{0: Tenant, 1: User, 2: array<string, mixed>} */
     private function tenantWithCatalog(TenantRole $role = TenantRole::Owner): array
     {
         [$tenant, $user] = $this->createTenantWithUser($role);
@@ -92,7 +94,7 @@ class DemandV2ApiTest extends TestCase
 
     // ───────────────────────── envoltura y respaldo por horizonte ─────────────────────────
 
-    /** @return array{0: \App\Models\Tenant, 1: \App\Models\User, 2: ForecastRun} */
+    /** @return array{0: Tenant, 1: User, 2: ForecastRun} */
     private function runWithStage2Summary(): array
     {
         [$tenant, $user, $cat] = $this->tenantWithCatalog();
@@ -325,7 +327,7 @@ class DemandV2ApiTest extends TestCase
     /**
      * Tres ejecuciones de producción: r1 y r2 retiradas, r3 vigente.
      *
-     * @return array{0: \App\Models\Tenant, 1: \App\Models\User, 2: list<ForecastRun>, 3: list<int>}
+     * @return array{0: Tenant, 1: User, 2: list<ForecastRun>, 3: list<int>}
      */
     private function threeRuns(TenantRole $role = TenantRole::Owner): array
     {

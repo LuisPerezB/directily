@@ -17,7 +17,7 @@ reales de un cliente ni con el ERP de un cliente (pendiente de acceso autorizado
 | Conector PostgreSQL de solo lectura | **Probado de punta a punta contra una base PostgreSQL de pruebas** (no contra el ERP de un cliente) | `SqlSourceSyncTest` (E2-25) |
 | Conector MySQL/MariaDB | **`implemented_untested`**: implementado, sin servidor de pruebas en este entorno | `SqlConnectorContractTest` (contrato común + prueba de servidor omitida) |
 | Conector SQL Server | **`implemented_untested`**: implementado, sin servidor ni `pdo_sqlsrv` en este entorno | ídem |
-| Validador de consultas de solo lectura | Probado (dialectos PostgreSQL, MySQL, SQL Server) | `SqlQueryGuardTest` (60 casos) |
+| Validador de consultas de solo lectura | Probado (dialectos PostgreSQL, MySQL, SQL Server) | `SqlQueryGuardTest` (14 aceptadas y 41 rechazadas + invariantes) |
 | Importación de compromisos, calendario, conversiones de unidades y almacenes (CSV/Excel/SQL/API) | Implementado y probado | `CommitmentsImportTest`, `CalendarEventsTest`, `CanonicalDataTest` |
 | Cobertura de fuentes (`data_coverage`) declarada y por conector | Implementado y probado | `CanonicalDataTest`, `SqlSourceSyncTest`, `test_platform_effective_config.py` |
 | Reporte de calidad extendido | Implementado y probado | `CanonicalDataTest::test_extended_quality_report_…` |
@@ -389,14 +389,27 @@ son de la migración `2026_02_02_000100` del arquitecto, sin cambios.
 
 ## 12. Pruebas y resultados
 
-Se completa al cierre (comandos y cifras exactas en el informe final del paquete). Comandos:
+Comandos (entorno: PHP 8.3, PostgreSQL 16, Python 3.12; sin semillas aleatorias en estas pruebas):
 
 ```
-cd backend && DB_DATABASE=predictily_test_p3 php artisan test                    # suite completa
+cd backend && DB_DATABASE=predictily_test_p3 php artisan test                          # suite completa
 cd backend && DB_DATABASE=predictily_test_p3 php artisan test tests/Feature/DataCore tests/Unit/DataCore
 cd engine && ENGINE_TEST_DATABASE_URL=postgresql+psycopg://predictily:secret@127.0.0.1:5432/predictily_engine_test_p3 \
     OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1 .venv/bin/python -m pytest -q tests
 ```
+
+Resultados de la última ejecución del paquete:
+
+| Suite | Resultado |
+|---|---|
+| Backend completa | 300 pruebas, 298 aprobadas, 2 omitidas (contrato con servidor MySQL/MariaDB y SQL Server), 2584 aserciones, ≈ 60 s |
+| Backend P3 (`tests/Feature/DataCore`, `tests/Unit/DataCore`) | 114 pruebas, 112 aprobadas, 2 omitidas, 1126 aserciones, ≈ 12 s |
+| Motor P3 (`tests/unit/test_platform_extensions.py`, `tests/integration/test_platform_effective_config.py`) | 15 + 8 aprobadas |
+| Motor completa | 370 aprobadas, 0 fallos, ≈ 5 min 34 s (con `OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1`). Una ejecución anterior mostró 3 errores de preparación en `test_supply_integration.py` (P4) por estado compartido de la base; no se repitieron y esas pruebas pasan solas |
+
+Mapa prueba → caso: E2-25 → `SqlSourceSyncTest`; E2-23 → `CommitmentsImportTest`; E2-17 (datos/extensiones) → `DataCoreIsolationTest` y las pruebas de aislamiento
+de cada entidad; E2-05 (parte datos: `known_at` de costos, calendario y compromisos) → `CanonicalDataTest`, `CalendarEventsTest`, `CommitmentsImportTest`,
+`test_platform_effective_config.py` (calendario `as_of`); configuración y extensiones (§6.H) → `test_platform_extensions.py`, `test_platform_effective_config.py`, `EffectiveConfigApiTest`.
 
 La base «ERP de origen» ficticia es `predictily_erp_source_p3` (variables `TEST_ERP_HOST/PORT/DATABASE/USERNAME/PASSWORD`); las pruebas crean y
 borran sus tablas `erp_*`. Si no existe, las pruebas de sincronización se omiten.

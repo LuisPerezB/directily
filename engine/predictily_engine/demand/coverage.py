@@ -82,6 +82,18 @@ class SalesCoverage:
         cov.through = min(throughs) if throughs else None
         return cov
 
+    @classmethod
+    def resolve(cls, conn: Any, tenant_id: int, rows: pd.DataFrame, active_branches: set[int] | None = None) -> "SalesCoverage":
+        """Cobertura efectiva de ventas de la empresa a partir de `data_coverage` (todas las lecturas filtran por empresa).
+        `active_branches`: solo ellas pueden fijar el corte con una cobertura propia; None = todas."""
+        from predictily_engine.extensions.data_core import effective_coverage
+
+        own = set(rows["branch_id"].dropna().astype(int)) if rows is not None and not rows.empty else set()
+        if active_branches is not None:
+            own &= active_branches
+        return cls.from_effective(effective_coverage(conn, tenant_id, "sales", None),
+                                  {b: effective_coverage(conn, tenant_id, "sales", b) for b in sorted(own)}, rows)
+
     def limit_cutoff(self, cutoff: date) -> date:
         self.requested_cutoff = cutoff
         self.effective_cutoff = min(cutoff, self.through) if self.through is not None else cutoff
