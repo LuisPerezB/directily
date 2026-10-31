@@ -355,8 +355,8 @@ hash se guardan en cada corrida.
 ```
 cd backend && DB_DATABASE=predictily_engine_test_p4 php artisan migrate --force      # esquema para el motor
 cd engine && ENGINE_TEST_DATABASE_URL=postgresql+psycopg://predictily:secret@127.0.0.1:5432/predictily_engine_test_p4 \
-    OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1 .venv/bin/python -m pytest -q tests        # @@ENGINE_RESULT@@
-cd backend && DB_DATABASE=predictily_test_p4 php artisan test                          # 348 pruebas: 346 aprobadas, 2 omitidas
+    OMP_WAIT_POLICY=PASSIVE ENGINE_N_JOBS=1 .venv/bin/python -m pytest -q tests        # 392 aprobadas en 440 s (7 min 20 s)
+cd backend && DB_DATABASE=predictily_test_p4 php artisan test                          # 356 pruebas: 354 aprobadas, 2 omitidas (3.049 aserciones)
 cd backend && DB_DATABASE=predictily_test_p4 php artisan test tests/Feature/Supply     # 19 pruebas, 159 aserciones
 ```
 
