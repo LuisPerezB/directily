@@ -29,7 +29,9 @@ final class SqlSourceConnection
     /** @throws SqlSourceException */
     public static function open(SqlDialect $dialect, SqlConnectionSettings $settings, string $username, string $password): self
     {
-        SqlHostPolicy::assertAllowed($settings->host);
+        // Política SSRF: resuelve A y AAAA, valida TODAS las respuestas y FIJA la IP; el dialecto se conecta a ella (sin segunda
+        // resolución que un atacante pueda cambiar: DNS rebinding).
+        $settings = $settings->pinnedTo(SqlHostPolicy::resolve($settings->host));
         try {
             $pdo = $dialect->connect($settings, $username, $password);
             $dialect->begin($pdo, $settings);

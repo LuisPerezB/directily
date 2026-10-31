@@ -29,7 +29,7 @@ final class ErpSourceDatabase
     public static function tryConnect(): ?self
     {
         try {
-            return new self(
+            $erp = new self(
                 host: (string) (getenv('TEST_ERP_HOST') ?: '127.0.0.1'),
                 port: (int) (getenv('TEST_ERP_PORT') ?: 5432),
                 database: (string) (getenv('TEST_ERP_DATABASE') ?: 'predictily_erp_source_p3'),
@@ -39,6 +39,19 @@ final class ErpSourceDatabase
         } catch (PDOException) {
             return null;
         }
+        $erp->authorizeInConnectorPolicy();
+
+        return $erp;
+    }
+
+    /**
+     * La base «ERP de origen» ficticia vive en el PostgreSQL local (loopback), que la política SSRF de los conectores
+     * (SqlHostPolicy, ADR-V25-15) deniega por defecto. La prueba lo declara EXPLÍCITAMENTE en la lista blanca de destinos
+     * (host + IP literal): sin esta declaración la sincronización de pruebas sería rechazada, que es lo que se quiere en producción.
+     */
+    public function authorizeInConnectorPolicy(): void
+    {
+        config(['connectors.sql.allowed_hosts' => array_values(array_unique([$this->host, '127.0.0.1'])), 'connectors.sql.allowed_cidrs' => []]);
     }
 
     /** Esquema tipo ERP: facturas, líneas, productos, clientes, pedidos e inventario. */

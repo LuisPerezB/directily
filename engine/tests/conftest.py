@@ -20,6 +20,16 @@ os.environ.setdefault("ENGINE_N_JOBS", "4")
 sys.path.insert(0, str(Path(__file__).parent))
 warnings.filterwarnings("ignore")
 
+# Firma de artefactos (ADR-V25-20): es obligatoria. Las pruebas generan un par Ed25519 EFÍMERO por sesión (la clave privada solo
+# existe en memoria y en el entorno del proceso de pruebas) y NUNCA activan ENGINE_ALLOW_UNSIGNED_ARTIFACTS.
+from predictily_engine.platform.signing import generate_keypair  # noqa: E402
+
+_KID, _PRIVATE, _PUBLIC = generate_keypair("test-ephemeral")
+os.environ["ENGINE_SIGNING_KEY_ID"] = _KID
+os.environ["ENGINE_SIGNING_PRIVATE_KEY"] = _PRIVATE
+os.environ["ENGINE_TRUSTED_PUBLIC_KEYS"] = f"{_KID}:{_PUBLIC}"
+os.environ.pop("ENGINE_ALLOW_UNSIGNED_ARTIFACTS", None)
+
 from predictily_engine.pipeline.data import tenant_data_from_synthetic  # noqa: E402
 from predictily_engine.synthetic import generate_company  # noqa: E402
 

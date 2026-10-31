@@ -151,6 +151,24 @@ def test_registry_states_roles_core_and_compat(world, db_engine):
         assert hashlib.sha256(resolve_stored_path(r["artifact_path"]).read_bytes()).hexdigest() == r["artifact_sha256"]
 
 
+def test_demand_artifacts_are_signed_and_the_registry_records_the_signature(world, db_engine):
+    """ADR-V25-20: el artefacto de demanda lleva manifiesto firmado (core `demand`, corrida, huella de datos) y el registro lo anota."""
+    from predictily_engine.platform.artifacts import verify_stored_artifact
+
+    with db_engine.connect() as conn:
+        reg = conn.execute(text("SELECT artifact_path, artifact_sha256, artifact_compat, training_data_hash FROM model_registry "
+                                "WHERE forecast_run_id = :r AND artifact_path IS NOT NULL"), {"r": world["r3"]}).mappings().all()
+    assert reg
+    for r in reg:
+        assert r["artifact_compat"]["signature"]["status"] == "signed" and r["artifact_compat"]["signature"]["key_id"] == "test-ephemeral"
+        verdict = verify_stored_artifact(r["artifact_path"], tenant_id=world["d"], core="demand", expected_sha256=r["artifact_sha256"])
+        assert verdict.ok
+        manifest = verdict.artifact.manifest
+        assert (manifest["core"], manifest["run_id"], manifest["tenant_id"]) == ("demand", world["r3"], world["d"])
+        assert manifest["data_fingerprint"] == r["training_data_hash"] and manifest["libraries"]
+        assert verify_stored_artifact(r["artifact_path"], tenant_id=world["d"] + 1, core="demand", expected_sha256=r["artifact_sha256"]).reason == "artifact_path_invalid"
+
+
 def test_declared_coverage_limits_the_cutoff_and_what_follows_is_absent_not_zero(world, db_engine):
     with db_engine.connect() as conn:
         run = conn.execute(text("SELECT cutoff_date, summary FROM forecast_runs WHERE id = :r"), {"r": world["r1"]}).mappings().one()

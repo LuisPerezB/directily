@@ -16,7 +16,6 @@ import pandas as pd
 from sqlalchemy import text
 
 from predictily_engine.calendar.regions import region_for_province
-from predictily_engine.data.asof import with_knowledge
 from predictily_engine.db.repository import TenantRepository
 
 DEFAULT_SETTINGS = {
@@ -123,9 +122,13 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
     if cutoff is None:
         raise ValueError("La empresa no tiene ventas válidas")
     # Ventas as-of (ADR-V25-23): UNA lectura de las versiones hasta el corte final; `sales`/`returns` son la vista a ese
-    # corte y las ventanas del backtest derivan la suya de `sales_versions` (sin volver a leer la base).
-    sales = repo.daily_sales(cutoff)
-    versions = repo.sales_versions(cutoff)
+    # corte y las ventanas del backtest derivan la suya de `sales_versions` (sin volver a leer la base). Ejecución vigente (corte =
+    # último dato): el período final conoce hasta HOY (una carga nocturna del último día cuenta, como las promociones); una
+    # reconstrucción histórica, solo hasta el propio corte. Los cortes anteriores (ventanas) usan siempre lo conocido en el suyo.
+    live = last is not None and cutoff >= last
+    known_until = _local_today(tenant.get("timezone")) if live else None
+    sales = repo.daily_sales(cutoff, known_until)
+    versions = repo.sales_versions(cutoff, known_until)
     first = pd.to_datetime(sales["ds"]).min().date() if not sales.empty else cutoff
     gaps = repo.sales_coverage_gaps()
     gap_sources = sorted({int(x) for x in gaps.loc[gaps["branch_id"].isna() & gaps["data_source_id"].notna(),
@@ -138,7 +141,7 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         products=repo.products(),
         categories=repo.categories(),
         sales=sales,
-        returns=repo.daily_returns(cutoff),
+        returns=repo.daily_returns(cutoff, known_until),
         inventory=repo.inventory(first - timedelta(days=1), cutoff),
         latest_inventory=repo.latest_inventory(cutoff),
         promotions=repo.promotions(),
@@ -146,11 +149,11 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         suppliers=repo.suppliers(),
         # Corte retroactivo: solo órdenes que existían al corte (sin fuga de compras posteriores).
         open_purchase_orders=repo.open_purchase_orders(cutoff if last is not None and cutoff < last else None),
-        sales_stats=repo.sales_stats(cutoff),
+        sales_stats=repo.sales_stats(cutoff, known_until),
         promotion_revisions=repo.promotion_revisions(),
         # Ejecución vigente (corte = último dato): vale lo conocido hoy. Ejecución histórica: lo
         # conocido al corte (una promoción registrada después no puede usarse en ese pronóstico).
-        promotions_known_on=_local_today(tenant.get("timezone")) if last is not None and cutoff >= last else None,
+        promotions_known_on=known_until,
         currency=tenant.get("currency"),
         sector=tenant.get("sector"),
         sales_versions=versions,

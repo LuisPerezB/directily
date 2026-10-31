@@ -221,6 +221,18 @@ class AsOfWindows:
         return [self.log[k] for k in sorted(self.log)]
 
 
+def asof_windows(data: Any, panel: Panel, features: FeatureBuilder, horizon_end: Any,
+                 rules: DayRules | None = None) -> AsOfWindows | None:
+    """`AsOfWindows` de una ejecución, o None si `data` no trae versiones de documentos o ninguna depende del corte (carga
+    histórica sin cambios): en ese caso todas las ventanas coinciden con la verdad y no hay nada que reconstruir."""
+    versions = getattr(data, "sales_versions", None)
+    if versions is None or not versions.has_dynamic:
+        return None
+    return AsOfWindows(data, panel, features,
+                       lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
+                                                 promotion_revisions=data.promotion_revisions), rules)
+
+
 def run_backtest(
     panel: Panel,
     features: FeatureBuilder,

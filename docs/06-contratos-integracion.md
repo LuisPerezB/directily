@@ -56,8 +56,8 @@ confirma. Los nombres de la izquierda son los **campos Predictily** (claves del 
 | Campo | Req. | Tipo | Sinónimos típicos | Reglas |
 |---|---|---|---|---|
 | `document_number` | sí | texto | numero_factura, nro_documento, factura, comprobante | clave de idempotencia junto a `document_type` |
-| `document_type` | no | texto | tipo_documento, tipo | factura→invoice, nota de venta→sales_note, nota de crédito / devolución→credit_note; por defecto invoice |
-| `status` | no | texto | estado, anulada | anulada/anulado/void/cancelada→voided; por defecto completed |
+| `document_type` | no | texto | tipo_documento, tipo | factura→invoice, nota de venta→sales_note, nota de crédito / devolución→credit_note, otro→other; vacío = invoice. Un tipo NO vacío que no se reconoce (cotización, proforma, pedido, guía…) es ERROR `unknown_document_type` (clase `REVIEW_REQUIRED`): el documento no se escribe |
+| `status` | no | texto | estado, anulada | anulada/anulado/void/cancelada (y las banderas sí/1/true)→voided; pendiente/borrador→pending; emitida/autorizada/completada/pagada… (y no/0/false)→completed; vacío = completed. Un estado NO vacío que no se reconoce (rechazada, reversada, no autorizada…) es ERROR `unknown_document_status` (clase `REVIEW_REQUIRED`): el documento no se escribe |
 | `issued_at` | sí | fecha o fecha-hora | fecha, fecha_emision, fecha_venta | formatos: Y-m-d, d/m/Y, d-m-Y, Y-m-d H:i:s, serial Excel; `sale_date` se calcula en la zona horaria de la empresa |
 | `branch_code` | cond. | texto | sucursal, establecimiento, local, bodega | requerido si hay >1 sucursal y no se define `options.default_branch_code` |
 | `product_sku` | sí | texto | codigo, sku, codigo_producto, item | |
@@ -76,6 +76,10 @@ confirma. Los nombres de la izquierda son los **campos Predictily** (claves del 
 | `currency` | no | texto | moneda | ≠ moneda de la empresa ⇒ error `currency_mismatch` |
 | `line_number` | no | entero | linea, item_no | si falta: orden de aparición dentro del documento |
 
+Los códigos de estado o de tipo propios de un ERP (p. ej. `A`, `V`) no se reconocen: en una **sincronización SQL** se traducen con
+`source_mappings.options.value_maps.status` / `.document_type` (valor de origen ⇒ valor canónico); en archivos, hasta que existan mapas de
+valores por fuente (paquete S01), se normalizan en el archivo o se importan solo las filas válidas (`skip_invalid_rows`).
+
 ### 2.2 `entity_type = products`
 `sku`*, `name`*, `category`, `unit`, `brand`, `current_price`, `current_cost`, `is_active`.
 
@@ -91,15 +95,28 @@ Idempotente por (branch, product, snapshot_date) → upsert.
 `date_format` (auto | `Y-m-d` | `d/m/Y` | `m/d/Y` | `d-m-Y`), `decimal_separator` (`.` | `,`),
 `thousands_separator`, `csv_delimiter` (auto | `,` | `;` | `\t`), `default_branch_code`,
 `create_missing_products` (true), `create_missing_branches` (false), `create_missing_categories` (true),
-`skip_invalid_rows` (false: si hay errores no se puede confirmar; true: se importan solo filas válidas).
+`skip_invalid_rows` (false: si hay errores no se puede confirmar; true: se importan solo filas válidas),
+`ingestion_mode` (solo ventas; `backfill` | `incremental` | vacío = automático, ADR-V25-23): vacío ⇒ `backfill` si la empresa
+no tiene ninguna fila en `sales` cuando EMPIEZA la escritura (primera carga histórica) e `incremental` si ya tiene. En la
+validación se muestra como proyección (`stats.ingestion_mode`, `stats.ingestion_mode_basis`); al confirmar se decide con
+las ventas existentes en ese momento y el valor resuelto queda en `import_jobs.options.ingestion_mode` (un reintento del mismo
+import conserva el modo con el que empezó). Un valor inválido, o enviarlo para otra entidad, es 422 `options.ingestion_mode`.
 
 ### 2.6 Códigos de error/advertencia de importación
 `required`, `invalid_date`, `future_date`, `invalid_number`, `negative_quantity` (warning: devolución),
 `zero_quantity` (warning), `negative_price`, `duplicate_in_file`, `unknown_branch`,
 `unknown_product` (warning si se crearán), `currency_mismatch`, `net_amount_mismatch` (warning),
 `document_conflict` (misma clave con distinto contenido dentro del archivo),
-`voided_document` (info), `existing_document_changed` (warning: se actualizará),
+`unknown_document_type` y `unknown_document_status` (**error**, `dq_class = REVIEW_REQUIRED`; antes el tipo desconocido era una
+advertencia y se contaba como venta `other`, y el estado desconocido se contaba como completada),
+`voided_document` (info), `existing_document_changed` (warning: se actualizará y la versión anterior se archiva),
+`stale_document_skipped` (warning, reporte: documentos con una versión ANTERIOR a la guardada, no se aplican),
+`updated_without_source_order` (info, reporte: actualizaciones sin fecha de registro en la fuente; gana la última carga),
 `missing_dates` (reporte: días sin ventas en el rango).
+
+`dq_class` (ADR-V25-05) acompaña a los hallazgos que exigen revisión humana: `REVIEW_REQUIRED` en `unknown_document_type` y
+`unknown_document_status`, y `null` en los demás. No es una columna de `import_errors`: se deriva del código y se entrega en
+`GET /imports/{id}/errors` (`dq_class`), en `errors.csv` (columna `clase_calidad`) y en el detalle de errores de `POST /sales/batch`.
 
 ### 2.7 Datos de demostración
 `data/demo/` contiene datasets **ficticios** generados por `engine/predictily_engine/synthetic`
@@ -223,7 +240,7 @@ Códigos: `known_at_unknown`, `known_after_start`, `scope_ref_ignored`.
 |---|---|---|
 | GET | `/sales` [T] | query `date_from, date_to, branch_id, status, document_type, page` → `[{id, document_type, document_number, status, issued_at, sale_date, branch:{id,code,name}, total, items_count}]` |
 | GET | `/sales/{id}` [T] | con `items` |
-| POST | `/sales/batch` [T] `imports.manage` | `{documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, errors:[{index, field, code, message}]}}` — idempotente por `(document_type, document_number)` |
+| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
 | GET | `/sales/summary` [T] | query `date_from, date_to, branch_id, category_id, product_id, granularity(day|week|month)` → `{data:{series:[{period, units, revenue, documents}], totals:{units, revenue, documents, returns_units}}}` (excluye anuladas) |
 
 ### 3.6 Importaciones
@@ -236,14 +253,14 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 | POST | `/imports` [T] `imports.manage` | multipart: `file` (csv/xlsx, máx 20 MB), `entity_type` → 201 `ImportJob` en `awaiting_mapping` con `detected_columns`, `suggested_mapping`, `preview` (20 filas crudas) |
 | GET | `/imports/{id}` [T] | `ImportJob` |
 | PUT | `/imports/{id}/mapping` [T] | `{mapping:{campo: columna|null}, options:{...}}` → 202, pasa a `validating` (Job asíncrono). Repetible para corregir (desde `awaiting_mapping`, `validated` o `failed`) |
-| GET | `/imports/{id}/errors` [T] | query `severity, page` → `[{row_number, column, error_code, severity, message, raw_value}]` |
+| GET | `/imports/{id}/errors` [T] | query `severity, page` → `[{row_number, column, error_code, severity, message, raw_value, dq_class}]` (`dq_class` = `REVIEW_REQUIRED` en `unknown_document_type` / `unknown_document_status`; `null` en los demás) |
 | GET | `/imports/{id}/errors.csv` [T] | descarga de errores |
 | POST | `/imports/{id}/confirm` [T] | 202 → `importing` (solo desde `validated`; 409 si hay errores y `skip_invalid_rows=false`) |
 | POST | `/imports/{id}/reject` [T] | → `rejected` |
 | GET | `/import-templates/{entity_type}` | CSV de plantilla con encabezados canónicos |
 | GET | `/import-fields/{entity_type}` | definición de campos (para el asistente): `[{key, label, required, type, description, synonyms}]` |
 
-`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new}, quality_report:{score, issues:[{code, severity, message, count}]}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
+`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load)}, quality_report:{score, issues:[{code, severity, message, count}]}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
 
 ### 3.7 Fuentes de datos
 | Método | Ruta | Detalle |
@@ -400,10 +417,13 @@ conocido × (1+cost_change_pct). Si falta costo para productos, se informa `cost
 |---|---|---|
 | GET/POST | `/data-sources/{id}/mappings`, GET `/{mapping}` [T] `datasources.manage` | consultas autorizadas: `{entity, query, field_map, options}`; cada cambio crea una versión **sin aprobar**. 422 `sql_query_rejected` (`reason`) si no es un único SELECT de solo lectura |
 | POST | `/data-sources/{id}/mappings/{mapping}/preview`, `/approve`, `/deactivate` [T] `datasources.manage` | vista previa de campos canónicos (sin importar); aprobar activa la versión; solo la aprobada sincroniza |
-| POST | `/data-sources/{id}/sync` [T] `datasources.manage` | `{entity, mode: full|incremental}` → 202 `SourceSync`; 409 `mapping_not_approved` / `sync_in_progress`. Job `SyncDataSource` (cola `imports`) |
-| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, stats, error_message, started_at, finished_at}` |
+| POST | `/data-sources/{id}/sync` [T] `datasources.manage` | `{entity, mode: full|incremental, ingestion_mode?: backfill\|incremental}` → 202 `SourceSync`; 409 `mapping_not_approved` / `sync_in_progress`. Job `SyncDataSource` (cola `imports`). `ingestion_mode` (solo `sales`; 422 para otra entidad): solicitud > `source_mappings.options.ingestion_mode` > regla (la primera sincronización de la fuente que trajo datos es `backfill`; las siguientes, `incremental`; una completada con 0 filas no cuenta) |
+| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, stats, error_message, started_at, finished_at}`. `watermark` = mínimo entre el máximo `source_recorded_at` LEGIBLE extraído y el inicio de la sincronización: una fecha futura o ilegible no la adelanta y se cuenta en `stats.future_recorded_at` (con `stats.recorded_at_unreadable` como parte ilegible). En ventas, `stats.ingestion_mode` e `ingestion_mode_basis` (`declared\|first_sync\|subsequent_sync`). Una marca guardada en el futuro se acota también al leerla |
 | GET | `/data-coverage` [T] | `{data:[{id, entity, data_source_id, branch_id, complete_from, complete_through, basis: declared|inferred, last_ingested_at, notes}], effective:{entidad:{complete_from, complete_through, rule: declared_by_user|min_over_sources|none, basis}}}` |
 | PUT | `/data-coverage` [T] `imports.manage` | `{entity, complete_from?, complete_through*, data_source_id?, branch_id?, notes?}`; `complete_through` no puede ser futura |
+| GET | `/data-coverage/gaps` [T] `data.view` | huecos INTERNOS de cobertura (ADR-V25-23): query `entity, data_source_id, branch_id, basis, from, to` (huecos que se solapan con el rango), `per_page` → `{data:[{id, entity, data_source_id, branch_id, gap_from, gap_to, days, reason, basis, notes, created_by, created_at}], meta}`. Sus días son `missing_source`, nunca ceros; pueden solaparse (el consumidor toma la unión) |
+| POST | `/data-coverage/gaps` [T] `imports.manage` | `{entity*, gap_from*, gap_to*, data_source_id?, branch_id?, reason?, notes?}` → 201. `entity` ∈ `sales, inventory, purchases, costs, promotions, customers, commitments`; `gap_to` ≥ `gap_from` (ambos incluidos, máx. 3660 días); `data_source_id` y `branch_id` de la MISMA empresa y no dados de baja (422); `reason` ∈ `integration_outage, source_missing, migration, unknown` (defecto `unknown`); `basis` siempre `declared` (enviar `inferred` es 422). Auditoría `data_coverage.gap_declared` |
+| DELETE | `/data-coverage/gaps/{id}` [T] `imports.manage` | 204; un hueco de otra empresa responde 404. Auditoría `data_coverage.gap_deleted` |
 | GET | `/data-quality/extended` [T] | reporte ampliado: `temporal_coverage, sales_days, customer_identity, product_code_changes, price_history, units`; `?persist=1` lo guarda (`data_quality_reports`, scope `data_core`) |
 | GET | `/calendar-events` [T] | query `from, to, scope, category, status, include_public, as_of, limit`; con `as_of` solo revisiones con `known_at` ≤ corte (las de `known_at` desconocido no se devuelven) |
 | POST/PATCH/DELETE | `/calendar-events[/{id}]` [T] `catalog.manage` | alta/edición (nueva **revisión**) / cancelación; solo eventos propios (el calendario público es de solo lectura). Pasan por el importador |
@@ -416,7 +436,36 @@ conocido × (1+cost_change_pct). Si falta costo para productos, se informa `cost
 | GET | `/platform/extensions` [T] | perfil sectorial y proveedores que aplican a la empresa (vacío si no tiene perfil) |
 
 Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calendar_events`, `unit_conversions`, `warehouses` (§2.10–2.12).
-No se actualizó `docs/openapi/predictily-api.yaml` con estas rutas (pendiente de la integración).
+`docs/openapi/predictily-api.yaml` se regenera con `python infra/scripts/merge_openapi.py` (incluye los huecos de cobertura y el modo de ingestión).
+
+#### 3.14.1 Contrato temporal de ventas (V2.5 · ADR-V25-23) — resumen para integradores
+
+- **Modo de ingestión** (`sales.ingestion_mode`): importación de archivo (`options.ingestion_mode`; automático ⇒ `backfill` si la empresa
+  no tiene ventas al empezar la escritura, si no `incremental`), `POST /sales/batch` (`ingestion_mode`; por defecto `incremental`),
+  sincronización SQL (solicitud > mapeo > primera sincronización con datos = `backfill`), demo (`backfill` explícito).
+- **Versiones**: un documento existente con contenido distinto archiva su versión vigente (`sales_document_revisions` / `sale_item_revisions`)
+  antes de reemplazarla; `current_revision` avanza en 1 y `first_seen_at` no cambia.
+- **Orden**: una versión entrante con `source_recorded_at` ANTERIOR a la almacenada se descarta (`stale_skipped`, no se escribe nada). Sin marca
+  de tiempo en alguna de las dos gana la última ingestión (`updated_without_source_order`). Estadísticas aditivas en importaciones, lotes y
+  sincronizaciones: `stale_skipped`, `revisions_archived`, `updated_without_source_order`.
+- **Tipos y estados**: no vacíos y desconocidos ⇒ error de fila `REVIEW_REQUIRED`, no se escribe (vacío = factura / completada).
+- **Marca de agua** de las sincronizaciones: acotada al inicio de la sincronización (futuras o ilegibles = anomalía `future_recorded_at`).
+- **Huecos de cobertura**: `GET/POST /data-coverage/gaps`, `DELETE /data-coverage/gaps/{id}`.
+
+| Estado | Qué | Prueba que lo demuestra |
+|---|---|---|
+| IMPLEMENTADO / VERIFICADO | Primera importación `backfill`, segunda `incremental`; declaración explícita respetada; decisión al iniciar la escritura | `SalesImportIngestionModeTest::test_first_import_is_backfill_and_the_second_is_incremental_by_default`, `::test_explicit_declaration_is_respected_over_the_default_rule`, `::test_the_mode_is_decided_when_the_write_starts_not_when_the_file_is_validated`, `::test_ingestion_mode_option_is_validated` |
+| IMPLEMENTADO / VERIFICADO | `POST /sales/batch` incremental por defecto, modo inválido 422 | `SalesTemporalWriteTest::test_batch_defaults_to_incremental_and_a_late_document_is_not_visible_before_its_arrival`, `::test_invalid_ingestion_mode_is_rejected` |
+| IMPLEMENTADO / VERIFICADO | Estadísticas de versiones en importaciones (validación = proyección) y reporte de calidad | `SalesImportIngestionModeTest::test_import_updates_archive_versions_and_report_the_new_statistics`, `::test_updates_without_a_source_timestamp_are_counted_and_reported` |
+| IMPLEMENTADO / VERIFICADO | Demo con `backfill` explícito aun con ventas existentes | `SalesImportIngestionModeTest::test_demo_loads_sales_as_declared_backfill_even_on_a_company_with_sales` |
+| IMPLEMENTADO / VERIFICADO | Tipo/estado desconocido ⇒ `REVIEW_REQUIRED` y no se escribe; vacíos por convención | `UnknownDocumentTypeStatusTest` (5 pruebas: importación y lote), `DocumentVocabularyTest` |
+| IMPLEMENTADO / VERIFICADO | Sincronización SQL: modo (primera = backfill, siguientes = incremental, declarable), versiones y `stale_skipped` | `SqlSyncTemporalContractTest::test_first_sync_is_backfill_and_later_syncs_are_incremental_with_archived_versions`, `::test_an_older_version_from_the_source_is_stale_skipped_by_the_sync`, `::test_ingestion_mode_can_be_declared_in_the_request_and_overrides_the_mapping`, `::test_ingestion_mode_can_be_declared_in_the_mapping_options`, `::test_an_empty_first_sync_does_not_count_as_the_historical_load` |
+| IMPLEMENTADO / VERIFICADO | Marca de agua acotada (futura, ilegible, marca previa envenenada) | `SqlSyncTemporalContractTest::test_a_future_recorded_at_does_not_advance_the_watermark_and_is_reported`, `::test_unreadable_recorded_at_is_an_anomaly_and_falls_back_to_the_sync_start`, `::test_a_poisoned_previous_watermark_is_bounded_when_it_is_read` |
+| IMPLEMENTADO / VERIFICADO | Huecos de cobertura: CRUD, lista blanca, rango, fuente/sucursal de la misma empresa, habilidades y aislamiento | `CoverageGapsApiTest` (8 pruebas) |
+| IMPLEMENTADO / VERIFICADO | OpenAPI al día con las rutas reales | `OpenApiRoutesTest`; `python infra/scripts/merge_openapi.py --check --strict` |
+| DISEÑADO / NO IMPLEMENTADO | Alerta tras N sincronizaciones consecutivas con 0 filas; mapeo `value_maps` de tipo/estado en archivos; cuarentena `quarantine_records` | ADR-V25-24 / paquete S01 (Data Quality Engine) |
+| BLOQUEADO | Sincronización de MySQL y SQL Server con el contrato temporal | No hay servidor de pruebas en el entorno: solo PostgreSQL (`tested_with_test_database`); la lógica es independiente del conector |
+| NO APLICA | `ingestion_mode` en productos, inventario y demás entidades | Solo las ventas son documentos versionados; enviarlo para otra entidad es 422 |
 
 ### 3.15 Customer Core · comportamiento de compra (etapa 2 · P2) — detalle en `docs/architecture/v2/P2-comportamiento.md`
 Todas bajo `/api/v1/customer`, [T], `auth:sanctum`. Lectura `forecast.view`; entrenar/predecir `forecast.run`. Horizontes: plan ∩ {7, 30, 90} (un horizonte fuera del plan: **402**

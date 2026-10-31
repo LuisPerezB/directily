@@ -44,7 +44,7 @@ def compute_activity(fb: FeatureBuilder, c: int, cfg: dict[str, Any]) -> pd.Data
     """Frecuencia, inactividad y cambio de comportamiento de cada comprador con ≥ 1 compra hasta el corte `c`."""
     if fb.empty:
         return pd.DataFrame()
-    cs = fb.cstore
+    cs = fb.cstore_at(c)  # días de compra tal como se conocían en el corte (ADR-V25-23)
     groups = np.arange(fb.n_cust)
     chi = cs.pos(groups, c)
     n = chi - cs.start
@@ -136,11 +136,11 @@ def evaluate_activity(fb: FeatureBuilder, cutoffs: list[int], last_complete: int
             rows_i.append(act.assign(outcome=out, cutoff=c))
         if c + 30 <= last_complete:
             n30 = fb.cstore.count(codes, c, c + 30).astype(float)
-            ten = (c - fb.cstore.day[fb.cstore.start[codes]])
+            cs = fb.cstore_at(c)  # variables: lo conocido en el corte; el resultado (arriba) usa la verdad disponible
+            ten = (c - cs.day[cs.start[codes]])
             keep = ten >= 365
             sub = act.loc[keep]
             if len(sub):
-                cs = fb.cstore
                 cod = codes[keep]
                 hi = cs.pos(cod, c)
                 f = {}

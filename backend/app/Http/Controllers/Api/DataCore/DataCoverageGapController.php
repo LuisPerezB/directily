@@ -49,7 +49,7 @@ final class DataCoverageGapController extends Controller
         $page = $query->paginate((int) ($filters['per_page'] ?? 50));
 
         return response()->json([
-            'data' => $page->getCollection()->map(fn (DataCoverageGap $g) => $g->toResource())->values(),
+            'data' => $page->getCollection()->map(fn (DataCoverageGap $g) => $g->toApi())->values(),
             'meta' => ['current_page' => $page->currentPage(), 'per_page' => $page->perPage(), 'total' => $page->total(), 'last_page' => $page->lastPage()],
         ]);
     }
@@ -74,7 +74,7 @@ final class DataCoverageGapController extends Controller
             'data_source_id' => $gap->data_source_id, 'branch_id' => $gap->branch_id, 'reason' => $gap->reason,
         ]);
 
-        return response()->json(['data' => $gap->refresh()->toResource()], 201);
+        return response()->json(['data' => $gap->refresh()->toApi()], 201);
     }
 
     public function destroy(DataCoverageGap $gap): Response

@@ -25,6 +25,7 @@ import pandas as pd
 from predictily_engine.backtest.rolling import (
     AsOfWindows,
     BacktestPlan,
+    asof_windows,
     eligible_ids,
     plan_backtest,
     run_backtest,
@@ -197,11 +198,7 @@ def run_pipeline(
                               promotions_known_on=data.promotions_known_on)
     # Conocimiento as-of (ADR-V25-23): si hubo documentos tardíos, anulaciones o correcciones, cada ventana entrena con lo que
     # se conocía en SU corte (panel, perfil y variables); sus promociones son las conocidas ese día (sin `promotions_known_on`).
-    versions = data.sales_versions
-    windows = AsOfWindows(data, panel, features,
-                          lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
-                                                    promotion_revisions=data.promotion_revisions),
-                          day_rules) if versions is not None and versions.has_dynamic else None
+    windows = asof_windows(data, panel, features, horizon_end, day_rules)
     plan = plan_backtest(panel, max_windows)
     full_ids = eligible_ids(panel, cutoff)
     use_lgbm = 5 <= len(full_ids) <= max_series_lgbm
@@ -383,6 +380,14 @@ def run_pipeline(
     t3 = time.perf_counter()
     agg_fc = aggregate(series_fc, ["yhat", "revenue_yhat"], ["ds", "step"], AGG_LEVELS)
     node_hist = aggregate(panel.df.assign(y_clean=panel.df["y"]), ["y_clean"], ["ds"], AGG_LEVELS)
+    # Escala de cada nodo en cada ventana: con el conocimiento de ESA ventana (ADR-V25-23), no con la historia final.
+    window_hist = {}
+    if windows is not None:
+        for info in windows.info():
+            if info["panel_rebuilt"]:
+                origin = pd.Timestamp(info["origin"])
+                wp = windows.at(origin)[0]
+                window_hist[origin] = aggregate(wp.df.assign(y_clean=wp.df["y"]), ["y_clean"], ["ds"], AGG_LEVELS)
     agg_cal_day, agg_cal_week, agg_cal_month, agg_bt = None, None, None, pd.DataFrame()
     if not sel_bt.empty:
         b = sel_bt.copy()
@@ -391,7 +396,7 @@ def run_pipeline(
                      product_id=b["unique_id"].str.extract(r"-p(\d+)")[0].astype(int))
         b["category_id"] = b["product_id"].map(cat)
         agg_bt = aggregate(b, ["actual", "yhat"], ["window", "cutoff", "ds", "step"], AGG_LEVELS)
-        agg_bt["scale"] = _node_scales_at(node_hist, agg_bt)
+        agg_bt["scale"] = _node_scales_at(node_hist, agg_bt, window_hist)
         agg_cal_day = ConformalCalibrator(agg_bt.assign(group=agg_bt["level"]), "group", day_bucket, "absolute")
         for gran in ("week", "month"):
             per = to_periods(agg_bt.drop(columns=["cutoff", "scale"]), gran, ["actual", "yhat"], ["window"])
@@ -592,6 +597,9 @@ def _knowledge(data: TenantData, windows: AsOfWindows | None) -> dict[str, Any]:
             "training": "cada ventana del backtest y el período final entrenan con los datos tal como se conocían en SU corte "
                         "(panel, perfil de demanda, escalas y variables)",
             "evaluation_actuals": "los reales con que se evalúa cada ventana son la verdad disponible al corte final",
+            "final_cutoff_knowledge": "el corte final de una ejecución vigente (corte = último dato) conoce hasta la fecha de ejecución "
+                                      "(`knowledge_date`: lo recibido después de la medianoche del último día, p. ej. la carga nocturna, sí cuenta); "
+                                      "una reconstrucción histórica, solo hasta su propio corte",
             "static_catalog": "inventario, catálogo y calendario no están versionados: se usa su estado vigente",
         },
         "source": versions.summary() if versions is not None else {
@@ -601,11 +609,13 @@ def _knowledge(data: TenantData, windows: AsOfWindows | None) -> dict[str, Any]:
     }
 
 
-def _node_scales_at(node_hist: pd.DataFrame, agg_bt: pd.DataFrame) -> pd.Series:
-    """Escala de cada nodo al corte de cada ventana (media de 28 días previos)."""
+def _node_scales_at(node_hist: pd.DataFrame, agg_bt: pd.DataFrame,
+                    window_hist: dict[pd.Timestamp, pd.DataFrame] | None = None) -> pd.Series:
+    """Escala de cada nodo al corte de cada ventana (media de 28 días previos). `window_hist`: historia por nodo con el
+    conocimiento de las ventanas cuyo panel difiere de la verdad final (as-of)."""
     out = pd.Series(np.nan, index=agg_bt.index)
     for cutoff, idx in agg_bt.groupby("cutoff").groups.items():
-        sc = _node_scale_final(node_hist, pd.Timestamp(cutoff))
+        sc = _node_scale_final((window_hist or {}).get(pd.Timestamp(cutoff), node_hist), pd.Timestamp(cutoff))
         out.loc[idx] = agg_bt.loc[idx, "node_key"].map(sc).to_numpy()
     return out.fillna(0.05)
 

@@ -18,7 +18,33 @@ final readonly class SqlConnectionSettings
         public bool $encrypt = true,
         public bool $trustServerCertificate = false,
         public string $charset = 'utf8mb4',
+        /** IP FIJADA por la política de destino (SqlHostPolicy): el dialecto se conecta a ella y nunca vuelve a resolver el host. */
+        public ?string $resolvedAddress = null,
     ) {}
+
+    /** Copia con el destino ya autorizado: `host` queda normalizado (TLS/registro) y la conexión usa la IP fijada. */
+    public function pinnedTo(SqlResolvedTarget $target): self
+    {
+        return new self(
+            host: $target->host,
+            port: $this->port,
+            database: $this->database,
+            sslMode: $this->sslMode,
+            sourceTimezone: $this->sourceTimezone,
+            connectTimeout: $this->connectTimeout,
+            statementTimeout: $this->statementTimeout,
+            encrypt: $this->encrypt,
+            trustServerCertificate: $this->trustServerCertificate,
+            charset: $this->charset,
+            resolvedAddress: $target->address,
+        );
+    }
+
+    /** Dirección a la que debe abrirse el socket: la IP fijada o, en pruebas de dialecto sin política, el host indicado. */
+    public function connectAddress(): string
+    {
+        return $this->resolvedAddress ?? $this->host;
+    }
 
     /** @param array<string, mixed> $config */
     public static function fromConfig(array $config, string $defaultTimezone, int $defaultPort): self

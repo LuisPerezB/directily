@@ -33,16 +33,29 @@ final class SqlServerDialect extends AbstractSqlDialect
     public function connect(SqlConnectionSettings $settings, string $username, string $password): PDO
     {
         $this->requireDriver();
-        $this->assertSafeDsnPart('host', $settings->host);
-        $this->assertSafeDsnPart('database', $settings->database);
-        $dsn = sprintf('sqlsrv:Server=%s,%d;Database=%s;LoginTimeout=%d;Encrypt=%d;TrustServerCertificate=%d;ApplicationIntent=ReadOnly;CharacterSet=UTF-8',
-            $settings->host, $settings->port, $settings->database, $settings->connectTimeout, $settings->encrypt ? 1 : 0, $settings->trustServerCertificate ? 1 : 0);
+        $dsn = $this->dsn($settings);
         $options = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION];
         if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
             $options[constant('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')] = $settings->statementTimeout;
         }
 
         return new PDO($dsn, $username, $password, $options);
+    }
+
+    /**
+     * DSN contra el literal IP fijado por SqlHostPolicy (sin segunda resolución: sin DNS rebinding); un literal IPv6 va entre
+     * corchetes. Con Encrypt=1 y TrustServerCertificate=0 el certificado debe cubrir esa IP (limitación documentada).
+     */
+    public function dsn(SqlConnectionSettings $settings): string
+    {
+        $this->assertSafeDsnPart('host', $settings->host);
+        $address = $settings->connectAddress();
+        $this->assertSafeDsnPart('host', $address);
+        $this->assertSafeDsnPart('database', $settings->database);
+        $server = str_contains($address, ':') ? '['.$address.']' : $address;
+
+        return sprintf('sqlsrv:Server=%s,%d;Database=%s;LoginTimeout=%d;Encrypt=%d;TrustServerCertificate=%d;ApplicationIntent=ReadOnly;CharacterSet=UTF-8',
+            $server, $settings->port, $settings->database, $settings->connectTimeout, $settings->encrypt ? 1 : 0, $settings->trustServerCertificate ? 1 : 0);
     }
 
     public function begin(PDO $pdo, SqlConnectionSettings $settings): void

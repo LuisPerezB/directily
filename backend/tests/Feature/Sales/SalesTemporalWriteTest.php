@@ -13,8 +13,8 @@ use App\Services\Sales\SalesDocumentWriter;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use InvalidArgumentException;
 use Illuminate\Testing\TestResponse;
+use InvalidArgumentException;
 use Tests\Concerns\InteractsWithTenants;
 use Tests\Feature\Sales\Support\ReadsSalesVersions;
 use Tests\TestCase;
@@ -370,6 +370,48 @@ final class SalesTemporalWriteTest extends TestCase
             'subtotal' => 0, 'discount_total' => 0, 'tax_total' => 0, 'total' => 0, 'source_hash' => str_repeat('a', 64), 'ingestion_mode' => 'incremental',
             'known_until' => '2026-06-12 15:30:00+00', 'change_kind' => 'mixed',
         ]);
+    }
+
+    public function test_updating_many_documents_costs_the_same_number_of_queries_as_updating_a_few(): void
+    {
+        $build = fn (int $count, float $qtyA): array => array_map(
+            fn (int $i) => $this->doc(sprintf('M-%03d', $i), [], $this->itemsWithQtyA($qtyA)),
+            range(1, $count),
+        );
+        $queriesFor = function (int $count) use ($build): int {
+            $first = 2.0;
+            $this->travelTo(self::T0);
+            $this->ingest($build($count, $first))->assertOk()->assertJsonPath('data.created', $count);
+            $this->travelTo(self::T1);
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->ingest($build($count, 8.0))->assertOk()->assertJsonPath('data.updated', $count)->assertJsonPath('data.revisions_archived', $count);
+            $queries = count(DB::getQueryLog());
+            DB::disableQueryLog();
+            DB::table('sales')->where('document_number', 'like', 'M-%')->delete();
+
+            return $queries;
+        };
+
+        $few = $queriesFor(5);
+        $many = $queriesFor(60);
+        $this->assertSame($few, $many, 'las consultas por lote no crecen con el número de documentos (sin consultas por documento)');
+    }
+
+    public function test_retention_purge_removes_the_revisions_together_with_their_documents(): void
+    {
+        $old = fn (float $qty) => $this->doc('V-1', ['issued_at' => '2020-01-15T10:00:00-05:00'], $this->itemsWithQtyA($qty));
+        $this->ingest([$old(2)], 'backfill')->assertOk();
+        $this->ingest([$old(3)], 'backfill')->assertOk()->assertJsonPath('data.revisions_archived', 1);
+        $this->ingest([$this->doc('V-2')], 'backfill')->assertOk(); // reciente: se conserva
+        $this->assertSame(1, DB::table('sales_document_revisions')->count());
+        $this->assertSame(2, DB::table('sale_item_revisions')->count());
+
+        $this->artisan('predictily:purge')->assertSuccessful();
+
+        $this->assertSame(['V-2'], DB::table('sales')->pluck('document_number')->all(), 'la retención borra el documento vencido');
+        $this->assertSame(0, DB::table('sales_document_revisions')->count(), 'y, en cascada, sus versiones archivadas');
+        $this->assertSame(0, DB::table('sale_item_revisions')->count());
     }
 
     public function test_the_writer_requires_an_explicit_valid_ingestion_mode(): void

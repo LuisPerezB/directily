@@ -140,6 +140,8 @@ final class SqlConnectorContractTest extends TestCase
     /** Contrato común contra un servidor real: lee en páginas, respeta :since y rechaza escrituras en el propio motor cuando existe modo de solo lectura. */
     private function runServerContract(SqlDialect $dialect, SqlConnectionSettings $settings, string $user, string $password): void
     {
+        // El servidor de pruebas es local o de red privada: la política SSRF lo exige declarado en la lista blanca (ADR-V25-15).
+        config(['connectors.sql.allowed_hosts' => array_values(array_unique([$settings->host, '127.0.0.1'])), 'connectors.sql.allowed_cidrs' => []]);
         $connection = SqlSourceConnection::open($dialect, $settings, $user, $password);
         try {
             $query = SqlQueryGuard::validate('SELECT 1 AS uno', $dialect->name());

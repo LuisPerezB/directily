@@ -244,7 +244,9 @@ final class CanonicalStager
 
             return;
         }
-        $recorded = $parsed[0];
+        // En UTC: Eloquent guarda un Carbon con el formato de su propia zona (sin desplazamiento), así que una marca de agua en la zona
+        // de la empresa se guardaría corrida por su desfase horario. La marca debe ser el instante real.
+        $recorded = $parsed[0]->utc();
         if ($recorded->greaterThan($bound)) {
             $result->futureRecordedAt++;
 

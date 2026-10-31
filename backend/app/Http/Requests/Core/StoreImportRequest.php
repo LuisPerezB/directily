@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Requests\Core;
 
 use App\Services\Imports\ImportEntity;
+use App\Services\Imports\Reading\ReaderFactory;
+use App\Services\Imports\Reading\UnsafeSpreadsheetException;
+use App\Services\Imports\Reading\ZipArchiveInspector;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\Rule;
 
 final class StoreImportRequest extends FormRequest
@@ -19,6 +23,21 @@ final class StoreImportRequest extends FormRequest
             'entity_type' => ['required', Rule::in(ImportEntity::values())],
             'data_source_id' => ['sometimes', 'nullable', 'integer', TenantRule::exists('data_sources')],
         ];
+    }
+
+    /**
+     * Endurecimiento de cargas (ADR-V25-15): un XLSX es un ZIP y se inspecciona su directorio ANTES de guardarlo y de analizarlo
+     * (nº de entradas, tamaño descomprimido, razón de compresión, archivos anidados). Cuesta milisegundos; un libro que no cumple
+     * se rechaza con 413 (tamaño descomprimido/razón) o 422 y un código estable `xlsx_*`, sin crear importación ni guardar el archivo.
+     *
+     * @throws UnsafeSpreadsheetException
+     */
+    protected function passedValidation(): void
+    {
+        $file = $this->file('file');
+        if ($file instanceof UploadedFile && ReaderFactory::formatFromExtension($file->getClientOriginalExtension()) === 'xlsx') {
+            ZipArchiveInspector::fromConfig()->inspect((string) $file->getRealPath());
+        }
     }
 
     /** @return array<string, string> */

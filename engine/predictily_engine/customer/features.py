@@ -204,8 +204,26 @@ class CutoffFrame:
     horizon: dict[int, pd.DataFrame]
 
 
+@dataclass
+class _Events:
+    """Índices de eventos de UN estado de conocimiento: compras de cada relación, días de compra de cada comprador, ventas
+    por producto, devoluciones y cambios de precio de lista observados."""
+
+    ev: EventIndex
+    cstore: EventIndex
+    pstore: EventIndex
+    rev: EventIndex
+    last_change: np.ndarray
+
+
 class FeatureBuilder:
-    """Construye candidatos, variables y etiquetas a partir de un `CustomerData`."""
+    """Construye candidatos, variables y etiquetas a partir de un `CustomerData`.
+
+    Conocimiento as-of (ADR-V25-23): las VARIABLES de un corte `c` se calculan con los eventos tal como se conocían ese día
+    (`events_at(c)`: un documento cargado después de `c` o una anulación posterior no las alteran) y las ETIQUETAS de la ventana
+    (c, c+H] con el conocimiento más reciente (`data.purchases`/`data.returns`: la verdad disponible al corte final). Si los datos
+    no traen versiones (`purchase_versions`) o ninguna difiere de la verdad, todos los cortes comparten un único índice y el
+    resultado es idéntico al de antes."""
 
     def __init__(self, data: CustomerData, cfg: dict[str, Any], max_horizon: int = 90, last_day: int | None = None,
                  extend_to: int | None = None) -> None:
@@ -214,19 +232,23 @@ class FeatureBuilder:
         p = data.purchases
         self.empty = p is None or len(p) == 0
         self.n_rels = 0
+        self._versions = getattr(data, "purchase_versions", None)
+        self._dynamic = False
+        self._views: dict[int, _Events] = {}
         if self.empty:
             return
-        p = p.copy()
-        p["day"] = to_day(p["ds"])
-        key = ["customer_id", "product_id", "day"]
-        agg = p.groupby(key, sort=False).agg(qty=("qty", "sum"), net=("net_amount", "sum"), gross=("gross_amount", "sum"),
-                                              disc=("discount_amount", "sum")).reset_index()
-        main = p.sort_values("qty", ascending=False, kind="mergesort").drop_duplicates(key)[key + ["branch_id", "currency"]]
-        ev = agg.merge(main, on=key, how="left")
-        cur_codes, cur_uniques = pd.factorize(ev["currency"].fillna("USD"))
+        truth_ev = self._event_frame(p)
+        # Universo de relaciones, compradores y productos. Si hay versiones que difieren de la verdad (cargas tardías, anulaciones
+        # o correcciones) abarca TODAS las versiones: los códigos son los mismos en la vista de cada corte y en la verdad.
+        universe_ev = truth_ev
+        if self._versions is not None and self._versions.has_dynamic:
+            self._dynamic = True
+            universe_ev = self._event_frame(pd.concat([self._versions.all_purchase_cells(), p], ignore_index=True))
+        cur_codes, cur_uniques = pd.factorize(universe_ev["currency"].fillna("USD"))
         self.currencies: list[str] = [str(c) for c in cur_uniques]
-        ev["cur"] = cur_codes
-        rel_codes, rel_uniques = pd.MultiIndex.from_arrays([ev["customer_id"].astype(np.int64), ev["product_id"].astype(np.int64)]).factorize()
+        self._currency_index = pd.Index(self.currencies)
+        rel_codes, rel_uniques = pd.MultiIndex.from_arrays([universe_ev["customer_id"].astype(np.int64),
+                                                            universe_ev["product_id"].astype(np.int64)]).factorize()
         self.n_rels = len(rel_uniques)
         self.rel_customer = np.asarray(rel_uniques.get_level_values(0), dtype=np.int64)
         self.rel_product = np.asarray(rel_uniques.get_level_values(1), dtype=np.int64)
@@ -237,40 +259,14 @@ class FeatureBuilder:
         self.rel_pcode = prod_codes.astype(np.int64)
         self.n_prod = len(prod_uniques)
         self.rel_index = rel_uniques  # para mapear devoluciones
-
-        qty = ev["qty"].to_numpy(dtype=float)
-        net = ev["net"].to_numpy(dtype=float)
-        gross = ev["gross"].to_numpy(dtype=float)
-        self.ev = EventIndex(
-            rel_codes, ev["day"].to_numpy(), self.n_rels, qty=qty, net=net, gross=gross, disc=ev["disc"].to_numpy(dtype=float),
-            branch=ev["branch_id"].fillna(-1).to_numpy(dtype=float), cur=ev["cur"].to_numpy(dtype=float),
-            price=_safe_div(net, qty), listp=_safe_div(gross, qty))
-        # días de compra por comprador (cualquier producto)
-        cd = ev.groupby(["customer_id", "day"], as_index=False).agg(net=("net", "sum"))
-        ccodes = pd.Index(cust_uniques).get_indexer(cd["customer_id"].astype(np.int64))
-        self.cstore = EventIndex(ccodes, cd["day"].to_numpy(), self.n_cust, net=cd["net"].to_numpy(dtype=float))
+        self._cust_index = pd.Index(cust_uniques)
+        self._prod_index = pd.Index(prod_uniques)
         self.cust_ids = np.asarray(cust_uniques, dtype=np.int64)  # código interno → customer_id
-        # ventas por producto-día (todos los compradores modelados)
-        pd_ = ev.assign(pcode=pd.Index(prod_uniques).get_indexer(ev["product_id"].astype(np.int64)))
-        pagg = pd_.groupby(["pcode", "day"], sort=False).agg(qty=("qty", "sum"), net=("net", "sum"), gross=("gross", "sum"),
-                                                             disc=("disc", "sum")).reset_index()
-        self.pstore = EventIndex(pagg["pcode"].to_numpy(), pagg["day"].to_numpy(), self.n_prod,
-                                 qty=pagg["qty"].to_numpy(), net=pagg["net"].to_numpy(), gross=pagg["gross"].to_numpy(),
-                                 disc=pagg["disc"].to_numpy())
-        self._price_changes()
-        # devoluciones (aparte)
-        r = data.returns
-        if r is not None and len(r):
-            r = r.copy()
-            r["day"] = to_day(r["ds"])
-            ridx = self.rel_index.get_indexer(pd.MultiIndex.from_arrays([r["customer_id"].astype(np.int64), r["product_id"].astype(np.int64)]))
-            keep = ridx >= 0
-            self.rev = EventIndex(ridx[keep], r["day"].to_numpy()[keep], self.n_rels, qty=r["qty"].to_numpy(dtype=float)[keep])
-        else:
-            self.rev = EventIndex(np.zeros(0), np.zeros(0), self.n_rels, qty=np.zeros(0))
+        self._truth = self._build_events(truth_ev, data.returns)
+        self._truth_day = int(to_day(self._versions.final)) if self._versions is not None else None
         # primera/última fecha para calendarios e inventario
-        self.day_min = int(self.ev.day.min())
-        self.day_max = int(self.ev.day.max())
+        self.day_min = int(universe_ev["day"].min())
+        self.day_max = int(universe_ev["day"].max())
         last = to_day(data.last_complete_day()) if data.last_complete_day() is not None else self.day_max
         self.last_complete = int(last_day if last_day is not None else last)
         hi_day = max(self.day_max, self.last_complete, extend_to or 0) + max(max_horizon, 90) + 30
@@ -281,9 +277,98 @@ class FeatureBuilder:
         self.product_category = (products["category_id"].to_dict() if len(products) and "category_id" in products else {})
         self._promo_cache: dict[int, pd.DataFrame] = {}
 
+    # ── eventos de un estado de conocimiento ──
+    @staticmethod
+    def _event_frame(p: pd.DataFrame) -> pd.DataFrame:
+        """Compras por comprador × producto × día (suma de todas las líneas) con la sucursal y la moneda principales."""
+        p = p.copy()
+        p["day"] = to_day(p["ds"])
+        key = ["customer_id", "product_id", "day"]
+        agg = p.groupby(key, sort=False).agg(qty=("qty", "sum"), net=("net_amount", "sum"), gross=("gross_amount", "sum"),
+                                              disc=("discount_amount", "sum")).reset_index()
+        main = p.sort_values("qty", ascending=False, kind="mergesort").drop_duplicates(key)[key + ["branch_id", "currency"]]
+        return agg.merge(main, on=key, how="left")
+
+    def _build_events(self, ev: pd.DataFrame, returns: pd.DataFrame | None) -> _Events:
+        ev = ev.copy()
+        ev["cur"] = self._currency_index.get_indexer(ev["currency"].fillna("USD")).astype(np.int64)
+        rel_codes = self.rel_index.get_indexer(pd.MultiIndex.from_arrays([ev["customer_id"].astype(np.int64),
+                                                                          ev["product_id"].astype(np.int64)]))
+        qty = ev["qty"].to_numpy(dtype=float)
+        net = ev["net"].to_numpy(dtype=float)
+        gross = ev["gross"].to_numpy(dtype=float)
+        events = EventIndex(
+            rel_codes, ev["day"].to_numpy(), self.n_rels, qty=qty, net=net, gross=gross, disc=ev["disc"].to_numpy(dtype=float),
+            branch=ev["branch_id"].fillna(-1).to_numpy(dtype=float), cur=ev["cur"].to_numpy(dtype=float),
+            price=_safe_div(net, qty), listp=_safe_div(gross, qty))
+        # días de compra por comprador (cualquier producto)
+        cd = ev.groupby(["customer_id", "day"], as_index=False).agg(net=("net", "sum"))
+        ccodes = self._cust_index.get_indexer(cd["customer_id"].astype(np.int64))
+        cstore = EventIndex(ccodes, cd["day"].to_numpy(), self.n_cust, net=cd["net"].to_numpy(dtype=float))
+        # ventas por producto-día (todos los compradores modelados)
+        pd_ = ev.assign(pcode=self._prod_index.get_indexer(ev["product_id"].astype(np.int64)))
+        pagg = pd_.groupby(["pcode", "day"], sort=False).agg(qty=("qty", "sum"), net=("net", "sum"), gross=("gross", "sum"),
+                                                             disc=("disc", "sum")).reset_index()
+        pstore = EventIndex(pagg["pcode"].to_numpy(), pagg["day"].to_numpy(), self.n_prod,
+                            qty=pagg["qty"].to_numpy(), net=pagg["net"].to_numpy(), gross=pagg["gross"].to_numpy(),
+                            disc=pagg["disc"].to_numpy())
+        # devoluciones (aparte)
+        r = returns
+        if r is not None and len(r):
+            r = r.copy()
+            r["day"] = to_day(r["ds"])
+            ridx = self.rel_index.get_indexer(pd.MultiIndex.from_arrays([r["customer_id"].astype(np.int64), r["product_id"].astype(np.int64)]))
+            keep = ridx >= 0
+            rev = EventIndex(ridx[keep], r["day"].to_numpy()[keep], self.n_rels, qty=r["qty"].to_numpy(dtype=float)[keep])
+        else:
+            rev = EventIndex(np.zeros(0), np.zeros(0), self.n_rels, qty=np.zeros(0))
+        return _Events(events, cstore, pstore, rev, self._price_changes(pstore))
+
+    @property
+    def ev(self) -> EventIndex:
+        return self._truth.ev
+
+    @property
+    def cstore(self) -> EventIndex:
+        return self._truth.cstore
+
+    @property
+    def pstore(self) -> EventIndex:
+        return self._truth.pstore
+
+    @property
+    def rev(self) -> EventIndex:
+        return self._truth.rev
+
+    def events_at(self, c: int) -> _Events:
+        """Índices con lo que se conocía al corte `c` (día entero). Coinciden con los de la verdad (`ev`, `cstore`, ...) salvo que
+        haya versiones cuya visibilidad dependa del corte; en ese caso se arma una vista propia (se conservan las dos últimas)."""
+        if not self._dynamic or c >= self._truth_day:
+            return self._truth
+        day = pd.Timestamp(from_day(int(c)))
+        if not self._versions.differs_from_truth(day):
+            return self._truth
+        view = self._views.get(int(c))
+        if view is None:
+            cells = self._versions.purchase_cells(day)
+            if len(cells):
+                ev = self._event_frame(cells)
+            else:
+                ev = pd.DataFrame({"customer_id": np.zeros(0, np.int64), "product_id": np.zeros(0, np.int64), "day": np.zeros(0, np.int64),
+                                   "qty": np.zeros(0), "net": np.zeros(0), "gross": np.zeros(0), "disc": np.zeros(0),
+                                   "branch_id": np.zeros(0), "currency": pd.Series(dtype=object)})
+            view = self._build_events(ev, self._versions.return_cells(day))
+            while len(self._views) >= 2:
+                self._views.pop(next(iter(self._views)))
+            self._views[int(c)] = view
+        return view
+
+    def cstore_at(self, c: int) -> EventIndex:
+        """Días de compra de cada comprador tal como se conocían al corte `c`."""
+        return self.events_at(c).cstore
+
     # ── cambios de precio de lista observados (derivados de las ventas, solo pasado) ──
-    def _price_changes(self) -> None:
-        ps = self.pstore
+    def _price_changes(self, ps: EventIndex) -> np.ndarray:
         lp = _safe_div(ps.values["gross"], ps.values["qty"])
         prev = np.concatenate(([np.nan], lp[:-1]))
         same = np.concatenate(([False], ps.group[1:] == ps.group[:-1]))
@@ -296,17 +381,20 @@ class FeatureBuilder:
             s, e = ps.start[g], ps.end[g]
             if e > s:
                 out[s:e] = np.maximum.accumulate(marked[s:e])
-        self.last_change = out
+        return out
 
     # ── candidatos ──
     def candidate_rels(self, c: int) -> tuple[np.ndarray, np.ndarray]:
         """(relaciones candidatas al corte c, posición `hi` de cada una). Solo usa eventos ≤ c."""
         if self.empty:
             return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
+        ev = self.events_at(c).ev
+        if ev.n == 0:
+            return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
         rels = np.arange(self.n_rels)
-        hi_all = self.ev.pos(rels, c)
-        n_all = hi_all - self.ev.start
-        last_day = np.where(n_all > 0, self.ev.day[np.clip(hi_all - 1, 0, self.ev.n - 1)], -10 ** 9)
+        hi_all = ev.pos(rels, c)
+        n_all = hi_all - ev.start
+        last_day = np.where(n_all > 0, ev.day[np.clip(hi_all - 1, 0, ev.n - 1)], -10 ** 9)
         mask = (n_all >= int(self.cfg["min_relation_purchases"])) & ((c - last_day) <= int(self.cfg["candidate_max_recency_days"]))
         R = np.nonzero(mask)[0]
         cap = int(self.cfg["max_candidates_per_customer"])
@@ -324,9 +412,10 @@ class FeatureBuilder:
         """Conteos del corte para documentar exclusiones (no altera candidatos)."""
         if self.empty:
             return {"relations_with_history": 0, "candidates": 0, "excluded_stale": 0, "customers": 0}
+        ev = self.events_at(c).ev
         rels = np.arange(self.n_rels)
-        hi_all = self.ev.pos(rels, c)
-        n_all = hi_all - self.ev.start
+        hi_all = ev.pos(rels, c)
+        n_all = hi_all - ev.start
         has = n_all > 0
         R, _ = self.candidate_rels(c)
         return {"relations_with_history": int(has.sum()), "candidates": int(len(R)),
@@ -339,7 +428,8 @@ class FeatureBuilder:
         if n == 0:
             return CutoffFrame(c, pd.DataFrame(columns=ID_COLUMNS + BASE_FEATURES + SUPPORT_COLUMNS),
                                {h: pd.DataFrame(columns=HORIZON_FEATURES + REFERENCE_COLUMNS) for h in horizons})
-        ev, cs, ps = self.ev, self.cstore, self.pstore
+        events = self.events_at(c)  # lo que se conocía en este corte (la verdad si nada difiere)
+        ev, cs, ps = events.ev, events.cstore, events.pstore
         st = ev.start[R]
         last_idx = hi - 1
         last_day = ev.day[last_idx]
@@ -406,7 +496,7 @@ class FeatureBuilder:
         pg, pdc = ps.cum["gross"], ps.cum["disc"]
         feats["prod_disc_30"] = _safe_div(pdc[phi] - pdc[p30], pg[phi] - pg[p30])
         lc_idx = np.clip(phi - 1, 0, max(ps.n - 1, 0))
-        lc = np.where((phi - 1) >= ps.start[pc], self.last_change[lc_idx], -1.0)
+        lc = np.where((phi - 1) >= ps.start[pc], events.last_change[lc_idx], -1.0)
         feats["days_since_price_change"] = np.where(lc >= 0, np.minimum(c - lc, 365.0), np.nan)
         n90_pos = feats["rel_n_90"] > 0
         feats["prod_buyers_90"] = np.bincount(pc[n90_pos], minlength=self.n_prod)[pc].astype(float)
@@ -432,9 +522,9 @@ class FeatureBuilder:
         feats["rel_share_180"] = _safe_div(feats["rel_n_180"], cust_events_180)
 
         # devoluciones (informativas)
-        rn = self.rev.count(R, c - 180, c).astype(float)
+        rn = events.rev.count(R, c - 180, c).astype(float)
         feats["rel_return_days_180"] = rn
-        feats["rel_return_qty_ratio_180"] = _safe_div(self.rev.total("qty", R, c - 180, c), feats["qty_sum_180"])
+        feats["rel_return_qty_ratio_180"] = _safe_div(events.rev.total("qty", R, c - 180, c), feats["qty_sum_180"])
 
         # sucursal habitual = sucursal de la última compra de la relación al corte
         branch = ev.values["branch"][last_idx].astype(np.int64)

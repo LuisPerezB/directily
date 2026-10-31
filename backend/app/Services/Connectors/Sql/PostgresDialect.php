@@ -10,6 +10,7 @@ use PDO;
 /**
  * PostgreSQL. Transacción REPEATABLE READ + READ ONLY (instantánea coherente y sin escritura posible),
  * statement_timeout y lectura por cursor del servidor (páginas de N filas, sin cargar todo en memoria).
+ * Conexión a la IP fijada por la política de destino (`hostaddr`), conservando `host` para TLS.
  */
 final class PostgresDialect extends AbstractSqlDialect
 {
@@ -28,19 +29,34 @@ final class PostgresDialect extends AbstractSqlDialect
     public function connect(SqlConnectionSettings $settings, string $username, string $password): PDO
     {
         $this->requireDriver();
-        $this->assertSafeDsnPart('host', $settings->host);
-        $this->assertSafeDsnPart('database', $settings->database);
-        if (! in_array($settings->sslMode, ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'], true)) {
-            throw new \InvalidArgumentException('sslmode no válido.');
-        }
-        $dsn = sprintf('pgsql:host=%s;port=%d;dbname=%s;sslmode=%s;connect_timeout=%d;application_name=predictily-sync',
-            $settings->host, $settings->port, $settings->database, $settings->sslMode, $settings->connectTimeout);
+        $dsn = $this->dsn($settings);
 
         return new PDO($dsn, $username, $password, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_EMULATE_PREPARES => false,
             PDO::ATTR_PERSISTENT => false,
         ]);
+    }
+
+    /**
+     * DSN de libpq. `hostaddr` fija la IP validada por SqlHostPolicy (libpq no vuelve a resolver el nombre: sin DNS rebinding) y
+     * `host` se conserva para la verificación TLS (sslmode=verify-full compara el certificado con el nombre, no con la IP).
+     */
+    public function dsn(SqlConnectionSettings $settings): string
+    {
+        $this->assertSafeDsnPart('host', $settings->host);
+        $this->assertSafeDsnPart('database', $settings->database);
+        if (! in_array($settings->sslMode, ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'], true)) {
+            throw new \InvalidArgumentException('sslmode no válido.');
+        }
+        $hostaddr = '';
+        if ($settings->resolvedAddress !== null) {
+            $this->assertSafeDsnPart('hostaddr', $settings->resolvedAddress);
+            $hostaddr = 'hostaddr='.$settings->resolvedAddress.';';
+        }
+
+        return sprintf('pgsql:host=%s;%sport=%d;dbname=%s;sslmode=%s;connect_timeout=%d;application_name=predictily-sync',
+            $settings->host, $hostaddr, $settings->port, $settings->database, $settings->sslMode, $settings->connectTimeout);
     }
 
     public function begin(PDO $pdo, SqlConnectionSettings $settings): void

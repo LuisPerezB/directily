@@ -137,13 +137,13 @@ class SalesCoverage:
                 setattr(data, name, df[keep].reset_index(drop=True))
         self.dropped_before_from = dropped
         versions = getattr(data, "sales_versions", None)
-        if versions is not None and len(versions) and (self.from_ is not None or self.branch_from):
-            lines = versions.lines
-            keep_v = pd.Series(True, index=lines.index)
+        if versions is not None and versions.n_cells and (self.from_ is not None or self.branch_from):
+            cells = versions.cells
+            keep_v = pd.Series(True, index=cells.index)
             if self.from_ is not None:
-                keep_v &= lines["ds"] >= pd.Timestamp(self.from_)
+                keep_v &= cells["ds"] >= pd.Timestamp(self.from_)
             for b, f in self.branch_from.items():
-                keep_v &= ~((lines["branch_id"] == b) & (lines["ds"] < pd.Timestamp(f)))
+                keep_v &= ~((cells["branch_id"] == b) & (cells["ds"] < pd.Timestamp(f)))
             if not keep_v.all():
                 data.sales_versions = versions.restrict(keep_v.to_numpy())
                 data.sales_knowledge = data.sales_versions.summary()

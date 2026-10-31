@@ -8,6 +8,7 @@ use App\Enums\TenantRole;
 use App\Models\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\SignsModelArtifacts;
 use Tests\Feature\Customer\Support\CustomerFixtures;
 use Tests\TestCase;
 
@@ -16,9 +17,17 @@ class CustomerModelRollbackTest extends TestCase
 {
     use CustomerFixtures;
     use RefreshDatabase;
+    use SignsModelArtifacts;
 
     /** @var list<string> */
     private array $files = [];
+
+    /** ADR-V25-20: revertir a un artefacto visible exige, además del SHA-256, una firma Ed25519 de una clave de confianza. */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->trustNewSigningKey();
+    }
 
     protected function tearDown(): void
     {
@@ -44,6 +53,7 @@ class CustomerModelRollbackTest extends TestCase
             $path = sys_get_temp_dir().'/customer-rollback-'.bin2hex(random_bytes(6)).'.joblib';
             file_put_contents($path, $content.$version);
             $this->files[] = $path;
+            $this->files[] = $this->signArtifactFile($path, $tenant->id);
             $sha = hash_file('sha256', $path);
         }
 
@@ -116,6 +126,7 @@ class CustomerModelRollbackTest extends TestCase
         $stored = $tenant->id.'/customer/run-35/h30_probability_logistic.joblib';
         mkdir(dirname($dir.'/'.$stored), 0777, true);
         file_put_contents($dir.'/'.$stored, 'artefacto-motor');
+        $this->signArtifactFile($dir.'/'.$stored, $tenant->id);
         $good = hash('sha256', 'artefacto-motor');
         $old = $this->model($tenant, 'h30:probability', 'retired', 'v1', ['artifact_path' => $stored, 'artifact_sha256' => $good], false);
         $api = $this->actingAsTenantUser($user, $tenant);

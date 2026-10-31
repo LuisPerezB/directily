@@ -4,6 +4,12 @@ Misma garantía de aislamiento que `TenantRepository`: toda consulta es parametr
 `:tenant_id`; `_read` rechaza SQL que no filtre por empresa. Las compras válidas excluyen anuladas,
 notas de crédito/devoluciones, ventas anónimas y compradores genéricos; las devoluciones se leen
 aparte (nunca restan de la cantidad de compra).
+
+Compras as-of (ADR-V25-23): `purchases(through)` y `returns(through)` devuelven lo que se CONOCÍA al corte (la versión del documento
+vigente ese día), no el estado actual: un documento cargado después o una anulación posterior no alteran un corte pasado. Ambas se
+derivan de UNA lectura de la vista `sales_line_versions` (`purchase_versions`), con la que el Customer Core arma además las
+variables de cada corte con su propio conocimiento y las etiquetas con el más reciente (la verdad al corte final). Con `knowledge`
+(un día posterior al corte) rige lo conocido hasta ese día: así lee su período final una ejecución vigente (ver `data.asof`).
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import Connection, text
 
+from predictily_engine.data.asof import PurchaseVersions, to_day, with_knowledge
 from predictily_engine.db.repository import TenantRepository, TenantScopeError
 from predictily_engine.extensions.data_core import effective_coverage
 
@@ -26,6 +33,8 @@ class CustomerRepository:
         self.base = TenantRepository(conn, tenant_id)  # valida tenant_id
         self.conn = conn
         self.tenant_id = tenant_id
+        # lecturas de versiones ya hechas (por tipo y filtros): (corte final, conocimiento, líneas)
+        self._lines: dict[tuple, tuple[pd.Timestamp, pd.Timestamp, pd.DataFrame]] = {}
 
     # ── infraestructura ──
     def _read(self, sql: str, **params: Any) -> pd.DataFrame:
@@ -84,63 +93,112 @@ class CustomerRepository:
         r = df.iloc[0]
         return (None if pd.isna(r["first_day"]) else r["first_day"], None if pd.isna(r["last_day"]) else r["last_day"])
 
-    def purchases(self, through: date, exclude_generic: bool, generic_codes: list[str]) -> pd.DataFrame:
-        """Compras válidas por comprador identificado × producto × sucursal × día (cantidades de todas las líneas)."""
-        generic_sql = ("AND c.is_generic = false AND c.external_code <> ALL(CAST(:codes AS text[])) "
-                       if exclude_generic else "")
-        return self._read(
-            f"""
-            SELECT s.customer_id, si.product_id, si.branch_id, si.sale_date AS ds, s.currency,
-                   SUM(si.quantity)::float8 AS qty,
-                   SUM(si.net_amount)::float8 AS net_amount,
-                   SUM(si.quantity * si.unit_price)::float8 AS gross_amount,
-                   SUM(si.discount_amount)::float8 AS discount_amount
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            JOIN customers c ON c.id = s.customer_id AND c.tenant_id = s.tenant_id
-            WHERE si.tenant_id = :tenant_id AND s.tenant_id = :tenant_id AND c.tenant_id = :tenant_id
-              AND s.status = 'completed' AND s.document_type IN {VALID_DOCS}
-              AND si.is_return = false AND si.quantity > 0 AND c.deleted_at IS NULL
-              {generic_sql}
-              AND si.sale_date <= :through
-            GROUP BY s.customer_id, si.product_id, si.branch_id, si.sale_date, s.currency
-            ORDER BY s.customer_id, si.product_id, si.sale_date
-            """,
-            through=through, codes=list(generic_codes))
+    def _version_lines(self, kind: str, through: date, exclude_generic: bool = True, generic_codes: tuple[str, ...] = (),
+                       knowledge: date | None = None) -> tuple[pd.DataFrame, str]:
+        """Compras válidas (`kind = 'purchases'`) o devoluciones (`'returns'`) con fecha ≤ `through` conocidas hasta el día `knowledge`
+        (por defecto el propio corte), AGREGADAS por comprador × producto × sucursal × día × moneda y ventana de visibilidad (`c_from`,
+        `c_to`: primer y último corte en que la versión del documento es visible; ver `data.asof`). Una lectura por tipo y filtros; un corte o
+        un conocimiento mayores la reemplazan por otra que cubre también lo ya leído."""
+        final = to_day(through)
+        know = final if knowledge is None else max(final, to_day(knowledge))
+        key = (kind, bool(exclude_generic), tuple(generic_codes))
+        tz = self.base.timezone()
+        cached = self._lines.get(key)
+        if cached is not None and cached[0] >= final and cached[1] >= know:
+            return cached[2], tz
+        if cached is not None:
+            final, know = max(final, cached[0]), max(know, cached[1])
+        self.conn.execute(text("SET LOCAL jit = off"))  # escaneo con agregación: JIT solo suma tiempo de compilación
+        window = ("v.sale_date AS ds, s.currency, (v.ingestion_mode = 'incremental') AS incremental, "
+                  "GREATEST(v.sale_date, CAST(v.known_from AT TIME ZONE CAST(:tz AS text) AS date)) AS c_from, "
+                  "CAST(v.known_until AT TIME ZONE CAST(:tz AS text) AS date) - 1 AS c_to, ")
+        source = "FROM sales_line_versions v JOIN sales s ON s.id = v.sale_id AND s.tenant_id = v.tenant_id "
+        if kind == "purchases":
+            generic_sql = ("AND c.is_generic = false AND c.external_code <> ALL(CAST(:codes AS text[])) "
+                           if exclude_generic else "")
+            sql = f"""
+                WITH v AS (
+                    SELECT v.customer_id, v.product_id, v.branch_id, {window}
+                           v.quantity, v.net_amount, v.unit_price, v.discount_amount
+                    {source}
+                    JOIN customers c ON c.id = v.customer_id AND c.tenant_id = v.tenant_id
+                    WHERE v.tenant_id = :tenant_id AND s.tenant_id = :tenant_id AND c.tenant_id = :tenant_id
+                      AND v.status = 'completed' AND v.document_type IN {VALID_DOCS}
+                      AND v.is_return = false AND v.quantity > 0 AND c.deleted_at IS NULL
+                      {generic_sql}
+                      AND v.sale_date <= :through
+                )
+                SELECT customer_id, product_id, branch_id, ds, currency, false AS is_ret, incremental, c_from, c_to,
+                       SUM(quantity)::float8 AS qty, SUM(net_amount)::float8 AS net_amount,
+                       SUM(quantity * unit_price)::float8 AS gross_amount, SUM(discount_amount)::float8 AS discount_amount,
+                       COUNT(*) AS lines
+                FROM v WHERE c_from <= :knowledge AND (c_to IS NULL OR c_to >= c_from)
+                GROUP BY customer_id, product_id, branch_id, ds, currency, incremental, c_from, c_to
+                """
+        else:
+            sql = f"""
+                WITH v AS (
+                    SELECT v.customer_id, v.product_id, v.branch_id, {window} v.quantity
+                    {source}
+                    WHERE v.tenant_id = :tenant_id AND s.tenant_id = :tenant_id AND v.status = 'completed'
+                      AND v.customer_id IS NOT NULL AND (v.is_return = true OR v.document_type = 'credit_note')
+                      AND v.sale_date <= :through
+                )
+                SELECT customer_id, product_id, branch_id, ds, currency, true AS is_ret, incremental, c_from, c_to,
+                       SUM(quantity)::float8 AS qty, 0.0::float8 AS net_amount, 0.0::float8 AS gross_amount,
+                       0.0::float8 AS discount_amount, COUNT(*) AS lines
+                FROM v WHERE c_from <= :knowledge AND (c_to IS NULL OR c_to >= c_from)
+                GROUP BY customer_id, product_id, branch_id, ds, currency, incremental, c_from, c_to
+                """
+        df = self._read(sql, through=final.date(), knowledge=know.date(), tz=tz, codes=list(generic_codes))
+        self._lines[key] = (final, know, df)
+        return df, tz
 
-    def returns(self, through: date) -> pd.DataFrame:
-        """Devoluciones (notas de crédito o líneas marcadas) de compradores identificados: se informan aparte."""
-        return self._read(
-            """
-            SELECT s.customer_id, si.product_id, si.sale_date AS ds, SUM(si.quantity)::float8 AS qty
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            WHERE si.tenant_id = :tenant_id AND s.tenant_id = :tenant_id AND s.status = 'completed'
-              AND s.customer_id IS NOT NULL
-              AND (si.is_return = true OR s.document_type = 'credit_note')
-              AND si.sale_date <= :through
-            GROUP BY s.customer_id, si.product_id, si.sale_date
-            """,
-            through=through)
+    def purchase_versions(self, through: date, exclude_generic: bool, generic_codes: list[str],
+                          knowledge: date | None = None) -> PurchaseVersions:
+        """Versiones de las líneas de compra y devolución de compradores identificados hasta `through`, con su ventana de
+        conocimiento: ÚNICA lectura con la que el Customer Core deriva cada vista as-of (ver `data.asof.PurchaseVersions`).
+        `knowledge`: hasta qué día llega lo conocido para la verdad del corte final (por defecto el propio corte)."""
+        codes = tuple(generic_codes)
+        p, tz = self._version_lines("purchases", through, exclude_generic, codes, knowledge)
+        r, _ = self._version_lines("returns", through, knowledge=knowledge)
+        return PurchaseVersions(pd.concat([p, r], ignore_index=True), tz, to_day(through), knowledge)
 
-    def excluded_sales_stats(self, through: date, generic_codes: list[str]) -> dict[str, Any]:
-        """Líneas y unidades de ventas válidas que NO se atribuyen a un comprador modelable (anónimas/genéricas)."""
+    def purchases(self, through: date, exclude_generic: bool, generic_codes: list[str],
+                  knowledge: date | None = None) -> pd.DataFrame:
+        """Compras válidas por comprador identificado × producto × sucursal × día (cantidades de todas las líneas) tal como se
+        conocían al corte `through`: un documento cargado después no aparece y uno anulado o corregido después aparece con la
+        versión que tenía ese día. Con `knowledge`, lo conocido hasta ese día."""
+        versions = self.purchase_versions(through, exclude_generic, generic_codes, knowledge)
+        return with_knowledge(versions.purchase_cells(through, knowledge), versions)
+
+    def returns(self, through: date, knowledge: date | None = None) -> pd.DataFrame:
+        """Devoluciones (notas de crédito o líneas marcadas) de compradores identificados conocidas al corte: se informan aparte."""
+        lines, tz = self._version_lines("returns", through, knowledge=knowledge)
+        return PurchaseVersions(lines, tz, to_day(through), knowledge).return_cells(through, knowledge)
+
+    def excluded_sales_stats(self, through: date, generic_codes: list[str], knowledge: date | None = None) -> dict[str, Any]:
+        """Líneas y unidades de ventas válidas que NO se atribuyen a un comprador modelable (anónimas/genéricas), tal como se
+        conocían al corte `through` (o a `knowledge`; misma regla de visibilidad que las compras)."""
+        tz = self.base.timezone()
+        know = to_day(through) if knowledge is None else max(to_day(through), to_day(knowledge))
         df = self._read(
             f"""
-            SELECT CASE WHEN s.customer_id IS NULL THEN 'anonymous'
+            SELECT CASE WHEN v.customer_id IS NULL THEN 'anonymous'
                         WHEN c.is_generic OR c.external_code = ANY(CAST(:codes AS text[])) THEN 'generic'
                         WHEN c.deleted_at IS NOT NULL THEN 'deleted_customer'
                         ELSE 'modeled' END AS kind,
-                   COUNT(*) AS lines, SUM(si.quantity)::float8 AS units
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            LEFT JOIN customers c ON c.id = s.customer_id AND c.tenant_id = s.tenant_id
-            WHERE si.tenant_id = :tenant_id AND s.tenant_id = :tenant_id AND s.status = 'completed'
-              AND s.document_type IN {VALID_DOCS} AND si.is_return = false AND si.quantity > 0
-              AND si.sale_date <= :through AND si.sale_date > :through - 180
+                   COUNT(*) AS lines, SUM(v.quantity)::float8 AS units
+            FROM sales_line_versions v
+            LEFT JOIN customers c ON c.id = v.customer_id AND c.tenant_id = v.tenant_id
+            WHERE v.tenant_id = :tenant_id AND v.status = 'completed'
+              AND v.document_type IN {VALID_DOCS} AND v.is_return = false AND v.quantity > 0
+              AND v.sale_date <= :through AND v.sale_date > :through - 180
+              AND GREATEST(v.sale_date, CAST(v.known_from AT TIME ZONE CAST(:tz AS text) AS date)) <= :knowledge
+              AND (v.known_until IS NULL OR CAST(v.known_until AT TIME ZONE CAST(:tz AS text) AS date) - 1 >= :knowledge)
             GROUP BY 1
             """,
-            through=through, codes=list(generic_codes))
+            through=through, knowledge=know.date(), tz=tz, codes=list(generic_codes))
         out = {k: {"lines": 0, "units": 0.0} for k in ("anonymous", "generic", "deleted_customer", "modeled")}
         for r in df.itertuples(index=False):
             out[r.kind] = {"lines": int(r.lines), "units": float(r.units or 0.0)}

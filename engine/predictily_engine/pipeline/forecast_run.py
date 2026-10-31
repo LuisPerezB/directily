@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -17,7 +16,6 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-import joblib
 import pandas as pd
 from sqlalchemy import Connection, text
 
@@ -43,7 +41,7 @@ from predictily_engine.pipeline.core import InsufficientDataError, PipelineResul
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
 from predictily_engine.pipeline.schemas import ExecuteRequest
-from predictily_engine.platform.artifacts import to_stored_path
+from predictily_engine.platform.artifacts import SavedArtifact, save_signed_artifact
 from predictily_engine.platform.config import effective_config_record
 from predictily_engine.platform.snapshot import persist_snapshot
 
@@ -208,13 +206,16 @@ def _as_date(v: Any) -> date | None:
     return date.fromisoformat(str(v)[:10])
 
 
+def _save_signed_artifact(tenant_id: int, run_id: int, family: str, obj: Any, *, data_fingerprint: str | None = None) -> SavedArtifact:
+    """Guarda el artefacto y lo FIRMA (ADR-V25-20): manifiesto Ed25519 junto al archivo; sin clave privada queda `unsigned`."""
+    path = Path(get_settings().artifacts_dir) / str(tenant_id) / f"run-{run_id}" / f"{family}.joblib"
+    return save_signed_artifact(obj, path, tenant_id=tenant_id, core="demand", run_id=run_id, name=family, data_fingerprint=data_fingerprint,
+                                feature_schema_version=FEATURE_SET_VERSION, libraries=library_versions())
+
+
 def _save_artifact(tenant_id: int, run_id: int, family: str, obj: Any) -> tuple[str, str]:
-    base = Path(get_settings().artifacts_dir) / str(tenant_id) / f"run-{run_id}"
-    base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{family}.joblib"
-    joblib.dump(obj, path, compress=3)
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    return to_stored_path(path), digest      # relativa a ENGINE_ARTIFACTS_DIR (ver platform/artifacts.py)
+    saved = _save_signed_artifact(tenant_id, run_id, family, obj)
+    return saved.stored_path, saved.sha256      # ruta relativa a ENGINE_ARTIFACTS_DIR (ver platform/artifacts.py)
 
 
 def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int | None, result: PipelineResult,
@@ -247,9 +248,10 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
                 status = "candidate"
         if status == "failed":
             notes = (notes + " " if notes else "") + f"Falló el entrenamiento final: {info.get('error')}"
-        artifact_path = artifact_sha = None
+        artifact_path = artifact_sha = artifact_signature = None
         if fam == "lightgbm_global" and result.lgbm is not None:
-            artifact_path, artifact_sha = _save_artifact(tenant_id, run_id, fam, result.lgbm.mlf)
+            saved = _save_signed_artifact(tenant_id, run_id, fam, result.lgbm.mlf, data_fingerprint=result.training_data_hash)
+            artifact_path, artifact_sha, artifact_signature = saved.stored_path, saved.sha256, saved.signature.as_compat()
         elif FAMILIES[fam].kind == "statistical":
             notes = (notes + " " if notes else "") + "Modelo estadístico determinista: se reentrena con la configuración registrada."
         hp = dict(info["hyperparameters"])
@@ -259,6 +261,8 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         compat = {"input_schema": "demand-panel-v1", "feature_set_version": FEATURE_SET_VERSION, "libraries": versions,
                   "artifact_kind": "mlforecast_joblib" if artifact_path else "statistical_refit",
                   "frequency": "D", "season_length": 7}
+        if artifact_signature is not None:
+            compat["signature"] = artifact_signature      # firma Ed25519 del manifiesto (signed | unsigned), ADR-V25-20
         evaluated = status in ("production", "validated", "candidate") and info.get("evaluated", False)
         rid = conn.execute(text(
             """

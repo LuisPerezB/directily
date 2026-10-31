@@ -67,8 +67,20 @@ def _int(v: Any) -> int | None:
     return None if f is None else int(f)
 
 
+def exclusion_detail(rows: pd.DataFrame) -> dict[str, int]:
+    """Días NO evaluables de `rows` por causa (la columna `stockout` del backtest marca todo día no evaluable; `day_status`,
+    cuál): quiebre de stock, fuente ausente (`missing_source`) o cierre (`closed`, ADR-V25-03). Ninguno cuenta como cero."""
+    cens = rows["stockout"].astype(bool)
+    if "day_status" not in rows:
+        return {"stockout_days": int(cens.sum())}
+    status = rows["day_status"].astype(str)
+    missing, closed = cens & (status == "missing_source"), cens & (status == "closed")
+    return {"stockout_days": int((cens & ~missing & ~closed).sum()), "missing_source_days": int(missing.sum()),
+            "closed_days": int(closed.sum())}
+
+
 def with_keys(rows: pd.DataFrame, cat: pd.Series) -> pd.DataFrame:
-    """Filas sin quiebre con sucursal, producto, categoría y tramo de horizonte."""
+    """Filas evaluables (sin quiebre, fuente ausente ni cierre) con sucursal, producto, categoría y tramo de horizonte."""
     ids = rows["unique_id"].str.extract(r"b(\d+)-p(\d+)").astype(int)
     out = rows.assign(branch_id=ids[0], product_id=ids[1])
     out = out[~out["stockout"].astype(bool)].copy()
@@ -161,7 +173,7 @@ def p50_decision(q: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def build_metrics(row: Any, ctx: dict[str, Any], quant: dict[str, Any] | None = None,
-                  excluded_stockout: int | None = None) -> dict[str, Any]:
+                  excluded_stockout: int | None = None, excluded_detail: dict[str, int] | None = None) -> dict[str, Any]:
     """Jsonb `model_evaluations.metrics` de una fila resumida por `summarize`."""
     get = (lambda k: row.get(k)) if hasattr(row, "get") else (lambda k: None)
     n_obs = _int(get("n_obs"))
@@ -170,7 +182,9 @@ def build_metrics(row: Any, ctx: dict[str, Any], quant: dict[str, Any] | None = 
         "scale_undefined": None if n_scaled is None or n_obs is None else n_obs - n_scaled,
         "price_missing": None if n_money is None or n_obs is None else n_obs - n_money,
     }
-    if excluded_stockout is not None:
+    if excluded_detail is not None:
+        exclusions.update(excluded_detail)
+    elif excluded_stockout is not None:
         exclusions["stockout_days"] = int(excluded_stockout)
     metrics: dict[str, Any] = {
         "metrics_version": METRICS_VERSION,
@@ -191,7 +205,8 @@ def build_metrics(row: Any, ctx: dict[str, Any], quant: dict[str, Any] | None = 
 
 def metric_row(family: str, eval_level: str, key: str | None, row: pd.Series | dict, ctx: dict[str, Any],
                horizon_days: int | None = None, is_selected: bool = False, cov=(None, None),
-               quant: dict[str, Any] | None = None, excluded_stockout: int | None = None) -> dict[str, Any]:
+               quant: dict[str, Any] | None = None, excluded_stockout: int | None = None,
+               excluded_detail: dict[str, int] | None = None) -> dict[str, Any]:
     return {
         "model_family": family, "evaluation_type": ctx["evaluation_type"], "level": eval_level, "level_key": key,
         "horizon_days": horizon_days, "is_baseline": family == BASELINE_FAMILY, "is_selected": is_selected,
@@ -199,7 +214,7 @@ def metric_row(family: str, eval_level: str, key: str | None, row: pd.Series | d
         "bias": _num(row.get("bias")),
         "coverage_80": cov[0], "coverage_95": cov[1], "n_obs": int(row["n_obs"]),
         "n_windows": len(ctx["cutoffs"]), "cutoffs": ctx["cutoffs"],
-        "metrics": build_metrics(row, ctx, quant, excluded_stockout),
+        "metrics": build_metrics(row, ctx, quant, excluded_stockout, excluded_detail),
         "extra": {"evaluation_scope": ctx["scope"], "independent_holdout": ctx["scope"] == SCOPE_HOLDOUT},
     }
 
@@ -241,8 +256,9 @@ def horizon_total_rows(family: str, test: pd.DataFrame, ctx: dict[str, Any], hor
         else:
             s["n_money"] = 0
         s["n_series"] = int(g["unique_id"].nunique())
+        kept = sub.merge(g[["unique_id", "window"]], on=["unique_id", "window"], how="inner")
         rows.append(metric_row(family, "horizon_total", f"H{h}", s, ctx, horizon_days=h, is_selected=is_selected,
-                               excluded_stockout=int(g["censored"].sum())))
+                               excluded_stockout=int(g["censored"].sum()), excluded_detail=exclusion_detail(kept)))
     return rows
 
 
@@ -263,9 +279,9 @@ def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, c
         if fam == BASELINE_FAMILY:
             cov, _, _ = coverage(test[test["family"] == fam],
                                  None if calib is None else calib[calib["family"] == fam])
-        excl = int(((test["family"] == fam) & test["stockout"].astype(bool)).sum())
+        excl = exclusion_detail(test[test["family"] == fam])
         rows.append(metric_row(fam, "overall", None, summarize(sub, ["family"]).iloc[0], ctx, cov=cov,
-                               excluded_stockout=excl))
+                               excluded_detail=excl))
         for _, r in summarize(sub, ["demand_class"]).iterrows():
             rows.append(metric_row(fam, "demand_class", r["demand_class"], r, ctx,
                                    is_selected=winners_by_class.get(r["demand_class"]) == fam))
@@ -289,7 +305,7 @@ def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, c
             q_bucket = {b: quantile_metrics(g) for b, g in scored.groupby("hbucket")}
             q_class = {c: quantile_metrics(g) for c, g in scored.groupby("demand_class")}
         rows.append(metric_row("selection", "overall", None, summarize(s, ["fam"]).iloc[0], ctx, is_selected=True,
-                               cov=cov, quant=q_all, excluded_stockout=int(len(sel_test) - len(s))))
+                               cov=cov, quant=q_all, excluded_detail=exclusion_detail(sel_test)))
         for _, r in summarize(s, ["hbucket"]).iterrows():
             rows.append(metric_row("selection", "horizon", r["hbucket"], r, ctx, horizon_days=BUCKET_DAYS[r["hbucket"]],
                                    is_selected=True, cov=cov_by_bucket.get(r["hbucket"], (None, None)),

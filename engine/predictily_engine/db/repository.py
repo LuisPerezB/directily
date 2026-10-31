@@ -7,6 +7,8 @@ filtre por empresa, de modo que un error de programación falla en lugar de mezc
 Ventas as-of (ADR-V25-23): `daily_sales(cutoff)`, `daily_returns(cutoff)`, `last_sale_date(cutoff)` y `sales_stats(cutoff)`
 devuelven lo que se CONOCÍA al corte (versión del documento vigente ese día, no su estado actual). Todas se derivan de UNA
 lectura de la vista `sales_line_versions` hasta el corte final (`sales_versions`), que el repositorio conserva mientras vive.
+Con `knowledge` (un día posterior al corte) devuelven las ventas con fecha ≤ corte conocidas hasta ese día: así lee su período final
+una ejecución vigente (ver `data.asof`).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import Connection, text
 
-from predictily_engine.data.asof import SalesVersions, knowledge_boundary, resolve_timezone, to_day, with_knowledge
+from predictily_engine.data.asof import SalesVersions, resolve_timezone, to_day, with_knowledge
 
 VALID_SALE_DOCUMENT_TYPES = ("invoice", "sales_note", "other")
 
@@ -38,9 +40,11 @@ class TenantRepository:
 
     def analytic_reads(self) -> None:
         """Lecturas analíticas: evita nested loops (planes desastrosos con estadísticas
-        desactualizadas justo después de una importación masiva). Solo afecta a la
-        transacción actual (SET LOCAL)."""
+        desactualizadas justo después de una importación masiva) y la compilación JIT (con nested loops
+        deshabilitados el costo estimado la dispara y suma ~1 s a lecturas que no la aprovechan). Solo
+        afecta a la transacción actual (SET LOCAL)."""
         self.conn.execute(text("SET LOCAL enable_nestloop = off"))
+        self.conn.execute(text("SET LOCAL jit = off"))
 
     # ── infraestructura ──
     def _read(self, sql: str, **params: Any) -> pd.DataFrame:
@@ -117,53 +121,80 @@ class TenantRepository:
             self._timezone = resolve_timezone(self.tenant().get("timezone"))
         return self._timezone
 
-    def sales_versions(self, upto: date) -> SalesVersions:
-        """Versiones de las líneas de venta COMPLETADAS con fecha ≤ `upto` y conocidas antes de la medianoche local de
-        `upto + 1` (vista `sales_line_versions`). Es la ÚNICA lectura de ventas de una ejecución: cada vista as-of
-        (`daily_sales(c)` con c ≤ upto) se deriva de ella en pandas. Se conserva: pedir un corte menor o igual no vuelve
-        a leer; uno mayor reemplaza la lectura."""
-        final = to_day(upto)
-        if self._versions is not None and self._versions.final >= final:
-            return self._versions
+    def sales_versions(self, upto: date, knowledge: date | None = None) -> SalesVersions:
+        """Versiones de las líneas de venta COMPLETADAS con fecha ≤ `upto` y su ventana de visibilidad por día (vista
+        `sales_line_versions`): ÚNICA lectura de ventas de una ejecución; cada vista as-of (`daily_sales(c)` con c ≤ upto) se
+        deriva de ella en pandas. Se conserva: pedir un corte (y un conocimiento) menores o iguales no vuelve a leer; uno mayor la
+        reemplaza por otra que cubre también lo ya leído.
+
+        `knowledge`: hasta qué día llega lo conocido para la «verdad» del corte final. Por defecto el propio corte (reconstrucción
+        histórica); una ejecución vigente pasa HOY, de modo que una carga recibida después de la medianoche del último día de datos cuenta.
+
+        La base agrega las líneas que comparten celda (sucursal, producto, día) y ventana de visibilidad: una versión es visible en los
+        cortes `C ∈ [max(sale_date, día_local(known_from)), día_local(known_until) − 1]` (equivalente a la regla `known_from <
+        medianoche local (C+1)` y `known_until ≥ medianoche local (C+1)`; ver `data.asof`). Con una carga histórica devuelve las mismas
+        filas que la consulta agregada anterior, y las sumas se hacen en `numeric` (exactas)."""
+        want_final = to_day(upto)
+        want_know = want_final if knowledge is None else max(want_final, to_day(knowledge))
+        held = self._versions
+        if held is None or held.final < want_final or held.knowledge < want_know:
+            final = want_final if held is None else max(want_final, held.final)
+            know = want_know if held is None else max(want_know, held.knowledge)
+            held = self._versions = self._read_versions(final, know)
+        return held.at_final(want_final, want_know)
+
+    def _read_versions(self, final: pd.Timestamp, know: pd.Timestamp) -> SalesVersions:
+        """Lee de la base las versiones con fecha ≤ `final` conocidas hasta el día `know` (≥ `final`)."""
         tz = self.timezone()
-        limit = pd.Timestamp(knowledge_boundary(final, tz)).to_pydatetime()
+        self.conn.execute(text("SET LOCAL jit = off"))  # escaneo con agregación: JIT solo suma tiempo de compilación
         df = self._read(
             """
-            SELECT v.sale_id, v.line_number, v.branch_id, v.product_id, v.sale_date AS ds,
-                   v.quantity::float8 AS quantity, v.unit_price::float8 AS unit_price,
-                   v.discount_amount::float8 AS discount_amount, v.net_amount::float8 AS net_amount,
-                   v.unit_cost::float8 AS unit_cost, v.is_return, v.document_type, v.ingestion_mode,
-                   (v.known_from AT TIME ZONE 'UTC') AS known_from, (v.known_until AT TIME ZONE 'UTC') AS known_until
-            FROM sales_line_versions v
-            WHERE v.tenant_id = :tenant_id AND v.status = 'completed' AND v.sale_date <= :upto
-              AND v.known_from < (CAST(:limit AS timestamp) AT TIME ZONE 'UTC')
+            WITH v AS (
+                SELECT v.branch_id, v.product_id, v.sale_date AS ds,
+                       (v.document_type IN ('invoice', 'sales_note', 'other') AND NOT v.is_return) AS is_sale,
+                       v.is_return AS is_ret, (v.ingestion_mode = 'incremental') AS incremental,
+                       GREATEST(v.sale_date, CAST(v.known_from AT TIME ZONE CAST(:tz AS text) AS date)) AS c_from,
+                       CAST(v.known_until AT TIME ZONE CAST(:tz AS text) AS date) - 1 AS c_to,
+                       v.quantity, v.unit_price, v.discount_amount, v.net_amount, v.unit_cost
+                FROM sales_line_versions v
+                WHERE v.tenant_id = :tenant_id AND v.status = 'completed' AND v.sale_date <= :upto
+            )
+            SELECT branch_id, product_id, ds, is_sale, is_ret, incremental, c_from, c_to,
+                   SUM(quantity)::float8 AS units, SUM(net_amount)::float8 AS net_amount,
+                   SUM(quantity * unit_price)::float8 AS gross_amount, SUM(discount_amount)::float8 AS discount_amount,
+                   SUM(CASE WHEN unit_cost IS NOT NULL THEN quantity * unit_cost END)::float8 AS cost_amount,
+                   SUM(CASE WHEN unit_cost IS NOT NULL THEN quantity END)::float8 AS cost_units,
+                   COUNT(*) AS lines, COUNT(unit_cost) AS lines_cost
+            FROM v
+            WHERE c_from <= :knowledge AND (c_to IS NULL OR c_to >= c_from)
+            GROUP BY branch_id, product_id, ds, is_sale, is_ret, incremental, c_from, c_to
             """,
-            upto=final.date(), limit=limit,
+            tz=tz, upto=final.date(), knowledge=know.date(),
         )
-        self._versions = SalesVersions(df, tz, final)
-        return self._versions
+        return SalesVersions(df, tz, final, know)
 
-    def last_sale_date(self, cutoff: date | None = None) -> date | None:
+    def last_sale_date(self, cutoff: date | None = None, knowledge: date | None = None) -> date | None:
         """Última fecha con ventas válidas. Sin `cutoff`: la conocida AHORA (estado vigente de los documentos);
-        con `cutoff`: la conocida al corte (as-of)."""
+        con `cutoff`: la conocida al corte (as-of), o a `knowledge` si se indica."""
         if cutoff is not None:
-            return self.sales_versions(cutoff).last_sale_date(cutoff)
+            return self.sales_versions(cutoff, knowledge).last_sale_date(cutoff, knowledge)
         return self._scalar(
             "SELECT MAX(s.sale_date) FROM sales s WHERE s.tenant_id = :tenant_id AND s.status = 'completed' "
             "AND s.document_type IN ('invoice', 'sales_note', 'other')"
         )
 
-    def daily_sales(self, cutoff: date) -> pd.DataFrame:
+    def daily_sales(self, cutoff: date, knowledge: date | None = None) -> pd.DataFrame:
         """Ventas válidas diarias por sucursal-producto tal como se conocían al corte (excluye anuladas y devoluciones).
 
         As-of: un documento cargado después del corte no aparece; uno anulado o corregido después aparece con la versión
-        que tenía ese día. Los marcos llevan la huella de las ventanas de conocimiento (`attrs`) para la huella de datos."""
-        versions = self.sales_versions(cutoff)
-        return with_knowledge(versions.sales_cells(cutoff), versions)
+        que tenía ese día. Con `knowledge` (ejecución vigente) rige lo conocido hasta ese día. Los marcos llevan la huella de las
+        ventanas de conocimiento (`attrs`) para la huella de datos."""
+        versions = self.sales_versions(cutoff, knowledge)
+        return with_knowledge(versions.sales_cells(cutoff, knowledge), versions)
 
-    def daily_returns(self, cutoff: date) -> pd.DataFrame:
+    def daily_returns(self, cutoff: date, knowledge: date | None = None) -> pd.DataFrame:
         """Devoluciones diarias conocidas al corte (líneas marcadas o notas de crédito)."""
-        return self.sales_versions(cutoff).return_cells(cutoff)
+        return self.sales_versions(cutoff, knowledge).return_cells(cutoff, knowledge)
 
     def daily_actuals(self, date_from: date, date_to: date) -> pd.DataFrame:
         """Ventas reales (mismas reglas que el entrenamiento) para evaluar pronósticos."""
@@ -182,10 +213,10 @@ class TenantRepository:
             date_to=date_to,
         )
 
-    def sales_stats(self, cutoff: date | None = None) -> dict[str, Any]:
-        """Líneas válidas, líneas con costo y rango de fechas. Con `cutoff`, lo conocido a ese corte."""
+    def sales_stats(self, cutoff: date | None = None, knowledge: date | None = None) -> dict[str, Any]:
+        """Líneas válidas, líneas con costo y rango de fechas. Con `cutoff`, lo conocido a ese corte (o a `knowledge`)."""
         if cutoff is not None:
-            return self.sales_versions(cutoff).stats(cutoff)
+            return self.sales_versions(cutoff, knowledge).stats(cutoff, knowledge)
         df = self._read(
             """
             SELECT COUNT(*) AS lines,

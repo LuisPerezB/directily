@@ -1,7 +1,8 @@
 """Ejecución de una corrida del Customer Core creada por Laravel (`core_runs` core='customer').
 
 - `train`: dataset de cortes → protocolo temporal por horizonte → modelos + calibración + evaluación → registro
-  (`model_registry` core='customer') con artefactos joblib y sha256. Solo se promueve lo que supera la regla versionada.
+  (`model_registry` core='customer') con artefactos joblib, sha256 y manifiesto firmado Ed25519 (ADR-V25-20). Solo se promueve lo
+  que supera la regla versionada.
 - `predict`: carga los modelos en producción, recalcula las variables al día (la recencia cambia sin ventas nuevas),
   persiste predicciones, ranking, actividad y reconciliación. No entrena.
 
@@ -22,7 +23,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import joblib
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -43,7 +43,7 @@ from predictily_engine.db.customer_repository import CustomerRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import ProgressReporter, jdump, none_if_nan
 from predictily_engine.pipeline.errors import ConflictError, NotFoundError
-from predictily_engine.platform.artifacts import resolve_stored_path, to_stored_path
+from predictily_engine.platform.artifacts import SavedArtifact, deserialize, save_signed_artifact, tenant_of_stored_path, verify_stored_artifact
 from predictily_engine.platform.config import resolve_config
 from predictily_engine.platform.snapshot import DataSnapshot, persist_snapshot
 
@@ -183,12 +183,16 @@ def _copy_frame(conn: Connection, table: str, df: pd.DataFrame, columns: list[st
     return n
 
 
+def _save_signed_artifact(tenant_id: int, run_id: int, name: str, obj: Any, *, data_fingerprint: str | None = None) -> SavedArtifact:
+    """Guarda el artefacto y lo FIRMA (ADR-V25-20): manifiesto Ed25519 junto al archivo; sin clave privada queda `unsigned`."""
+    path = Path(get_settings().artifacts_dir) / str(tenant_id) / "customer" / f"run-{run_id}" / f"{name}.joblib"
+    return save_signed_artifact(obj, path, tenant_id=tenant_id, core="customer", run_id=run_id, name=name, data_fingerprint=data_fingerprint,
+                                feature_schema_version=FEATURE_SCHEMA_VERSION, libraries=library_versions())
+
+
 def _save_artifact(tenant_id: int, run_id: int, name: str, obj: Any) -> tuple[str, str]:
-    base = Path(get_settings().artifacts_dir) / str(tenant_id) / "customer" / f"run-{run_id}"
-    base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{name}.joblib"
-    joblib.dump(obj, path, compress=3)
-    return to_stored_path(path), hashlib.sha256(path.read_bytes()).hexdigest()      # relativa a ENGINE_ARTIFACTS_DIR
+    saved = _save_signed_artifact(tenant_id, run_id, name, obj)
+    return saved.stored_path, saved.sha256      # ruta relativa a ENGINE_ARTIFACTS_DIR
 
 
 def _artifact_compat() -> dict[str, Any]:
@@ -197,15 +201,28 @@ def _artifact_compat() -> dict[str, Any]:
             "n_features": len(MODEL_FEATURES), "libraries": library_versions()}
 
 
-def load_artifact(row: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """Carga un artefacto de producción verificando sha256 y compatibilidad. Devuelve (artefacto, motivo de rechazo)."""
+def load_artifact(row: dict[str, Any], tenant_id: int | None = None) -> tuple[dict[str, Any] | None, str | None]:
+    """Carga un artefacto de producción: verifica firma Ed25519, sha256, tamaño y empresa ANTES de deserializar (ADR-V25-20) y
+    luego su compatibilidad. Devuelve (artefacto, motivo de rechazo).
+
+    Un artefacto sin firma (salvo ENGINE_ALLOW_UNSIGNED_ARTIFACTS), con firma inválida, de clave desconocida, alterado, de otra
+    empresa o con la ruta fuera del directorio de su empresa NO se deserializa: el llamador sirve el respaldo (referencia validada
+    o abstención) y el motivo queda en `limitations` y en el registro (sin PII). `tenant_id` es la empresa a la que sirve la
+    corrida; sin él se usa `row["tenant_id"]` y, en último caso, la de la propia ruta.
+    """
     stored = row.get("artifact_path")
-    path = resolve_stored_path(stored) if stored else None
-    if path is None or not path.exists():
+    if not stored:
         return None, "artifact_missing"
-    data = path.read_bytes()
-    if hashlib.sha256(data).hexdigest() != row.get("artifact_sha256"):
+    owner = tenant_id if tenant_id is not None else (row.get("tenant_id") if row.get("tenant_id") is not None else tenant_of_stored_path(stored))
+    if owner is None:
+        return None, "artifact_path_invalid"
+    if not row.get("artifact_sha256"):
         return None, "artifact_sha256_mismatch"
+    verification = verify_stored_artifact(stored, tenant_id=int(owner), core="customer", expected_sha256=row.get("artifact_sha256"))
+    if not verification.ok or verification.artifact is None:
+        if verification.reason != "artifact_missing":
+            log.warning("Artefacto rechazado antes de deserializar: motivo=%s empresa=%s modelo=%s", verification.reason, owner, row.get("version"))
+        return None, verification.reason
     compat = row.get("artifact_compat") or {}
     if isinstance(compat, str):
         compat = json.loads(compat)
@@ -216,7 +233,7 @@ def load_artifact(row: dict[str, Any]) -> tuple[dict[str, Any] | None, str | Non
         a, b = (compat.get("libraries") or {}).get(lib), cur["libraries"].get(lib)
         if a and b and a.split(".")[:2] != b.split(".")[:2]:
             return None, f"{lib}_version_incompatible"
-    return joblib.load(path), None
+    return deserialize(verification.artifact), None      # desde los MISMOS bytes verificados: sin reabrir el archivo
 
 
 def _slot(h: int, target: str) -> str:
@@ -432,7 +449,9 @@ def _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_
 
 def _upsert_registry(conn: Connection, tenant_id: int, version: str, family: str, status: str, role: str, hp: dict[str, Any],
                      path: str | None, sha: str | None, run_id: int, job_id: int | None, trained_to: date | None, rows: int,
-                     seed: int, notes: str | None, snapshot_hash: str | None, promote: bool) -> int:
+                     seed: int, notes: str | None, snapshot_hash: str | None, promote: bool,
+                     signature: dict[str, Any] | None = None) -> int:
+    compat = _artifact_compat() | ({"signature": signature} if signature else {})      # firma Ed25519 del manifiesto (ADR-V25-20)
     return int(conn.execute(text(
         """
         INSERT INTO model_registry (tenant_id, version, model_family, strategy_level, scope, status, hyperparameters, feature_set_version,
@@ -450,7 +469,7 @@ def _upsert_registry(conn: Connection, tenant_id: int, version: str, family: str
         """), {"t": tenant_id, "version": version, "family": family[:40], "status": status, "hp": jdump(hp), "fsv": FEATURE_SCHEMA_VERSION,
                "to": trained_to, "hash": snapshot_hash, "rows": rows, "path": path, "sha": sha, "libs": jdump(library_versions()),
                "seed": seed, "job": job_id, "promote": promote, "notes": notes, "role": role, "run": run_id,
-               "compat": jdump(_artifact_compat())}).scalar_one())
+               "compat": jdump(compat)}).scalar_one())
 
 
 def _persist_models(conn: Connection, tenant: dict[str, Any], run: dict[str, Any], job_id: int | None,
@@ -491,7 +510,8 @@ def _persist_models(conn: Connection, tenant: dict[str, Any], run: dict[str, Any
                 family = art[fam_key] if fam_key in art else art["objective"]
                 art["meta"] = _artifact_meta(r, target, family, is_served)
                 name = f"h{h}_{target}_{family}"
-                path, sha = _save_artifact(tenant_id, run_id, name, art)
+                saved = _save_signed_artifact(tenant_id, run_id, name, art, data_fingerprint=snap_hash)
+                path, sha = saved.stored_path, saved.sha256
                 served_role = "primary" if art["kind"] == "complex" else "fallback"
                 if is_served and production_run:
                     status = "production"
@@ -509,7 +529,7 @@ def _persist_models(conn: Connection, tenant: dict[str, Any], run: dict[str, Any
                                        path, sha, run_id, job_id, last_complete, int(trained_rows), seed,
                                        None if (is_served or art["kind"] == "reference") else
                                        "Evaluado y validado; no superó la regla de promoción (%s)." % cfg["promotion_rule_version"],
-                                       snap_hash, status == "production")
+                                       snap_hash, status == "production", signature=saved.signature.as_compat())
                 slot_models.append({"id": rid, "version": version, "family": family, "status": status, "served": is_served})
                 if status == "production":
                     # retira la producción anterior de ESTE horizonte y objetivo
@@ -651,14 +671,14 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         if rp is None or rq is None:
             rejected.append(f"H={h}: no hay modelo en producción (ejecute el entrenamiento); abstención.")
             continue
-        ap, why_p = load_artifact(rp)
-        aq, why_q = load_artifact(rq)
+        ap, why_p = load_artifact(rp, tenant_id)
+        aq, why_q = load_artifact(rq, tenant_id)
         if ap is None or aq is None:
             # el ganador falló: se sirve la referencia validada del mismo horizonte (respaldo identificado)
             refs = {}
             for target in ("probability", "quantity"):
                 cand = references.get(_slot(h, target))
-                refs[target] = load_artifact(cand) if cand is not None else (None, "no_validated_reference")
+                refs[target] = load_artifact(cand, tenant_id) if cand is not None else (None, "no_validated_reference")
             if ap is None and refs["probability"][0] is not None:
                 ap, rp = refs["probability"][0], references[_slot(h, "probability")]
                 rejected.append(f"H={h}: el artefacto de probabilidad en producción falló ({why_p}); se sirve la referencia validada (respaldo).")

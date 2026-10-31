@@ -572,3 +572,60 @@ def test_historical_runs_never_displace_the_current_production_runs(db_engine, e
     # y la siguiente de producción sí releva a la anterior de producción (una sola vigente por operación)
     next_predict = predict_a(db_engine, env)
     assert _current_ids(db_engine, tid)["predict"] == [next_predict["run_id"]]
+
+
+# ───────────────────────────── artefactos firmados (ADR-V25-20) ─────────────────────────────
+
+def test_every_registered_artifact_has_a_signed_manifest_recorded_in_the_registry(db_engine, env):
+    """El entrenamiento firma cada artefacto (clave efímera del conftest) y deja el resumen en `artifact_compat.signature`."""
+    from predictily_engine.platform import signing
+    from predictily_engine.platform.artifacts import verify_stored_artifact
+
+    tid = env["A"]["tenant_id"]
+    rows = [r for r in q(db_engine, "SELECT * FROM model_registry WHERE tenant_id = :t AND core = 'customer' AND artifact_path IS NOT NULL", t=tid)]
+    assert rows
+    for r in rows:
+        info = r["artifact_compat"]["signature"]
+        assert (info["status"], info["algorithm"], info["key_id"]) == ("signed", "ed25519", "test-ephemeral")
+        sidecar = signing.manifest_path(resolve_stored_path(r["artifact_path"]))
+        assert info["manifest_sha256"] == hashlib.sha256(sidecar.read_bytes()).hexdigest()
+        verdict = verify_stored_artifact(r["artifact_path"], tenant_id=tid, core="customer", expected_sha256=r["artifact_sha256"])
+        assert verdict.ok and verdict.artifact.status == "signed"
+        manifest = verdict.artifact.manifest
+        assert manifest["tenant_id"] == tid and manifest["core"] == "customer" and manifest["run_id"] == r["core_run_id"]
+        assert manifest["data_fingerprint"] and manifest["feature_schema_version"] and manifest["libraries"]
+
+
+def test_a_production_artifact_without_a_valid_signature_degrades_to_the_validated_reference(db_engine, env):
+    """Sin firma válida el artefacto NO se deserializa: se sirve la referencia validada y el motivo queda explícito (sin PII)."""
+    from predictily_engine.platform import signing
+
+    tid = env["A"]["tenant_id"]
+    prod = _complex_slot(db_engine, tid)
+    if prod is None:
+        pytest.skip("En esta corrida ningún horizonte sirve un modelo complejo")
+    h = prod["hyperparameters"]["horizon_days"]
+    sidecar = signing.manifest_path(resolve_stored_path(prod["artifact_path"]))
+    original = sidecar.read_bytes()
+
+    def limitations(out):
+        return " ".join(q(db_engine, "SELECT limitations FROM core_runs WHERE id = :r", r=out["run_id"])[0]["limitations"])
+
+    try:
+        sidecar.unlink()                                                   # sin manifiesto: artefacto «sin firma»
+        out = predict_a(db_engine, env)
+        assert "artifact_unsigned" in limitations(out) and "referencia validada" in limitations(out) and out["quality_status"] == "degraded"
+        row = q(db_engine, "SELECT model_family, model_role FROM customer_predictions WHERE core_run_id = :r AND horizon_days = :h LIMIT 1", r=out["run_id"], h=h)[0]
+        assert row["model_family"] == "reference" and row["model_role"] == "fallback"
+
+        envelope = json.loads(original)                                    # firma adulterada
+        envelope["signature"] = ("B" if envelope["signature"][0] == "A" else "A") + envelope["signature"][1:]
+        sidecar.write_text(json.dumps(envelope))
+        out = predict_a(db_engine, env)
+        assert "artifact_signature_invalid" in limitations(out)
+        assert q(db_engine, "SELECT model_family FROM customer_predictions WHERE core_run_id = :r AND horizon_days = :h LIMIT 1", r=out["run_id"], h=h)[0]["model_family"] == "reference"
+    finally:
+        sidecar.write_bytes(original)
+    # Restaurado el manifiesto, vuelve a servirse el modelo en producción.
+    out = predict_a(db_engine, env)
+    assert q(db_engine, "SELECT model_family FROM customer_predictions WHERE core_run_id = :r AND horizon_days = :h LIMIT 1", r=out["run_id"], h=h)[0]["model_family"] != "reference"

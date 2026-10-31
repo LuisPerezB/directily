@@ -9,6 +9,7 @@ use App\Services\Connectors\ConnectorTestResult;
 use App\Services\Connectors\Sql\SqlConnectionSettings;
 use App\Services\Connectors\Sql\SqlConnectorInterface;
 use App\Services\Connectors\Sql\SqlDialect;
+use App\Services\Connectors\Sql\SqlHostPolicy;
 use App\Services\Connectors\Sql\SqlSourceConnection;
 use App\Services\Connectors\Sql\SqlSourceException;
 use App\Support\Tenancy\TenantContext;
@@ -90,9 +91,10 @@ abstract class AbstractSqlConnector extends AbstractConnector implements SqlConn
                 ? 'Las credenciales van en «credentials», no en «config».'
                 : "Clave de configuración no reconocida: {$key}.";
         }
-        $host = (string) ($config['host'] ?? '');
-        if ($host === '' || preg_match('/^[A-Za-z0-9._:\-\[\]]+$/', $host) !== 1) {
-            $errors['config.host'][] = 'Indique un host válido (nombre o IP).';
+        // Solo nombres RFC 1123 o literales IP canónicos (rechaza 2130706433, 0x7f.0.0.1, 0177.0.0.1…): ver SqlHostPolicy.
+        $hostError = is_string($config['host'] ?? null) ? SqlHostPolicy::syntaxError($config['host']) : SqlHostPolicy::INVALID_MESSAGE;
+        if ($hostError !== null) {
+            $errors['config.host'][] = $hostError;
         }
         $port = $config['port'] ?? $dialect->defaultPort();
         if (! is_numeric($port) || (int) $port < 1 || (int) $port > 65535) {

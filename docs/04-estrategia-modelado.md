@@ -15,11 +15,18 @@ No se usa ningún LLM para calcular cifras.
   imputa de forma conservadora `max(venta, media móvil de 28 días sin quiebre)`; en LightGBM
   esos días tienen **peso 0**; y se **excluyen de todas las métricas**. Si no hay inventario,
   no se puede detectar la censura y el motor lo informa como limitación (readiness y warnings).
+- **Un día sin ventas no siempre es un cero** (ADR-V25-03, §16): cada día de una serie se clasifica en `day_status`
+  (`sale`, `zero_confirmed`, `missing_source`, `stockout_censored`, `closed`). Solo `zero_confirmed` es un cero
+  observado; los días de fuente ausente (fuera de la cobertura, en un hueco o inferidos) y los cierres declarados se
+  **excluyen** de las métricas y del perfilado y se imputan igual que los quiebres.
+- **Las ventas se leen tal como se conocían al corte** (ADR-V25-23, §16): un documento cargado tarde o una anulación
+  posterior no reescriben un corte pasado.
 - Series sin ventas en 180 días o de productos inactivos no se pronostican (se informa).
 
 ## 2. Perfilado y clases de demanda
 
-Clasificación Syntetos–Boylan sobre los últimos 365 días sin quiebre: ADI (intervalo medio
+Clasificación Syntetos–Boylan sobre los últimos 365 días limpios (sin quiebre, fuente ausente ni cierre: esos días no
+cuentan como ceros): ADI (intervalo medio
 entre ventas) y CV² (variabilidad de los tamaños no nulos) con umbrales 1,32 y 0,49:
 `smooth`, `erratic`, `intermittent`, `lumpy`; `insufficient` si hay < 28 días o < 4 días
 con venta. La selección de modelos se hace **por clase**.
@@ -62,6 +69,15 @@ ventana del backtest, el período reservado y las ejecuciones históricas aplica
 la ejecución vigente usa lo conocido el día en que se ejecuta. Un histórico importado sin
 `known_at` queda como conocido el día de la carga, de modo que el backtest lo trata como
 promoción no anunciada (`tests/unit/test_promotions_as_of.py`).
+
+**Ventas as-of por ventana (ADR-V25-23).** Cada ventana de selección y el período reservado entrenan con las ventas **tal como se conocían
+en SU corte**, no con el estado actual de los documentos: el panel, el perfil de demanda, las escalas, el precio supuesto y las variables
+de LightGBM de la ventana se arman con las versiones de documento visibles ese día (una versión es visible al corte `C` si `known_from <
+medianoche local de C+1` y `known_until` es nulo o `>=` esa medianoche). Un documento cargado después del corte o una anulación o
+corrección posterior no cambian lo que entrena una ventana anterior. Los **reales** con que se evalúa cada ventana son la **verdad disponible al
+corte final**: se mide contra lo que de verdad ocurrió, no contra lo que se creía entonces. Si lo tardío no toca el pasado de una
+ventana, esta reutiliza el panel final (mismo resultado, sin costo). El manifiesto (`evaluation_manifest.knowledge`) registra la política y, por
+ventana, si se reconstruyó y cuánto difería de la verdad. Detalle, regla en días, costo medido y pruebas en `docs/data/TEMPORAL_AVAILABILITY.md`.
 
 **Período final reservado (holdout, F6).** Si la historia alcanza, el plan reserva una ventana
 final con origen `H = corte − h` y fechas objetivo `(H, corte]`. Las ventanas de **selección**
@@ -118,7 +134,10 @@ el futuro (`test_profiling.py`); en el pipeline completo, alterar ventas posteri
 la primera ventana (y añadir una serie que al corte tenía 2 días de venta) no cambia sus series,
 pronósticos ni clases; alterar el período reservado cambia sus métricas, pero no la selección
 usada para evaluarlo, ni sus pronósticos, ni las métricas de las ventanas de selección
-(`test_pipeline.py`). Los indicadores externos solo se usan desde su fecha real de publicación.
+(`test_pipeline.py`). La fuga por **fecha de conocimiento** (no solo por fecha de evento) se prueba contra PostgreSQL: un documento tardío, una
+anulación posterior y una corrección posterior, todos con fecha de evento anterior al corte de la ventana 0, no cambian sus pronósticos, clases ni
+escalas, y sin lectura as-of sí los cambiaban (`test_asof_integration.py::test_a_backtest_window_does_not_change_when_data_known_after_its_cutoff_is_perturbed`).
+Los indicadores externos solo se usan desde su fecha real de publicación.
 
 **Pendiente documentado: evaluación anidada.** El holdout mide el procedimiento en un único
 origen (90 días, una temporada). Para estimar su variabilidad se puede repetir todo el
@@ -378,6 +397,15 @@ cifras no tienen intervalo de confianza y no certifican exactitud comercial.
 - Los eventos extraordinarios solo se marcan; el motor no aprende su efecto (no hay histórico etiquetado).
 - La reversión solo verifica el SHA-256 de artefactos visibles desde el backend (volumen compartido con el
   motor); en servidores distintos informa `artifacts_verified = null`.
+- **Conocimiento as-of (ADR-V25-23)**: una carga histórica (`backfill`) asume el estado final del documento desde su día de negocio (la fuente no
+  entrega el historial de estados: una anulación posterior cargada así no se puede reconstruir); inventario, catálogo, costos y calendario no están
+  versionados y se leen con su estado vigente; las declaraciones de cobertura, huecos y cierres se aplican con su estado vigente en todas las
+  ventanas. Los lectores de Supply y Causal siguen leyendo el estado vigente de las ventas (`docs/data/TEMPORAL_AVAILABILITY.md` §12). Una ejecución vigente (corte = último
+  dato) conoce hasta hoy —la carga nocturna del último día cuenta—, pero un corte que la cobertura declarada limita por debajo del último dato se trata como histórico
+  (conocimiento hasta el propio corte): ver §16.1 y `TEMPORAL_AVAILABILITY.md` §3 y §12.12.
+- **Regla inferida de días sin fuente (ADR-V25-03)**: activa por defecto y **pendiente de aprobación en el piloto**; confunde un cierre sin declarar
+  con una caída de la fuente (con datos sintéticos marca los feriados cerrados), no detecta caídas de más de ≈ 14 días ni sucursales de pocas líneas.
+  Los cierres se declaran con `calendar_events.category = 'closure'`, valor nuevo que el backend aún no acepta.
 
 ## 13. Casos especiales, cobertura, huella y configuración (etapa 2 · P1)
 
@@ -398,14 +426,18 @@ Detalle y contratos en `docs/architecture/v2/P1-demanda.md`.
 
 **Cobertura de fuentes.** `data_coverage` (ventas): el corte no supera el menor `complete_through`
 declarado; lo posterior (y lo anterior a `complete_from`) es dato **ausente**, no cero. Sin declaración:
-comportamiento anterior + limitación `coverage_undeclared`.
+comportamiento anterior + limitación `coverage_undeclared`. Además, el panel clasifica `missing_source` los días de una sucursal
+fuera de SU cobertura (también una sucursal cerrada con cobertura propia), los de un hueco `data_coverage_gaps` y los que infiere la
+regla de actividad (§16).
 
 **Huella y configuración.** Cada ejecución enlaza `data_snapshots` (ventas, devoluciones, inventario, precios,
 costos, catálogo, promociones tal como se conocían al corte, calendario/feature set/eventos, indicadores
 externos, insumos de abastecimiento, configuración efectiva, reglas de elegibilidad y cobertura) y guarda
 `config_version` + `effective_config` (core → perfil sectorial → empresa → opciones de la ejecución). Mismo
 snapshot + configuración + semilla ⇒ mismos valores (`test_pipeline.py::test_reproducible_with_same_seed`,
-`test_snapshot_config.py`, `test_demand_v2_integration.py`).
+`test_snapshot_config.py`, `test_demand_v2_integration.py`). Los componentes `sales` y `costs` se calculan sobre los datos **as-of
+efectivamente usados** e incluyen sus ventanas de conocimiento: dos cortes con las mismas cifras pero distinto conocimiento no comparten huella,
+y lo que ocurra después del corte final no la altera (§16).
 
 ## 14. Comportamiento de compra por comprador (Customer Core, etapa 2 · P2)
 
@@ -440,6 +472,11 @@ con ventanas 90/180/365.
 
 **14.6 Reconciliación y compromisos.** agregado = Σ max(esperanza, comprometido) + comprometido fuera del modelo + residual; `inconsistent` si compradores > agregado
 (sin alterar probabilidades). Comprometido = pedidos/contratos confirmados, conocidos al corte, no cancelados, con entrega en el horizonte (pendiente = cantidad − cumplida).
+
+**14.6b Conocimiento as-of (ADR-V25-23).** Las **variables** de cada corte `c` (recencia, frecuencia, intervalos, cantidades, precios, devoluciones, comprador y
+producto, actividad) se calculan con las compras tal como se conocían el día `c`; las **etiquetas** (compra y cantidad en `(c, c+H]`) usan el conocimiento más
+reciente al corte final (la verdad disponible). Un documento cargado después de `c` o una anulación posterior no alteran las variables del corte, pero sí cuentan
+como resultado. `CustomerRepository.purchases()/returns()` devuelven lo conocido al corte. Detalle y pruebas en `docs/data/TEMPORAL_AVAILABILITY.md` §7.
 
 **14.7 Resultados medidos (ficticios).** Generador de verdad conocida (`customer/synthetic.py`): la probabilidad servida coincide con la verdad analítica por grupos
 y el modelo complejo supera a la referencia en Brier 5–16 % en H = 7/30 (con la regla de promoción aplicada); demo Ferretería Andina: ver
@@ -477,3 +514,46 @@ Detalle completo, modelo matemático y limitaciones en `docs/architecture/v2/P4-
 * **Simulación histórica de operación.** Re-juego semanal de la política actual, una referencia mín-máx y el planificador
   con información disponible a cada fecha, con la misma demanda y los mismos retrasos aleatorios. Resultados en los datos
   demo sintéticos y su lectura en `P4-decisiones.md` §10; no validan precisión comercial.
+
+## 16. Tiempo de conocimiento y semántica de días (W1-A2 · ADR-V25-23 y ADR-V25-03)
+
+Documento de referencia: `docs/data/TEMPORAL_AVAILABILITY.md` (regla de visibilidad, modos de ingestión, costo medido, limitaciones y lista de pruebas con su estado).
+Código: `engine/predictily_engine/data/asof.py` (lectura as-of), `profiling/days.py` (clasificación de días), `backtest/rolling.py` (`AsOfWindows`),
+`customer/features.py` (variables vs etiquetas) y `platform/snapshot.py` (huella).
+
+**16.1 Lectura as-of.** Las ventas se leen **una vez** de la vista `sales_line_versions` hasta el corte final y cada vista de un corte se deriva en pandas con filtros
+vectorizados; `daily_sales(cutoff)`, `daily_returns`, `last_sale_date` y `sales_stats` conservan su firma y devuelven lo conocido al corte. Los fixtures existentes (carga
+histórica, `ingestion_mode = 'backfill'`) se leen como antes. IMPLEMENTADO / VERIFICADO (`test_asof_integration.py`, `test_asof_visibility.py`).
+
+**Conocimiento del corte final.** La regla («visible al corte C si `known_from < medianoche local (C+1)`…») es estricta para todo corte **anterior** al final. Para el corte final depende de
+la ejecución: una **ejecución vigente** (corte = último dato) conoce hasta **hoy** —sin esto, con carga incremental el último día aparecería vacío porque sus documentos llegan tras la
+medianoche—, igual que ya hacían las promociones (`promotions_known_on`); una **reconstrucción histórica** (existen ventas posteriores al corte) conoce solo hasta el propio corte, de modo
+que lo que llegue después no cambia ni sus datos ni su huella. Las ventanas del backtest y las observaciones del Customer Core siguen siendo estrictas. Los reales con que se mide cada ventana
+son la verdad disponible (hasta hoy en la ejecución vigente). Queda en `knowledge.source.knowledge_date`. IMPLEMENTADO / VERIFICADO (`test_asof_visibility.py::test_a_live_*`,
+`test_asof_integration.py::test_a_live_run_*`, `test_asof_customer_integration.py::test_a_live_customer_run_*`).
+
+**16.2 Qué se entrena y qué se evalúa en cada ventana.**
+
+| Elemento de la ventana | Conocimiento |
+|---|---|
+| Panel, perfil de demanda, clase, elegibilidad, escalas, precio supuesto, variables de LightGBM | as-of el origen de la ventana |
+| Reales con que se mide (`actual`, `price_act`) y marca de día no evaluable | la verdad disponible al corte final (hasta hoy en una ejecución vigente) |
+| Selección y calibración de la evaluación | solo ventanas anteriores al período reservado (sin cambio) |
+
+**16.3 Clasificación de días (`day_status`).**
+
+| Estado | Entra como 0 | Tratamiento |
+|---|---|---|
+| `sale` | — | observado |
+| `zero_confirmed` | sí | cero observado (fuente completa, sucursal abierta, sin quiebre) |
+| `stockout_censored` | no | censurado: peso 0, fuera de métricas, imputado (lógica existente) |
+| `missing_source` | no | fuera de `data_coverage`, dentro de `data_coverage_gaps` o inferido: excluido de métricas y perfilado, imputado con la media móvil de 28 días, con su conteo en limitaciones y manifiesto |
+| `closed` | no | `calendar_events` con `category = 'closure'` (empresa o sucursal): igual que `missing_source` |
+
+Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_confirmed`. La **regla inferida** (por defecto activa; claves `day_status_infer_gaps`,
+`day_status_infer_min_median_lines` = 5 y `day_status_infer_lookback_days` = 28) marca `missing_source` con base `inferred` un día en que una sucursal no registra ninguna línea pese a una
+mediana ≥ 5 líneas diarias en los 28 días previos; **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
+IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
+
+**16.4 Costo.** En los datos de la demo-ferretería (14 k líneas) la lectura de versiones tarda 0,19–0,28 s frente a 0,11–0,20 s de la consulta agregada anterior, y cada vista as-of adicional
+8–11 ms; con 714 k líneas (12 % tardías) la lectura tarda 4,1 s frente a 0,83 s y cada vista 10–20 ms. Una ventana solo reconstruye su panel cuando hay diferencias con la verdad.
