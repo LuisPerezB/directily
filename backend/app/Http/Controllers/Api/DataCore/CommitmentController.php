@@ -10,6 +10,7 @@ use App\Models\CommercialCommitment;
 use App\Services\DataCore\Commitments\CommitmentAsOf;
 use App\Services\DataCore\Commitments\CommitmentCancellation;
 use App\Services\Imports\ImportEntity;
+use App\Services\Imports\Parsing\ValueParser;
 use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantRule;
 use Carbon\CarbonImmutable;
@@ -43,7 +44,7 @@ final class CommitmentController extends Controller
 
             return response()->json(['data' => $view, 'meta' => [
                 'as_of' => CarbonImmutable::parse($data['as_of'])->toIso8601String(),
-                'rule' => 'last_version_known_at_or_before_as_of; versions_without_known_at_are_not_visible; cancelled_when_cancelled_at_lte_as_of; pending=max(0,quantity-fulfilled)',
+                'rule' => 'last_version_with_effective_known_at_lte_as_of; effective_known_at=coalesce(known_at,ingested_at); known_basis=declared|ingestion; cancelled_when_cancelled_at_lte_as_of; pending=max(0,quantity-fulfilled)',
             ]]);
         }
         $query = CommercialCommitment::query()->with('items')->orderByDesc('issued_at')->orderByDesc('id');
@@ -119,7 +120,7 @@ final class CommitmentController extends Controller
 
     private function typeOf(string $raw): string
     {
-        $k = \App\Services\Imports\Parsing\ValueParser::key($raw);
+        $k = ValueParser::key($raw);
 
         return match (true) {
             in_array($k, ['cotizacion', 'proforma', 'presupuesto', 'oferta', 'cot'], true) => 'quote',

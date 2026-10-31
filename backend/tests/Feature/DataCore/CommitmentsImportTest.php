@@ -132,7 +132,7 @@ final class CommitmentsImportTest extends TestCase
         $this->assertEquals(150.0, $view('2026-10-05T12:00:00-05:00')[0]['pending_total']);
     }
 
-    public function test_commitments_without_known_at_are_not_visible_at_a_cutoff_and_undated_cancellations_are_flagged(): void
+    public function test_ingestion_bounds_knowledge_when_known_at_is_not_declared_and_undated_cancellations_are_flagged(): void
     {
         $this->importCsv('commitments', self::HEADERS, [
             $this->row(['external_id' => 'SINF-1', 'known_at' => '']),
@@ -142,15 +142,40 @@ final class CommitmentsImportTest extends TestCase
         $this->assertNull($this->commitment('order', 'CANC-1')['cancelled_at']);
         $this->assertSame('cancelled', $this->commitment('order', 'CANC-1')['status']);
 
-        $view = $this->getJson('/api/v1/commitments?as_of='.urlencode('2026-10-20T00:00:00-05:00'))->assertOk()->json('data');
-        $ids = array_column($view, 'external_id');
-        $this->assertNotContains('SINF-1', $ids, 'conocimiento desconocido ⇒ no se puede usar como conocido al corte');
-        $this->assertContains('CANC-1', $ids);
-        $cancelled = collect($view)->firstWhere('external_id', 'CANC-1');
+        // Importado HOY sin known_at: la ingestión es la cota superior del conocimiento. Un corte anterior a la importación no lo ve...
+        $past = $this->getJson('/api/v1/commitments?as_of='.urlencode('2026-10-20T00:00:00-05:00'))->assertOk()->json('data');
+        $this->assertNotContains('SINF-1', array_column($past, 'external_id'), 'importado después del corte: no se pudo conocer antes');
+        $this->assertContains('CANC-1', array_column($past, 'external_id'));
+        $cancelled = collect($past)->firstWhere('external_id', 'CANC-1');
         $this->assertContains('cancellation_date_unknown', $cancelled['flags']);
         $this->assertEquals(0.0, $cancelled['pending_total']);
+        $this->assertSame('declared', $cancelled['known_basis']);
+        // ...pero sí cuenta en el corte de hoy, marcado como conocimiento por ingestión.
+        $today = $this->getJson('/api/v1/commitments?as_of='.urlencode(now()->addMinute()->toIso8601String()))->assertOk()->json('data');
+        $sinf = collect($today)->firstWhere('external_id', 'SINF-1');
+        $this->assertNotNull($sinf, 'el pedido confirmado importado sin known_at cuenta en el corte de hoy');
+        $this->assertSame('ingestion', $sinf['known_basis']);
+        $this->assertNotNull($sinf['known_at']);
+        $this->assertEquals(100.0, $sinf['pending_total']);
         $detail = $this->getJson('/api/v1/commitments/'.$this->commitment('order', 'CANC-1')['id'])->json('data');
         $this->assertTrue($detail['cancellation_date_unknown']);
+    }
+
+    public function test_a_declared_known_at_makes_the_version_visible_from_that_instant_and_a_later_undeclared_version_only_from_its_ingestion(): void
+    {
+        $this->importCsv('commitments', self::HEADERS, [$this->row(['external_id' => 'DEC-1', 'quantity' => 40, 'known_at' => '2026-09-05 10:00:00'])]);
+        $view = fn (string $asOf) => collect($this->getJson('/api/v1/commitments?as_of='.urlencode($asOf))->assertOk()->json('data'))->firstWhere('external_id', 'DEC-1');
+        $this->assertNull($view('2026-09-05T09:59:00-05:00'));                                  // antes del known_at declarado
+        $v = $view('2026-09-05T10:00:00-05:00');
+        $this->assertSame('declared', $v['known_basis']);
+        $this->assertEquals(40.0, $v['pending_total']);
+        // Nueva versión (cantidad 90) sin known_at: visible solo desde su ingestión; antes sigue la versión declarada.
+        $this->importCsv('commitments', self::HEADERS, [$this->row(['external_id' => 'DEC-1', 'quantity' => 90, 'known_at' => ''])]);
+        $this->assertEquals(40.0, $view('2026-10-01T00:00:00-05:00')['pending_total']);
+        $latest = $view(now()->addMinute()->toIso8601String());
+        $this->assertSame('ingestion', $latest['known_basis']);
+        $this->assertEquals(90.0, $latest['pending_total']);
+        $this->assertSame(2, $latest['revision']);
     }
 
     public function test_validation_rules(): void

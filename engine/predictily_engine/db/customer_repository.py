@@ -191,12 +191,14 @@ class CustomerRepository:
 
     # ── compromisos comerciales (los escribe P3; aquí solo se leen) ──
     def commitment_revisions(self) -> pd.DataFrame:
-        """Todas las revisiones de compromisos con `known_at`/`cancelled_at` en hora local de la empresa (la regla de visibilidad
-        a un corte —P3 `CommitmentAsOf`— se aplica en `customer.commitments.state_as_of`)."""
+        """Todas las revisiones de compromisos con `known_at`, `recorded_at` (ingestión) y `cancelled_at` en hora local de la empresa
+        (la regla de visibilidad a un corte —P3 `CommitmentAsOf`: `COALESCE(known_at, recorded_at) ≤ corte`— se aplica en
+        `customer.commitments.state_as_of`)."""
         tz = TenantRepository._TENANT_TZ
         df = self._read(
             f"""
             SELECT r.commitment_id, r.revision, r.status, (r.known_at AT TIME ZONE tz.tz) AS known_local,
+                   (r.recorded_at AT TIME ZONE tz.tz) AS recorded_local,
                    (r.cancelled_at AT TIME ZONE tz.tz) AS cancelled_local, r.snapshot,
                    c.commitment_type, c.customer_id, c.currency
             FROM commercial_commitment_revisions r

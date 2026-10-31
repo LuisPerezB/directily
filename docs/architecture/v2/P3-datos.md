@@ -95,7 +95,10 @@ demanda; son una vista separada con su estado, fechas y cantidades pendientes.
 **Reglas de estado a un corte** (`GET /commitments?as_of=…`, `App\Services\DataCore\Commitments\CommitmentAsOf`; las debe usar
 cualquier consumidor, p. ej. Customer Core):
 
-1. Versiones visibles = revisiones con `known_at` **no nulo** y `≤ corte`. Sin ninguna, el compromiso **no existe** para ese corte.
+1. Versiones visibles = revisiones con `effective_known_at ≤ corte`, donde `effective_known_at = COALESCE(known_at, recorded_at)` (**ADR de visibilidad por ingestión**:
+   la ingestión en Predictily es una **cota superior** del conocimiento; con `known_at` declarado manda éste, `known_basis = declared`; sin él, el momento en que se
+   registró la revisión, `known_basis = ingestion`). Un histórico importado hoy sin `known_at` **no** se usa en cortes anteriores a la importación, pero **sí** cuenta en el corte de
+   hoy. Sin ninguna versión visible, el compromiso **no existe** para ese corte. La salida `GET /commitments?as_of=` trae `known_at` (efectivo), `known_basis` e `ingested_at`.
 2. Se usa la última versión visible (cabecera, líneas y cumplido tal como se conocían).
 3. Cancelado al corte si `cancelled_at ≤ corte`. Estado cancelado sin fecha ⇒ bandera `cancellation_date_unknown`, pendiente 0.
 4. Pendiente por línea = `max(0, cantidad − cumplida)`; 0 si está cancelado.
@@ -170,7 +173,7 @@ Ver §4. Un mapeo es una consulta/vista **autorizada y versionada** por fuente y
 | **Ingestión** en Predictily | `created_at`/`updated_at`, `commercial_commitment_revisions.recorded_at`, `import_jobs`, `source_syncs` | siempre conocida |
 
 Una carga histórica actual **no demuestra** que algo se conocía antes: por eso `known_at` jamás se rellena con la fecha de la carga.
-Consecuencia para los consumidores: lo que tiene `known_at` `NULL` **no puede usarse como conocido a futuro de un corte pasado**; la
+Consecuencia para los consumidores: lo que tiene `known_at` `NULL` **no puede usarse como conocido a futuro de un corte pasado** (para los compromisos, su conocimiento se acota por la ingestión y vale desde ese instante: §2.3 regla 1); la
 variable que lo requiera debe excluirse del backtest y declararse la limitación (`instrucctions.md` §6.C). Limitaciones conocidas:
 no hay historial de versiones de ventas (solo la actual + `source_recorded_at`); la cantidad de un compromiso sí se versiona; el inventario
 (`inventory_snapshots`) solo tiene la fecha del corte (evento) y la ingestión: la disponibilidad en la fuente queda **desconocida** y no se declara.
@@ -418,7 +421,7 @@ borran sus tablas `erp_*`. Si no existe, las pruebas de sincronización se omite
 
 - Ningún ERP real conectado (Soyoda, Contífico, ODBC): el recorrido SQL se probó contra una base PostgreSQL ficticia. MySQL/MariaDB y SQL Server **sin probar**.
 - Sin lectura de `customers` ni `costs` como entidades SQL propias (los clientes salen de las ventas; costos por productos).
-- `source_recorded_at` no versiona ventas anteriores (solo la actual). Un compromiso modificado en el origen sin `known_at` no puede reconstruirse a un corte.
+- `source_recorded_at` no versiona ventas anteriores (solo la actual). Un compromiso modificado en el origen sin `known_at` solo es visible desde la ingestión de su revisión (cota superior), no desde que cambió en el origen.
 - Cancelación de compromiso por API usa la hora actual como `known_at` si no se indica (se conoce desde que se informa).
 - El exportador de datos LOPDP (`TenantDataExporter`) aún no incluye las tablas nuevas.
 - No se actualizó `docs/openapi/*.yaml` (documentado en `docs/06`).

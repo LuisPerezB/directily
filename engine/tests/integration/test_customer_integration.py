@@ -494,3 +494,37 @@ def test_label_maturity_and_prediction_date_follow_the_effective_coverage_of_p3(
     assert out["quality_status"] == "degraded"
     lims = " ".join(q(db_engine, "SELECT limitations FROM core_runs WHERE id = :r", r=out["run_id"])[0]["limitations"])
     assert "cobertura declarada" in lims
+
+
+def test_a_confirmed_order_without_known_at_counts_today_but_not_in_past_cutoffs(db_engine, env):
+    """La ingestión es la cota superior del conocimiento: un pedido confirmado importado SIN known_at es visible en el corte de hoy
+    (`known_basis = ingestion`) y no existe en cortes anteriores a su importación."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tid = env["A"]["tenant_id"]
+    today = datetime.now(ZoneInfo("America/Guayaquil")).date()
+    base = predict_a(db_engine, env)
+    rel = q(db_engine, "SELECT p.customer_id, p.product_id FROM customer_predictions p WHERE p.tenant_id = :t AND p.core_run_id = :r AND p.horizon_days = 30 "
+                       "AND p.customer_id NOT IN (SELECT customer_id FROM commercial_commitments WHERE tenant_id = :t AND customer_id IS NOT NULL) "
+                       "ORDER BY p.expected_quantity DESC LIMIT 1", t=tid, r=base["run_id"])[0]
+    delivery = (today + timedelta(days=10)).isoformat()
+    with db_engine.begin() as conn:
+        sku = conn.execute(text("SELECT sku FROM products WHERE tenant_id = :t AND id = :p"), {"t": tid, "p": rel["product_id"]}).scalar_one()
+        cid = conn.execute(text(
+            "INSERT INTO commercial_commitments (tenant_id, customer_id, commitment_type, external_id, status, issued_at, known_at, expected_delivery_date, currency, created_at, updated_at) "
+            "VALUES (:t, :c, 'order', 'PED-SINF', 'confirmed', now(), NULL, :d, 'USD', now(), now()) RETURNING id"), {"t": tid, "c": rel["customer_id"], "d": delivery}).scalar_one()
+        conn.execute(text("INSERT INTO commercial_commitment_items (tenant_id, commitment_id, line_number, product_id, quantity, quantity_fulfilled, unit, created_at, updated_at) "
+                          "VALUES (:t, :c, 1, :p, 33, 3, 'unidad', now(), now())"), {"t": tid, "c": cid, "p": rel["product_id"]})
+        snap = {"header": {"commitment_type": "order", "external_id": "PED-SINF", "status": "confirmed", "expected_delivery_date": delivery, "currency": "USD"},
+                "lines": [{"line_number": 1, "product_sku": sku, "quantity": 33, "quantity_fulfilled": 3, "unit": "unidad", "delivery_date": None}]}
+        conn.execute(text("INSERT INTO commercial_commitment_revisions (tenant_id, commitment_id, revision, status, known_at, source_hash, snapshot, recorded_at) "
+                          "VALUES (:t, :c, 1, 'confirmed', NULL, repeat('b', 64), CAST(:s AS jsonb), now())"), {"t": tid, "c": cid, "s": json.dumps(snap)})
+    sql = ("SELECT committed_quantity FROM customer_predictions WHERE tenant_id = :t AND core_run_id = :r AND customer_id = :c AND product_id = :p AND horizon_days = 30")
+    past = predict_a(db_engine, env)                                              # corte anterior a la importación
+    assert float(q(db_engine, sql, t=tid, r=past["run_id"], c=rel["customer_id"], p=rel["product_id"])[0]["committed_quantity"]) == 0.0
+    assert past["summary"]["committed"]["30"]["commitments_not_visible_at_cutoff"] >= 1
+    now_run = run(db_engine, tid, "predict", as_of=today.isoformat())              # corte de hoy
+    committed = q(db_engine, sql, t=tid, r=now_run["run_id"], c=rel["customer_id"], p=rel["product_id"])
+    assert committed and float(committed[0]["committed_quantity"]) == pytest.approx(30.0)    # 33 − 3 cumplidos, entrega dentro de 30 días
+    s30 = now_run["summary"]["committed"]["30"]
+    assert s30["commitments_known_by_ingestion"] >= 1 and s30["lines_known_by_ingestion"] >= 1

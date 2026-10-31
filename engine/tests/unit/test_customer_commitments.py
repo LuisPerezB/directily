@@ -92,11 +92,12 @@ def test_committed_by_relation_aggregates_per_buyer_and_product_and_keeps_unattr
     assert rel["customer_id"].isna().sum() == 1
 
 
-def _rev(cid, revision, status, known, cancelled=None, qty=100.0, fulfilled=10.0, ctype="order", delivery="2026-06-10", sku="ABC", unit="unidad"):
+def _rev(cid, revision, status, known, cancelled=None, qty=100.0, fulfilled=10.0, ctype="order", delivery="2026-06-10", sku="ABC", unit="unidad",
+         recorded="2026-04-01 00:00"):
     header = {"commitment_type": ctype, "status": status, "expected_delivery_date": delivery, "currency": "USD"}
     lines = [{"line_number": 1, "product_sku": sku, "quantity": qty, "quantity_fulfilled": fulfilled, "unit": unit, "delivery_date": None}]
     return {"commitment_id": cid, "revision": revision, "status": status, "known_local": pd.Timestamp(known) if known else pd.NaT,
-            "cancelled_local": pd.Timestamp(cancelled) if cancelled else pd.NaT, "snapshot": {"header": header, "lines": lines},
+            "recorded_local": pd.Timestamp(recorded), "cancelled_local": pd.Timestamp(cancelled) if cancelled else pd.NaT, "snapshot": {"header": header, "lines": lines},
             "commitment_type": ctype, "customer_id": 10, "currency": "USD"}
 
 
@@ -119,12 +120,31 @@ def test_state_follows_the_p3_rule_last_version_known_at_or_before_the_cutoff():
     assert len(state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 5, 1))[0]) == 1
 
 
-def test_a_version_without_known_at_is_never_visible_even_for_the_present():
-    revs = pd.DataFrame([_rev(1, 1, "confirmed", None)])
-    st, stats = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 6, 1))
-    assert st.empty and stats["not_visible_unknown_or_later"] == 1
-    _, summary = committed_lines(st, date(2026, 6, 1), 30, stats)
-    assert summary["excluded"]["unknown_or_after_cutoff"] == 1 and summary["committed_quantity"] == 0
+def test_ingestion_is_the_upper_bound_of_knowledge_when_known_at_is_not_declared():
+    """(a) importado sin known_at HOY ⇒ visible en el corte de hoy, invisible en el de ayer; (b) known_at declarado ⇒ visible desde known_at."""
+    undeclared = pd.DataFrame([_rev(1, 1, "confirmed", None, recorded="2026-06-01 09:30")])
+    today, yesterday = date(2026, 6, 1), date(2026, 5, 31)
+    st, stats = state_as_of(undeclared, {"ABC": 5}, UNITS, today)
+    assert len(st) == 1 and st.iloc[0]["known_basis"] == "ingestion" and stats["known_by_ingestion"] == 1
+    lines, summary = committed_lines(st, today, 30, stats)
+    assert summary["committed_quantity"] == pytest.approx(90) and summary["commitments_known_by_ingestion"] == 1 and summary["lines_known_by_ingestion"] == 1
+    st_y, stats_y = state_as_of(undeclared, {"ABC": 5}, UNITS, yesterday)
+    assert st_y.empty and stats_y["not_visible_unknown_or_later"] == 1                 # un histórico importado hoy no se usa en cortes pasados
+    declared = pd.DataFrame([_rev(1, 1, "confirmed", "2026-05-10 08:00", recorded="2026-06-01 09:30")])
+    for as_of, visible in ((date(2026, 5, 9), False), (date(2026, 5, 10), True), (yesterday, True)):
+        st, stats = state_as_of(declared, {"ABC": 5}, UNITS, as_of)
+        assert (len(st) == 1) is visible
+        if visible:
+            assert st.iloc[0]["known_basis"] == "declared" and stats["known_by_ingestion"] == 0      # manda el known_at declarado, no la ingestión
+
+
+def test_a_later_undeclared_version_supersedes_only_from_its_ingestion():
+    revs = pd.DataFrame([_rev(1, 1, "confirmed", "2026-05-01 08:00", qty=50, fulfilled=0, recorded="2026-05-01 09:00"),
+                         _rev(1, 2, "confirmed", None, qty=120, fulfilled=0, recorded="2026-06-01 09:30")])
+    before = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 5, 31))[0]
+    after = state_as_of(revs, {"ABC": 5}, UNITS, date(2026, 6, 1))[0]
+    assert before.iloc[0]["quantity"] == 50 and before.iloc[0]["known_basis"] == "declared"
+    assert after.iloc[0]["quantity"] == 120 and after.iloc[0]["known_basis"] == "ingestion"
 
 
 def test_cancellation_without_date_is_flagged_and_counts_zero_and_a_later_cancellation_does_not_apply():
