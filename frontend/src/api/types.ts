@@ -831,7 +831,9 @@ export interface ModelEvaluation {
 }
 
 /** Estados del registro: nuevos (etapa 2) y legados (aún aceptados por el filtro de la API). */
-export type ModelStatus = 'candidate' | 'validated' | 'production' | 'retired' | 'failed'
+export type ModelStatus = 'candidate' | 'validated' | 'approved' | 'production' | 'retired' | 'rejected' | 'failed'
+/** Base de servicio (V2.5 · W4): aprobado por otra persona, legado del pipeline propio, o sin aprobar (no se sirve ni se restaura). */
+export type ModelServingBasis = 'approved' | 'legacy_pipeline' | 'not_approved'
 export type ModelRole = 'primary' | 'fallback'
 
 export interface ModelRegistryEntry {
@@ -842,6 +844,7 @@ export interface ModelRegistryEntry {
   strategy_level: string
   scope?: string
   status: ModelStatus
+  serving_basis?: ModelServingBasis
   /** Estado de la etapa 1 equivalente (fallback, archived, rejected...). */
   legacy_status?: string | null
   core?: 'demand' | 'customer' | string | null

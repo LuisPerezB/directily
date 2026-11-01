@@ -257,18 +257,136 @@ paths:
       tags: [Precisión]
       summary: Registro de modelos de la empresa
       description: |
-        Estados (ADR-V2-07): `candidate`, `validated`, `production`, `retired`, `failed`, con `role` (`primary|fallback`) y `core`.
-        El filtro `status` acepta también los nombres de la etapa 1 (`fallback` = production + role fallback, `archived` = retired,
-        `rejected` = validated); cada fila trae `legacy_status`.
+        Estados (ADR-V2-07 y ADR-V25-07): `candidate`, `validated`, `approved`, `production`, `retired`, `rejected` y el legado `failed`, con
+        `role` (`primary|fallback`) y `core`. El filtro `status` acepta también los nombres de la etapa 1 (`fallback` = production + role
+        fallback, `archived` = retired, `rejected` = los validados no promovidos de la etapa 1 Y los rechazados); cada fila trae `legacy_status`.
+        `family` filtra por familia de modelo (`model_family`). Cada fila trae el ciclo de vida (publicación y aprobación separada) y
+        `serving_basis`: `approved` (aprobado por una persona distinta de quien lo publicó o entrenó), `legacy_pipeline` (legado del pipeline
+        propio, se sirve como hasta ahora) o `not_approved` (no puede servirse ni restaurarse). Nunca expone la clave del almacén de objetos.
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
-        - { name: status, in: query, schema: { type: string, enum: [candidate, validated, production, retired, failed, fallback, archived, rejected] } }
+        - { name: status, in: query, schema: { type: string, enum: [candidate, validated, approved, production, retired, rejected, failed, fallback, archived] } }
         - { name: role, in: query, schema: { type: string, enum: [primary, fallback] } }
         - { name: core, in: query, schema: { type: string, enum: [demand, customer, supply, cost, scenario] } }
+        - { name: family, in: query, description: 'Familia del modelo (model_family), p. ej. lightgbm_global', schema: { type: string, maxLength: 40, pattern: '^[a-z0-9_]+$' } }
         - { name: run_id, in: query, schema: { type: integer } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
       responses:
         '200': { description: Lista paginada de model_registry }
         '422': { $ref: '#/components/responses/ValidationError' }
+  /models/{id}:
+    get:
+      tags: [Precisión]
+      summary: Detalle de un modelo con su historial de transiciones
+      description: |
+        Los campos de la lista más `events` (de la más antigua a la más reciente: de, a, actor, tipo de actor `user|system|cli`, motivo y
+        evidencia: firma, gate de datos, política) y la decisión de promoción de la política asociada (`promotion_decision`). Un modelo de otra
+        empresa responde 404. Habilidad `forecast.view`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Modelo con eventos
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ModelRegistryDetail' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /models/{id}/validate:
+    post:
+      tags: [Precisión]
+      summary: Validar un candidato (compuertas automáticas)
+      description: |
+        `candidate` → `validated` si pasa las compuertas: firma Ed25519 verificada del artefacto, gate de calidad de datos de su ejecución distinto de
+        BLOCK, decisión de política no rechazada y compatibilidad (Customer). No es una decisión de negocio y **no vuelve servible** al modelo: solo la
+        aprobación separada lo hace. Habilidad `forecast.run` para un candidato publicado por la CLI; un modelo que no entró por la publicación (retador
+        del pipeline propio) exige `models.approve` (403 `forbidden`). Queda en `model_registry_events` y en auditoría (`models.validated`). Errores 409 (`code`): `model_transition_not_allowed`,
+        `approval_artifact_not_verifiable|unsigned|mismatch|signature_invalid|without_checksum` (un modelo publicado sin `published_object_key` también
+        es `approval_artifact_not_verifiable`), `approval_object_key_invalid`, `approval_data_gate_blocked|missing`, `approval_policy_rejected`,
+        `model_without_slot`, `model_incompatible`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelDecisionBody' } } }
+      responses:
+        '200':
+          description: Modelo validado
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ModelRegistryDetail' } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Transición o compuerta no superada (code en el cuerpo)' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /models/{id}/approve:
+    post:
+      tags: [Precisión]
+      summary: Aprobar un modelo validado (aprobación separada)
+      description: |
+        `validated` → `approved`. Exige la habilidad `models.approve` (propietario y administrador) Y segregación de funciones: quien publicó el
+        modelo (`published_by`) o disparó su entrenamiento (`training_jobs.user_id`, `forecast_runs.user_id`, `core_runs.user_id`) no puede aprobarlo
+        (403 `approval_segregation_of_duties`). Re-verifica la firma, el gate de datos de W2-C (≠ BLOCK) y la compatibilidad; completa la decisión de
+        promoción de W3 asociada (`approved_by`, `approved_at`). Aprobar no sirve el modelo: `POST /models/{id}/promote` lo pone en producción.
+        Errores 409 como en `validate`. Queda en `model_registry_events` y en auditoría (`models.approved`).
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelDecisionBody' } } }
+      responses:
+        '200':
+          description: Modelo aprobado
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ModelRegistryDetail' } } } } }
+        '403': { description: 'Sin la habilidad models.approve (code forbidden) o aprobador responsable del modelo (code approval_segregation_of_duties)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Transición o compuerta no superada (code en el cuerpo)' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /models/{id}/reject:
+    post:
+      tags: [Precisión]
+      summary: Rechazar un modelo (motivo obligatorio)
+      description: |
+        `candidate`, `validated` o `approved` (aún sin producción) → `rejected`, terminal. El motivo es obligatorio (5 a 1000 caracteres) y queda en
+        `rejected_reason`, en el evento y en auditoría (`models.rejected`). Misma habilidad (`models.approve`) y misma segregación de funciones que
+        aprobar (403 `approval_segregation_of_duties`). Rechazar un modelo aprobado retira la aprobación vigente (`approved_by` y `approved_at`
+        quedan en nulo); el evento conserva quién y cuándo lo aprobó (`evidence.previous_approval`).
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 5, maxLength: 1000 } } } } }
+      responses:
+        '200':
+          description: Modelo rechazado
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ModelRegistryDetail' } } } } }
+        '403': { description: 'Sin la habilidad models.approve (code forbidden) o responsable del modelo (code approval_segregation_of_duties)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Transición no permitida (code en el cuerpo)' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /models/{id}/promote:
+    post:
+      tags: [Precisión]
+      summary: Poner un modelo aprobado en producción
+      description: |
+        `approved` → `production`. Retira (`retired`) al modelo que servía en el mismo alcance (Customer: el mismo slot `h<H>:<objetivo>`; los demás
+        cores: la misma familia, clase de demanda y rol) en la MISMA transacción, y vuelve a verificar firma, gate de datos y compatibilidad. Habilidad
+        `models.approve`; el aprobador no puede ser responsable del modelo (403 `approval_segregation_of_duties`). 402 si el plan no incluye el
+        horizonte (Customer). `data.retired_model_ids` lista los retirados.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelDecisionBody' } } }
+      responses:
+        '200':
+          description: Modelo en producción
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/ModelRegistryDetail' } } } } }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Transición o compuerta no superada (code en el cuerpo)' }
   /models/demand/rollback:
     post:
       tags: [Precisión]
@@ -279,7 +397,10 @@ paths:
         (`models.demand_rolled_back`). Una ejecución de otra empresa responde 404.
         Errores 409 (`code`): `no_current_run`, `rollback_already_current`, `rollback_target_not_production`,
         `rollback_target_not_previous`, `rollback_target_without_models`, `rollback_target_without_forecasts`,
-        `rollback_artifact_mismatch`.
+        `rollback_target_not_approved`, `rollback_artifact_mismatch`.
+        V2.5 · W4 (ADR-V25-07): solo se restauran modelos aprobados por una persona distinta de quien los publicó o entrenó, o legados del pipeline
+        propio (`serving_basis` = `legacy_pipeline`: origen positivo en una corrida enlazada o en la línea base de la migración, nunca validado por una
+        persona ni publicado); cada cambio de estado deja su evento en `model_registry_events`.
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }]
       requestBody:
         required: true
@@ -525,6 +646,44 @@ components:
         message: { type: string }
         code: { type: string }
         errors: { type: object, additionalProperties: { type: array, items: { type: string } } }
+    ModelDecisionBody:
+      type: object
+      properties:
+        reason: { type: [string, 'null'], maxLength: 1000, description: 'Justificación opcional (queda en el evento de auditoría)' }
+    ModelRegistryEvent:
+      type: object
+      description: Una transición del ciclo de vida de un modelo (solo inserción)
+      properties:
+        id: { type: integer }
+        from_status: { type: [string, 'null'], description: 'Nulo en la línea base' }
+        to_status: { type: string, enum: [candidate, validated, approved, production, retired, rejected, failed] }
+        actor_user_id: { type: [integer, 'null'] }
+        actor_kind: { type: string, enum: [user, system, cli] }
+        reason: { type: [string, 'null'] }
+        evidence: { type: object, additionalProperties: true, description: 'Compuertas (firma, gate de datos, política), alcance y base de servicio' }
+        created_at: { type: string, format: date-time }
+    ModelRegistryDetail:
+      type: object
+      description: Modelo del registro con su historial; los campos de la lista de GET /models más los siguientes
+      additionalProperties: true
+      properties:
+        id: { type: integer }
+        version: { type: string }
+        model_family: { type: string }
+        status: { type: string, enum: [candidate, validated, approved, production, retired, rejected, failed] }
+        serving_basis: { type: string, enum: [approved, legacy_pipeline, not_approved] }
+        published_by: { type: [integer, 'null'] }
+        published_env: { type: [string, 'null'] }
+        published_at: { type: [string, 'null'], format: date-time }
+        approved_by: { type: [integer, 'null'] }
+        approved_at: { type: [string, 'null'], format: date-time }
+        rejected_reason: { type: [string, 'null'] }
+        previous_model_registry_id: { type: [integer, 'null'] }
+        promotion_decision_id: { type: [integer, 'null'] }
+        events: { type: array, items: { $ref: '#/components/schemas/ModelRegistryEvent' } }
+        promotion_decision: { type: [object, 'null'], additionalProperties: true }
+        published: { type: boolean }
+        retired_model_ids: { type: array, items: { type: integer }, description: 'Solo en la respuesta de promote' }
     PaginationEnvelope:
       type: object
       properties:

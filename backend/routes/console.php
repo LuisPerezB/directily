@@ -41,3 +41,8 @@ Schedule::command('predictily:customer-predict')
 Schedule::command('predictily:intelligence-expire')
     ->dailyAt('01:30')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
+
+// ── MLOps (V2.5 · W4-A): foto diaria del almacenamiento por empresa (Bronze y artefactos) para el modelo de costos; solo cantidades, sin precios ──
+Schedule::command('predictily:usage-snapshot')
+    ->dailyAt('05:00')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();

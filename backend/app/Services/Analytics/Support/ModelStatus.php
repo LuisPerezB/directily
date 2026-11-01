@@ -5,16 +5,18 @@ declare(strict_types=1);
 namespace App\Services\Analytics\Support;
 
 /**
- * Estados del registro de modelos (ADR-V2-07): candidate | validated | production | retired | failed,
- * con el papel (role) primary | fallback en columna aparte. Los nombres de la etapa 1 siguen aceptándose
+ * Estados del registro de modelos (ADR-V2-07, ampliados en V2.5 · W4 por ADR-V25-07): candidate | validated | approved | production |
+ * retired | rejected | failed, con el papel (role) primary | fallback en columna aparte. Los nombres de la etapa 1 siguen aceptándose
  * al filtrar y se derivan al presentar (`legacy_status`):
  *   fallback  = production + role fallback · archived = retired · rejected = validated · candidate/production igual.
+ * `rejected` ahora también es un estado real (rechazo humano); el alias heredado `?status=rejected` devuelve los validados no promovidos
+ * (significado de la etapa 1) Y los rechazados, y `legacy_status` de un rechazado real es `rejected`.
  */
 final class ModelStatus
 {
-    public const STATES = ['candidate', 'validated', 'production', 'retired', 'failed'];
+    public const STATES = ['candidate', 'validated', 'approved', 'production', 'retired', 'rejected', 'failed'];
 
-    public const LEGACY = ['fallback', 'archived', 'rejected'];
+    public const LEGACY = ['fallback', 'archived'];
 
     public const ROLES = ['primary', 'fallback'];
 
@@ -27,15 +29,15 @@ final class ModelStatus
     /**
      * Condición equivalente de un valor de filtro (nuevo o legado).
      *
-     * @return array{status: string, role?: string}
+     * @return array{status: list<string>, role?: string}
      */
     public static function filter(string $value): array
     {
         return match ($value) {
-            'fallback' => ['status' => 'production', 'role' => 'fallback'],
-            'archived' => ['status' => 'retired'],
-            'rejected' => ['status' => 'validated'],
-            default => ['status' => $value],
+            'fallback' => ['status' => ['production'], 'role' => 'fallback'],
+            'archived' => ['status' => ['retired']],
+            'rejected' => ['status' => ['validated', 'rejected']],
+            default => ['status' => [$value]],
         };
     }
 
@@ -44,7 +46,7 @@ final class ModelStatus
         return match (true) {
             $status === 'production' && $role === 'fallback' => 'fallback',
             $status === 'retired' => 'archived',
-            $status === 'validated' => 'rejected',
+            $status === 'validated', $status === 'rejected' => 'rejected',
             default => $status,
         };
     }

@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Tabla `model_registry`. Ver docs/03-modelo-datos.md.
@@ -21,6 +22,9 @@ class ModelRegistry extends Model
     /** tenant_id se asigna desde TenantContext (BelongsToTenant), nunca por asignación masiva. */
     protected $guarded = ['id', 'tenant_id'];
 
+    /** Base de servicio calculada por lote para las listas (ModelServingPolicy::annotate); NO se persiste. */
+    public ?string $servingBasis = null;
+
     protected function casts(): array
     {
         return [
@@ -33,6 +37,9 @@ class ModelRegistry extends Model
             'trained_at' => 'datetime',
             'promoted_at' => 'datetime',
             'retired_at' => 'datetime',
+            // V2.5 · W4 (ADR-V25-07): publicación y aprobación separada.
+            'published_at' => 'datetime',
+            'approved_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
@@ -46,5 +53,11 @@ class ModelRegistry extends Model
     public function trainingJob(): BelongsTo
     {
         return $this->belongsTo(TrainingJob::class, 'training_job_id');
+    }
+
+    /** Transiciones auditadas del ciclo de vida (V2.5 · W4), de la más antigua a la más reciente (por id: el orden de inserción, no el reloj de quien escribe). */
+    public function events(): HasMany
+    {
+        return $this->hasMany(ModelRegistryEvent::class, 'model_registry_id')->orderBy('id');
     }
 }

@@ -26,4 +26,6 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/intelligence.php';
     // V2.5 · W2-B: linaje (Bronze), reconciliación e identidades (alias).
     require __DIR__.'/api/lineage.php';
+    // V2.5 · W4-A: ciclo de vida del registro de modelos (detalle, validar, aprobar, rechazar, promover).
+    require __DIR__.'/api/models.php';
 });

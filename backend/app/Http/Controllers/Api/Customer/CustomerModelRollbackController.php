@@ -13,6 +13,6 @@ class CustomerModelRollbackController extends CustomerController
 {
     public function store(RollbackCustomerModelRequest $request, CustomerRollbackService $service): JsonResponse
     {
-        return response()->json(['data' => $service->rollback($this->tenant(), $request->user(), (int) $request->validated('model_registry_id'))]);
+        return response()->json(['data' => $service->rollback($this->tenant(), $request->user(), (int) $request->validated('model_registry_id'), $request->attributes->get('tenant_role')?->can('models.approve') === true)]);
     }
 }

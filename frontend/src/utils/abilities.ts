@@ -20,6 +20,7 @@ export type Ability =
   | 'datasources.manage'
   | 'settings.manage'
   | 'audit.view'
+  | 'models.approve'
   | 'tenant.delete'
   | 'tenant.consent'
   | 'owners.manage'
@@ -27,7 +28,7 @@ export type Ability =
 
 const VIEWER: Ability[] = ['data.view', 'forecast.view', 'alerts.view']
 const ANALYST: Ability[] = [...VIEWER, 'imports.manage', 'forecast.run', 'scenarios.run', 'alerts.manage', 'data.export', 'catalog.manage']
-const ADMIN: Ability[] = [...ANALYST, 'users.manage', 'branches.manage', 'datasources.manage', 'settings.manage', 'audit.view']
+const ADMIN: Ability[] = [...ANALYST, 'users.manage', 'branches.manage', 'datasources.manage', 'settings.manage', 'audit.view', 'models.approve']
 const OWNER: Ability[] = [...ADMIN, 'tenant.delete', 'tenant.consent', 'owners.manage', 'tenant.export_all']
 
 export const ROLE_ABILITIES: Record<TenantRole, readonly Ability[]> = {

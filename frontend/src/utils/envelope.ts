@@ -195,6 +195,7 @@ export const ROLLBACK_ERROR_CODES = [
   'rollback_target_without_slot',
   'rollback_target_without_artifact',
   'rollback_target_incompatible',
+  'rollback_target_not_approved',
 ] as const
 
 export function rollbackErrorKey(code: string | null | undefined): string | null {

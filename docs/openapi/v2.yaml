@@ -1261,8 +1261,11 @@ paths:
   /models/customer/rollback:
     post:
       tags: [Comportamiento de compra]
-      summary: Revertir el modelo servido del Customer Core a una versión validada o retirada
-      description: 'Re-sirve la versión y retira la de producción del mismo horizonte y objetivo. Queda en auditoría (`models.customer_rolled_back`).
+      summary: Revertir el modelo servido del Customer Core a una versión validada, aprobada o retirada
+      description: 'Re-sirve la versión y retira la de producción del mismo horizonte y objetivo. Queda en auditoría (`models.customer_rolled_back`) y
+        en `model_registry_events`. V2.5 · W4 (ADR-V25-07): solo se restauran modelos aprobados por una persona distinta de quien los publicó o entrenó,
+        o legados del pipeline propio (`serving_basis` = `legacy_pipeline`). Restaurar un modelo `approved` que nunca estuvo en producción equivale a
+        promoverlo: exige además `models.approve` (403 `forbidden`) y repite las compuertas de la promoción.
 
 
         Habilidad requerida: `forecast.run`.'
@@ -1290,8 +1293,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409':
-          description: '`rollback_already_current`, `rollback_target_not_restorable`, `rollback_target_without_slot`, `rollback_target_without_artifact`,
-            `rollback_target_incompatible`, `rollback_artifact_mismatch`'
+          description: '`rollback_already_current`, `rollback_target_not_restorable`, `rollback_target_not_approved`, `rollback_target_without_slot`,
+            `rollback_target_without_artifact`, `rollback_target_incompatible`, `rollback_artifact_mismatch`'
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}

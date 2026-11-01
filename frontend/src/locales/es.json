@@ -294,6 +294,7 @@
       "archived": "Archivado",
       "rejected": "Rechazado",
       "validated": "Validado",
+      "approved": "Aprobado",
       "retired": "Retirado",
       "failed": "Fallido"
     },
@@ -1374,7 +1375,8 @@
       "rollback_target_without_models": "Esa versión no tiene modelos retirados que restaurar.",
       "rollback_target_without_forecasts": "Esa versión ya no conserva sus pronósticos.",
       "rollback_artifact_mismatch": "El archivo del modelo no coincide con su huella de integridad: no se puede restaurar.",
-      "rollback_target_not_restorable": "Esa versión no se puede volver a servir (debe estar validada o retirada).",
+      "rollback_target_not_restorable": "Esa versión no se puede volver a servir (debe estar validada, aprobada o retirada).",
+      "rollback_target_not_approved": "Esa versión no está aprobada: solo se vuelve a servir lo aprobado por otra persona o lo generado por el pipeline propio.",
       "rollback_target_without_slot": "Esa versión no indica a qué horizonte y objetivo pertenece.",
       "rollback_target_without_artifact": "Esa versión no tiene archivo de modelo.",
       "rollback_target_incompatible": "Esa versión usa un esquema de variables incompatible con el actual."

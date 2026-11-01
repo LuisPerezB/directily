@@ -34,7 +34,8 @@ enum TenantRole: string
     {
         $viewer = ['data.view', 'forecast.view', 'alerts.view'];
         $analyst = [...$viewer, 'imports.manage', 'forecast.run', 'scenarios.run', 'alerts.manage', 'data.export', 'catalog.manage'];
-        $admin = [...$analyst, 'users.manage', 'branches.manage', 'datasources.manage', 'settings.manage', 'audit.view'];
+        // V2.5 · W4 (ADR-V25-07): `models.approve` = aprobar, rechazar y promover modelos (aprobación separada de quien los publica o entrena).
+        $admin = [...$analyst, 'users.manage', 'branches.manage', 'datasources.manage', 'settings.manage', 'audit.view', 'models.approve'];
         $owner = [...$admin, 'tenant.delete', 'tenant.consent', 'owners.manage', 'tenant.export_all'];
 
         return match ($this) {

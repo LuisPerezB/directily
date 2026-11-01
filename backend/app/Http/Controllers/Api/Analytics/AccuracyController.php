@@ -14,6 +14,7 @@ use App\Services\Analytics\AccuracyService;
 use App\Services\Analytics\RunResolver;
 use App\Services\Analytics\Support\ForecastNode;
 use App\Services\Analytics\Support\ModelStatus;
+use App\Services\Models\ModelServingPolicy;
 use App\Support\Results\JsonMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -65,12 +66,14 @@ class AccuracyController extends AnalyticsController
     {
         $status = $request->validated('status') !== null ? ModelStatus::filter((string) $request->validated('status')) : null;
         $models = ModelRegistry::query()
-            ->when($status, fn ($q) => $q->where('status', $status['status']))
+            ->when($status, fn ($q) => $q->whereIn('status', $status['status']))
+            ->when($request->validated('family'), fn ($q, $family) => $q->where('model_family', $family))
             ->when($status['role'] ?? $request->validated('role'), fn ($q, $role) => $q->where('role', $role))
             ->when($request->validated('core'), fn ($q, $core) => $q->where('core', $core))
             ->when($request->validated('run_id'), fn ($q, $run) => $q->where('forecast_run_id', (int) $run))
             ->latest('id')
             ->paginate($this->perPage($request, 25));
+        app(ModelServingPolicy::class)->annotate($models->getCollection());   // una consulta de eventos para toda la página
 
         return ModelRegistryResource::collection($models);
     }

@@ -65,6 +65,18 @@ final class ModelArtifactSignatureTest extends TestCase
         return [$dir.'/'.$name, hash('sha256', $content)];
     }
 
+    /** @var array<int, int> */
+    private array $pipelineRuns = [];
+
+    /** V2.5 · W4 (ADR-V25-07): los modelos del motor llevan su corrida enlazada (origen del pipeline propio = legado servible); sin ella no hay origen. */
+    private function pipelineRun(Tenant $tenant): int
+    {
+        return $this->pipelineRuns[$tenant->id] ??= (int) DB::table('core_runs')->insertGetId([
+            'tenant_id' => $tenant->id, 'core' => 'customer', 'operation' => 'train', 'version' => 1, 'run_type' => 'production', 'status' => 'completed',
+            'options' => '{}', 'assumptions' => '[]', 'limitations' => '[]', 'triggered_by' => 'schedule', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
     /** @param array<string, mixed> $over */
     private function model(Tenant $tenant, string $slot, string $status, string $version, string $file, string $sha, array $over = []): int
     {
@@ -72,7 +84,7 @@ final class ModelArtifactSignatureTest extends TestCase
 
         return (int) DB::table('model_registry')->insertGetId(array_merge([
             'tenant_id' => $tenant->id, 'version' => $version, 'model_family' => 'customer_'.str_replace(':', '_', $slot), 'strategy_level' => 'B', 'scope' => 'tenant',
-            'status' => $status, 'core' => 'customer', 'role' => 'primary', 'artifact_path' => $stored, 'artifact_sha256' => $sha,
+            'status' => $status, 'core' => 'customer', 'role' => 'primary', 'artifact_path' => $stored, 'artifact_sha256' => $sha, 'core_run_id' => $this->pipelineRun($tenant),
             'hyperparameters' => json_encode(['slot' => $slot, 'kind' => 'complex', 'ranking_source' => 'popularity']),
             'artifact_compat' => json_encode(['feature_schema_version' => 'cust-fs-2026.10-v1', 'libraries' => ['lightgbm' => '4.7.0']]),
             'retired_at' => $status === 'retired' ? now()->subDay() : null, 'created_at' => now(), 'updated_at' => now(),
@@ -400,7 +412,7 @@ final class ModelArtifactSignatureTest extends TestCase
         $compat = json_encode(['feature_schema_version' => 'cust-fs-2026.10-v1', 'libraries' => ['lightgbm' => '4.7.0'], 'signature' => ['status' => 'unsigned', 'algorithm' => null, 'key_id' => null, 'manifest_sha256' => str_repeat('a', 64)]]);
         $old = (int) DB::table('model_registry')->insertGetId([
             'tenant_id' => $tenant->id, 'version' => 'v1-no-visible', 'model_family' => 'customer_h30_probability', 'strategy_level' => 'B', 'scope' => 'tenant', 'status' => 'retired',
-            'core' => 'customer', 'role' => 'primary', 'artifact_path' => $tenant->id.'/customer/run-9/no-visible.joblib', 'artifact_sha256' => str_repeat('b', 64),
+            'core' => 'customer', 'role' => 'primary', 'core_run_id' => $this->pipelineRun($tenant), 'artifact_path' => $tenant->id.'/customer/run-9/no-visible.joblib', 'artifact_sha256' => str_repeat('b', 64),
             'hyperparameters' => json_encode(['slot' => 'h30:probability', 'kind' => 'complex']), 'artifact_compat' => $compat, 'retired_at' => now()->subDay(), 'created_at' => now(), 'updated_at' => now(),
         ]);
 

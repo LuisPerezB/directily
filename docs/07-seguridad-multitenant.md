@@ -73,6 +73,7 @@ sea miembro de ella (privacidad desde el diseño).
 | `datasources.manage` fuentes y tokens de API | — | — | ✅ | ✅ |
 | `settings.manage` configuración de la empresa | — | — | ✅ | ✅ |
 | `audit.view` bitácora de auditoría | — | — | ✅ | ✅ |
+| `models.approve` aprobar, rechazar y promover modelos del registro (aprobador distinto de quien los publica o entrena; V2.5 · W4) | — | — | ✅ | ✅ |
 | `owners.manage` asignar/quitar propietarios | — | — | — | ✅ |
 | `tenant.consent` consentimiento de entrenamiento compartido | — | — | — | ✅ |
 | `tenant.export_all` exportación completa (portabilidad) | — | — | — | ✅ |
