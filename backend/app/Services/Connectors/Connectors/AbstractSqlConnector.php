@@ -107,6 +107,12 @@ abstract class AbstractSqlConnector extends AbstractConnector implements SqlConn
         if (isset($config['sslmode']) && ! in_array($config['sslmode'], ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'], true)) {
             $errors['config.sslmode'][] = 'sslmode no válido.';
         }
+        // Booleanos estrictos: un texto como "false" se convertiría en true al leer la configuración (SqlConnectionSettings).
+        foreach (['encrypt', 'trust_server_certificate'] as $key) {
+            if (array_key_exists($key, $config) && ! is_bool($config[$key])) {
+                $errors["config.{$key}"][] = 'Debe ser verdadero o falso.';
+            }
+        }
         if (isset($config['sync_schedule']) && ! in_array($config['sync_schedule'], ['manual', 'hourly', 'daily'], true)) {
             $errors['config.sync_schedule'][] = 'Use manual, hourly o daily.';
         }

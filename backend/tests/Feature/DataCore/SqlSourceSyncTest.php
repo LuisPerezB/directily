@@ -199,6 +199,19 @@ SQL,
         ])->assertStatus(422)->assertJsonValidationErrors(['config.host', 'config.password']);
     }
 
+    public function test_sql_server_tls_options_must_be_booleans(): void
+    {
+        $payload = fn (array $tls) => [
+            'type' => 'connector', 'connector_key' => 'sql_sqlserver', 'name' => 'ERP SQL Server',
+            'config' => ['host' => '203.0.113.10', 'database' => 'erp', ...$tls], 'credentials' => ['username' => 'lector', 'password' => 'p'],
+        ];
+        // Un texto «false» se leería como true al convertirlo: se rechaza.
+        $this->postJson('/api/v1/data-sources', $payload(['encrypt' => 'false', 'trust_server_certificate' => 'yes']))
+            ->assertStatus(422)->assertJsonValidationErrors(['config.encrypt', 'config.trust_server_certificate']);
+        $this->postJson('/api/v1/data-sources', $payload(['encrypt' => false, 'trust_server_certificate' => true]))
+            ->assertCreated()->assertJsonPath('data.config.encrypt', false)->assertJsonPath('data.config.trust_server_certificate', true);
+    }
+
     public function test_unapproved_mapping_cannot_sync(): void
     {
         $this->postJson("/api/v1/data-sources/{$this->sourceId}/sync", ['entity' => 'sales'])->assertStatus(409)->assertJsonPath('code', 'mapping_not_approved');

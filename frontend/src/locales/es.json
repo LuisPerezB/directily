@@ -1790,6 +1790,10 @@
       "port": "Puerto",
       "database": "Base de datos",
       "sslmode": "Cifrado de la conexión",
+      "encrypt": "Cifrado TLS (SQL Server)",
+      "encryptOn": "Cifrar la conexión",
+      "trustServerCertificate": "Certificado del servidor",
+      "trustServerCertificateOn": "Confiar en el certificado del servidor sin validarlo",
       "timezone": "Zona horaria de la fuente",
       "schedule": "Sincronización automática",
       "username": "Usuario",
@@ -1798,6 +1802,8 @@
     "hints": {
       "host": "Nombre o dirección del servidor.",
       "sslmode": "En producción use require o verify-full.",
+      "encrypt": "Recomendado. Desactívelo solo si el servidor no admite TLS (p. ej. un ERP antiguo en una red privada o VPN).",
+      "trustServerCertificate": "Solo para certificados autofirmados en redes de confianza: sin validación, la conexión cifrada no está protegida contra suplantación.",
       "timezone": "Se usa para interpretar las fechas sin zona de la consulta."
     },
     "schedules": {
