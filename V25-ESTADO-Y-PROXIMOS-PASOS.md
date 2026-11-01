@@ -198,6 +198,23 @@ compartido (fijaba el catálogo anterior). Demo con gate PASS (Ferretería WAPE 
 `fbb1739` (W2 integrado), para que los cambios en curso de W3 no lo afecten: el piloto ya usa Bronze, calidad,
 cuarentena y reconciliación.
 
+### Estado al cortar la sesión (1-nov-2026, 15:40 UTC)
+
+- **W3 (sin confirmar, en el árbol de trabajo):** W3-A, W3-B y W3-C están implementados (motor 1022 pruebas en verde
+  antes de las correcciones). Revisión adversarial: W3-A 1 MEDIUM (resumen por segmentos demasiado pesado), W3-C 2 MEDIUM
+  (decisión del arquitecto: número de pedidos por modelo *hurdle* E(N) = P × E(N | N≥1), y ventana sin cifras cuando la
+  validación no da evidencia). Las correcciones de W3-A y W3-C y la revisión de W3-B quedaron **a medias** (se
+  detuvieron por límite de uso): reanudarlas, revisar W3-B, integrar (suites, demo, E2E) y confirmar. Después, W3-D
+  (API y UI).
+- **W4:** contrato activado (`7170174`); W4-A (`c77deab`) y W4-C (`bc54d9c`) confirmados tras revisión y corrección.
+  Falta W4-B (CLI y serving del motor; contrato de publicación en `docs/ml/MODEL_REGISTRY.md` §5.6), que se lanza
+  después de cerrar W3.
+- **Corrección transversal:** FKs compuestas `ON DELETE SET NULL (x_id)` (`e0378db`).
+- **W5 y W6:** contratos listos, no activados.
+- **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
+- **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;
+  el propietario debe iniciar sesión con la cuenta dueña del repositorio para subir la rama y abrir el PR.
+
 ### Paso 1b · Oleada W3 · Calidad ML P0 (en curso)
 
 Contrato activado (`4eb34f4`): `customer_predictions` con nº de pedidos, cantidad por pedido, unidades y ventana;
