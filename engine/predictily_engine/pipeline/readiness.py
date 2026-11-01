@@ -10,6 +10,7 @@ from sqlalchemy import text
 from predictily_engine.db.repository import TenantRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import insert_quality_report, jdump, mark_failed, upsert_series_profile
+from predictily_engine.demand.coverage import SalesCoverage
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import NotFoundError
 from predictily_engine.platform.config import effective_config_record
@@ -39,7 +40,11 @@ def run_readiness(tenant_id: int, training_job_id: int | None = None) -> dict[st
                 readiness = compute_readiness_empty()
                 panel = None
             else:
-                data = load_tenant_data(repo, last)
+                # Misma cobertura declarada que la ejecución de demanda (ADR-V25-03): el corte no la supera, lo anterior a `complete_from` se
+                # descarta y los días fuera de ella son `missing_source`; el informe describe los datos que el pronóstico realmente usaría.
+                coverage = SalesCoverage.for_repository(repo)
+                data = coverage.apply(load_tenant_data(repo, coverage.limit_cutoff(last), live=True))
+                data.coverage_limitations = coverage.limitations()
                 # Misma clasificación de días que la ejecución (ADR-V25-03): la regla inferida sale de la configuración efectiva.
                 tenant = repo.tenant()
                 try:
@@ -48,6 +53,12 @@ def run_readiness(tenant_id: int, training_job_id: int | None = None) -> dict[st
                     rules = DayRules()
                 panel = build_panel(data, rules)
                 readiness = compute_readiness(data, panel)
+                if coverage.cutoff_limited:
+                    readiness["issues"].append({
+                        "code": "cutoff_limited_by_coverage", "severity": "info", "count": (last - coverage.effective_cutoff).days,
+                        "message": (f"La cobertura completa declarada de la fuente de ventas llega hasta {coverage.effective_cutoff}: lo posterior "
+                                    f"(hasta {last}) es dato ausente, no ceros, y este informe y el pronóstico lo ignoran.")})
+                    readiness["coverage"] = data.coverage
         with engine.begin() as conn:
             if panel is not None:
                 upsert_series_profile(conn, tenant_id, panel.profile)

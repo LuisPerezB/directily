@@ -270,6 +270,86 @@ def test_a_live_run_applies_a_correction_received_after_its_last_day_but_the_win
         assert units_on(hist.sales, 3) == 4.0 and not hist.sales_versions.has_dynamic and hist.promotions_known_on is None
 
 
+def coverage_limited_world(conn) -> tuple[World, date, date]:
+    """Escenario del hallazgo «cobertura limita el corte»: histórico de los días 0 a 9, carga nocturna del día 9 (6 u. recibidas el día 10
+    a las 03:00 locales), ventas PARCIALES de hoy (día 10) y cobertura completa declarada hasta el día 9. Devuelve (mundo, último dato,
+    corte limitado por la cobertura)."""
+    w = make_world(conn)
+    for d in range(0, 10):
+        add_document(conn, w, number=f"B-{d:02d}", sale_date=iso(d), lines=[(0, 4, 10.0)])
+    add_document(conn, w, number="N-09", sale_date=iso(9), lines=[(0, 6, 10.0)], mode="incremental", known_from=local(iso(10), 3))
+    add_document(conn, w, number="P-10", sale_date=iso(10), lines=[(0, 1, 10.0)], mode="incremental", known_from=local(iso(10), 15))
+    conn.execute(text("INSERT INTO data_coverage (tenant_id, entity, complete_from, complete_through, basis, created_at, updated_at) "
+                      "VALUES (:t, 'sales', :f, :c, 'declared', now(), now())"), {"t": w.tenant_id, "f": iso(0), "c": iso(9)})
+    repo = repo_of(conn, w)
+    last = repo.last_sale_date()
+    cutoff = SalesCoverage.resolve(conn, w.tenant_id, repo.sales_coverage(), None).limit_cutoff(last)
+    assert (last, cutoff) == (date.fromisoformat(iso(10)), date.fromisoformat(iso(9))), "la cobertura limita el corte por debajo del último dato"
+    return w, last, cutoff
+
+
+def test_a_live_run_whose_cutoff_is_limited_by_coverage_keeps_the_nightly_load_of_its_last_day(db_engine):
+    """Hallazgo MEDIUM de la revisión: con `cutoff < último dato` por la cobertura declarada, la ejecución vigente se trataba como histórica y
+    perdía la carga nocturna de su último día. El llamador ahora lo indica con `live=True`; sin él se infiere del corte (el comportamiento
+    anterior, correcto para quien pide un corte histórico) y `live=False` fuerza la reconstrucción histórica aunque el corte sea el último dato."""
+    with rolled_back(db_engine) as conn:
+        w, last, cutoff = coverage_limited_world(conn)
+        day9 = lambda data: float(data.sales.loc[data.sales["ds"] == pd.Timestamp(iso(9)), "units"].sum())  # noqa: E731
+        repo = repo_of(conn, w)
+
+        live = SalesCoverage.resolve(conn, w.tenant_id, repo.sales_coverage(), None).apply(load_tenant_data(repo, cutoff, live=True))
+        today = live.promotions_known_on
+        assert today is not None and today > last, "vigente: el período final conoce hasta hoy"
+        assert day9(live) == 10.0 and live.sales_knowledge["knowledge_date"] == today.isoformat() and live.sales_knowledge["late_lines"] == 1
+        assert live.sales_stats["lines"] == 11 and live.sales["ds"].max() == pd.Timestamp(iso(9)), "nada posterior al corte limitado entra"
+
+        inferred = load_tenant_data(repo_of(conn, w), cutoff)          # sin la señal explícita: cutoff < último dato ⇒ histórica
+        assert inferred.promotions_known_on is None and day9(inferred) == 4.0 and inferred.sales_knowledge["knowledge_date"] == iso(9)
+        forced = load_tenant_data(repo_of(conn, w), last, live=False)  # histórica forzada aunque el corte sea el último dato
+        assert forced.promotions_known_on is None and forced.sales_knowledge["knowledge_date"] == iso(10), "conoce solo hasta su corte"
+        assert live.sales.attrs["knowledge_digest"] != inferred.sales.attrs["knowledge_digest"], "la huella distingue lo que cada una conoció"
+        assert load_tenant_data(repo_of(conn, w), last).promotions_known_on == today, "sin cobertura que limite, `None` infiere vigente (como antes)"
+
+
+def test_the_forecast_run_passes_live_to_the_loader_so_a_coverage_limited_run_knows_the_nightly_load(db_engine, client):
+    """De extremo a extremo (`execute_forecast_run`): una ejecución de producción (sin corte pedido) cuyo corte limita la cobertura declarada
+    carga el último día con la carga nocturna; una histórica con corte explícito conoce solo hasta su corte."""
+    from conftest import AUTH
+    from loader import create_run
+
+    with db_engine.begin() as conn:
+        w = make_world(conn, name="Empresa cobertura vigente (ficticia)")
+        for d in range(0, 69):
+            add_document(conn, w, number=f"B-{d:02d}", sale_date=iso(d), lines=[(0, 4, 10.0), (1, 2, 10.0)])
+        add_document(conn, w, number="N-68", sale_date=iso(68), lines=[(0, 6, 10.0)], mode="incremental", known_from=local(iso(69), 3))
+        add_document(conn, w, number="P-69", sale_date=iso(69), lines=[(0, 1, 10.0)], mode="incremental", known_from=local(iso(69), 15))
+        conn.execute(text("INSERT INTO data_coverage (tenant_id, entity, complete_from, complete_through, basis, created_at, updated_at) "
+                          "VALUES (:t, 'sales', :f, :c, 'declared', now(), now())"), {"t": w.tenant_id, "f": iso(0), "c": iso(68)})
+
+    def execute(cutoff: str | None) -> dict:
+        with db_engine.begin() as conn:
+            run_id, job_id = create_run(conn, w.tenant_id, run_type="historical" if cutoff else "production", cutoff=cutoff)
+        body = {"tenant_id": w.tenant_id, "training_job_id": job_id, "horizons": [7]}
+        if cutoff:
+            body["cutoff_date"] = cutoff
+        r = client.post(f"/v1/forecast-runs/{run_id}/execute", headers=AUTH, json=body)
+        assert r.status_code == 200, r.text
+        with db_engine.connect() as conn:
+            return dict(conn.execute(text("SELECT cutoff_date, evaluation_manifest, summary FROM forecast_runs WHERE id = :r"),
+                                     {"r": run_id}).mappings().one())
+
+    live = execute(None)
+    assert live["cutoff_date"].isoformat() == iso(68) and "cutoff_limited_by_coverage" in live["summary"]["limitation_codes"]
+    k = live["evaluation_manifest"]["knowledge"]["source"]
+    assert k["final_cutoff"] == iso(68) and date.fromisoformat(k["knowledge_date"]) > date.fromisoformat(iso(69)), "la ejecución vigente conoce hasta hoy"
+    assert (k["lines"], k["late_lines"]) == (2 * 69 + 1, 1), "la carga nocturna del día 68 está en lo leído (la venta parcial del día 69 no)"
+    hist = execute(iso(60))
+    hk = hist["evaluation_manifest"]["knowledge"]["source"]
+    assert hist["cutoff_date"].isoformat() == iso(60) and hk["knowledge_date"] == iso(60) == hk["final_cutoff"], "histórica: solo hasta su corte"
+    assert (hk["lines"], hk["late_lines"]) == (2 * 61, 0)
+    assert hk["digest"] != k["digest"]
+
+
 def test_the_sales_fingerprint_changes_with_the_knowledge_windows_even_if_the_values_are_equal(db_engine):
     """Dos cortes con las mismas cifras pero distinto conocimiento no comparten huella en el componente de ventas."""
     def snapshot(mode: str):
@@ -439,6 +519,66 @@ def test_declared_closures_are_closed_and_data_coverage_limits_the_days_of_each_
         assert st(2, 59)[0] == "sale" and st(2, 60) == ("missing_source", "declared"), "la cobertura propia de la sucursal cerrada acaba el día 59"
         assert panel.day_summary["series_days"]["closed"] > 0 and data.coverage["sales"]["branch_complete_through"] == {
             str(w.branch_ids[2]): iso(59)}
+
+
+def test_declaring_a_closure_or_a_gap_changes_the_persisted_fingerprint_and_removing_it_reuses_the_old_row(db_engine):
+    """`persist_snapshot` reutiliza la fila por (empresa, core, hash): si declarar un cierre o un hueco no cambiaba la huella, dos ejecuciones
+    con paneles distintos compartían `data_snapshot_id`."""
+    from predictily_engine.platform.snapshot import persist_snapshot
+
+    with rolled_back(db_engine) as conn:
+        w = make_world(conn)
+        seed_daily_sales(conn, w, n_days=60, lines_per_day=1)
+        cutoff = date.fromisoformat(iso(59))
+
+        def snapshot_id() -> tuple[int, str]:
+            data = load_tenant_data(repo_of(conn, w), cutoff)
+            snap = build_snapshot(data, build_panel(data, DayRules()), {"core": "demand", "config": {}, "run": {}}, pd.Timestamp(cutoff), None, data.coverage)
+            return persist_snapshot(conn, w.tenant_id, snap), snap.hash
+
+        plain_id, plain_hash = snapshot_id()
+        conn.execute(text("INSERT INTO calendar_events (tenant_id, scope, code, name, category, starts_on, ends_on, status, known_at, created_at, updated_at) "
+                          "VALUES (:t, 'tenant', 'cierre', 'cierre', 'closure', :s, :s, 'confirmed', now(), now(), now())"), {"t": w.tenant_id, "s": iso(30)})
+        closure_id, closure_hash = snapshot_id()
+        conn.execute(text("INSERT INTO data_coverage_gaps (tenant_id, entity, branch_id, gap_from, gap_to, reason, basis, created_at, updated_at) "
+                          "VALUES (:t, 'sales', :b, :f, :e, 'integration_outage', 'declared', now(), now())"),
+                     {"t": w.tenant_id, "b": w.branch_ids[0], "f": iso(40), "e": iso(41)})
+        gap_id, gap_hash = snapshot_id()
+        assert len({plain_id, closure_id, gap_id}) == 3 and len({plain_hash, closure_hash, gap_hash}) == 3
+        conn.execute(text("DELETE FROM data_coverage_gaps WHERE tenant_id = :t"), {"t": w.tenant_id})
+        conn.execute(text("DELETE FROM calendar_events WHERE tenant_id = :t"), {"t": w.tenant_id})
+        assert snapshot_id() == (plain_id, plain_hash), "sin las declaraciones vuelve la huella original (misma fila)"
+
+
+def test_readiness_applies_the_declared_coverage_like_the_forecast_run(db_engine, client):
+    """Hallazgo LOW de la revisión: `run_readiness` cargaba hasta la última venta e ignoraba la cobertura declarada, así que su informe y el
+    perfil de series describían datos que el pronóstico no usa. Ahora aplica `SalesCoverage` igual que `execute_forecast_run`: el corte no la
+    supera, lo anterior a `complete_from` se descarta y los días fuera de ella son `missing_source`."""
+    from conftest import AUTH
+
+    with db_engine.begin() as conn:
+        w = make_world(conn, name="Empresa readiness cobertura (ficticia)")
+        seed_daily_sales(conn, w, n_days=80, lines_per_day=1)
+        conn.execute(text("INSERT INTO data_coverage (tenant_id, entity, complete_from, complete_through, basis, created_at, updated_at) "
+                          "VALUES (:t, 'sales', :f, :c, 'declared', now(), now())"), {"t": w.tenant_id, "f": iso(10), "c": iso(59)})
+
+    r = client.post(f"/v1/tenants/{w.tenant_id}/readiness", headers=AUTH, json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["date_from"] == iso(10) and body["date_to"] == iso(59), "el informe usa lo mismo que el pronóstico: [complete_from, complete_through]"
+    assert body["history_days"] == 50
+    limited = [i for i in body["issues"] if i["code"] == "cutoff_limited_by_coverage"]
+    assert len(limited) == 1 and limited[0]["count"] == 20 and iso(59) in limited[0]["message"]
+    assert body["coverage"]["sales"]["cutoff_limited"] and body["coverage"]["sales"]["effective_cutoff"] == iso(59)
+    with db_engine.connect() as conn:
+        last_day = conn.execute(text("SELECT max(last_sale_date) FROM forecasting_series WHERE tenant_id = :t"), {"t": w.tenant_id}).scalar_one()
+    assert last_day.isoformat() == iso(59), "el perfil de series persistido llega hasta el corte limitado"
+    # una empresa sin cobertura declarada conserva el informe de siempre
+    with db_engine.begin() as conn:
+        free = make_world(conn, name="Empresa readiness sin cobertura (ficticia)")
+        seed_daily_sales(conn, free, n_days=40, lines_per_day=1)
+    plain = client.post(f"/v1/tenants/{free.tenant_id}/readiness", headers=AUTH, json={}).json()
+    assert plain["date_to"] == iso(39) and not any(i["code"] == "cutoff_limited_by_coverage" for i in plain["issues"]) and "coverage" not in plain
 
 
 def test_undeclared_coverage_keeps_the_old_zero_semantics_and_the_limitation(db_engine):

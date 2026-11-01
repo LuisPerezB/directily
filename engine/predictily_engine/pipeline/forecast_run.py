@@ -139,6 +139,9 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
                 raise InsufficientDataError("La empresa no tiene ventas válidas importadas.")
             if cutoff is None or cutoff > last:
                 cutoff = last
+            # Ejecución vigente = no se pidió un corte histórico (anterior al último dato). Sigue siéndolo aunque la cobertura declarada
+            # limite el corte más abajo: su período final conoce hasta HOY (la carga nocturna del último día cuenta; ADR-V25-23).
+            live_run = cutoff >= last
             # Configuración efectiva (core → perfil sectorial → empresa): se valida y se registra en el run.
             tenant = repo.tenant()
             try:
@@ -152,7 +155,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
                                if "is_active" in branches else set(branches["branch_id"].astype(int)))
             coverage = SalesCoverage.resolve(conn, tenant_id, repo.sales_coverage(), active_branches)
             cutoff = coverage.limit_cutoff(cutoff)
-            data = coverage.apply(load_tenant_data(repo, cutoff))
+            data = coverage.apply(load_tenant_data(repo, cutoff, live=live_run))
             data.coverage_limitations = coverage.limitations()
         load_s = time.perf_counter() - t0
         log.info("run=%s tenant=%s datos cargados en %.1fs", run_id, tenant_id, load_s)

@@ -10,7 +10,7 @@ from predictily_engine.platform.config import config_hash, resolve_config
 from predictily_engine.profiling.series import build_panel
 
 EXPECTED = {"sales", "returns", "inventory", "prices", "costs", "catalog", "promotions", "calendar",
-            "external_indicators", "supply_inputs", "config", "eligibility", "coverage"}
+            "external_indicators", "supply_inputs", "config", "eligibility", "coverage", "day_inputs", "day_status"}
 
 
 @pytest.fixture(scope="module")

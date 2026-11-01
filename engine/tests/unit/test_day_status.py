@@ -325,3 +325,123 @@ def test_profile_at_keeps_the_day_columns_for_past_cutoffs():
     past = profile_at(panel.df, day(41))
     assert set(past["missing_source_days"]) == {2}, "al corte del día 41 solo se habían visto dos días del hueco"
     assert set(profile_at(panel.df, day(79))["missing_source_days"]) == {3}
+
+
+# ───────────────────────────── huella de datos: entradas y resultado de la clasificación de días ─────────────────────────────
+
+def _day_snapshot(data):
+    from predictily_engine.demand.snapshot import build_snapshot
+
+    data = replace(data, products=data.products.assign(current_price=10.0, current_cost=4.0))
+    panel = build_panel(data, DayRules())
+    cfg = {"core": "demand", "config": {}, "run": {}}
+    return build_snapshot(data, panel, cfg, pd.Timestamp(data.cutoff), None, data.coverage or {})
+
+
+def test_the_data_fingerprint_changes_with_gaps_closures_the_source_map_and_the_rules():
+    """Hallazgo MEDIUM de la revisión: la huella solo hasheaba la cobertura, así que declarar un cierre o un hueco (que cambia qué días se
+    entrenan y miden) dejaba el mismo hash y `persist_snapshot` reutilizaba la fila. Ahora lo cubren `day_inputs` (entradas) y `day_status`
+    (resultado). Todo lo demás de la huella no se mueve."""
+    base = hand_data(n_days=100)
+    closures = pd.DataFrame([{"branch_id": 1, "starts_on": day(50), "ends_on": day(52), "code": "cierre"}])
+    gaps = pd.DataFrame([{"data_source_id": np.nan, "branch_id": 1, "gap_from": day(60), "gap_to": day(62), "reason": "unknown", "basis": "declared"}])
+    s0 = _day_snapshot(base)
+    assert _day_snapshot(base).hash == s0.hash, "determinista"
+
+    def moved(other):
+        return {k for k in s0.components if s0.components[k] != other.components[k]}
+
+    with_closure, with_gap = _day_snapshot(replace(base, closures=closures)), _day_snapshot(replace(base, coverage_gaps=gaps))
+    assert with_closure.hash != s0.hash and with_gap.hash != s0.hash and with_closure.hash != with_gap.hash
+    assert moved(with_closure) == {"day_inputs", "day_status"} and moved(with_gap) == {"day_inputs", "day_status"}
+    assert with_closure.row_counts["day_status"] == 6 and with_gap.row_counts["day_status"] == 6, "2 productos × 3 días excluidos"
+    # el orden de las filas declaradas no cambia la huella; el contenido sí
+    two = pd.concat([closures, closures.assign(starts_on=day(70), ends_on=day(70), code="otro")], ignore_index=True)
+    assert _day_snapshot(replace(base, closures=two)).hash == _day_snapshot(replace(base, closures=two.iloc[::-1].reset_index(drop=True))).hash
+    assert _day_snapshot(replace(base, closures=two)).hash != with_closure.hash
+    # la regla inferida (parámetros `day_status_*` en la configuración efectiva): si cambia lo inferido, cambia el resultado
+    quiet = replace(base, sales=base.sales[~((base.sales["branch_id"] == 1) & (base.sales["ds"] == day(50)))])
+    panel_on, panel_off = build_panel(quiet, DayRules()), build_panel(quiet, DayRules(infer_gaps=False))
+    assert panel_on.day_summary["series_days"]["missing_source"] > 0 and panel_off.day_summary["series_days"]["missing_source"] == 0
+    from predictily_engine.demand.snapshot import build_snapshot
+
+    cfg = {"core": "demand", "config": {}, "run": {}}
+    quiet = replace(quiet, products=quiet.products.assign(current_price=10.0, current_cost=4.0))
+    on, off = (build_snapshot(quiet, p, cfg, pd.Timestamp(quiet.cutoff), None, {}) for p in (panel_on, panel_off))
+    assert {k for k in on.components if on.components[k] != off.components[k]} == {"day_status"}
+    # el mapa fuente → sucursales: el mismo hueco por fuente expande a otras sucursales
+    two_branches = hand_data(n_days=100, branches=(1, 2))
+    by_source = pd.DataFrame([{"data_source_id": 7, "branch_id": np.nan, "gap_from": day(60), "gap_to": day(62), "reason": "unknown", "basis": "inferred"}])
+    only_one = _day_snapshot(replace(two_branches, coverage_gaps=by_source, source_branches={7: [1]}))
+    both = _day_snapshot(replace(two_branches, coverage_gaps=by_source, source_branches={7: [1, 2]}))
+    assert only_one.hash != both.hash and moved_between(only_one, both) == {"day_inputs", "day_status"}
+    # mismo panel, distinto mapa (una fuente que alimenta una sucursal sin ventas en el panel): la entrada declarada sigue cambiando la huella
+    unrelated = _day_snapshot(replace(two_branches, coverage_gaps=by_source, source_branches={7: [1, 99]}))
+    assert moved_between(only_one, unrelated) == {"day_inputs"} and only_one.components["day_status"] == unrelated.components["day_status"]
+
+
+def moved_between(a, b) -> set[str]:
+    return {k for k in a.components if a.components[k] != b.components[k]}
+
+
+# ───────────────────────────── huecos largos: el último nivel se propaga ─────────────────────────────
+
+def test_a_long_declared_gap_carries_the_last_level_instead_of_feeding_zeros_to_the_statistical_models():
+    """Hallazgo LOW de la revisión: `rolling(28, min_periods=7)` se agota tras 21 días de hueco; un hueco declarado de 60 días dejaba 38 días con
+    y = 0 visibles a las familias estadísticas. Ahora los días de fuente ausente o cierre propagan el último nivel disponible."""
+    skip = tuple((1, day(k).strftime("%Y-%m-%d")) for k in range(40, 100))
+    gap = pd.DataFrame([{"data_source_id": np.nan, "branch_id": 1, "gap_from": day(40), "gap_to": day(99), "reason": "integration_outage", "basis": "declared"}])
+    data = hand_data(n_days=140, skip=skip, coverage_gaps=gap, units=5.0)
+    panel = build_panel(data)
+    in_gap = panel.df[panel.df["ds"].between(day(40), day(99))]
+    assert len(in_gap) == 120 and (in_gap["units"] == 0).all() and (in_gap["day_status"] == "missing_source").all()
+    assert (in_gap["y"] == 5.0).all(), "los 60 días del hueco (también los 38 posteriores a la ventana de 28) llevan el último nivel, no ceros"
+    s = panel.day_summary
+    assert s["excluded_days_imputed"] == 120 and s["excluded_days_not_imputable"] == 0
+    assert s["excluded_days_carried_forward"] == 2 * 38, "2 productos × (60 − 22) días con la ventana de 28 días ya agotada"
+    # la proporción de ceros del perfilado y las métricas no cambian: esos días siguen excluidos
+    assert set(panel.profile["missing_source_days"]) == {60} and (panel.profile["adi"] == 1.0).all()
+    # sin el hueco declarado el comportamiento de siempre: son ceros observados
+    undeclared = build_panel(replace(data, coverage_gaps=pd.DataFrame()))
+    assert (undeclared.df.loc[undeclared.df["ds"].between(day(40), day(99)), "y"] == 0).all()
+
+
+def test_the_carried_level_is_the_last_one_before_the_gap_and_stockouts_keep_the_legacy_rule():
+    # el nivel cambia antes del hueco: se propaga el último (7 días limpios previos al agotamiento), no el promedio de toda la historia
+    rows = []
+    for k in range(120):
+        if 30 <= k < 100:
+            continue
+        rows.append({"branch_id": 1, "product_id": 1, "ds": day(k), "units": 2.0 if k < 20 else 8.0, "net_amount": 10.0, "lines": 3})
+    gap = pd.DataFrame([{"data_source_id": np.nan, "branch_id": 1, "gap_from": day(30), "gap_to": day(99), "reason": "unknown", "basis": "declared"}])
+    base = hand_data(n_days=120)
+    data = replace(base, sales=pd.DataFrame(rows), coverage_gaps=gap, returns=base.returns.iloc[0:0])
+    y = build_panel(data).df.set_index("ds")["y"]
+    assert y[day(30)] == pytest.approx((8.0 * 10 + 2.0 * 18) / 28), "el primer día del hueco usa la media móvil de 28 días de siempre"
+    assert y[day(51)] > 7.9 and y[day(52):day(99)].eq(8.0).all(), "agotada la ventana, el nivel queda en el último disponible (los 7 días limpios más recientes)"
+    # un quiebre largo (> 28 días) conserva la regla de siempre: no es objeto de este cambio y se documenta como limitación
+    inv = pd.DataFrame([{"branch_id": 1, "product_id": 1, "ds": day(k), "on_hand": 0.0, "reserved": 0.0, "in_transit": 0.0, "unit_cost": 1.0} for k in range(40, 90)])
+    stock = hand_data(n_days=120, inventory=inv, skip=tuple((1, day(k).strftime("%Y-%m-%d")) for k in range(40, 90)))
+    st = build_panel(stock).df
+    one = st[st["product_id"] == 1].set_index("ds")
+    assert one.loc[day(40):day(89), "stockout"].all() and (one.loc[day(40):day(89), "day_status"] == "stockout_censored").all()
+    assert one.loc[day(50), "y"] == 5.0 and one.loc[day(89), "y"] == 0.0, \
+        "quiebre: la ventana se agota y el día queda con su valor observado (0), como en el motor anterior (limitación documentada, §12)"
+
+
+def test_days_that_cannot_be_imputed_emit_their_own_limitation_code():
+    """Un hueco que abre la serie no tiene ningún nivel previo: sus días quedan con el valor observado y la limitación lo dice con su conteo."""
+    from predictily_engine.pipeline.core import _day_limitations
+
+    gap = pd.DataFrame([{"data_source_id": np.nan, "branch_id": 1, "gap_from": day(3), "gap_to": day(4), "reason": "unknown", "basis": "declared"}])
+    panel = build_panel(replace(hand_data(skip=tuple((1, day(k).strftime("%Y-%m-%d")) for k in (3, 4))), coverage_gaps=gap))
+    assert panel.day_summary["excluded_days_not_imputable"] == 4
+    codes = {x["code"]: x["message"] for x in _day_limitations(panel.day_summary)}
+    assert "days_not_imputable" in codes and "4 días-serie excluidos" in codes["days_not_imputable"] and "ningún nivel previo" in codes["days_not_imputable"]
+    # sin días sin imputar no se emite
+    clean = build_panel(replace(hand_data(skip=((1, day(50).strftime("%Y-%m-%d")),)), coverage_gaps=gap.assign(gap_from=day(50), gap_to=day(50))))
+    assert clean.day_summary["excluded_days_not_imputable"] == 0 and "days_not_imputable" not in {x["code"] for x in _day_limitations(clean.day_summary)}
+    long_gap = build_panel(hand_data(n_days=140, skip=tuple((1, day(k).strftime("%Y-%m-%d")) for k in range(40, 100)),
+                                     coverage_gaps=gap.assign(gap_from=day(40), gap_to=day(99))))
+    msg = next(x["message"] for x in _day_limitations(long_gap.day_summary) if x["code"] == "days_missing_source")
+    assert "76 de ellos con el último nivel conocido por huecos de más de 21 días" in msg

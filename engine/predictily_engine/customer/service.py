@@ -299,7 +299,8 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     with engine.connect() as conn:
         repo = CustomerRepository(conn, tenant_id)
         repo.base.analytic_reads()
-        data = load_customer_data(repo, cfg, through=as_of_req, cap_to_complete=True)
+        # Sin fecha histórica pedida la ejecución es vigente aunque la cobertura limite el corte (None = inferir de la fecha pedida).
+        data = load_customer_data(repo, cfg, through=as_of_req, cap_to_complete=True, live=True if as_of_req is None else None)
     load_s = time.perf_counter() - t0
     last_complete = data.last_complete_day()
     results: dict[int, HorizonResult] = {}
@@ -696,7 +697,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
     with engine.connect() as conn:
         repo = CustomerRepository(conn, tenant_id)
         repo.base.analytic_reads()
-        data = load_customer_data(repo, cfg, through=as_of_req)
+        data = load_customer_data(repo, cfg, through=as_of_req, live=True if run.get("as_of") is None else None)
         coverage_declared = data.coverage is not None and len(data.coverage) > 0
         complete = data.last_complete_day() if coverage_declared else None
         commit_rev = repo.commitment_revisions() if artifacts else pd.DataFrame()

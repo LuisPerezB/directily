@@ -5,6 +5,13 @@ inventario, precios observados, promociones tal como se conocían al corte (as-o
 calendario y feature set (incluidos los eventos extraordinarios conocidos), insumos de abastecimiento,
 configuración efectiva, reglas de elegibilidad y cobertura de las fuentes. Reproducibilidad = mismo snapshot
 + misma configuración + misma semilla ⇒ mismos valores (prueba `test_snapshot_config.py`).
+
+Semántica de días (ADR-V25-03): dos paneles con las mismas ventas pueden diferir en qué días son `missing_source` o `closed` (huecos de la
+fuente, cierres del calendario, mapa fuente → sucursales que expande los huecos por fuente, reglas `DayRules`), y eso cambia el entrenamiento y
+las métricas. Por eso la huella lleva dos componentes: `day_inputs` (las ENTRADAS declaradas, ordenadas: huecos, cierres y mapa fuente → sucursales) y
+`day_status` (su RESULTADO: los días-serie excluidos con su estado y base, que recoge también la regla inferida `DayRules`, cuyos parámetros
+viajan además en la configuración efectiva). `persist_snapshot` reutiliza la fila por (empresa, core, hash): sin ellos, declarar un cierre o
+un hueco no cambiaba la huella.
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from __future__ import annotations
 from importlib import metadata
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from predictily_engine.backtest.rolling import MIN_SCALE_PAIRS, SEASON, TIERS
@@ -19,6 +27,7 @@ from predictily_engine.config import FEATURE_SET_VERSION
 from predictily_engine.features.builder import CALENDAR_FEATURES, observed_promotions, promotions_as_of
 from predictily_engine.models.ml import MIN_SERIES, MIN_TRAIN_ROWS
 from predictily_engine.platform.snapshot import DataSnapshot
+from predictily_engine.profiling.days import excluded_days
 from predictily_engine.profiling.series import (
     ADI_THRESHOLD,
     CV2_THRESHOLD,
@@ -46,6 +55,42 @@ def _lib(name: str) -> str:
         return metadata.version(name)
     except metadata.PackageNotFoundError:  # pragma: no cover
         return "n/d"
+
+
+def _sorted_rows(df: pd.DataFrame | None, columns: tuple[str, ...], dates: tuple[str, ...]) -> list[list[str]]:
+    """Filas ordenadas y como texto estable (fechas ISO, enteros sin decimales, nulos vacíos) de un marco de entradas declaradas."""
+    if df is None or len(df) == 0:
+        return []
+    out = pd.DataFrame(index=df.index)
+    for col in columns:
+        values = df[col] if col in df else pd.Series(np.nan, index=df.index)
+        if col in dates:
+            out[col] = pd.to_datetime(values).dt.strftime("%Y-%m-%d").fillna("")
+        else:
+            out[col] = values.map(lambda v: "" if pd.isna(v) else (str(int(v)) if isinstance(v, (float, np.floating)) and float(v).is_integer()
+                                                                   else str(v)))
+    return sorted(out.values.tolist())
+
+
+def day_classification_inputs(data: Any) -> dict[str, Any]:
+    """Entradas declaradas de la clasificación de días (ADR-V25-03): huecos y cierres ordenados y el mapa fuente → sucursales que expande los
+    huecos por fuente. Las reglas de la regla inferida (`day_status_*`) viajan en la configuración efectiva (componente `config`) y su efecto en
+    `day_status`."""
+    return {
+        "coverage_gaps": _sorted_rows(getattr(data, "coverage_gaps", None),
+                                      ("data_source_id", "branch_id", "gap_from", "gap_to", "reason", "basis"), ("gap_from", "gap_to")),
+        "closures": _sorted_rows(getattr(data, "closures", None), ("branch_id", "starts_on", "ends_on", "code"), ("starts_on", "ends_on")),
+        "source_branches": {str(k): sorted(int(b) for b in v) for k, v in sorted((getattr(data, "source_branches", None) or {}).items())},
+    }
+
+
+def excluded_day_frame(panel: Panel) -> pd.DataFrame | None:
+    """Series-día excluidos del panel (`missing_source` / `closed`) con su estado y base: el RESULTADO de la clasificación de días."""
+    df = panel.df
+    if df is None or df.empty or "day_status" not in df:
+        return None
+    rows = df.loc[excluded_days(df), ["unique_id", "ds", "day_status", "day_basis"]]
+    return rows.assign(day_status=rows["day_status"].astype(str), day_basis=rows["day_basis"].astype(str))
 
 
 def build_snapshot(data: Any, panel: Panel, effective_config: dict[str, Any], knowledge_date: pd.Timestamp,
@@ -100,6 +145,8 @@ def build_snapshot(data: Any, panel: Panel, effective_config: dict[str, Any], kn
         "open_purchase_orders": None if data.open_purchase_orders is None or data.open_purchase_orders.empty else
         data.open_purchase_orders.astype(str).values.tolist(),
     })
+    snap.add_value("day_inputs", day_classification_inputs(data))
+    snap.add_frame("day_status", excluded_day_frame(panel), None, ["unique_id", "ds"])
     snap.add_value("config", effective_config)
     snap.add_value("eligibility", eligibility_rules())
     snap.add_value("coverage", coverage or {})

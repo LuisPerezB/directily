@@ -113,8 +113,13 @@ def _normalize(data: TenantData) -> TenantData:
     return data
 
 
-def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> TenantData:
-    """Carga todo lo necesario para pronosticar con datos hasta `cutoff` (inclusive)."""
+def load_tenant_data(repo: TenantRepository, cutoff: date | None = None, live: bool | None = None) -> TenantData:
+    """Carga todo lo necesario para pronosticar con datos hasta `cutoff` (inclusive).
+
+    `live`: la ejecución es VIGENTE (no se pidió un corte histórico explícito): su período final conoce hasta HOY, aunque la
+    cobertura declarada haya limitado el corte por debajo del último dato (la carga nocturna del último día cuenta). `False` fuerza
+    una reconstrucción histórica. `None` (por defecto) lo infiere del corte: vigente si `cutoff ≥ última venta`. Quien limita el
+    corte por cobertura (`forecast_run`) debe pasar `live=True`, porque entonces `cutoff < última venta` sin ser histórica."""
     tenant = repo.tenant()
     last = repo.last_sale_date()
     if cutoff is None:
@@ -122,17 +127,16 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
     if cutoff is None:
         raise ValueError("La empresa no tiene ventas válidas")
     # Ventas as-of (ADR-V25-23): UNA lectura de las versiones hasta el corte final; `sales`/`returns` son la vista a ese
-    # corte y las ventanas del backtest derivan la suya de `sales_versions` (sin volver a leer la base). Ejecución vigente (corte =
-    # último dato): el período final conoce hasta HOY (una carga nocturna del último día cuenta, como las promociones); una
-    # reconstrucción histórica, solo hasta el propio corte. Los cortes anteriores (ventanas) usan siempre lo conocido en el suyo.
-    live = last is not None and cutoff >= last
+    # corte y las ventanas del backtest derivan la suya de `sales_versions` (sin volver a leer la base). Ejecución vigente: el
+    # período final conoce hasta HOY (una carga nocturna del último día cuenta, como las promociones); una reconstrucción histórica,
+    # solo hasta el propio corte. Los cortes anteriores (ventanas) usan siempre lo conocido en el suyo.
+    if live is None:
+        live = last is not None and cutoff >= last
     known_until = _local_today(tenant.get("timezone")) if live else None
     sales = repo.daily_sales(cutoff, known_until)
     versions = repo.sales_versions(cutoff, known_until)
     first = pd.to_datetime(sales["ds"]).min().date() if not sales.empty else cutoff
-    gaps = repo.sales_coverage_gaps()
-    gap_sources = sorted({int(x) for x in gaps.loc[gaps["branch_id"].isna() & gaps["data_source_id"].notna(),
-                                                   "data_source_id"]}) if not gaps.empty else []
+    gaps, closures, source_branches = load_day_declarations(repo)
     data = TenantData(
         tenant_id=repo.tenant_id,
         settings=tenant["settings"],
@@ -159,11 +163,21 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         sales_versions=versions,
         sales_knowledge=versions.summary(),
         coverage_gaps=gaps,
-        closures=repo.closure_events(),
-        source_branches=repo.branches_by_source(gap_sources),
+        closures=closures,
+        source_branches=source_branches,
     )
     data.exceptional_events, data.exceptional_stats = _exceptional_events(repo, cutoff)
     return _normalize(data)
+
+
+def load_day_declarations(repo: TenantRepository) -> tuple[pd.DataFrame, pd.DataFrame, dict[int, list[int]]]:
+    """Declaraciones que definen los días `missing_source` y `closed` (ADR-V25-03): huecos de la fuente de ventas, cierres del calendario y
+    las sucursales que alimenta cada fuente con un hueco declarado sin sucursal. Las usan la carga del pipeline y la evaluación posterior
+    de pronósticos, para clasificar los días con la MISMA regla (`profiling.days`)."""
+    gaps = repo.sales_coverage_gaps()
+    gap_sources = sorted({int(x) for x in gaps.loc[gaps["branch_id"].isna() & gaps["data_source_id"].notna(),
+                                                   "data_source_id"]}) if not gaps.empty else []
+    return gaps, repo.closure_events(), repo.branches_by_source(gap_sources)
 
 
 EXCEPTIONAL_LOOKAHEAD_DAYS = 180  # igual al tope del horizonte interno (inventory.MAX_INTERNAL_HORIZON)

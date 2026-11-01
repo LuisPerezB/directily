@@ -220,8 +220,13 @@ def infer_missing_days(data: Any, branches: np.ndarray, day0: int, n_days: int, 
     return regular & ~activity & ~skip & ~before_first
 
 
-def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayRules | None = None) -> DayClassification:
-    """Clasifica cada fila del panel (`df` con branch_id, ds, units y stockout). Ver el docstring del módulo."""
+def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayRules | None = None,
+                  context_from: Any = None) -> DayClassification:
+    """Clasifica cada fila del panel (`df` con branch_id, ds, units y stockout). Ver el docstring del módulo.
+
+    `data`: cualquier objeto con `coverage`, `coverage_gaps`, `closures`, `source_branches` y, para la regla inferida, `sales` (branch_id,
+    ds, lines) y `returns`. `context_from`: primer día de historia que la regla inferida puede mirar cuando `df` solo trae una ventana
+    reciente de días (la evaluación posterior de pronósticos clasifica los días evaluados, no todo el panel); por defecto, el primer día de `df`."""
     rules = rules or NO_INFERENCE
     n = len(df)
     units = df["units"].to_numpy(float)
@@ -236,6 +241,8 @@ def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayR
     ds = df["ds"].to_numpy("datetime64[D]")
     day = _day_index(ds)
     day0 = int(day.min())
+    if context_from is not None:
+        day0 = min(day0, int(_day_index(np.array([pd.Timestamp(context_from).to_datetime64()]))[0]))
     n_days = int(_day_index(np.array([pd.Timestamp(cutoff).to_datetime64()]))[0]) - day0 + 1
     n_days = max(n_days, int(day.max()) - day0 + 1)
     branches = np.unique(df["branch_id"].to_numpy(np.int64))
@@ -273,7 +280,7 @@ def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayR
 
 
 def summarize_days(df: pd.DataFrame, classification_summary: dict[str, Any] | None = None, imputed: int | None = None,
-                   not_imputable: int | None = None) -> dict[str, Any]:
+                   not_imputable: int | None = None, carried_forward: int | None = None) -> dict[str, Any]:
     """Resumen de la clasificación del panel (series-día por estado y base) para el manifiesto y las limitaciones."""
     out: dict[str, Any] = dict(classification_summary or {})
     if df.empty or "day_status" not in df:
@@ -289,4 +296,6 @@ def summarize_days(df: pd.DataFrame, classification_summary: dict[str, Any] | No
         out["excluded_days_imputed"] = int(imputed)
     if not_imputable is not None:
         out["excluded_days_not_imputable"] = int(not_imputable)
+    if carried_forward is not None:
+        out["excluded_days_carried_forward"] = int(carried_forward)
     return out

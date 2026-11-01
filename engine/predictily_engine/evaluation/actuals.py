@@ -3,17 +3,25 @@
 - Para cada run completado se toman las fechas objetivo ya observadas (≤ última venta) y se
   calcula la venta real por nodo con las mismas reglas del entrenamiento (sin anuladas ni
   devoluciones). Se guarda en forecast_actuals (idempotente por run, nodo y fecha).
-- Métricas realizadas por run (nivel serie, sin días con quiebre de stock; y nivel total) en
-  model_evaluations con evaluation_type='realized'.
+- Métricas realizadas por run (nivel serie, sin días con quiebre de stock, fuente ausente ni cierre; y nivel total sin los días
+  de fuente ausente o cierre) en model_evaluations con evaluation_type='realized'.
 - Drift: si el WAPE realizado de un tramo de horizonte (h1-7 / h8-14 / h15-30 / h31-60 / h61-90), acumulado en
   los runs de producción evaluados, supera max(1.3 × backtest, backtest + 0.10) con al menos 14
   días observados, se crea una alerta forecast_drift (deduplicada).
+
+Semántica de días (ADR-V25-03): un día sin ventas NO es siempre un cero. Los días de una serie que la fuente no cubre (fuera de
+`data_coverage`, dentro de un hueco declarado o inferido, o inferidos por la regla de actividad de la sucursal) o en que la sucursal
+cerró (`calendar_events.category = 'closure'`) NO son ceros observados: se marcan censurados (`is_censored`), no entran a las métricas
+realizadas ni a la detección de deriva, y se cuentan por clase (`exclusions`: `stockout_days`, `missing_source_days`, `closed_days`).
+Se clasifican con la MISMA función del entrenamiento (`profiling.days.classify_days`) y con el conocimiento más reciente de las
+declaraciones; así una caída de la integración no se lee como un deterioro del pronóstico.
 """
 
 from __future__ import annotations
 
 import time
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
@@ -22,10 +30,15 @@ from sqlalchemy import Connection, text
 
 from predictily_engine.backtest.metrics import summarize
 from predictily_engine.backtest.rolling import BUCKET_DAYS, horizon_bucket
+from predictily_engine.data.asof import local_today
 from predictily_engine.db.repository import TenantRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import jdump, mark_failed, none_if_nan, upsert_alert
+from predictily_engine.demand.coverage import SalesCoverage
+from predictily_engine.pipeline.data import load_day_declarations
 from predictily_engine.pipeline.errors import NotFoundError
+from predictily_engine.platform.config import effective_config_record
+from predictily_engine.profiling.days import BASIS_INFERRED, CLOSED, EXCLUDED_STATUSES, MISSING_SOURCE, DayRules, classify_days
 from predictily_engine.reconciliation.hierarchy import ALL_LEVELS, aggregate
 
 MIN_DRIFT_DAYS = 14
@@ -35,31 +48,105 @@ def drift_threshold(backtest_wape: float) -> float:
     return max(1.3 * backtest_wape, backtest_wape + 0.10)
 
 
-def node_actuals(actual: pd.DataFrame, stockouts: pd.DataFrame, categories: pd.Series) -> pd.DataFrame:
-    """Reales por nodo y día. actual: branch_id, product_id, ds, units (solo combinaciones con venta)."""
+def _flag_nodes(days: pd.DataFrame, flag: str, categories: pd.Series) -> pd.DataFrame:
+    """Marca (`flag` = 1) cada nodo y día que contiene al menos una serie-día de `days` (branch_id, product_id, ds)."""
+    s = days[["branch_id", "product_id", "ds"]].copy()
+    s["category_id"] = s["product_id"].map(categories)
+    s[flag] = 1
+    return aggregate(s, [flag], ["ds"], ALL_LEVELS)[["node_key", "ds", flag]]
+
+
+def node_actuals(actual: pd.DataFrame, stockouts: pd.DataFrame, categories: pd.Series,
+                 excluded: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Reales por nodo y día. actual: branch_id, product_id, ds, units (solo combinaciones con venta).
+
+    `stockouts`: series-día con quiebre de stock (la venta es cota inferior). `excluded`: series-día de fuente ausente o cierre
+    (ADR-V25-03: branch_id, product_id, ds), cuyo «cero» es dato ausente. Un nodo agregado queda marcado si alguna de sus series
+    lo está ese día. Devuelve node_key, ds, units, censored (quiebre) y excluded (fuente ausente o cierre)."""
     a = actual.copy()
     a["category_id"] = a["product_id"].map(categories)
-    a["censored"] = 0
-    nodes = aggregate(a, ["units"], ["ds"], ALL_LEVELS)
-    if not stockouts.empty:
-        s = stockouts.copy()
-        s["category_id"] = s["product_id"].map(categories)
-        s["censored"] = 1
-        cens = aggregate(s, ["censored"], ["ds"], ALL_LEVELS)[["node_key", "ds", "censored"]]
-        nodes = nodes.merge(cens, on=["node_key", "ds"], how="outer")
+    if a.empty:  # ningún documento de venta en el período (p. ej. caída total de la integración): solo hay marcas
+        nodes = pd.DataFrame({"node_key": pd.Series(dtype=object), "ds": pd.Series(dtype="datetime64[ns]"), "units": pd.Series(dtype=float)})
     else:
-        nodes["censored"] = 0
-    nodes["censored"] = nodes["censored"].fillna(0) > 0
-    return nodes[["node_key", "ds", "units", "censored"]]
+        nodes = aggregate(a, ["units"], ["ds"], ALL_LEVELS)[["node_key", "ds", "units"]]
+    for flag, days in (("censored", stockouts), ("excluded", excluded)):
+        if days is not None and not days.empty:
+            nodes = nodes.merge(_flag_nodes(days, flag, categories), on=["node_key", "ds"], how="outer")
+        else:
+            nodes[flag] = 0
+        nodes[flag] = nodes[flag].fillna(0) > 0
+    return nodes[["node_key", "ds", "units", "censored", "excluded"]]
 
 
 def realized_rows(fv: pd.DataFrame, nodes: pd.DataFrame) -> pd.DataFrame:
-    """Une pronóstico diario con reales (0 si no hubo venta en el nodo ese día)."""
+    """Une pronóstico diario con reales (0 si no hubo venta en el nodo ese día). `is_excluded`: fuente ausente o cierre (nunca un cero
+    observado); `is_censored`: además, quiebre de stock. Ninguno entra a las métricas de la serie."""
     df = fv.merge(nodes, on=["node_key", "ds"], how="left")
     df["actual"] = df["units"].fillna(0.0)
-    df["is_censored"] = df["censored"].eq(True)
+    df["is_excluded"] = df["excluded"].eq(True)
+    df["is_censored"] = df["censored"].eq(True) | df["is_excluded"]
     df["abs_error"] = (df["actual"] - df["yhat"]).abs()
-    return df.drop(columns=["units", "censored"])
+    return df.drop(columns=["units", "censored", "excluded"])
+
+
+@dataclass
+class DayContext:
+    """Insumos de la clasificación de días (`profiling.days`) con el conocimiento MÁS RECIENTE, para clasificar los días evaluados de
+    pronósticos ya publicados: cobertura, huecos, cierres, mapa fuente → sucursales, líneas diarias por sucursal (regla inferida) y las
+    reglas de la configuración efectiva de la empresa."""
+
+    coverage: dict[str, Any]
+    coverage_gaps: pd.DataFrame
+    closures: pd.DataFrame
+    source_branches: dict[int, list[int]]
+    sales: pd.DataFrame
+    returns: pd.DataFrame
+    rules: DayRules = field(default_factory=DayRules)
+
+    @classmethod
+    def load(cls, repo: TenantRepository, last: date) -> "DayContext":
+        tenant = repo.tenant()
+        try:
+            rules = DayRules.from_config(effective_config_record("demand", tenant.get("settings"), tenant.get("sector"))["effective_config"])
+        except ValueError:  # configuración inválida: la ejecución la rechaza; aquí se evalúa con los valores del core
+            rules = DayRules()
+        gaps, closures, source_branches = load_day_declarations(repo)
+        today = local_today(repo.timezone())   # la verdad más reciente: lo conocido hasta hoy (como `daily_actuals`)
+        sales = repo.daily_sales(last, today)
+        returns = repo.daily_returns(last, today)
+        return cls(coverage=SalesCoverage.for_repository(repo).as_dict(), coverage_gaps=gaps, closures=closures,
+                   source_branches=source_branches,
+                   sales=sales.groupby(["branch_id", "ds"], as_index=False)["lines"].sum() if not sales.empty else sales,
+                   returns=returns[["branch_id", "ds"]].drop_duplicates() if not returns.empty else returns, rules=rules)
+
+
+def excluded_series_days(fv: pd.DataFrame, ctx: DayContext | None, date_from, date_to) -> pd.DataFrame:
+    """Series-día pronosticados (nivel serie de `fv`) que la fuente no cubre o en que la sucursal cerró, con su estado y base. Usa
+    `classify_days` del entrenamiento, con la historia previa a `date_from` para la regla inferida."""
+    cols = ["branch_id", "product_id", "ds", "day_status", "day_basis"]
+    series = fv.loc[fv["level"] == "series", ["branch_id", "product_id", "ds"]].drop_duplicates() if ctx is not None else fv.iloc[0:0]
+    if series.empty:
+        return pd.DataFrame(columns=cols)
+    df = series.astype({"branch_id": int, "product_id": int}).assign(units=0.0, stockout=False)
+    context_from = pd.Timestamp(date_from) - pd.Timedelta(days=ctx.rules.infer_lookback_days + 1)
+    cls = classify_days(df, ctx, pd.Timestamp(date_to), ctx.rules, context_from=context_from)
+    out = df.assign(day_status=np.asarray(cls.status.astype(str)), day_basis=np.asarray(cls.basis.astype(object)))
+    return out[out["day_status"].isin(EXCLUDED_STATUSES)][cols].reset_index(drop=True)
+
+
+def exclusion_counts(rows: pd.DataFrame, excluded: pd.DataFrame) -> dict[str, int]:
+    """Series-día del pronóstico por clase de exclusión (nunca cuentan como cero observado): quiebre de stock, fuente ausente
+    (`missing_source`; `missing_source_inferred_days` es el subconjunto inferido) y cierre (`closed`), y cuántos quedan evaluables."""
+    ser = rows[rows["level"] == "series"]
+    keys = ["branch_id", "product_id", "ds"]
+    tag = ser[keys].astype({"branch_id": int, "product_id": int}).merge(
+        excluded[[*keys, "day_status", "day_basis"]].astype({"branch_id": int, "product_id": int}), on=keys, how="left") \
+        if len(ser) else pd.DataFrame(columns=[*keys, "day_status", "day_basis"])
+    missing, closed = tag["day_status"].eq(MISSING_SOURCE), tag["day_status"].eq(CLOSED)
+    inferred = missing & tag["day_basis"].eq(BASIS_INFERRED)
+    stockout = int(ser["is_censored"].sum()) - int(missing.sum()) - int(closed.sum())
+    return {"series_days": int(len(ser)), "evaluated_series_days": int((~ser["is_censored"]).sum()), "stockout_days": max(stockout, 0),
+            "missing_source_days": int(missing.sum()), "missing_source_inferred_days": int(inferred.sum()), "closed_days": int(closed.sum())}
 
 
 def _stockout_days(repo: TenantRepository, date_from, date_to) -> pd.DataFrame:
@@ -114,6 +201,8 @@ def _evaluate(conn: Connection, repo: TenantRepository, lookback_runs: int) -> d
     categories = repo.products().set_index("product_id")["category_id"]
     evaluated, pooled = [], []
     current = repo.current_run()
+    day_ctx = DayContext.load(repo, last) if (last is not None and not runs.empty) else None
+    totals: dict[str, int] = {}
     for run in runs.to_dict("records"):
         cutoff = pd.Timestamp(run["cutoff_date"])
         if last is None or pd.Timestamp(last) <= cutoff:
@@ -126,13 +215,18 @@ def _evaluate(conn: Connection, repo: TenantRepository, lookback_runs: int) -> d
         fv["ds"] = pd.to_datetime(fv["ds"])
         act = repo.daily_actuals(date_from, date_to)
         act["ds"] = pd.to_datetime(act["ds"])
-        nodes = node_actuals(act, _stockout_days(repo, date_from, date_to), categories)
+        # ADR-V25-03: fuente ausente y cierres no son ceros observados; se clasifican con la regla del entrenamiento.
+        excluded = excluded_series_days(fv, day_ctx, date_from, date_to)
+        nodes = node_actuals(act, _stockout_days(repo, date_from, date_to), categories, excluded)
         rows = realized_rows(fv, nodes)
         _upsert_actuals(conn, tenant_id, int(run["id"]), rows)
         series = rows[(rows["level"] == "series") & ~rows["is_censored"]]
-        metrics = _write_realized(conn, tenant_id, run, rows, series)
+        exclusions = exclusion_counts(rows, excluded)
+        for key, value in exclusions.items():
+            totals[key] = totals.get(key, 0) + value
+        metrics = _write_realized(conn, tenant_id, run, rows, series, exclusions)
         evaluated.append({"run_id": int(run["id"]), "version": int(run["version"]), "run_type": run["run_type"],
-                          "days_observed": int(rows["ds"].nunique()), **metrics})
+                          "days_observed": int(rows["ds"].nunique()), "exclusions": exclusions, **metrics})
         if run["run_type"] == "production":
             pooled.append(series.assign(run_id=int(run["id"])))
 
@@ -167,7 +261,7 @@ def _evaluate(conn: Connection, repo: TenantRepository, lookback_runs: int) -> d
     latest = next((e for e in evaluated if current is not None and e["run_id"] == int(current["id"])),
                   evaluated[0] if evaluated else None)
     return {"evaluated_runs": evaluated, "drift_detected": drift_detected, "drift_details": drift_details,
-            "realized_wape": latest["wape"] if latest else None}
+            "realized_wape": latest["wape"] if latest else None, "exclusions": totals}
 
 
 def _upsert_actuals(conn: Connection, tenant_id: int, run_id: int, rows: pd.DataFrame) -> None:
@@ -194,13 +288,14 @@ def _upsert_actuals(conn: Connection, tenant_id: int, run_id: int, rows: pd.Data
     ), payload)
 
 
-def _write_realized(conn: Connection, tenant_id: int, run: dict, rows: pd.DataFrame, series: pd.DataFrame) -> dict:
+def _write_realized(conn: Connection, tenant_id: int, run: dict, rows: pd.DataFrame, series: pd.DataFrame,
+                    exclusions: dict[str, int] | None = None) -> dict:
     run_id = int(run["id"])
     conn.execute(text("DELETE FROM model_evaluations WHERE tenant_id = :tenant_id AND forecast_run_id = :run_id "
                       "AND evaluation_type = 'realized'"), {"tenant_id": tenant_id, "run_id": run_id})
     out_rows = []
     base = {"tenant_id": tenant_id, "run_id": run_id, "family": "selection", "n_windows": 1,
-            "cutoffs": jdump([str(run["cutoff_date"])[:10]])}
+            "cutoffs": jdump([str(run["cutoff_date"])[:10]]), "extra": jdump({"exclusions": exclusions or {}})}
 
     def add(level, key, df, horizon_days=None, cov=None):
         if df.empty:
@@ -219,7 +314,7 @@ def _write_realized(conn: Connection, tenant_id: int, run: dict, rows: pd.DataFr
     sb = series.assign(hbucket=horizon_bucket(series["horizon_step"]))
     for bucket, sub in sb.groupby("hbucket"):
         add("horizon", bucket, sub, horizon_days=BUCKET_DAYS[bucket])
-    add("total", "total", rows[rows["level"] == "total"])
+    add("total", "total", rows[(rows["level"] == "total") & ~rows["is_excluded"]])  # los días de fuente ausente o cierre no son ceros
     if out_rows:
         conn.execute(text(
             """
@@ -227,7 +322,7 @@ def _write_realized(conn: Connection, tenant_id: int, run: dict, rows: pd.DataFr
                 horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80, n_obs, n_windows, cutoffs,
                 extra, created_at)
             VALUES (:tenant_id, :run_id, :family, 'realized', :level, :level_key, :horizon_days, false, true, :wape,
-                :mae, :rmse, :bias, :coverage_80, :n_obs, :n_windows, CAST(:cutoffs AS jsonb), '{}'::jsonb, now())
+                :mae, :rmse, :bias, :coverage_80, :n_obs, :n_windows, CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), now())
             """
         ), out_rows)
     return {"wape": none_if_nan(overall["wape"]) if overall is not None else None,

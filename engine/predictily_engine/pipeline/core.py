@@ -565,7 +565,9 @@ def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
     total = int(day_summary.get("series_days_total") or 0)
     missing, closed = int(days.get("missing_source", 0)), int(days.get("closed", 0))
     imputed, not_imputable = int(day_summary.get("excluded_days_imputed", 0)), int(day_summary.get("excluded_days_not_imputable", 0))
-    tail = (f" Para ajustar los modelos se imputaron con la media móvil de 28 días de los días limpios ({imputed} imputados; "
+    carried = int(day_summary.get("excluded_days_carried_forward", 0))
+    carry = f", {carried} de ellos con el último nivel conocido por huecos de más de 21 días" if carried else ""
+    tail = (f" Para ajustar los modelos se imputaron con la media móvil de 28 días de los días limpios ({imputed} imputados{carry}; "
             f"{not_imputable} sin historia suficiente quedan con su valor observado).")
     if missing:
         out.append({"code": "days_missing_source", "message": (
@@ -580,6 +582,11 @@ def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
             f"línea pese a una mediana de al menos {rules.get('infer_min_median_lines')} líneas diarias en los "
             f"{rules.get('infer_lookback_days')} días previos ({by_basis.get('missing_source:inferred', 0)} días-serie). La regla es configurable "
             "(`day_status_infer_gaps`) y debe aprobarse en el piloto: un cierre sin declarar en el calendario se confunde con una caída de la fuente.")})
+    if (missing or closed) and not_imputable:
+        out.append({"code": "days_not_imputable", "message": (
+            f"{not_imputable} días-serie excluidos (fuente ausente o cierre) no tienen ningún nivel previo con que imputarlos (menos de 7 "
+            "días limpios antes, p. ej. un hueco que abre la serie): quedan con su valor observado en los modelos que exigen series "
+            "contiguas, pero siguen fuera de las métricas y de la proporción de ceros del perfilado.")})
     if closed:
         out.append({"code": "days_closed", "message": (
             f"{closed} días-serie corresponden a cierres declarados en el calendario (`closure`): no son ceros observados y se excluyen "

@@ -108,6 +108,15 @@ class SalesCoverage:
                 cov.branch_through[b] = closed_through
         return cov
 
+    @classmethod
+    def for_repository(cls, repo: Any) -> "SalesCoverage":
+        """Cobertura efectiva de ventas de la empresa del repositorio tal como la resuelve una ejecución de demanda: solo las sucursales
+        ACTIVAS con cobertura propia fijan el corte. La usan `forecast_run`, la preparación de datos (`readiness`) y la evaluación posterior."""
+        branches = repo.branches()
+        active = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
+                  if "is_active" in branches else set(branches["branch_id"].astype(int)))
+        return cls.resolve(repo.conn, repo.tenant_id, repo.sales_coverage(), active)
+
     def limit_cutoff(self, cutoff: date) -> date:
         self.requested_cutoff = cutoff
         self.effective_cutoff = min(cutoff, self.through) if self.through is not None else cutoff
