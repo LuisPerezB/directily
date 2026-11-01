@@ -232,6 +232,37 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "supply_min_lead_time_coverage": 0.5,    # DEGRADE: fracción de series con plazo explícito (producto u oferta) menor
         "supply_warn_min_cost_coverage": 0.5,    # WARN: fracción de productos con costo conocido menor
     },
+    # ── W3-B · promotion · política de selección heredada, política de promoción V2.5, shadow mode y Optuna (ADR-V25-21) ────────────
+    # Se resuelve con la MISMA precedencia que el resto (core → perfil → `settings.cores.promotion`). TODOS los umbrales son valores
+    # INICIALES de diseño, «a aprobar en el piloto» con datos reales; ninguno es universal. Su justificación está en docs/ml/FORECAST_SELECTION.md.
+    # `governing_policy`: qué política decide lo SERVIDO. Por defecto `legacy` (no cambia la demo ni los E2E); la V2.5 se calcula siempre en
+    # paralelo y se registra («sombra de decisión»). La mejora mínima de la política heredada es `demand.min_improvement` (3 %).
+    "promotion": {
+        "governing_policy": "legacy",         # legacy | v25
+        # ── política heredada (legacy-selection-v1): fracción de ventanas que debe ganar LightGBM (2/3 ⇒ ⌈2n/3⌉; 3 de 4 en producción)
+        "legacy_windows_won_fraction": 2 / 3,
+        # ── política V2.5 (promotion-v25-1): gates calculados SOLO con las ventanas de selección (el holdout nunca decide) ──
+        "v25_min_selection_windows": 2,       # ventanas de selección mínimas para certificar estabilidad y calibración
+        "v25_max_consecutive_losing_windows": 1,   # el candidato no puede perder en más de x ventanas consecutivas frente a la referencia
+        "v25_min_relative_improvement": 0.03,      # mejora relativa mínima del WAPE frente al champion vigente (o el baseline)
+        "v25_operational_min_money_improvement": 0.05,   # alternativa: mejora del WAPE en dinero (unidades × precio) sin empeorar las unidades
+        "v25_segment_max_regression": 0.10,        # regresión relativa máxima del WAPE en un segmento crítico frente a la referencia
+        "v25_segment_min_actual": 30.0,            # unidades reales mínimas de un segmento para evaluarlo (menos ⇒ insufficient_data)
+        "v25_critical_segments": ["demand_class", "volume_tier"],   # dimensiones de segmento protegidas (ver selection/promotion.py)
+        "v25_coverage_tolerance": 0.10,            # |cobertura de intervalos − nominal| máxima (80 % y 95 %) para documentar la calibración
+        "v25_approval_blocks_serving": False,      # True: sin aprobación humana (W4 · S06) el candidato queda en shadow y NO se sirve
+        # ── shadow mode: el challenger (mejor candidato no servido de cada clase) predice sin servirse ──
+        "shadow_enabled": True,
+        "shadow_max_series": 100,                  # tope de series por alcance (las de mayor volumen reciente)
+        "shadow_train_ml_challenger": True,        # si el challenger es LightGBM y no se sirve: entrenar uno SOLO con las series acotadas del shadow (aproximación; costo ∝ tope)
+        # ── Optuna (opcional y APAGADO): ajusta LightGBM SOLO dentro de las ventanas de selección ──
+        "optuna_enabled": False,
+        "optuna_n_trials": 20,
+        "optuna_timeout_seconds": 120,
+        "optuna_seed": 42,
+        "optuna_early_stopping_patience": 8,       # pruebas consecutivas sin mejorar el mejor valor ⇒ se detiene
+        "optuna_max_cpu": 2,                       # tope de hilos de LightGBM durante el ajuste
+    },
 }
 
 # Claves de tenants.settings que mapean a cada core (compatibilidad con la etapa 1).
@@ -242,6 +273,7 @@ TENANT_SETTING_KEYS: dict[str, tuple[str, ...]] = {
     "cost": (),
     "factors": (),
     "scenario": (),
+    "promotion": (),
 }
 
 
@@ -291,6 +323,26 @@ del _key, _value
 
 # ── W2-D · factors: rangos (los mapas anidados se validan en availability/pipeline.py, enganchado en `validate_overrides`) ──
 CONFIG_CONSTRAINTS[("factors", "default_max_staleness_days")] = {"min": 1, "max": 3650}
+
+# ── W3-B · promotion: rangos validados (la mejora mínima de la política heredada es `demand.min_improvement`) ──
+CONFIG_CONSTRAINTS[("demand", "min_improvement")] = {"min": 0.0, "max": 0.5}
+CONFIG_CONSTRAINTS.update({
+    ("promotion", "governing_policy"): {"choices": ["legacy", "v25"]},
+    ("promotion", "legacy_windows_won_fraction"): {"min": 0.5, "max": 1.0},
+    ("promotion", "v25_min_selection_windows"): {"min": 1, "max": 20},
+    ("promotion", "v25_max_consecutive_losing_windows"): {"min": 0, "max": 10},
+    ("promotion", "v25_min_relative_improvement"): {"min": 0.0, "max": 0.5},
+    ("promotion", "v25_operational_min_money_improvement"): {"min": 0.0, "max": 0.5},
+    ("promotion", "v25_segment_max_regression"): {"min": 0.0, "max": 1.0},
+    ("promotion", "v25_segment_min_actual"): {"min": 0.0, "max": 1e9},
+    ("promotion", "v25_coverage_tolerance"): {"min": 0.0, "max": 0.5},
+    ("promotion", "shadow_max_series"): {"min": 1, "max": 5000},
+    ("promotion", "optuna_n_trials"): {"min": 1, "max": 200},
+    ("promotion", "optuna_timeout_seconds"): {"min": 1, "max": 3600},
+    ("promotion", "optuna_seed"): {"min": 0, "max": 2**31 - 1},
+    ("promotion", "optuna_early_stopping_patience"): {"min": 1, "max": 100},
+    ("promotion", "optuna_max_cpu"): {"min": 1, "max": 16},
+})
 
 
 class ConfigValidationError(ValueError):

@@ -34,6 +34,7 @@ from predictily_engine.backtest.rolling import (
 from predictily_engine.config import FEATURE_SET_VERSION
 from predictily_engine.demand import evaluation as ev
 from predictily_engine.demand import horizons as hz
+from predictily_engine.demand import segments as seg_metrics
 from predictily_engine.demand.lifecycle import (
     LABEL_EXCEPTIONAL,
     LifecyclePlan,
@@ -66,6 +67,8 @@ from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import Panel, build_panel
 from predictily_engine.quality.assessment import QualityAssessment, assess_demand
 from predictily_engine.reconciliation.hierarchy import AGG_LEVELS, aggregate, to_periods
+from predictily_engine.selection import shadow as shadow_stage                                   # W3-B: champion/challenger y shadow mode
+from predictily_engine.selection.promotion import W3A_SEGMENT_SOURCE, PromotionConfig, PromotionOutcome, run_selection_stage   # W3-B: política heredada + V2.5
 from predictily_engine.selection.selector import Selection, select_models, selected_rows
 
 log = logging.getLogger(__name__)
@@ -122,6 +125,9 @@ class PipelineResult:
     assumptions: list[str] = field(default_factory=list)
     lifecycle: LifecyclePlan | None = None
     quality: QualityAssessment | None = None  # W2-C: métricas de dataset y gate de calidad de la ejecución
+    # W3-B: decisiones de ambas políticas por alcance (model_promotion_decisions) y predicciones del challenger (shadow_forecast_values)
+    promotion: PromotionOutcome | None = None
+    shadow: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=shadow_stage.SHADOW_COLUMNS))
 
 
 def _noop(stage: str, pct: int) -> None:  # pragma: no cover
@@ -160,6 +166,10 @@ def run_pipeline(
     horizons: tuple[int, ...] = hz.SUPPORTED_HORIZONS,
     config_record: dict[str, Any] | None = None,
     quality_signals: dict[str, Any] | None = None,
+    promotion_record: dict[str, Any] | None = None,
+    champions: dict[str, str] | None = None,
+    segment_provider: Any = None,
+    champions_source: str | None = None,
 ) -> PipelineResult:
     progress = progress or _noop
     timings: dict[str, float] = {}
@@ -174,12 +184,19 @@ def run_pipeline(
     # y su hash); la ejecución lo conserva: cambiar después la configuración de la empresa no reescribe este registro.
     record = config_record or effective_config_record("demand", data.settings, data.sector)
     core_config = record["effective_config"]
+    # W3-B (ADR-V25-21): política heredada parametrizada, política V2.5, shadow y Optuna (bloque `promotion`; por defecto gobierna `legacy`).
+    # `champions` = familia servida por alcance en la ejecución vigente anterior (la carga `forecast_run.load_champions`; vacío en corridas históricas).
+    promotion_record = promotion_record or effective_config_record("promotion", data.settings, data.sector)
+    promo_cfg = PromotionConfig.from_config(promotion_record["effective_config"], min_improvement)
     effective_config = {
         "core": "demand", "config": core_config, "provenance": record["provenance"], "profile": record["profile"],
         "core_config_version": record["config_version"],
         "run": {"seed": seed, "horizon_days": horizon, "horizons": list(horizons), "min_improvement": min_improvement,
                 "max_backtest_windows": max_windows, "max_series_lgbm": max_series_lgbm,
                 "force_families": force_families, "feature_set_version": FEATURE_SET_VERSION},
+        # W3-B: la política de promoción decide lo servido y se registra ahora en la huella de la ejecución (trazabilidad: qué política y con qué parámetros).
+        "promotion": {"core_config_version": promotion_record["config_version"], "governing_policy": promo_cfg.governing_policy,
+                      "policy_versions": promo_cfg.policy_versions()},
     }
     config_version = config_hash(effective_config)
 
@@ -255,18 +272,32 @@ def run_pipeline(
     timings["backtesting"] = time.perf_counter() - t1
 
     progress("selecting", 58)
+    # W3-A: tramo de volumen y vida de la serie as-of en cada corte, calculados UNA vez y compartidos por el gate de segmentos de la política
+    # V2.5 (W3-B) y por las métricas por segmento. Aislado: un fallo registra la limitación `segment_metrics_unavailable` y no aborta la ejecución.
+    segment_config = seg_metrics.SegmentConfig.from_config(core_config)
+    segment_context, segment_error = (seg_metrics.safe_build_context(bt, panel, windows, segment_config)
+                                      if not bt.empty else (None, None))
     eval_selection: Selection | None = None
+    promotion: PromotionOutcome | None = None
     if bt.empty:
         selection = Selection({"pooled": "window_average"}, "seasonal_naive",
                               {"pooled": "Sin backtest posible: promedio móvil."}, pd.DataFrame(), pd.DataFrame())
     else:
-        # Producción: se elige con toda la evidencia (ventanas de selección + holdout).
-        selection = select_models(bt, prof, min_improvement)
-        in_holdout = bt["is_holdout"].astype(bool)
-        if in_holdout.any() and (~in_holdout).any():
-            # Evaluación final (F6): la selección que se mide en el holdout solo ve ventanas anteriores.
-            eval_selection = select_models(bt[~in_holdout], prof, min_improvement)
-        else:
+        # Producción: se elige con toda la evidencia (ventanas de selección + holdout) bajo la política heredada, que gobierna por defecto;
+        # la evaluación final (F6) solo ve las ventanas anteriores. La política V2.5 se calcula en paralelo y se registra (W3-B).
+        # Segmentos críticos del gate «sin regresión por segmento» = los de las métricas por segmento de W3-A (volumen y vida de la serie as-of
+        # en el corte de cada ventana). Sin ellos (métricas apagadas) o con un proveedor explícito rige `default_segments`/el entregado.
+        segment_source = "proveedor entregado a run_pipeline" if segment_provider is not None else None
+        if segment_provider is None:
+            segment_provider = seg_metrics.provider_from_context(segment_context, cat)
+            segment_source = W3A_SEGMENT_SOURCE if segment_provider is not None else None
+        promotion = run_selection_stage(panel=panel, features=features, plan=plan, windows=windows, bt=bt, profile=prof, cfg=promo_cfg,
+                                        seed=seed, n_jobs=n_jobs, use_lgbm=use_lgbm, champions=champions, quality=dq,
+                                        cutoff=cutoff.date(), data_from=panel.df["ds"].min().date(), segment_provider=segment_provider,
+                                        segment_source=segment_source, champions_source=champions_source)
+        bt, selection, eval_selection = promotion.backtest, promotion.selection, promotion.eval_selection
+        limitations.extend(promotion.limitations)
+        if eval_selection is None:
             warnings.append(
                 "La historia no alcanza para reservar un período final independiente: las métricas de precisión "
                 "provienen de las mismas ventanas que eligieron el modelo y calibraron los intervalos, por lo que "
@@ -286,7 +317,9 @@ def run_pipeline(
     if "lightgbm_global" in needed and full_ids:
         try:
             tr, ref = features.training_frame(cutoff, full_ids)
-            lgbm = LightGBMGlobal(seed=seed, n_jobs=n_jobs).fit(tr)
+            lgbm = LightGBMGlobal(seed=seed, n_jobs=n_jobs)
+            lgbm.params.update(promotion.lgbm_params if promotion is not None else {})   # W3-B: hiperparámetros ajustados con Optuna ({} por defecto)
+            lgbm.fit(tr)
             progress("predicting", 72)
             preds.append(lgbm.predict(fc_horizon, features.future_frame(cutoff, full_ids, fc_horizon, ref)))
         except FeatureContractError:
@@ -300,6 +333,8 @@ def run_pipeline(
     # E2-19: lo que se sirve (y por tanto métricas, intervalos y etiquetas) es la selección con el respaldo
     # en lugar de cualquier familia que falló; el ganador del backtest queda como `planned`.
     served = selection.served(set(failed))
+    if promotion is not None and failed:    # W3-B: las filas efectivas del registro de decisiones dicen lo REALMENTE servido, no la familia planeada
+        promotion.reconcile_served(failed, selection.fallback)
     eval_served = eval_selection.served(set(failed)) if eval_selection is not None else None
     if failed:
         limitations.append({"code": "fallback_served",
@@ -345,7 +380,16 @@ def run_pipeline(
 
     # ── Evaluación (del procedimiento tal como se sirve) y respaldo de cada horizonte ──
     progress("evaluating", 78)
-    evaluations, eval_info = ev.evaluate(bt, served, eval_served, cat, data.currency)
+    # W3-A: métricas por horizonte y segmento (volumen y vida de la serie con lo conocido en cada corte). Solo agrega filas; no cambia lo servido.
+    if segment_error is None:
+        segment_context, segment_error = seg_metrics.safe_build_context(bt, panel, windows, segment_config, reuse=segment_context)
+    evaluations, eval_info = ev.evaluate(bt, served, eval_served, cat, data.currency, segments=segment_context,
+                                         wape_min_denominator=segment_config.wape_min_denominator)
+    segment_error = segment_error or eval_info.get("segment_error")
+    if segment_error is not None:
+        limitations.append({"code": "segment_metrics_unavailable",
+                            "message": ("Las métricas por horizonte y segmento no se pudieron calcular en esta ejecución "
+                                        f"({segment_error}); el pronóstico, la selección y las demás métricas no cambiaron.")})
     history_days = int((cutoff - panel.df["ds"].min()).days) + 1
     support = hz.horizon_support(horizon, history_days, plan, ev.horizon_obs(evaluations))
     p50_info = eval_info["p50"]
@@ -563,6 +607,14 @@ def run_pipeline(
         has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info,
         day_status=panel.day_summary, knowledge=knowledge)
     manifest["data_quality_gate"] = dq.manifest_block()   # W2-C: resultado del gate de calidad de datos (ADR-V25-05)
+    if promotion is not None:   # W3-B: ambas políticas (parámetros, huellas, ventanas usadas, ajuste Optuna) y cuál gobernó
+        manifest["promotion"] = promotion.manifest_block()
+        if manifest.get("selection"):      # el criterio se genera de la política (no la frase fija «≥ 2/3»): con 4 ventanas la heredada exige 3
+            manifest["selection"]["criterion"] = promotion.selection_criterion()
+        manifest["decisions"]["model_selection_production"] = {
+            "policy": promotion.governing,
+            "windows": (promotion.windows["selection_windows"] + promotion.windows["holdout_windows"]) if promotion.governing == "legacy"
+            else promotion.windows["selection_windows"]}
     summary = _summary(series_fc, forecast_values, served, evaluations, plan, readiness, recs, horizon, active, lgbm,
                        warnings, eval_served, support=support, horizons=horizons)
     summary.update({
@@ -577,6 +629,28 @@ def run_pipeline(
         "history_days": history_days, "horizon_days": horizon, "horizons_requested": list(horizons),
         "day_status": panel.day_summary, "knowledge": knowledge, "quality_gate": dq.manifest_block(),
     })
+    summary["segment_metrics"] = seg_metrics.summary_block(evaluations, segment_config if segment_config.enabled else None,
+                                                           error=segment_error)   # W3-A (compacto: el detalle está en model_evaluations)
+    manifest["segment_metrics"] = seg_metrics.manifest_block(segment_config if segment_config.enabled else None)   # W3-A: definiciones estáticas, una vez
+    # ── W3-B · shadow mode: el challenger predice SIN servirse (al final: no puede alterar lo publicado) ──
+    shadow_df = pd.DataFrame(columns=shadow_stage.SHADOW_COLUMNS)
+    if promotion is not None:
+        t_shadow = time.perf_counter()
+        challengers, shadow_notes = [], []
+        if promo_cfg.shadow.enabled:
+            eligible = {c: sorted(set(full_ids) & set(active.loc[active["demand_class"] == c, "unique_id"])) for c in shadow_stage.CLASSES}
+            challengers = shadow_stage.choose_challengers(bt, prof, served, eligible, scales, promo_cfg.shadow.max_series, set(failed))
+            shadow_df, shadow_notes = shadow_stage.forecast_challengers(
+                challengers, bt=bt, profile=prof, train=train, features=features, lgbm=lgbm, lgbm_ref=ref if lgbm is not None else None,
+                full_ids=full_ids, cutoff=cutoff, fc_horizon=fc_horizon, horizon=horizon, scales=scales, seed=seed, n_jobs=n_jobs,
+                train_ml=promo_cfg.shadow.train_ml_challenger, lgbm_params=promotion.lgbm_params)
+            limitations.extend(n for n in shadow_notes if n not in limitations)
+        promotion.shadow = shadow_stage.shadow_summary(challengers, shadow_df, shadow_notes, promo_cfg.shadow.enabled, promo_cfg.shadow.max_series)
+        promotion.shadow_elapsed_seconds = round(time.perf_counter() - t_shadow, 2)      # costo del shadow de esta ejecución (V25-SEL-045; solo en el resumen)
+        summary["promotion"] = promotion.summary()
+        manifest["promotion"] = promotion.manifest_block()
+        summary["limitations"], summary["limitation_codes"] = limitations, [x["code"] for x in limitations]
+        timings["shadow"] = time.perf_counter() - t_shadow
     timings["total"] = time.perf_counter() - t0
     summary["timings_seconds"] = {k: round(v, 1) for k, v in timings.items()}
     return PipelineResult(
@@ -587,7 +661,7 @@ def run_pipeline(
         backtest=bt, evaluation_selection=eval_served, planned_selection=selection, failed_families=failed,
         snapshot=snapshot, manifest=manifest, effective_config=effective_config, config_version=config_version,
         horizon_support=support, quality_status=quality, limitations=limitations, assumptions=assumptions,
-        lifecycle=lifecycle, quality=dq,
+        lifecycle=lifecycle, quality=dq, promotion=promotion, shadow=shadow_df,
     )
 
 

@@ -9,6 +9,11 @@
   los runs de producción evaluados, supera max(1.3 × backtest, backtest + 0.10) con al menos 14
   días observados, se crea una alerta forecast_drift (deduplicada).
 
+- W3-B · shadow mode (`evaluate_shadow_prospective`): las predicciones del challenger que NO se sirvieron (`shadow_forecast_values`) se
+  evalúan tras el corte contra lo realizado, con la MISMA clasificación y censura de días que la evaluación servida (quiebre de stock, fuente
+  ausente, cierre), y se escriben en model_evaluations con evaluation_type = 'shadow_prospective' (WAPE, sesgo, cobertura 80 %, por horizonte y
+  comparación con el servido sobre las mismas series y días).
+
 Semántica de días (ADR-V25-03): un día sin ventas NO es siempre un cero. Los días de una serie que la fuente no cubre (fuera de
 `data_coverage`, dentro de un hueco declarado o inferido, o inferidos por la regla de actividad de la sucursal) o en que la sucursal
 cerró (`calendar_events.category = 'closure'`) NO son ceros observados: se marcan censurados (`is_censored`), no entran a las métricas
@@ -19,6 +24,7 @@ declaraciones; así una caída de la integración no se lee como un deterioro de
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -36,12 +42,14 @@ from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import jdump, mark_failed, none_if_nan, upsert_alert
 from predictily_engine.demand.coverage import SalesCoverage
 from predictily_engine.pipeline.data import load_day_declarations
+from predictily_engine.models.registry import BASELINE_FAMILY
 from predictily_engine.pipeline.errors import NotFoundError
 from predictily_engine.platform.config import effective_config_record
 from predictily_engine.profiling.days import BASIS_INFERRED, CLOSED, EXCLUDED_STATUSES, MISSING_SOURCE, DayRules, classify_days
 from predictily_engine.reconciliation.hierarchy import ALL_LEVELS, aggregate
 
 MIN_DRIFT_DAYS = 14
+log = logging.getLogger(__name__)
 
 
 def drift_threshold(backtest_wape: float) -> float:
@@ -260,8 +268,125 @@ def _evaluate(conn: Connection, repo: TenantRepository, lookback_runs: int) -> d
                          dedup_key="forecast_drift", related_type="forecast_run", related_id=int(current["id"]))
     latest = next((e for e in evaluated if current is not None and e["run_id"] == int(current["id"])),
                   evaluated[0] if evaluated else None)
+    # W3-B: evaluación prospectiva del challenger, AISLADA con un punto de guardado: si falla, la evaluación de lo servido (ya escrita arriba) y la
+    # detección de deriva no se pierden; queda la limitación `shadow_evaluation_failed`.
+    try:
+        with conn.begin_nested():
+            shadow = evaluate_shadow_prospective(conn, repo, runs, day_ctx, categories, last)
+    except Exception as exc:
+        log.exception("La evaluación prospectiva del shadow falló")
+        shadow = {"evaluated": [], "runs_with_shadow": 0, "exclusions": {}, "error": f"{type(exc).__name__}: {exc}"[:300],
+                  "limitations": [{"code": "shadow_evaluation_failed",
+                                   "message": f"La evaluación prospectiva del shadow falló ({type(exc).__name__}); la evaluación de lo servido no se ve afectada."}]}
     return {"evaluated_runs": evaluated, "drift_detected": drift_detected, "drift_details": drift_details,
-            "realized_wape": latest["wape"] if latest else None, "exclusions": totals}
+            "realized_wape": latest["wape"] if latest else None, "exclusions": totals, "shadow_prospective": shadow}
+
+
+SHADOW_EVALUATION_TYPE = "shadow_prospective"
+_SHADOW_LIMITS = {"wape": 1e6, "bias": 1e6, "mae": 1e10, "rmse": 1e10}     # capacidad de las columnas escalares de model_evaluations
+
+
+def _shadow_cap(column: str, value: Any) -> Any:
+    value = none_if_nan(value)
+    limit = _SHADOW_LIMITS.get(column)
+    return None if (limit is not None and value is not None and abs(float(value)) >= limit - 1e-6) else value
+
+
+def evaluate_shadow_prospective(conn: Connection, repo: TenantRepository, runs: pd.DataFrame, day_ctx: DayContext | None,
+                                categories: pd.Series, last: date | None) -> dict[str, Any]:
+    """W3-B · evaluación PROSPECTIVA del challenger (shadow mode): compara sus predicciones no servidas con lo realizado después del corte.
+
+    La censura es la de la evaluación servida: las series-día que la fuente no cubre o en que la sucursal cerró (`excluded_series_days`, la
+    misma función del entrenamiento) y los quiebres de stock quedan fuera de WAPE, sesgo y cobertura y se cuentan por clase (`exclusions`).
+    Escribe `model_evaluations` con `evaluation_type = 'shadow_prospective'` por familia: `overall` y `horizon` (tramo de pasos); `extra` /
+    `metrics` incluyen el WAPE del modelo SERVIDO sobre las mismas series y días no censurados (comparación justa). Idempotente por ejecución."""
+    tenant_id = repo.tenant_id
+    result: dict[str, Any] = {"evaluated": [], "runs_with_shadow": 0, "exclusions": {}}
+    if last is None or runs is None or runs.empty:
+        return result
+    totals: dict[str, int] = {}
+    for run in runs.to_dict("records"):
+        run_id = int(run["id"])
+        cutoff = pd.Timestamp(run["cutoff_date"])
+        if pd.Timestamp(last) <= cutoff:
+            continue
+        date_from = (cutoff + pd.Timedelta(days=1)).date()
+        date_to = min(pd.Timestamp(last), cutoff + pd.Timedelta(days=int(run["horizon_days"]))).date()
+        shadow = pd.DataFrame(conn.execute(text(
+            "SELECT model_family, model_registry_id, node_key, level, branch_id, product_id, target_date AS ds, horizon_step, "
+            "yhat::float8 AS yhat, lo_80::float8 AS lo_80, hi_80::float8 AS hi_80 FROM shadow_forecast_values "
+            "WHERE tenant_id = :t AND forecast_run_id = :r AND target_date BETWEEN :f AND :e"),
+            {"t": tenant_id, "r": run_id, "f": date_from, "e": date_to}).mappings().all())
+        if shadow.empty:
+            continue
+        shadow["ds"] = pd.to_datetime(shadow["ds"])
+        shadow["category_id"] = shadow["product_id"].map(categories)
+        act = repo.daily_actuals(date_from, date_to)
+        act["ds"] = pd.to_datetime(act["ds"])
+        excluded = excluded_series_days(shadow, day_ctx, date_from, date_to)      # fuente ausente y cierres: nunca son ceros observados
+        nodes = node_actuals(act, _stockout_days(repo, date_from, date_to), categories, excluded)
+        served = repo.forecast_values_for_run(run_id, date_from, date_to)
+        served = served[served["level"] == "series"][["node_key", "ds", "yhat"]].rename(columns={"yhat": "served_yhat"})
+        served["ds"] = pd.to_datetime(served["ds"])
+        conn.execute(text("DELETE FROM model_evaluations WHERE tenant_id = :t AND forecast_run_id = :r AND evaluation_type = :k"),
+                     {"t": tenant_id, "r": run_id, "k": SHADOW_EVALUATION_TYPE})
+        out_rows: list[dict[str, Any]] = []
+        run_summary: dict[str, Any] = {"run_id": run_id, "families": {}}
+        for family, part in shadow.groupby("model_family"):
+            rows = realized_rows(part.drop(columns=["model_family", "model_registry_id"]), nodes)
+            series = rows[(rows["level"] == "series") & ~rows["is_censored"]]
+            exclusions = exclusion_counts(rows, excluded)
+            for key, value in exclusions.items():
+                totals[key] = totals.get(key, 0) + value
+            same = series.merge(served, on=["node_key", "ds"], how="inner")
+            served_wape = None
+            if len(same) and same["actual"].sum() > 0:
+                served_wape = float((same["actual"] - same["served_yhat"]).abs().sum() / same["actual"].sum())
+            registry_id = part["model_registry_id"].dropna()
+            base = {"tenant_id": tenant_id, "run_id": run_id, "family": str(family), "rid": int(registry_id.iloc[0]) if len(registry_id) else None,
+                    "baseline": str(family) == BASELINE_FAMILY, "cutoffs": jdump([str(run["cutoff_date"])[:10]])}
+
+            def add(level: str, key: str | None, df: pd.DataFrame, horizon_days: int | None = None) -> dict[str, Any] | None:
+                if df.empty:
+                    return None
+                s = summarize(df.assign(_g=1), ["_g"]).iloc[0]
+                with_band = df[df["lo_80"].notna() & df["hi_80"].notna()]
+                cov = None if with_band.empty else float(((with_band["actual"] >= with_band["lo_80"] - 1e-9)
+                                                           & (with_band["actual"] <= with_band["hi_80"] + 1e-9)).mean())
+                comparison = {"served_wape_same_series_days": served_wape if level == "overall" else None,
+                              "relative_improvement_vs_served": (None if level != "overall" or served_wape in (None, 0) or s["wape"] != s["wape"]
+                                                                 else float((served_wape - s["wape"]) / served_wape)),
+                              "n_served_compared": int(len(same)) if level == "overall" else None}
+                metrics = {"shadow": True, "served": False, "scope": "prospectivo (tras el corte)", "exclusions": exclusions,
+                           "sample": {"n_obs": int(s["n_obs"]), "n_series": int(df["node_key"].nunique()), "sum_actual": float(s["sum_actual"])},
+                           "comparison": comparison, "coverage_80_n": int(len(with_band)),
+                           "censorship": "misma clasificación de días que la evaluación servida (quiebre, fuente ausente, cierre)"}
+                out_rows.append({**base, "level": level, "level_key": key, "horizon_days": horizon_days,
+                                 "wape": _shadow_cap("wape", s["wape"]), "mae": _shadow_cap("mae", s["mae"]), "rmse": _shadow_cap("rmse", s["rmse"]),
+                                 "bias": _shadow_cap("bias", s["bias"]), "coverage_80": cov, "n_obs": int(s["n_obs"]),
+                                 "extra": jdump({"shadow": True, "evaluation_scope": "prospective", "exclusions": exclusions}),
+                                 "metrics": jdump(metrics)})
+                return {"wape": none_if_nan(s["wape"]), "bias": none_if_nan(s["bias"]), "coverage_80": cov, "n_obs": int(s["n_obs"]),
+                        "served_wape_same_series_days": served_wape}
+
+            overall = add("overall", None, series)
+            for bucket, sub in series.assign(hbucket=horizon_bucket(series["horizon_step"])).groupby("hbucket"):
+                add("horizon", bucket, sub, horizon_days=BUCKET_DAYS[bucket])
+            run_summary["families"][str(family)] = {"exclusions": exclusions, **(overall or {"wape": None, "n_obs": 0})}
+        if out_rows:
+            conn.execute(text(
+                """
+                INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type, level, level_key,
+                    horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80, n_obs, n_windows, cutoffs, extra, core, metrics,
+                    created_at)
+                VALUES (:tenant_id, :rid, :run_id, :family, 'shadow_prospective', :level, :level_key, :horizon_days, :baseline, false, :wape,
+                    :mae, :rmse, :bias, :coverage_80, :n_obs, 1, CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), 'demand',
+                    CAST(:metrics AS jsonb), now())
+                """), out_rows)
+        result["evaluated"].append(run_summary)
+    result["runs_with_shadow"] = len(result["evaluated"])
+    result["exclusions"] = totals
+    return result
 
 
 def _upsert_actuals(conn: Connection, tenant_id: int, run_id: int, rows: pd.DataFrame) -> None:

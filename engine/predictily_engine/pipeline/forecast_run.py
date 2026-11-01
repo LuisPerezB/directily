@@ -47,6 +47,7 @@ from predictily_engine.platform.snapshot import persist_snapshot
 from predictily_engine.quality.persistence import insert_run_quality_report, record_blocked_forecast_run
 from predictily_engine.quality.service import resolve_policy
 from predictily_engine.quality.signals import collect_signals
+from predictily_engine.selection.promotion import champions_from_selection
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +153,17 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             except ValueError as exc:
                 raise InvalidConfigurationError(f"Configuración de demanda inválida: {exc}") from exc
             core_config = config_record["effective_config"]
+            # W3-B: política de promoción (bloque `promotion`: core → perfil → empresa) y champion de cada alcance (la selección servida de
+            # la ejecución de producción vigente ANTES de esta). Una configuración inválida se rechaza, no se aplica.
+            try:
+                promotion_record = effective_config_record("promotion", tenant.get("settings"), tenant.get("sector"))
+            except ValueError as exc:
+                raise InvalidConfigurationError(f"Configuración de promoción de modelos inválida: {exc}") from exc
+            # Solo una ejecución de PRODUCCIÓN toma como champion lo servido por la vigente: una corrida histórica (corte pasado) se compara con el
+            # baseline, porque la vigente es POSTERIOR a su corte (usarla sería mirar el futuro) y la corrida histórica no releva a nadie.
+            production_run = (run.get("run_type") or "production") == "production"
+            champions = load_champions(repo, production_run)
+            champions_source = "previous_production_run" if champions else ("none_historical_run" if not production_run else "none")
             # Umbrales de los gates de calidad (W2-C): core → perfil → empresa; una configuración inválida se rechaza, no se aplica.
             quality_policy = resolve_policy(tenant)
             # Cobertura declarada de la fuente de ventas: el corte no la supera y lo posterior es dato ausente.
@@ -179,7 +191,8 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             min_improvement=min_improvement, max_windows=max_windows,
             max_series_lgbm=settings.max_series_lgbm, progress=progress,
             force_families=req.options.force_models, horizons=tuple(req.horizons), config_record=config_record,
-            quality_signals=quality_signals,
+            quality_signals=quality_signals, promotion_record=promotion_record, champions=champions,
+            champions_source=champions_source,
         )
         progress("persisting", 92)
         result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)
@@ -356,6 +369,14 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
     # ── Valores pronosticados ──
     copy_forecast_values(conn, tenant_id, run_id, result.forecast_values, registry_ids)
 
+    # ── W3-B · decisiones de promoción de ambas políticas y predicciones del challenger (shadow; no se sirven) ──
+    # Aislados con un punto de guardado: el registro de decisiones y el shadow no pueden tumbar la transacción de lo servido; si fallan, la
+    # ejecución se publica igual y la limitación queda explícita.
+    _isolated(conn, result, "promotion_decisions_persist_failed", "No se pudieron registrar las decisiones de promoción de esta ejecución",
+              persist_promotion_decisions, conn, tenant_id, run_id, result, registry_ids)
+    _isolated(conn, result, "shadow_persist_failed", "No se pudieron guardar las predicciones del challenger (shadow) de esta ejecución",
+              persist_shadow_forecasts, conn, tenant_id, run_id, result, registry_ids)
+
     # ── Recomendaciones ──
     recs = result.recommendations
     if recs is not None and not recs.empty:
@@ -426,6 +447,100 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
                                                  "metrics": summary["metrics"], "models": summary["models"],
                                                  "warnings": result.warnings}),
             "rid": registry_ids.get(main_family), "id": job_id, "tenant_id": tenant_id})
+
+
+def load_champions(repo: TenantRepository, production: bool = True) -> dict[str, str]:
+    """W3-B · champion de cada alcance: la familia servida por clase en la ejecución de producción vigente anterior (`forecast_runs.selection`).
+    Sin ejecución vigente —o en una corrida histórica, `production=False`, cuyo corte es anterior a la vigente— no hay champion y la referencia es
+    el baseline."""
+    if not production:
+        return {}
+    current = repo.current_run()
+    return {} if current is None else champions_from_selection(_json(current.get("selection")))
+
+
+def _isolated(conn: Connection, result: PipelineResult, code: str, message: str, fn: Any, *args: Any) -> Any:
+    """Ejecuta `fn(*args)` dentro de un punto de guardado (`begin_nested`): un fallo revierte solo lo suyo, deja la limitación `code` en el resultado
+    (resumen y `limitation_codes`) y la persistencia de la ejecución continúa."""
+    try:
+        with conn.begin_nested():
+            return fn(*args)
+    except Exception as exc:
+        log.exception("%s (run=%s)", code, args[2] if len(args) > 2 else "?")
+        item = {"code": code, "message": f"{message} ({type(exc).__name__}). Lo servido no cambia."}
+        result.limitations.append(item)
+        codes = result.summary.setdefault("limitation_codes", [])
+        if code not in codes:
+            codes.append(code)
+        return None
+
+
+def persist_promotion_decisions(conn: Connection, tenant_id: int, run_id: int, result: PipelineResult, registry_ids: dict[str, int]) -> int:
+    """W3-B · una fila de `model_promotion_decisions` por política (legacy | v25) y alcance (global, clase, horizonte), con `is_effective` en las
+    que gobernaron lo servido y los gates con su evidencia. El candidato referencia el registro de modelos de ESTA ejecución; el champion, el de la
+    ejecución vigente anterior (FK compuestas por empresa). Idempotente por ejecución. Devuelve cuántas filas escribió."""
+    promotion = result.promotion
+    if promotion is None:
+        return 0
+    conn.execute(text("DELETE FROM model_promotion_decisions WHERE tenant_id = :t AND forecast_run_id = :r AND core = 'demand'"),
+                 {"t": tenant_id, "r": run_id})
+    previous = conn.execute(text("SELECT id FROM forecast_runs WHERE tenant_id = :t AND is_current AND id <> :r ORDER BY id DESC LIMIT 1"),
+                            {"t": tenant_id, "r": run_id}).scalar()      # se consulta ANTES de que esta ejecución releve a la vigente
+    previous_ids: dict[str, int] = {}
+    if previous is not None:
+        previous_ids = {str(f): int(i) for f, i in conn.execute(text(
+            "SELECT model_family, MAX(id) FROM model_registry WHERE tenant_id = :t AND core = 'demand' AND forecast_run_id = :p "
+            "GROUP BY model_family"), {"t": tenant_id, "p": previous}).all()}
+    payload = [{
+        "t": tenant_id, "r": run_id, "scope": d["scope_key"], "policy": d["policy"], "version": d["policy_version"],
+        "cand": d["candidate_family"], "champ": d["champion_family"], "cand_id": registry_ids.get(d["candidate_family"]),
+        # Solo un champion REAL (lo servido por la ejecución vigente anterior) referencia su registro; el baseline como referencia no es ese modelo.
+        "champ_id": previous_ids.get(d["champion_family"]) if d["metrics"].get("champion_source") == "previous_run" else None, "decision": d["decision"], "eff": bool(d["is_effective"]),
+        "gates": jdump(d["gates"]), "metrics": jdump(d["metrics"]), "reason": d["reason"],
+    } for d in promotion.rows()]
+    if payload:
+        conn.execute(text(
+            """
+            INSERT INTO model_promotion_decisions (tenant_id, core, forecast_run_id, scope_key, policy, policy_version, candidate_family,
+                champion_family, candidate_model_registry_id, champion_model_registry_id, decision, is_effective, gates, metrics, reason,
+                decided_at, created_at)
+            VALUES (:t, 'demand', :r, :scope, :policy, :version, :cand, :champ, :cand_id, :champ_id, :decision, :eff,
+                CAST(:gates AS jsonb), CAST(:metrics AS jsonb), :reason, now(), now())
+            """), payload)
+    return len(payload)
+
+
+SHADOW_COPY_COLUMNS = ["tenant_id", "forecast_run_id", "model_registry_id", "model_family", "node_key", "level", "branch_id", "product_id",
+                       "target_date", "horizon_step", "yhat", "lo_80", "hi_80"]
+
+
+def persist_shadow_forecasts(conn: Connection, tenant_id: int, run_id: int, result: PipelineResult, registry_ids: dict[str, int]) -> int:
+    """W3-B · predicciones del challenger en `shadow_forecast_values` (NO se sirven: no entran a `forecast_values`). Idempotente por ejecución."""
+    shadow = result.shadow
+    if shadow is None or shadow.empty:
+        return 0
+    conn.execute(text("DELETE FROM shadow_forecast_values WHERE tenant_id = :t AND forecast_run_id = :r"), {"t": tenant_id, "r": run_id})
+    df = shadow.copy()
+    df["tenant_id"], df["forecast_run_id"] = tenant_id, run_id
+    df["model_registry_id"] = df["model_family"].map(registry_ids)
+    for col in ("branch_id", "product_id", "model_registry_id", "horizon_step"):
+        df[col] = pd.to_numeric(df[col]).round().astype("Int64")
+    df = df[SHADOW_COPY_COLUMNS].astype(object).where(df[SHADOW_COPY_COLUMNS].notna(), None)
+    raw = conn.connection.driver_connection
+    n = 0
+    with raw.cursor() as cur:
+        with cur.copy(f"COPY shadow_forecast_values ({', '.join(SHADOW_COPY_COLUMNS)}) FROM STDIN") as cp:
+            for row in df.itertuples(index=False, name=None):
+                cp.write_row(tuple(_shadow_cell(v) for v in row))
+                n += 1
+    return n
+
+
+def _shadow_cell(v: Any) -> Any:
+    if v is pd.NA:
+        return None
+    v = none_if_nan(v)
+    return v.date() if isinstance(v, pd.Timestamp) else v
 
 
 def _alerts(conn: Connection, tenant_id: int, run_id: int, version: int, result: PipelineResult, dq_id: int) -> None:
