@@ -19,11 +19,17 @@ final class CompositeForeignKeysTest extends TestCase
     {
         $offending = [];
         foreach (CompositeForeignKeys::compositeSetNullForeignKeys() as $fk) {
-            if ($fk['not_null'] !== [] && ! preg_match('/ON DELETE SET NULL\s*\(/', $fk['definition'])) {
+            $protected = $fk['not_null'] !== [] || in_array(CompositeForeignKeys::TENANT_COLUMN, $fk['columns'], true);
+            if ($protected && ! preg_match('/ON DELETE SET NULL\s*\(/', $fk['definition'])) {
                 $offending[] = "{$fk['table']}.{$fk['constraint']}";
             }
         }
-        $this->assertSame([], $offending, 'FKs compuestas que anularían una columna NOT NULL (llame a CompositeForeignKeys::setNullOnlyReferences() en la migración)');
+        $this->assertSame([], $offending, 'FKs compuestas que anularían tenant_id o una columna NOT NULL (llame a CompositeForeignKeys::setNullOnlyReferences() en la migración)');
+        foreach (CompositeForeignKeys::compositeSetNullForeignKeys() as $fk) {
+            if (preg_match('/ON DELETE SET NULL\s*\(([^)]*)\)/', $fk['definition'], $m)) {
+                $this->assertStringNotContainsString(CompositeForeignKeys::TENANT_COLUMN, $m[1], "{$fk['table']}.{$fk['constraint']} anula tenant_id");
+            }
+        }
         $this->assertNotEmpty(CompositeForeignKeys::compositeSetNullForeignKeys(), 'el esquema tiene FKs compuestas ON DELETE SET NULL');
     }
 
@@ -42,5 +48,24 @@ final class CompositeForeignKeysTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame($tenantId, (int) $row->tenant_id);
         $this->assertNull($row->data_source_id);
+    }
+
+    public function test_deleting_a_previous_model_keeps_the_tenant_of_the_model_that_replaced_it(): void
+    {
+        // model_registry.tenant_id es NULLABLE (NULL = modelo de plataforma): anularlo publicaría el modelo a todas las empresas.
+        $tenantId = DB::table('tenants')->insertGetId(['uuid' => (string) Str::uuid(), 'name' => 'FK compuesta']);
+        $model = fn (string $version, ?int $previous = null): int => DB::table('model_registry')->insertGetId([
+            'tenant_id' => $tenantId, 'version' => $version, 'model_family' => 'lightgbm', 'strategy_level' => 'A',
+            'previous_model_registry_id' => $previous,
+        ]);
+        $previousId = $model('v1');
+        $currentId = $model('v2', $previousId);
+
+        DB::table('model_registry')->where('id', $previousId)->delete();
+
+        $row = DB::table('model_registry')->where('id', $currentId)->first();
+        $this->assertNotNull($row);
+        $this->assertSame($tenantId, (int) $row->tenant_id);
+        $this->assertNull($row->previous_model_registry_id);
     }
 }
