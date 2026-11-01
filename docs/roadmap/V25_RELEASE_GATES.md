@@ -1,6 +1,6 @@
 # Predictily V2.5 · Criterios de salida (release gates)
 
-Fecha de esta evaluación: 31-oct-2026 · Commit evaluado: `78c5029` (línea base, antes de cambios V2.5).
+Fecha de esta evaluación: 1-nov-2026 · Commit evaluado: cierre de W1 en `v25/w1-cierre-y-w2` (ver Historial). Evaluación inicial: 31-oct-2026 sobre `78c5029`.
 Regla (V2.5 §19 y §26): **no se admite GO** con fuga temporal, diferencia de ventas netas no explicada,
 mezcla de tenants, modelo no aprobado, métricas fabricadas o retorno atribuible no sustentado.
 Estados: **GO**, **GO CONDICIONAL**, **NO-GO**, **BLOQUEADO** (depende de un tercero o del propietario).
@@ -9,9 +9,9 @@ Estados: **GO**, **GO CONDICIONAL**, **NO-GO**, **BLOQUEADO** (depende de un ter
 
 | Gate | Estado | Motivo principal |
 |---|---|---|
-| A · Integridad de datos (bloqueante) | **NO-GO** | fugas temporales en ventas (documentos tardíos y anulaciones posteriores reescriben cortes pasados), huecos de la fuente tratados como ceros, tipos/estados desconocidos contados como venta; sin Data Quality Engine con clases y gates; sin fuente SQL real de un cliente |
+| A · Integridad de datos (bloqueante) | **NO-GO** | W1 cerró las fugas temporales de ventas (versiones con tiempo de conocimiento, lectura as-of por corte, invariante de una versión visible), los huecos como ceros y los tipos/estados desconocidos. Falta: Data Quality Engine con clases, cuarentena y gates (W2), Bronze y reconciliación por capas (W2) y conciliación contra una fuente SQL real (piloto: acceso disponible, en curso) |
 | B · Calidad ML (bloqueante para piloto predictivo) | **NO-GO** | horizonte 15 ausente; métricas por segmento incompletas; Customer Core sin ventana de recompra, número de pedidos ni lift@K; en la demo el ranking servido es la referencia de popularidad; sin datos reales |
-| C · Seguridad / ML Ops (bloqueante) | **NO-GO** | deserialización joblib verificada solo con SHA-256; SSRF evadible; sin protección ZIP bomb; CLI incompleta; sin almacén de objetos ni publicación aprobada; AWS **BLOQUEADO** |
+| C · Seguridad / ML Ops (bloqueante) | **NO-GO** | W1 cerró la deserialización sin firma (Ed25519 verificada antes de joblib, ligada a empresa, core, corrida y SHA-256), la evasión SSRF (IP fijada, sin rebinding) y la ZIP bomb (bytes reales contados, ventana interactiva acotada). Falta: formato sin pickle o subproceso sin credenciales, lista blanca SQL obligatoria en producción, CLI completa, almacén de objetos y publicación aprobada (W4); AWS **BLOQUEADO** |
 | D · Flujo empresarial (bloqueante para Enterprise P1) | **NO-GO** | no existen Revenue Radar, Decision Engine con aprobaciones ni medición de outcomes/ROI |
 | E · Piloto prospectivo | **BLOQUEADO** | sin cliente piloto con datos autorizados ni ventana de observación posterior |
 
@@ -27,11 +27,11 @@ Estados: **GO**, **GO CONDICIONAL**, **NO-GO**, **BLOQUEADO** (depende de un ter
 | Criterio | Estado | Evidencia / brecha |
 |---|---|---|
 | Fuente SQL real + CSV/Excel probados | 🟡 | CSV/XLSX probados de punta a punta; conector PostgreSQL probado contra una base local, no contra el ERP de un cliente (**BLOQUEADO**: acceso a Soyoda/Resgasa) |
-| Sincronización e idempotencia | 🟡 | reimportación sin duplicados (etapa 1); defecto HIGH: una versión vieja sobrescribe la nueva; marca de agua puede saltar al futuro → W1-A1 |
+| Sincronización e idempotencia | 🟡 | ✅ W1-A1: versión vieja → `stale_skipped` sin escritura (archivo, lote y SQL); marca de agua acotada al inicio de la sincronización; invariante de ventanas disjuntas en 336 secuencias (`SalesVersionWindowsInvariantTest`). Pendiente: alerta tras N extracciones vacías, carrera de «primera carga» entre importaciones simultáneas (documentada) |
 | Conciliación y linaje fuente → Bronze → Silver → Gold | ❌ | sin Bronze inmutable ni reporte de reconciliación → W2 S01 |
-| Notas de crédito, anulaciones y cortes as-of | ❌ | defectos HIGH de fuga temporal → W1-A1/A2 |
-| Esquemas versionados, pruebas de fuga y trazabilidad | 🟡 | pruebas de fuga de la etapa 2 en features; faltan las de documentos tardíos y anulaciones → W1-A2 |
-| Falta de datos → degradación o bloqueo, sin inventar | 🟡 | abstención `insufficient_data` existe; huecos tratados como ceros → W1-A2; gates de calidad → W2 |
+| Notas de crédito, anulaciones y cortes as-of | 🟡 | ✅ W1: documento tardío invisible antes de su ingestión y anulación posterior contada antes y excluida después, en lectura, backtest por ventana, holdout y Customer (`test_asof_visibility.py`, `test_asof_integration.py`, `test_asof_customer_integration.py`; V25-AVL-010 y V25-AVL-013 IMPLEMENTADOS). Pendiente: inventario, catálogo y costos sin versiones; Supply, Causal, Escenarios y Costos leen el estado vigente |
+| Esquemas versionados, pruebas de fuga y trazabilidad | 🟡 | ✅ W1-A2: pruebas T02 de documentos tardíos y anulaciones; huella `data_snapshot` as-of que cubre huecos, cierres y clasificación de días. Pendiente: contratos canónicos versionados (W2) |
+| Falta de datos → degradación o bloqueo, sin inventar | 🟡 | ✅ W1-A2: días `missing_source` / `closed` excluidos de métricas, perfilado, evaluación realizada y deriva (nunca ceros observados); regla inferida configurable, a aprobar en el piloto. Pendiente: gates de calidad PASS/WARN/DEGRADE/BLOCK por módulo (W2) |
 
 ## Gate B · Calidad ML
 
@@ -47,7 +47,7 @@ Estados: **GO**, **GO CONDICIONAL**, **NO-GO**, **BLOQUEADO** (depende de un ter
 |---|---|---|
 | Aislamiento A/B en API, S3, modelos, caché, jobs y export | 🟡 | API, jobs y export probados; S3 inexistente; caché y concurrencia parciales → W4, W6 S11 |
 | RBAC, revocación, secretos/cifrado, backups restaurables | 🟡 | RBAC y respaldo/restauración local probados; sin MFA ni roles Enterprise → W6 S11 |
-| CLI local + Registry + publicación aprobada a AWS + inferencia por tenant + rollback + artefactos verificables | ❌ | reversión con SHA-256 (etapa 2); firma, aprobación, CLI completa y AWS ausentes → W1-B, W4; AWS **BLOQUEADO** |
+| CLI local + Registry + publicación aprobada a AWS + inferencia por tenant + rollback + artefactos verificables | 🟡 | ✅ W1-B: artefactos firmados Ed25519 y verificados antes de deserializar en motor y backend (reversión), CLI `keygen` y `verify-artifact`. Pendiente: aprobación separada, CLI completa, publicación al almacén de objetos (W4); AWS **BLOQUEADO** |
 
 ## Gate D · Flujo empresarial
 
@@ -67,3 +67,4 @@ responsables y evidencia; si la precisión es insuficiente se informa, no se ocu
 | Fecha | Commit | Cambio |
 |---|---|---|
 | 2026-10-31 | `78c5029` | Evaluación inicial (línea base) |
+| 2026-11-01 | cierre W1 (`11c7086`, `c44076e`, `eea5321` + integración) | W1 integrado tras revisión adversarial y corrección de A1, A2 y B: 7 de 13 defectos HIGH corregidos y 6 corregidos parcialmente (`docs/roadmap/audit/progress/2026-11-01-w1.json`). Suites: backend 739 (736 aprobadas, 3 omitidas por falta de servidores MySQL/SQL Server), motor 549, frontend 313; E2E 32/32 y 256/256; demo sin regresión (paridad exacta con la regla inferida apagada). Ningún gate cambia a GO: A y C siguen NO-GO con menos brechas (evidencia: `docs/roadmap/evidence/2026-11-01-w1-integration/`) |

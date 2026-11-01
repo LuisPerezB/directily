@@ -19,7 +19,8 @@ from predictily_engine.customer.commitments import committed_by_relation, commit
 from predictily_engine.customer.events import from_day
 from predictily_engine.customer.features import BASE_FEATURES, HORIZON_FEATURES, FeatureBuilder
 from predictily_engine.customer.outputs import RANKING_SOURCES, compute_activity, top_k_products
-from predictily_engine.customer.serving import enforce_nested, enforce_nested_quantity, serve_probability, serve_quantity
+from predictily_engine.customer.serving import (enforce_nested, enforce_nested_quantity, rescale_quantity_interval, serve_probability,
+                                                serve_quantity)
 
 
 @dataclass
@@ -70,6 +71,10 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
         qs[h], los[h], his[h] = serve_quantity(artifacts[h]["qty"], X, ref_q)
     probs_c, coh = enforce_nested(probs)
     qs_c, qcoh = enforce_nested_quantity(probs_c, qs)
+    # El intervalo de la cantidad sigue a la cantidad ajustada (sin esto el punto quedaba fuera de su propio intervalo del 80 %).
+    q_adjusted: dict[int, np.ndarray] = {}
+    for h in horizons:
+        los[h], his[h], q_adjusted[h] = rescale_quantity_interval(qs[h], qs_c[h], los[h], his[h])
     summary["coherence"] = coh
     summary["quantity_coherence"] = qcoh
     summary["rows"] = int(len(base) * len(horizons))
@@ -97,6 +102,8 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
             flags[i].append("price_unknown")
         for i in np.nonzero(adjusted)[0]:
             flags[i].append("coherence_adjusted")
+        for i in np.nonzero(q_adjusted[h])[0]:
+            flags[i].append("quantity_coherence_adjusted")
         if meta.get("calibration_status") in ("degraded", "uncalibrated"):
             for f in flags:
                 f.append(f"calibration_{meta['calibration_status']}")

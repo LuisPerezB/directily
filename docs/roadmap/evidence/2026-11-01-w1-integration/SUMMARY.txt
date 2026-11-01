@@ -1,0 +1,12 @@
+Cierre de W1 · rama v25/w1-cierre-y-w2 · 2026-11-01 · macOS arm64, PostgreSQL 15 (Homebrew), PHP 8.3.26, Python 3.12.8, Node 22.14
+Paquetes revisados (revisión adversarial) y corregidos: W1-B 11c7086 · W1-A2 c44076e · W1-A1 eea5321; integración: d13e44f, 6150f00 y commit de cierre.
+Suites ejecutadas CON los .env de desarrollo presentes (hermeticidad verificada):
+backend  :: {"tool":"phpunit","result":"passed","tests":739,"passed":736,"assertions":15474,"duration_ms":81782,"skipped":3}   (omitidas: servidores MySQL y SQL Server de prueba ausentes; driver pdo_sqlsrv presente)
+engine   :: 550 passed, 1 warning in 259.95s (0:04:19)   (tras la corrección del intervalo de cantidad de Customer)
+frontend :: type-check 0 · lint 0 · vitest 313 passed (35 archivos) · build OK
+E2E mvp_acceptance.py    :: 32 de 32 verificaciones OK (e2e-mvp-acceptance.log)
+E2E stage2_acceptance.py :: 256 de 256 OK · 0 FALLA · 1 AVISO de diseño (e2e-stage2-acceptance.log). Una corrida previa dio 255/256:
+   «cantidad si compra dentro de su intervalo del 80 %» (defecto de la etapa 2: la coherencia entre horizontes subía la cantidad sin
+   mover el intervalo); corregido en customer/predict.py + serving.rescale_quantity_interval con prueba unitaria.
+Demo (datos ficticios): demo_metrics.json. Paridad exacta con el código previo a W1 con la regla de huecos inferidos apagada.
+Pico de memoria de la carga demo (99 334 líneas + 42 035): 187 MB (límite CLI de Docker: 1024 MB).
