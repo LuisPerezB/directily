@@ -26,14 +26,14 @@ Cuando cambie un JSON de `docs/roadmap/audit/2026-10-31` (estado de un requisito
 
 | Documento | Tipo | Contenido |
 | --- | --- | --- |
-| [`audit/2026-10-31/datos.json`](audit/2026-10-31/datos.json) | datos | Datos, calidad y disponibilidad temporal: 97 requisitos (IMPLEMENTADO 11, PARCIAL 70, PENDIENTE 15, BLOQUEADO 1), 32 defectos, 11 conflictos. |
-| [`audit/2026-10-31/conectores.json`](audit/2026-10-31/conectores.json) | datos | Conectores, Bridge, Auto Mapper y cargas: 96 requisitos (IMPLEMENTADO 12, PARCIAL 40, PENDIENTE 39, BLOQUEADO 5), 20 defectos, 8 conflictos. |
-| [`audit/2026-10-31/demanda.json`](audit/2026-10-31/demanda.json) | datos | Demand Core, selección de modelos y horizontes: 103 requisitos (IMPLEMENTADO 27, PARCIAL 62, PENDIENTE 13, BLOQUEADO 1), 22 defectos, 8 conflictos. |
-| [`audit/2026-10-31/cliente.json`](audit/2026-10-31/cliente.json) | datos | Customer Core y agenda comercial: 78 requisitos (IMPLEMENTADO 13, PARCIAL 36, PENDIENTE 28, BLOQUEADO 1), 16 defectos, 8 conflictos. |
+| [`audit/2026-10-31/datos.json`](audit/2026-10-31/datos.json) | datos | Datos, calidad y disponibilidad temporal: 97 requisitos (IMPLEMENTADO 18, PARCIAL 69, PENDIENTE 9, BLOQUEADO 1), 32 defectos, 11 conflictos. |
+| [`audit/2026-10-31/conectores.json`](audit/2026-10-31/conectores.json) | datos | Conectores, Bridge, Auto Mapper y cargas: 96 requisitos (IMPLEMENTADO 13, PARCIAL 42, PENDIENTE 36, BLOQUEADO 5), 20 defectos, 8 conflictos. |
+| [`audit/2026-10-31/demanda.json`](audit/2026-10-31/demanda.json) | datos | Demand Core, selección de modelos y horizontes: 103 requisitos (IMPLEMENTADO 30, PARCIAL 60, PENDIENTE 12, BLOQUEADO 1), 22 defectos, 8 conflictos. |
+| [`audit/2026-10-31/cliente.json`](audit/2026-10-31/cliente.json) | datos | Customer Core y agenda comercial: 78 requisitos (IMPLEMENTADO 14, PARCIAL 35, PENDIENTE 28, BLOQUEADO 1), 16 defectos, 8 conflictos. |
 | [`audit/2026-10-31/modelos_aws.json`](audit/2026-10-31/modelos_aws.json) | datos | Ciclo de vida de modelos, Registry y AWS: 107 requisitos (IMPLEMENTADO 12, PARCIAL 59, PENDIENTE 22, BLOQUEADO 14), 27 defectos, 9 conflictos. |
 | [`audit/2026-10-31/supply_decision.json`](audit/2026-10-31/supply_decision.json) | datos | Supply Core, Decision Engine y Outcomes: 119 requisitos (IMPLEMENTADO 20, PARCIAL 47, PENDIENTE 49, BLOQUEADO 2, NO_APLICA 1), 22 defectos, 9 conflictos. |
-| [`audit/2026-10-31/seguridad_ui.json`](audit/2026-10-31/seguridad_ui.json) | datos | Seguridad, UI, Intelligence Gateway y onboarding: 123 requisitos (IMPLEMENTADO 25, PARCIAL 67, PENDIENTE 23, BLOQUEADO 6, NO_APLICA 2), 27 defectos, 8 conflictos. |
-| [`audit/2026-10-31/factores_sector.json`](audit/2026-10-31/factores_sector.json) | datos | Factor Intelligence, taxonomía y módulos sectoriales: 118 requisitos (IMPLEMENTADO 4, PARCIAL 56, PENDIENTE 56, BLOQUEADO 2), 13 defectos, 8 conflictos. |
+| [`audit/2026-10-31/seguridad_ui.json`](audit/2026-10-31/seguridad_ui.json) | datos | Seguridad, UI, Intelligence Gateway y onboarding: 123 requisitos (IMPLEMENTADO 25, PARCIAL 69, PENDIENTE 21, BLOQUEADO 6, NO_APLICA 2), 27 defectos, 8 conflictos. |
+| [`audit/2026-10-31/factores_sector.json`](audit/2026-10-31/factores_sector.json) | datos | Factor Intelligence, taxonomía y módulos sectoriales: 118 requisitos (IMPLEMENTADO 17, PARCIAL 59, PENDIENTE 40, BLOQUEADO 2), 13 defectos, 8 conflictos. |
 | [`audit/2026-10-31/v1_literal.json`](audit/2026-10-31/v1_literal.json) | datos | Cotejo literal de V1: 471 filas y tabla de fuentes por versión. |
 | [`audit/2026-10-31/v2_literal.json`](audit/2026-10-31/v2_literal.json) | datos | Cotejo literal de V2 (371 filas) y del complemento V2C (281 filas). |
 | [`audit/2026-10-31/baseline_metrics.json`](audit/2026-10-31/baseline_metrics.json) | datos | Línea base técnica: política de selección heredada, hiperparámetros fijos, variables externas, restricciones del entorno e incidencias B-01..B-15. |
@@ -45,6 +45,7 @@ Cuando cambie un JSON de `docs/roadmap/audit/2026-10-31` (estado de un requisito
 | [`evidence/2026-10-31-baseline/`](evidence/2026-10-31-baseline/) | evidencia | Registros de la ejecución de la línea base (SUMMARY.txt, backend-phpunit.log, engine-pytest.log, frontend-build.log, frontend-lint.log, frontend-typecheck.log, frontend-vitest.log). |
 | [`evidence/2026-11-01-premerge/`](evidence/2026-11-01-premerge/) | evidencia | Registros de la ejecución de la línea base (SUMMARY.txt, backend-phpunit.log, engine-pytest.log, frontend-build.log, frontend-lint.log, frontend-typecheck.log, frontend-vitest.log). |
 | [`evidence/2026-11-01-w1-integration/`](evidence/2026-11-01-w1-integration/) | evidencia | Registros de la ejecución de la línea base (SUMMARY.txt, backend-phpunit.log, demo_metrics.json, e2e-mvp-acceptance.log, e2e-stage2-acceptance.log, engine-pytest.log, frontend-build.log, frontend-lint.log, frontend-typecheck.log, frontend-vitest.log). |
+| [`evidence/2026-11-01-w2-integration/`](evidence/2026-11-01-w2-integration/) | evidencia | Registros de la ejecución de la línea base (SUMMARY.txt, backend-phpunit.log, demo_metrics.json, e2e-mvp-acceptance.log, e2e-stage2-acceptance.log, engine-pytest.log, frontend-build.log, frontend-lint.log, frontend-typecheck.log, frontend-vitest.log). |
 
 ## Plan y criterios de salida
 

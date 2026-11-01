@@ -1,0 +1,849 @@
+{
+ "meta": {
+  "wave": "W2",
+  "date": "2026-11-01",
+  "commit": "e484c43 · 43a0873 · 8ed0faa · 8a69363 · df6531e · d7d468c · fbb1739",
+  "summary": "Data Core P0 de W2 (calidad de ingestión con clases, cuarentena y mapeos de valores, Bronze con linaje y reconciliación por carga y por ventana, alias de identidad, contratos canónicos versionados, métricas y gates por módulo, validador de disponibilidad y casos T11, horizonte 15 y planes, Factor Intelligence P0, taxonomía y SharedForecastGrant desactivado): 25 requisitos pasan a IMPLEMENTADO y 18 a PARCIAL, y 13 defectos se registran (3 corregidos y 10 corregidos parcialmente)."
+ },
+ "defects": [
+  {
+   "area": "datos",
+   "index": 2,
+   "title_prefix": "Tipos y estados de documento desconocido",
+   "state": "corregido",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/QuarantineFlowTest.php::test_skip_invalid_rows_retains_review_and_quarantined_documents_instead_of_discarding_them",
+    "backend/tests/Feature/DataQuality/QuarantineFlowTest.php::test_releasing_after_adding_a_value_map_writes_incrementally_and_links_bronze",
+    "backend/tests/Feature/DataQuality/QuarantineFlowTest.php::test_without_skip_invalid_rows_the_confirmation_is_blocked_and_the_findings_are_recorded",
+    "backend/tests/Feature/DataQuality/QuarantineFlowTest.php::test_discarding_requires_a_reason_and_keeps_the_record_for_audit",
+    "backend/tests/Feature/DataQuality/QuarantineFlowTest.php::test_the_quarantine_is_isolated_between_companies_and_by_ability",
+    "backend/tests/Feature/DataQuality/ValueMapsTest.php::test_value_maps_are_applied_before_vocabulary_recognition_and_registered_as_transformations",
+    "backend/tests/Feature/DataQuality/ValueMapsTest.php::test_targets_must_belong_to_the_canonical_vocabulary_and_only_sales_accepts_them",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_an_unknown_status_goes_to_quarantine_with_skip_invalid_rows_and_is_released_after_a_value_map",
+    "backend/tests/Feature/DataQuality/QuarantineSafetyTest.php::test_release_after_a_reload_under_another_key_is_refused_with_the_current_version_unless_forced_and_audited",
+    "backend/app/Services/DataCore/Quality/QuarantineService.php; backend/app/Services/DataCore/Quality/ValueMaps.php; backend/app/Http/Controllers/Api/DataCore/QuarantineController.php"
+   ],
+   "note": "Completa lo que W1 dejó pendiente: un documento con tipo o estado desconocido (REVIEW_REQUIRED) se retiene en quarantine_records en lugar de descartarse (con skip_invalid_rows; sin él la confirmación sigue bloqueada) y se libera —revalidando con los mapeos vigentes y escribiendo en modo incremental, enlazado a Bronze— o se descarta con motivo auditado; los value_maps de tipo y estado por fuente funcionan ahora en la importación de archivos y en la sincronización SQL, se aplican antes del reconocimiento y quedan en el informe. Liberar nunca sobrescribe en silencio una versión más nueva (409 newer_version_exists). Límites: el mapeo automático de «Estado» sigue leyendo 1/si/true como anulado (datos #22, sin tocar); la cuarentena es solo de ventas (las demás entidades siguen descartando sus filas inválidas); el lote REST no retiene los documentos rechazados (los devuelve; su cuerpo queda en Bronze)."
+  },
+  {
+   "area": "datos",
+   "index": 11,
+   "title_prefix": "Bronze con PII en claro, sin cifrado adi",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_the_uploaded_file_is_stored_in_bronze_before_any_normalization",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_a_batch_is_stored_in_bronze_as_received_and_writes_the_lineage",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_the_raw_extraction_goes_to_bronze_and_the_sales_carry_their_lineage",
+    "backend/tests/Feature/Lineage/BronzeRetentionPurgeTest.php::test_the_company_policy_takes_precedence_over_the_platform_default_and_ignores_corrupt_values",
+    "backend/tests/Feature/Lineage/BronzeRetentionPurgeTest.php::test_the_purge_command_removes_only_expired_objects_of_each_company_and_audits_it",
+    "backend/tests/Feature/Lineage/BronzeRetentionPurgeTest.php::test_deleting_a_company_erases_its_bronze_originals_and_retries_when_the_store_fails",
+    "backend/tests/Feature/Lineage/BronzeRetentionPurgeTest.php::test_only_owner_or_admin_can_set_the_policy_through_the_tenant_settings_api",
+    "backend/tests/Feature/Lineage/BronzeApiTest.php::test_every_role_reads_metadata_but_only_owner_and_admin_download_the_content",
+    "backend/tests/Feature/Lineage/BronzeApiTest.php::test_download_returns_the_verified_content_as_a_safe_attachment_and_is_audited",
+    "backend/tests/Feature/Lineage/BronzeStoreTest.php::test_companies_are_isolated_in_bronze",
+    "backend/app/Services/DataCore/Bronze/FilesystemBronzeStore.php; backend/app/Services/DataCore/Bronze/BronzePurger.php; backend/app/Services/DataCore/Bronze/BronzeRetention.php; backend/app/Console/Commands/Core/PurgeCommand.php"
+   ],
+   "note": "El original de los tres caminos (archivo, extracción SQL y lote) se conserva en bronze_objects antes de normalizar, con retención por empresa (tenants.settings.data.bronze_retention_days sobre bronze.retention_days), purga diaria auditada, borrado de los originales al eliminar la empresa, aislamiento por prefijo y acceso a metadatos/descarga restringido y auditado. Pendiente: el original sigue con identificaciones de clientes en claro (decisión documentada: es el original autorizado; la seudonimización del código de cliente antes de persistir es una decisión de política abierta), sin cifrado de aplicación (SSE solo probado contra el emulador S3) y el archivo subido conserva además su copia en stored_path, sin barredor de retención propio (ver seguridad_ui #5)."
+  },
+  {
+   "area": "datos",
+   "index": 13,
+   "title_prefix": "Los umbrales de calidad son fijos, no co",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_quality_gates.py::test_thresholds_follow_the_core_profile_tenant_precedence_and_record_their_provenance",
+    "engine/tests/unit/test_quality_gates.py::test_every_threshold_has_a_written_justification_marked_for_pilot_approval",
+    "engine/tests/unit/test_quality_gates.py::test_demand_blocks_with_insufficient_source_coverage",
+    "engine/tests/unit/test_quality_gates.py::test_demand_blocks_when_most_ingested_rows_were_rejected_and_warns_beyond_five_percent",
+    "engine/tests/integration/test_quality_gates_integration.py::test_a_block_gate_stops_the_forecast_with_a_stable_code_and_leaves_its_report",
+    "engine/tests/integration/test_quality_gates_integration.py::test_the_tenant_override_changes_the_gate_and_the_other_tenant_keeps_the_core_threshold",
+    "backend/tests/Feature/DataCore/EffectiveConfigApiTest.php::test_quality_gates_is_a_configurable_core_validated_by_the_engine",
+    "engine/predictily_engine/quality/rules.py; engine/predictily_engine/quality/thresholds.py; engine/predictily_engine/platform/config.py::quality_gates"
+   ],
+   "note": "Los gates del motor son configurables por empresa (core → perfil → empresa), cada umbral lleva su justificación y la marca «a aprobar en el piloto», BLOCK/WARN/DEGRADE tienen efecto real antes de entrenar e inferir y quedan persistidos con su rules_version. Pendiente: el puntaje de preparación (profiling/readiness.py) y el informe extendido (ExtendedQualityReport) conservan sus umbrales fijos, no hay análisis de sensibilidad ni aprobación del piloto y los gates de ingestión, reconciliación monetaria y fuga temporal no existen."
+  },
+  {
+   "area": "datos",
+   "index": 14,
+   "title_prefix": "Un código de producto nuevo crea un prod",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Lineage/CatalogResolverAliasTest.php::test_an_alias_is_resolved_before_the_sku_and_before_creating_a_new_product",
+    "backend/tests/Feature/Lineage/CatalogResolverAliasTest.php::test_an_import_with_the_old_code_after_a_code_change_resolves_to_the_same_product",
+    "backend/tests/Feature/Lineage/CatalogResolverAliasTest.php::test_a_sales_batch_with_the_old_code_uses_the_same_product",
+    "backend/tests/Feature/Lineage/CatalogResolverAliasTest.php::test_ingestion_resolves_aliases_with_the_date_of_each_document_not_with_todays",
+    "backend/tests/Feature/Lineage/CatalogResolverAliasTest.php::test_a_product_master_import_with_an_old_code_updates_the_canonical_product_instead_of_duplicating_it",
+    "backend/tests/Feature/Lineage/IdentityAliasApiTest.php::test_code_change_makes_the_new_code_visible_and_keeps_resolving_the_old_one_to_the_same_product",
+    "backend/tests/Feature/Lineage/IdentityAliasApiTest.php::test_alias_conflicts_are_refused_with_stable_codes",
+    "backend/app/Services/Catalog/CatalogResolver.php; backend/app/Services/Catalog/IdentityAliasService.php"
+   ],
+   "note": "Antes de crear un producto o cliente nuevo, CatalogResolver consulta los alias vigentes (primero el de la fuente, luego el general, con la fecha de cada documento): un código viejo tras un cambio de código resuelve al mismo producto en importación, lote y maestro (que actualiza el canónico y avisa alias_resolved), sin reescribir historia. Pendiente: por defecto un SKU desconocido sigue creando un producto (create_missing_products = true) y no hay propuesta automática de alias ni cuarentena de SKU; fusión y división están DISEÑADAS; solo ventas y maestro de productos resuelven con la fecha del documento."
+  },
+  {
+   "area": "datos",
+   "index": 30,
+   "title_prefix": "El lector as-of de indicadores externos ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/integration/test_factors_t11_integration.py::test_timezone_aware_instants_from_postgres_are_read_and_judged_in_the_company_timezone",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_new_statistical_revision_is_the_one_in_force_at_each_cutoff",
+    "engine/tests/unit/test_availability_validator.py::test_visibility_is_strict_at_the_local_midnight_of_the_next_day_and_independent_of_the_storage_timezone",
+    "engine/tests/unit/test_availability_validator.py::test_it_agrees_with_the_legacy_as_of_reader_wherever_the_legacy_reader_returns_a_value",
+    "engine/predictily_engine/features/external.py::as_of_value / as_of_series; engine/predictily_engine/availability/visibility.py"
+   ],
+   "note": "Los instantes con zona que llegan de PostgreSQL se leen y juzgan con la frontera del fin del día local de la empresa en el validador de disponibilidad (probado contra PostgreSQL), y el adaptador heredado ya no falla con published_at con zona. Pendiente: el adaptador heredado (as_of_value/as_of_series) sigue comparando contra un instante UTC sin zona y el calendario de Laravel y load_calendar_events conservan su propio criterio de corte (V25-AVL-014): no hay todavía una función única en todos los lectores."
+  },
+  {
+   "area": "cliente",
+   "index": 8,
+   "title_prefix": "El catálogo de horizontes del Customer C",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_the_catalog_and_the_customer_subset_are_declared_once",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_no_backend_source_keeps_its_own_copy_of_the_horizon_list",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_the_backend_matches_the_shared_horizon_contract_without_needing_the_engine",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_catalog_is_defined_once_and_every_core_derives_from_it",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_engine_matches_the_shared_horizon_contract",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_openapi_contract_does_not_keep_the_old_catalog",
+    "engine/predictily_engine/platform/config.py::HORIZONS; backend/app/Support/Horizons/HorizonCatalog.php; docs/product/horizons.contract.json"
+   ],
+   "note": "El catálogo del Customer Core (7/14/15/30/90) se declara una vez en el motor y una vez en el backend, de donde derivan validadores, servicio y programador, y ambos se comprueban contra docs/product/horizons.contract.json; el contrato OpenAPI y las pruebas del contrato antiguo se actualizaron. Pendiente: el frontend conserva su propia copia (utils/constants.ts) que ninguna prueba contrasta con el contrato compartido, y los E2E no se editaron: e2e/stage2_acceptance.py:627 espera 422 para horizon=14, que ahora es válido."
+  },
+  {
+   "area": "cliente",
+   "index": 14,
+   "title_prefix": "El catálogo de horizontes del Customer C",
+   "state": "corregido",
+   "evidence": [
+    "backend/tests/Feature/Customer/CustomerModelRollbackTest.php::test_models_of_the_new_customer_horizons_14_and_15_are_restorable_and_60_is_not_a_customer_slot",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_no_backend_source_keeps_its_own_copy_of_the_horizon_list",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_openapi_contract_does_not_keep_the_old_catalog",
+    "engine/tests/unit/test_horizon_catalog.py::test_configuration_validation_accepts_the_catalog_per_core_and_rejects_the_rest",
+    "engine/tests/integration/test_horizon_15_integration.py::test_customer_trains_h15_with_its_own_slot_manifest_and_evaluation",
+    "backend/app/Services/Customer/CustomerRollbackService.php (el patrón del slot se arma con HorizonCatalog::customer())"
+   ],
+   "note": "La regex funcional de reversión, los validadores de las rutas de Customer, el filtro del motor y los enums de OpenAPI derivan del catálogo único; una prueba restaura modelos de 14 y 15, rechaza el slot de 60 y el plan sin 15 responde 402."
+  },
+  {
+   "area": "cliente",
+   "index": 10,
+   "title_prefix": "El aviso de identidad usa un umbral univ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_quality_gates.py::test_customer_degrades_to_aggregate_when_identified_buyers_are_too_few",
+    "engine/tests/unit/test_quality_gates.py::test_customer_degrades_when_ids_are_unstable",
+    "engine/tests/integration/test_quality_gates_integration.py::test_customer_degrades_to_aggregate_no_models_are_trained_and_no_individual_predictions_are_written",
+    "engine/tests/integration/test_quality_gates_integration.py::test_identity_shares_split_identified_generic_anonymous_and_deleted_buyers_as_of_the_cutoff",
+    "engine/tests/integration/test_quality_gates_integration.py::test_the_tenant_override_changes_the_gate_and_the_other_tenant_keeps_the_core_threshold",
+    "engine/predictily_engine/quality/rules.py::dq_customer_identified_share_low; engine/predictily_engine/customer/service.py"
+   ],
+   "note": "El Customer Core lee ahora el gate de identidad antes de entrenar y de predecir, con umbrales configurables por empresa, justificados y «a aprobar en el piloto» (20 % de unidades de compradores identificados; 20 % de cambio de identidades). Pendiente: el aviso fijo del 0,3 de ExtendedQualityReport (share_without_stable_identifier) sigue en el backend sin tocar, y no mide duplicidad de códigos de cliente sin alias."
+  },
+  {
+   "area": "factores_sector",
+   "index": 0,
+   "title_prefix": "Los perfiles sectoriales no pueden asign",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_multiple_sector_profiles_with_priority_and_scope",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_taxonomy_is_isolated_between_companies",
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_the_role_matrix_of_every_write_route",
+    "backend/app/Services/Intelligence/SectorProfileService.php; backend/app/Http/Controllers/Api/Intelligence/SectorProfileController.php; backend/app/Models/TenantSectorProfile.php"
+   ],
+   "note": "La asignación de perfil se separó del rubro de negocio (tenants.sector): tenant_sector_profiles + API /api/v1/intelligence/sector-profiles con prioridad y alcance, auditada y aislada. Pendiente: profile_key se valida solo por formato (no contra el registro del motor) y el motor no lee la tabla (sigue resolviendo el perfil con tenants.sector), así que asignar un perfil por API aún no cambia ninguna configuración efectiva."
+  },
+  {
+   "area": "factores_sector",
+   "index": 2,
+   "title_prefix": "as_of_series propaga el último valor ind",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_availability_validator.py::test_stale_when_the_api_goes_down_the_age_is_labeled_and_the_missing_strategy_decides_the_fallback",
+    "engine/tests/unit/test_availability_validator.py::test_the_value_is_carried_over_the_horizon_with_a_growing_age_until_it_turns_stale",
+    "engine/tests/unit/test_availability_validator.py::test_validity_end_marks_stale_even_inside_the_staleness_window",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_failed_api_is_stale_with_its_age_and_the_factor_is_dropped",
+    "engine/tests/integration/test_factors_t11_integration.py::test_staleness_and_horizon_interact_the_carried_value_ages_until_it_turns_stale",
+    "engine/tests/integration/test_factors_t11_integration.py::test_a_factor_that_is_stale_at_the_cutoff_leaves_the_frames_identical_to_the_model_without_it",
+    "engine/predictily_engine/availability/validator.py (max_staleness_days, STALE con antigüedad); engine/predictily_engine/availability/pipeline.py"
+   ],
+   "note": "El validador de disponibilidad devuelve STALE con la antigüedad etiquetada pasado max_staleness_days o la vigencia, y la estrategia de ausencia (desactivar el factor o último valor con su edad) decide el respaldo; un valor arrastrado envejece día a día dentro del horizonte. Pendiente: el adaptador heredado as_of_series sigue propagando el último valor sin tolerancia, las antigüedades máximas son valores iniciales «a aprobar en el piloto» y el pipeline de factores no está cableado en run_pipeline (apagado por defecto, sin datos externos)."
+  },
+  {
+   "area": "factores_sector",
+   "index": 3,
+   "title_prefix": "as_of_value falla con published_at con z",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/integration/test_factors_t11_integration.py::test_timezone_aware_instants_from_postgres_are_read_and_judged_in_the_company_timezone",
+    "engine/tests/unit/test_availability_validator.py::test_visibility_is_strict_at_the_local_midnight_of_the_next_day_and_independent_of_the_storage_timezone",
+    "engine/tests/unit/test_availability_validator.py::test_the_rule_is_exactly_the_w1_boundary_and_the_supply_day_rule",
+    "engine/predictily_engine/features/external.py::_utc_naive; engine/predictily_engine/availability/visibility.py"
+   ],
+   "note": "Con published_at con zona el adaptador heredado ya no lanza TypeError y el validador fija la frontera (medianoche local de C+1, la misma regla de W1) y la zona de la empresa, probado contra PostgreSQL. Pendiente: el adaptador heredado conserva su comparación en UTC sin zona; la unificación con el calendario de Laravel y load_calendar_events es V25-AVL-014."
+  },
+  {
+   "area": "factores_sector",
+   "index": 11,
+   "title_prefix": "load_observations y as_of_series mezclan",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/integration/test_factors_t11_integration.py::test_public_and_private_indicators_with_the_same_code_are_never_combined",
+    "engine/tests/integration/test_factors_t11_integration.py::test_an_ambiguous_indicator_is_dropped_unless_the_precedence_is_declared",
+    "engine/tests/integration/test_factors_t11_integration.py::test_inactive_indicators_and_foreign_definitions_are_not_visible",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_public_and_private_calendar_events_with_the_same_code_are_never_combined",
+    "engine/predictily_engine/db/factors_repository.py::FactorsRepository.resolve_indicator; engine/predictily_engine/features/external.py::load_observations"
+   ],
+   "note": "La lectura se resuelve por identificador de indicador: con un indicador público y otro privado del mismo código hace falta una precedencia declarada ('tenant' o 'public') y sin ella falla con AmbiguousIndicatorError (el pipeline descarta el factor y lo registra); nunca se combinan en una serie. Lo mismo para los eventos de calendario públicos y de la empresa."
+  },
+  {
+   "area": "factores_sector",
+   "index": 12,
+   "title_prefix": "El único interruptor por empresa de una ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_exceptional_events_switch.py::test_the_flag_state_is_part_of_the_effective_configuration",
+    "engine/tests/unit/test_exceptional_events_switch.py::test_with_the_flag_off_no_event_is_flagged_or_used",
+    "engine/tests/unit/test_exceptional_events_switch.py::test_with_the_flag_off_the_forecast_equals_the_one_of_a_company_without_events",
+    "engine/tests/unit/test_exceptional_events_switch.py::test_the_flag_never_changes_the_numbers_only_labels_and_quality",
+    "engine/predictily_engine/pipeline/core.py (exceptional_events_flag)"
+   ],
+   "note": "Prueba del motor del estado apagado de demand.exceptional_events_flag: sin banderas ni eventos usados, pronóstico idéntico al de una empresa sin eventos y el estado en la configuración efectiva. Pendiente: la prueba de API que guarde el valor y lo refleje en effective_config y audit_logs sigue sin existir en el backend."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "V25-CAN-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_the_catalog_covers_each_entity_of_v25_section_3_exactly_once_and_in_order",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_versions_follow_the_format_and_designed_entities_stay_at_correlative_zero",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_fingerprints_fix_the_real_columns_and_fail_if_they_change_without_a_version_bump",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_changing_a_real_column_is_detected_by_the_fingerprint_and_the_declared_fields",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_declared_fields_are_exactly_the_real_columns_of_each_table",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_the_documentation_lists_every_entity_with_its_version_and_status",
+    "backend/app/Support/Canonical/CanonicalContracts.php::CONTRACTS; backend/app/Support/Canonical/ContractFingerprint.php; backend/tests/Fixtures/canonical_contract_fingerprints.json; docs/data/CANONICAL_CONTRACTS.md"
+   ],
+   "note": "Las 31 entidades de V2.5 §3 tienen versión «entidad@AAAA.MM.n» y una huella SHA-256 de sus columnas reales (information_schema: tipo, nulabilidad, longitud, precisión); la prueba falla si cambian las columnas sin subir el correlativo y sin agregar la huella nueva al historial de versiones. Catálogo: 4 IMPLEMENTADO · 24 PARCIAL · 3 DISEÑADO (los campos imprescindibles que faltan por entidad son V25-CAN-009 a -019). Límites: la huella no cubre índices, claves foráneas, CHECK ni valores por defecto; la versión es calendario + correlativo (no semver) y vive en el mismo repositorio que la huella (la convención la sostiene la revisión de código); la versión se escribe en los registros pero no se exige al escribir."
+  },
+  {
+   "id": "V25-DQE-016",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_the_fingerprint_ignores_order_case_and_accents_and_detects_added_and_removed_columns",
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_the_same_file_again_is_not_drift_and_a_different_entity_is_compared_apart",
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_a_data_source_stores_the_combined_fingerprint_and_raises_its_version_with_each_drift",
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_sql_types_count_but_an_unknown_type_is_not_drift",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_schema_drift_is_detected_from_the_columns_the_query_returns",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_a_mapping_that_references_a_missing_column_is_a_blocker_and_nothing_is_loaded",
+    "backend/app/Services/DataCore/Quality/SchemaDrift.php; backend/app/Services/DataCore/Sync/SourceColumnsMissingException.php"
+   ],
+   "note": "Huella SHA-256 de los encabezados normalizados y ordenados (en SQL, también el tipo observado) por fuente y entidad, comparada con la carga anterior de la misma fuente: si cambia sube schema_version (objeto Bronze y data_sources) y el informe registra el WARNING schema_drift con columnas agregadas, quitadas o con otro tipo (sin valores); una columna que el mapeo aprobado necesita y ya no llega es BLOCKER y la sincronización falla sin cargar nada. Límites: compara lo que devuelve la consulta aprobada o el archivo, no introspecciona las tablas del origen (V25-MAP-001/-002); en SQL el tipo es el del valor que entrega el controlador; probado solo contra PostgreSQL; no hay flujo de revisión posterior (V25-MAP-009)."
+  },
+  {
+   "id": "V25-MAP-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_the_fingerprint_ignores_order_case_and_accents_and_detects_added_and_removed_columns",
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_a_data_source_stores_the_combined_fingerprint_and_raises_its_version_with_each_drift",
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_sql_types_count_but_an_unknown_type_is_not_drift",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_schema_drift_is_detected_from_the_columns_the_query_returns",
+    "backend/app/Services/DataCore/Quality/SchemaDrift.php; backend/app/Services/DataCore/Quality/IngestionBronze.php"
+   ],
+   "note": "Detección de drift por comparación de huellas entre ejecuciones de la misma fuente y entidad: columnas añadidas, eliminadas y con otro tipo, versionada en data_sources.schema_version y en el objeto Bronze. Se compara el conjunto de columnas que devuelve la consulta aprobada (no una introspección del esquema del origen, V25-MAP-001/-002); el tipo depende del valor que entrega el controlador; verificado contra PostgreSQL."
+  },
+  {
+   "id": "V25-DQE-015",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_quality_gates_integration.py::test_ingestion_lag_distribution_uses_only_incremental_documents_known_at_the_cutoff",
+    "engine/tests/integration/test_quality_gates_integration.py::test_signals_at_a_cutoff_do_not_change_when_data_arrives_after_it",
+    "engine/tests/unit/test_quality_gates.py::test_every_rule_passes_at_its_threshold_and_fires_one_step_beyond",
+    "engine/predictily_engine/quality/signals.py; engine/predictily_engine/quality/rules.py::dq_demand_ingestion_lag_high"
+   ],
+   "note": "El motor calcula la distribución del desfase evento→ingestión (p50, p90, máximo y fracción > 1 y > 7 días, con sales.first_seen_at y sale_date) de los documentos incrementales de los últimos 90 días, leída as-of (un documento que llega después del corte no entra), y la regla WARN dq_demand_ingestion_lag_high (p90 > 7 días; umbral configurable por empresa, «a aprobar en el piloto») la alerta. Límites: es una medida agregada (no marca documento por documento), excluye los backfill y usa el modo de ingestión vigente del documento."
+  },
+  {
+   "id": "V25-DQE-019",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/IngestionFindingsTest.php::test_the_report_is_widened_and_summary_and_issues_are_kept_as_consumers_expect",
+    "backend/tests/Feature/DataQuality/IngestionFindingsTest.php::test_findings_never_hold_names_or_identifications_and_values_are_bounded",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_the_uploaded_file_is_stored_in_bronze_before_any_normalization",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_a_batch_is_stored_in_bronze_as_received_and_writes_the_lineage",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_a_batch_findings_and_rejections_are_recorded_with_their_classes",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_the_raw_extraction_goes_to_bronze_and_the_sales_carry_their_lineage",
+    "backend/tests/Feature/DataQuality/IngestionHardeningTest.php::test_an_identification_in_a_mismapped_column_never_reaches_the_findings_and_the_payload_masks_free_text",
+    "backend/app/Services/DataCore/Quality/FindingCollector.php; backend/app/Services/DataCore/Quality/IngestionQuality.php; backend/app/Services/DataCore/Quality/IngestionBronze.php; backend/app/Models/DataQualityIssue.php"
+   ],
+   "note": "Cada incidencia queda en data_quality_issues con clase, código, entidad, record_ref sin datos personales (tipo|número de documento), fila de origen, campo, valor original, valor propuesto, si se aplicó y el motivo; el original íntegro de los tres caminos (archivo, extracción SQL y cuerpo del lote) se conserva en Bronze antes de normalizar y se llega a él por el informe y source_row. Límites: original_value se acota a 200 caracteres y enmascara nombres e identificaciones (el valor íntegro solo está en Bronze); import_errors (W1) mantiene su enmascarado parcial; no hay clave directa incidencia→objeto Bronze."
+  },
+  {
+   "id": "V25-DQE-025",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_quality_gates_integration.py::test_a_block_gate_stops_the_forecast_with_a_stable_code_and_leaves_its_report",
+    "engine/tests/integration/test_quality_gates_integration.py::test_a_normal_forecast_persists_its_report_with_the_right_tenant_and_the_defaults_do_not_block",
+    "engine/tests/integration/test_quality_gates_integration.py::test_customer_train_and_predict_persist_their_gate_reports_and_the_defaults_do_not_block",
+    "engine/tests/integration/test_quality_gates_integration.py::test_customer_block_ends_the_run_with_insufficient_data_and_a_stable_reason",
+    "engine/tests/integration/test_quality_gates_integration.py::test_supply_plan_persists_its_gate_report_and_a_healthy_plan_is_not_degraded",
+    "engine/tests/integration/test_quality_gates_integration.py::test_supply_block_is_off_by_default_and_the_tenant_can_turn_it_on",
+    "engine/tests/unit/test_quality_gates.py::test_a_block_gate_stops_the_pipeline_with_a_stable_reason_code_before_training",
+    "engine/tests/unit/test_quality_gates.py::test_a_warn_gate_continues_and_records_the_notice_without_changing_the_quality_status",
+    "engine/tests/unit/test_quality_gates.py::test_the_default_thresholds_do_not_block_the_existing_fixtures",
+    "engine/predictily_engine/pipeline/core.py::run_pipeline (assess_demand); engine/predictily_engine/customer/service.py (customer_gate en entrenar y predecir); engine/predictily_engine/supply/plan_runner.py (supply_gate); engine/predictily_engine/quality/persistence.py::insert_run_quality_report"
+   ],
+   "note": "Demanda, Customer (entrenamiento y predicción) y abastecimiento evalúan su gate (PASS/WARN/DEGRADE/BLOCK) antes de entrenar o inferir: BLOCK termina la ejecución con insufficient_data y un código estable (HTTP 422 en demanda), DEGRADE deshabilita lo declarado y baja el estado a degraded, WARN continúa con avisos; el resultado se persiste en data_quality_reports (scope run) y se refleja en el manifiesto y las limitaciones. Los valores por defecto no bloquean las fixtures ni la demo; el BLOCK por falta de inventario en abastecimiento está desactivado por defecto (supply_min_inventory_coverage = 0). No incluye gates de ingestión ni de fuga temporal o reconciliación monetaria (ver V25-DQE-022)."
+  },
+  {
+   "id": "V25-DQE-029",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/IngestionFindingsTest.php::test_the_report_is_widened_and_summary_and_issues_are_kept_as_consumers_expect",
+    "backend/tests/Feature/DataQuality/IngestionFindingsTest.php::test_safe_normalizations_are_recorded_as_aggregated_auto_fix_findings_never_one_row_per_cell",
+    "backend/tests/Feature/DataQuality/ValueMapsTest.php::test_value_maps_are_applied_before_vocabulary_recognition_and_registered_as_transformations",
+    "backend/tests/Feature/DataQuality/DataQualityCatalogTest.php::test_the_rules_version_is_a_stable_sha256_that_changes_with_parameters_and_value_maps",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_the_import_report_is_linked_to_the_sync_with_transformations_and_the_sync_reconciles_all_layers",
+    "backend/tests/Feature/DataQuality/SchemaDriftTest.php::test_a_data_source_stores_the_combined_fingerprint_and_raises_its_version_with_each_drift",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_sales_carry_the_lineage_and_the_same_file_reuses_the_same_object",
+    "backend/app/Services/DataCore/Quality/IngestionQuality.php; backend/app/Services/DataCore/Quality/DataQualityCatalog.php::rulesVersion"
+   ],
+   "note": "Cada carga (importación, sincronización SQL y lote) deja en data_quality_reports.metrics las transformaciones aplicadas (mapeos de valores con su conteo y normalizaciones AUTO_FIX por código y campo), el esquema (huella, versión y deriva) y el linaje (objeto Bronze y versión del contrato), y en rules_version el SHA-256 del catálogo código→clase, los parámetros, la versión del código y los mapeos. En SQL las conversiones de tipo y zona horaria las hace el conector y quedan como transformaciones agregadas."
+  },
+  {
+   "id": "V25-CUS-037",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_quality_gates.py::test_customer_degrades_when_ids_are_unstable",
+    "engine/tests/unit/test_quality_gates.py::test_customer_degrades_to_aggregate_when_identified_buyers_are_too_few",
+    "engine/tests/unit/test_quality_gates.py::test_customer_blocks_without_buyers_or_history",
+    "engine/tests/integration/test_quality_gates_integration.py::test_customer_degrades_to_aggregate_no_models_are_trained_and_no_individual_predictions_are_written",
+    "engine/tests/integration/test_quality_gates_integration.py::test_identity_shares_split_identified_generic_anonymous_and_deleted_buyers_as_of_the_cutoff",
+    "engine/tests/integration/test_quality_gates_integration.py::test_id_stability_counts_recent_alias_changes_and_new_codes_only_when_the_history_allows_it",
+    "engine/tests/integration/test_quality_gates_integration.py::test_the_tenant_override_changes_the_gate_and_the_other_tenant_keeps_the_core_threshold",
+    "engine/predictily_engine/quality/rules.py (dq_customer_identified_share_low, dq_customer_product_ids_unstable, dq_customer_customer_ids_unstable, dq_customer_new_product_codes_high); engine/predictily_engine/quality/features.py::DEGRADABLE_FEATURES; engine/predictily_engine/customer/service.py"
+   ],
+   "note": "Si la proporción de unidades de compradores identificados o la estabilidad de identidades caen bajo el umbral, el Customer Core degrada a agregado: no entrena ni predice por comprador (predicciones, rankings y riesgo de actividad), quality_status = degraded, degraded_to = aggregate y el motivo estable en limitaciones y manifiesto; el pronóstico agregado de demanda sigue disponible (V2.5 §25.2). Umbrales (20 % de unidades identificadas, 20 % de cambio de identidades, 50 % de códigos nuevos) configurables por empresa y «a aprobar en el piloto». Límite: la inestabilidad solo se detecta con cambios de código REGISTRADOS (alias) o códigos nuevos recientes; una recodificación silenciosa o un cliente con dos códigos sin alias no se detecta; sin datos reales."
+  },
+  {
+   "id": "V25-HOR-002",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_the_catalog_and_the_customer_subset_are_declared_once",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_the_customer_subset_can_never_leave_the_catalog",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_the_backend_matches_the_shared_horizon_contract_without_needing_the_engine",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_the_backend_catalog_matches_the_engine_catalog",
+    "backend/tests/Unit/Horizons/HorizonCatalogTest.php::test_no_backend_source_keeps_its_own_copy_of_the_horizon_list",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_catalog_is_defined_once_and_every_core_derives_from_it",
+    "engine/tests/unit/test_horizon_catalog.py::test_configuration_validation_accepts_the_catalog_per_core_and_rejects_the_rest",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_engine_matches_the_shared_horizon_contract",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_backend_catalog_matches_the_engine_catalog",
+    "engine/tests/unit/test_horizon_catalog.py::test_the_openapi_contract_does_not_keep_the_old_catalog",
+    "backend/app/Support/Horizons/HorizonCatalog.php; backend/config/predictily.php::horizons; engine/predictily_engine/platform/config.py::HORIZONS; docs/product/horizons.contract.json"
+   ],
+   "note": "Catálogo único [7, 14, 15, 30, 60, 90] (Customer: 7/14/15/30/90) declarado una sola vez en el backend (predictily.horizons) y en el motor (HORIZONS), del que derivan los dominios, validaciones y valores por defecto; cada lado se compara con docs/product/horizons.contract.json sin depender del otro (y entre sí cuando ambos entornos están), ninguna lista literal queda en el código del backend y OpenAPI ya no conserva el catálogo antiguo. Límite: el frontend mantiene su propia copia (utils/constants.ts), verificada por sus pruebas pero no contrastada con el contrato compartido; los E2E (e2e/*.py) no se editaron."
+  },
+  {
+   "id": "V25-HOR-003",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_starter_growth_and_enterprise_are_configurable_plans_with_the_documented_hypotheses",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_the_basic_plan_is_exactly_what_it_was",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_horizon_15_is_accepted_only_by_the_plans_that_include_it",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_tenant_default_horizon_accepts_15_and_the_reads_use_it",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_the_largest_allowed_horizon_of_each_plan_is_what_the_scheduler_asks_for",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_the_scheduler_command_asks_each_company_for_the_largest_horizon_of_its_plan",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_the_superadmin_sets_contract_limits_and_invalid_overrides_are_rejected",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_plan_limits_only_ever_contain_catalog_horizons",
+    "backend/config/predictily.php::plans.enterprise; backend/app/Services/Plans/PlanLimitService.php; backend/database/seeders/PlanSeeder.php"
+   ],
+   "note": "El plan Enterprise nace con horizontes 7/15/30 y el catálogo completo se habilita por empresa con plan_overrides.horizons (validado contra el catálogo, solo el superadministrador, con auditoría); el Básico y los demás planes heredados conservan los suyos (Básico idéntico a antes) y el programador pide el mayor horizonte permitido del plan. El plan se crea sembrando PlanSeeder (php artisan db:seed --class=PlanSeeder); no hay alta de planes desde la interfaz."
+  },
+  {
+   "id": "V25-HOR-009",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_horizon_15_integration.py::test_customer_trains_h15_with_its_own_slot_manifest_and_evaluation",
+    "engine/tests/integration/test_horizon_15_integration.py::test_customer_predicts_h15_coherently_and_abstains_from_the_untrained_h14",
+    "engine/tests/unit/test_horizon_catalog.py::test_customer_prediction_reports_a_status_per_requested_horizon_and_never_a_made_up_number",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_growth_runs_customer_on_its_subset_including_15",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_customer_reads_horizon_15_and_abstains_with_a_reason_from_a_horizon_the_run_does_not_have",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_customer_abstention_without_a_recorded_reason_does_not_assume_a_missing_model",
+    "backend/tests/Feature/Customer/CustomerModelRollbackTest.php::test_models_of_the_new_customer_horizons_14_and_15_are_restorable_and_60_is_not_a_customer_slot",
+    "engine/predictily_engine/customer/train.py::train_horizon; backend/app/Services/Customer/CustomerRollbackService.php"
+   ],
+   "note": "Customer ofrece recompra a 7/14/15/30/90 (60 queda fuera por decisión documentada en config/predictily.php), limitada por el plan; cada horizonte se entrena solo si hay cortes maduros, filas y positivos suficientes (si no, queda abstained con reason_code coverage_insufficient o insufficient_horizon) y la predicción/API responde insufficient_data con su motivo en lugar de una cifra. Los modelos de Customer ya entrenados no tienen 14 ni 15: hay que reentrenar. Verificado con datos sintéticos."
+  },
+  {
+   "id": "V25-AVL-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_availability_validator.py::test_a_source_without_archived_issuances_is_invalid_for_a_backtest_and_the_backtest_is_forbidden",
+    "engine/tests/unit/test_availability_validator.py::test_a_forecast_issued_tomorrow_but_registered_today_is_not_available_today",
+    "engine/tests/unit/test_availability_validator.py::test_the_visible_forecast_is_the_latest_issuance_up_to_the_cutoff_and_it_ages_from_its_issue_date",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_forecast_source_without_issuance_history_is_invalid_and_its_backtest_forbidden",
+    "engine/tests/integration/test_factors_t11_integration.py::test_the_windows_before_the_final_cutoff_are_always_retroactive_even_when_the_final_run_is_live",
+    "engine/predictily_engine/availability/validator.py::assert_backtest_allowed / ForecastBacktestForbidden; engine/predictily_engine/availability/pipeline.py::FactorPipeline.resolve"
+   ],
+   "note": "Un factor THIRD_PARTY_FORECAST sin historial archivado de emisiones (issued_at) es INVALID (no_issuance_history): en una reconstrucción retroactiva y en todas las ventanas anteriores al corte final el backtest se prohíbe (ForecastBacktestForbidden), el factor se descarta con su estrategia de ausencia y solo la ejecución vigente puede aceptarlo; con historial, el pronóstico visible es la última emisión ≤ corte, nunca la de mañana. Verificado con un archivo de emisiones simulado y fixtures ficticias; la demostración con un proveedor real queda BLOQUEADA (sin conectores, credenciales ni licencias) y run_pipeline aún no invoca el pipeline de factores (apagado por defecto), de modo que hoy ningún pronóstico externo entra a un backtest."
+  },
+  {
+   "id": "V25-FAC-035",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_availability_validator.py::test_a_source_without_archived_issuances_is_invalid_for_a_backtest_and_the_backtest_is_forbidden",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_forecast_source_without_issuance_history_is_invalid_and_its_backtest_forbidden",
+    "engine/tests/integration/test_factors_t11_integration.py::test_the_windows_before_the_final_cutoff_are_always_retroactive_even_when_the_final_run_is_live",
+    "engine/predictily_engine/availability/validator.py::FeatureAvailabilityValidator; engine/predictily_engine/availability/pipeline.py::FactorPipeline.resolve; engine/predictily_engine/db/factors_repository.py::FactorsRepository"
+   ],
+   "note": "Guarda del backtest con pronósticos externos sin historial de emisiones: el factor queda INVALID (no_issuance_history), el backtest con él se prohíbe y se desactiva el factor (missing_strategy) con el motivo registrado. Misma salvedad que V25-AVL-006: probado con fixtures ficticias, origen real BLOQUEADO y pipeline de factores sin cablear en run_pipeline."
+  },
+  {
+   "id": "V25-FAC-030",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_seeder_catalogs_the_17_families_all_inactive_with_complete_metadata",
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_the_platform_owner_cannot_declare_active_an_external_factor_without_source",
+    "backend/tests/Feature/Intelligence/FactorActivationTest.php::test_owner_and_admin_can_activate_and_the_choice_is_stored_in_tenant_settings_without_touching_the_catalog",
+    "backend/tests/Feature/Intelligence/FactorActivationTest.php::test_analyst_and_viewer_cannot_activate",
+    "backend/tests/Feature/Intelligence/FactorActivationTest.php::test_activation_is_isolated_per_company_and_rejects_unknown_or_foreign_keys",
+    "backend/tests/Feature/Intelligence/FactorActivationTest.php::test_activation_cannot_be_forged_through_the_tenant_settings_endpoint",
+    "engine/tests/unit/test_factors_config.py::test_the_factors_core_is_off_by_default_and_declares_its_keys",
+    "engine/tests/unit/test_factors_config.py::test_a_factor_is_active_only_with_the_global_switch_and_its_own_activation",
+    "engine/tests/integration/test_factors_t11_integration.py::test_the_pipeline_follows_the_company_activation_and_not_the_catalog_flag_is_active",
+    "backend/database/seeders/FactorCatalogSeeder.php; backend/app/Http/Controllers/Api/Intelligence/FactorController.php::activation"
+   ],
+   "note": "Las 17 familias nacen con is_active = false y ninguna integración externa declarada; la activación es explícita por empresa y por factor (tenants.settings.factor_activation, solo propietario o administrador, aislada entre empresas) y el motor exige además el interruptor global factors.enabled (apagado por defecto): ninguna de las dos basta sola y el flag is_active del catálogo no interviene."
+  },
+  {
+   "id": "V25-FAC-038",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_an_event_is_born_proposed_with_full_provenance_and_cannot_forge_its_state",
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_the_proposer_cannot_verify_or_reject_their_own_event_but_another_user_can",
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_without_published_at_the_event_cannot_be_verified_for_predictive_use",
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_incomplete_provenance_blocks_verification_and_a_future_publication_is_rejected",
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_events_expire_when_their_validity_ends",
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_informative_alerts_are_listed_apart_and_are_never_predictive_features",
+    "backend/tests/Feature/Intelligence/ExternalEventsTest.php::test_this_package_has_no_external_integration_or_llm_extraction",
+    "backend/app/Services/Intelligence/ExternalEventService.php; backend/app/Models/ExternalEvent.php; backend/app/Http/Controllers/Api/Intelligence/ExternalEventController.php; backend/app/Console/Commands/Intelligence/ExpireIntelligenceCommand.php"
+   ],
+   "note": "Modelo de evento externo con procedencia (URL o ID de fuente, autoridad, publicación, vigencia, jurisdicción, corroboración) y máquina de estados PROPOSED → VERIFIED/REJECTED/EXPIRED con segregación (verifica o rechaza otro usuario) y sin published_at no verificable para uso predictivo; las alertas informativas se listan aparte. Solo eventos manuales: no existe EventExtractor ni LLM (V25-FAC-011, DISEÑADO)."
+  },
+  {
+   "id": "V25-FAC-056",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_issuer_creates_a_draft_with_every_contract_field_and_it_is_audited",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_grant_validation_rules",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_database_enforces_distinct_parties_and_valid_period_and_expiry",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_activation_requires_a_completed_forecast_and_a_draft",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_forecast_version_is_pinned_when_the_grant_is_activated",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_access_log_is_append_only",
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_every_table_of_the_contract_migration_has_its_model",
+    "backend/database/migrations/2026_03_04_000100_create_factor_intelligence_and_taxonomy_contracts.php (shared_forecast_grants, shared_forecast_grant_accesses); backend/app/Services/Intelligence/SharedGrants/SharedForecastGrantService.php; backend/app/Models/SharedForecastGrant.php"
+   ],
+   "note": "Esquema, modelo, servicio y API de SharedForecastGrant con emisor ≠ receptor (CHECK en la base), producto o categoría, periodo, granularidad, contenido permitido (solo pronóstico puntual e intervalos, nunca ventas ni clientes), versión de forecast fijada al activar, emisión y vencimiento, propósito, revocación y bitácora de accesos append-only. DESACTIVADO por bandera (V25-FAC-058)."
+  },
+  {
+   "id": "V25-FAC-058",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_feature_is_disabled_by_default",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_with_the_flag_off_no_route_is_functional_even_for_unauthenticated_callers",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_flag_is_fail_closed_for_any_value_that_is_not_a_recognizable_true",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_config_file_parses_the_environment_variable_fail_closed",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_every_http_verb_on_the_grant_urls_is_a_plain_404_with_the_flag_off",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_an_existing_grant_stops_being_readable_if_the_feature_is_turned_off_again",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_a_third_company_can_never_read_or_manage_a_grant_and_the_attempt_is_logged",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_recipient_never_receives_sales_customers_prices_revenue_or_other_issuer_data",
+    "backend/config/intelligence.php::shared_forecast_grants.enabled; backend/routes/api/intelligence.php; backend/app/Services/Intelligence/SharedGrants/EnsureSharedForecastGrantsEnabled.php"
+   ],
+   "note": "La red colaborativa no se habilita en P0: PREDICTILY_SHARED_FORECAST_GRANTS_ENABLED es false por defecto (fail-closed ante cualquier valor irreconocible) y con la bandera apagada todas las rutas responden 404, también sin sesión y para cualquier verbo; el contrato y las pruebas negativas de aislamiento (V25-FAC-066) existen."
+  },
+  {
+   "id": "V25-FAC-061",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_sanitary_document_published_after_the_cutoff_is_not_yet_available",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_weather_forecast_issued_tomorrow_but_registered_today_is_not_yet_available",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_competitor_price_revised_retroactively_shows_the_previous_revision_at_the_cutoff",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_news_without_date_is_invalid",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_new_statistical_revision_is_the_one_in_force_at_each_cutoff",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_failed_api_is_stale_with_its_age_and_the_factor_is_dropped",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_campaign_known_in_advance_is_available_for_the_future_days_of_the_horizon",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_user_scenario_is_scenario_only_and_excluded_from_accuracy",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_forecast_source_without_issuance_history_is_invalid_and_its_backtest_forbidden",
+    "engine/tests/unit/test_availability_validator.py::test_the_rule_is_exactly_the_w1_boundary_and_the_supply_day_rule",
+    "engine/tests/unit/test_availability_validator.py::test_stale_when_the_api_goes_down_the_age_is_labeled_and_the_missing_strategy_decides_the_fallback",
+    "engine/tests/unit/test_availability_validator.py::test_a_user_scenario_is_scenario_only_and_never_enters_accuracy",
+    "engine/predictily_engine/availability/validator.py::FeatureAvailabilityValidator; engine/predictily_engine/availability/pipeline.py::FactorPipeline.resolve; engine/predictily_engine/db/factors_repository.py::FactorsRepository"
+   ],
+   "note": "Los siete casos de cutoff de T11 (documento sanitario publicado después, pronóstico meteorológico emitido mañana y registrado hoy, precio de competencia actualizado retroactivamente, noticia sin fecha, nueva revisión de estadísticas, API fallida y campaña conocida por anticipado) más el escenario del usuario y el pronóstico sin historial de emisiones producen AVAILABLE, NOT_YET_AVAILABLE, STALE, INVALID o SCENARIO_ONLY con su motivo, sin usar conocimiento futuro (frontera exacta en cinco zonas horarias). Fixtures ficticias insertadas en las tablas del contrato; origen real BLOQUEADO (V25-FAC-063); run_pipeline no cablea el pipeline de factores."
+  },
+  {
+   "id": "V25-FAC-062",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_sanitary_document_published_after_the_cutoff_is_not_yet_available",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_weather_forecast_issued_tomorrow_but_registered_today_is_not_yet_available",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_competitor_price_revised_retroactively_shows_the_previous_revision_at_the_cutoff",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_news_without_date_is_invalid",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_new_statistical_revision_is_the_one_in_force_at_each_cutoff",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_failed_api_is_stale_with_its_age_and_the_factor_is_dropped",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_campaign_known_in_advance_is_available_for_the_future_days_of_the_horizon",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_user_scenario_is_scenario_only_and_excluded_from_accuracy",
+    "engine/tests/integration/test_factors_t11_integration.py::test_t11_forecast_source_without_issuance_history_is_invalid_and_its_backtest_forbidden",
+    "engine/tests/integration/test_factors_t11_integration.py (fixtures add_calendar_event / add_obs / add_indicator / add_definition)"
+   ],
+   "note": "Fixtures adversariales de factores externos para los casos de cutoff de T11 (documento sanitario, pronóstico meteorológico, precio de competencia, noticia sin fecha, revisión de estadísticas, API fallida, campaña y escenario) contra PostgreSQL. Son datos ficticios: no prueban un origen real (V25-FAC-063, BLOQUEADO) ni se declaran aprobados los casos sectoriales (V25-SCT-007)."
+  },
+  {
+   "id": "V25-FAC-066",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_recipient_reads_exactly_the_granted_scope_and_nothing_else",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_requests_outside_the_granted_scope_are_denied_and_logged",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_weekly_and_monthly_periods_are_served_only_when_fully_inside_the_granted_period",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_an_expired_grant_denies_the_recipient_and_logs_it",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_a_revoked_grant_denies_the_recipient_immediately_and_logs_it",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_a_draft_is_invisible_to_the_recipient",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_a_third_company_can_never_read_or_manage_a_grant_and_the_attempt_is_logged",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_the_recipient_never_receives_sales_customers_prices_revenue_or_other_issuer_data",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_a_shared_forecast_is_not_a_confirmed_order_and_writes_nothing_in_the_recipient",
+    "backend/tests/Feature/Intelligence/SharedForecastGrantTest.php::test_no_demand_or_commitment_code_reads_the_shared_forecast_tables",
+    "backend/tests/Feature/Intelligence/MassOperationsTest.php::test_the_access_log_cannot_be_changed_or_deleted_in_bulk_by_either_party",
+    "backend/tests/Feature/Intelligence/MassOperationsTest.php::test_the_recipient_cannot_bulk_change_or_delete_a_grant_it_received",
+    "backend/tests/Feature/Intelligence/IntelligenceExportTest.php::test_shared_forecast_grants_are_exported_to_each_party_without_the_data_or_identity_of_the_other"
+   ],
+   "note": "Pruebas negativas de destinatario, producto o categoría, periodo, granularidad, expiración, revocación, bitácora de accesos (read, denied_*), intentos de un tercero y de operaciones masivas, no exposición de ventas ni clientes del emisor y no duplicación con pedidos confirmados (un pronóstico compartido no escribe nada en el receptor ni lo lee el código de demanda o de compromisos). Se ejecutan con la bandera encendida en la prueba; en producción el contrato está desactivado."
+  },
+  {
+   "id": "V25-TAX-002",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_valid_four_level_hierarchy_can_be_built_with_an_erp_category_link",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_the_hierarchy_levels_are_enforced",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_node_can_be_versioned_without_rewriting_history",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_manual_assignment_is_usable_and_the_canonical_sku_is_untouched",
+    "backend/app/Models/TaxonomyNode.php; backend/app/Services/Intelligence/TaxonomyService.php; backend/routes/api/intelligence.php (taxonomy/*)"
+   ],
+   "note": "Jerarquía sector → industria → categoría → subcategoría (taxonomy_nodes, nivel del padre validado en el modelo, vínculo opcional a product_categories, versión con vigencia) y asignación producto → nodo; en el modelo Producto y SKU son products. No se siembra ninguna taxonomía pública y la jerarquía todavía no se usa en agregación ni en reglas de factores."
+  },
+  {
+   "id": "V25-TAX-007",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_manual_assignment_is_usable_and_the_canonical_sku_is_untouched",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_an_llm_proposal_is_pending_review_and_never_used_as_truth_until_a_user_verifies_it",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_models_block_cross_company_references_even_if_the_api_is_bypassed",
+    "backend/app/Services/Intelligence/TaxonomyService.php::resolveForProduct"
+   ],
+   "note": "La taxonomía cuelga del product_id canónico y no reescribe el SKU; la prueba afirma la invariante y que una propuesta sin verificar no se usa como verdad."
+  },
+  {
+   "id": "V25-TAX-010",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "docs/intelligence/PRODUCT_TAXONOMY.md",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_valid_four_level_hierarchy_can_be_built_with_an_erp_category_link",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_assignment_history_is_kept_by_validity_and_overlaps_are_rejected"
+   ],
+   "note": "docs/intelligence/PRODUCT_TAXONOMY.md describe el modelo, la procedencia manual/llm_proposed/verified, la API, el mapeo de SKUs (por alias de W2-B) y la cobertura de T13 con las marcas IMPLEMENTADO/DISEÑADO; declara DISEÑADOS el catálogo público inicial, las certificaciones verificadas, las presentaciones y la disponibilidad regional."
+  },
+  {
+   "id": "V25-TAX-011",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_valid_four_level_hierarchy_can_be_built_with_an_erp_category_link",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_the_hierarchy_levels_are_enforced",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_manual_assignment_is_usable_and_the_canonical_sku_is_untouched",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_multiple_sector_profiles_with_priority_and_scope"
+   ],
+   "note": "T13 automatizado: cadena sector → industria → categoría → subcategoría → producto (SKU canónico intacto) y perfiles de relevancia múltiples con prioridad y alcance (empresa, sucursal, categoría o producto). Los perfiles aún no cambian ninguna predicción (el motor no lee tenant_sector_profiles; ver V25-TAX-008)."
+  },
+  {
+   "id": "V25-TAX-012",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_an_llm_proposal_is_pending_review_and_never_used_as_truth_until_a_user_verifies_it",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_wrong_llm_proposal_can_be_rejected_and_leaves_no_truth_behind",
+    "backend/app/Services/Intelligence/TaxonomyService.php::proposeAssignment / resolveForProduct"
+   ],
+   "note": "Una asignación llm_proposed queda pendiente de revisión (pending_review, no usable), solo cuenta tras verificarla un usuario y, si es errónea, se descarta sin dejar verdad. La prueba usa propuestas generadas por el servicio: el clasificador por LLM real es DISEÑADO (V25-TAX-009)."
+  },
+  {
+   "id": "V25-CAN-019",
+   "status": "PARCIAL",
+   "gap": "La versión de esquema se escribe en sales, sales_document_revisions e inventory_snapshots; según la matriz de docs/data/CANONICAL_CONTRACTS.md §4 falta en unas 20 entidades (productos, clientes, sucursales, líneas de venta, compromisos, precios, costos, calendario, etc.) y se escribe sin exigirse en la escritura.",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_sales_carry_the_lineage_and_the_same_file_reuses_the_same_object",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_archived_revisions_keep_the_lineage_of_their_own_version",
+    "backend/tests/Feature/DataQuality/BronzeLineageTest.php::test_inventory_carries_the_same_lineage",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_schema_version_columns_fit_the_longest_contract_version",
+    "backend/tests/Feature/Lineage/CanonicalContractsTest.php::test_the_required_field_columns_exist",
+    "backend/app/Services/Sales/SalesDocumentWriter.php::write; backend/app/Support/Canonical/CanonicalContracts.php::version; backend/database/migrations/2026_03_07_000100_widen_schema_version_columns.php"
+   ],
+   "note": "Ventas, sus revisiones archivadas (con la versión de SU escritura) e inventario guardan schema_version = CanonicalContracts::version(...) y la columna cabe la versión más larga (ampliada a varchar(40)); el resto de las entidades enlaza la versión por su importación."
+  },
+  {
+   "id": "V25-BRG-036",
+   "status": "PARCIAL",
+   "gap": "La capa «fuente» se cuenta sobre las filas leídas (el CSV de preparación de la sincronización), no con COUNT/SUM ejecutados en el origen mediante una consulta autorizada: una pérdida de filas en la extracción solo se ve contra rows_extracted y las filas del objeto Bronze. Solo ventas; verificada con PostgreSQL (MySQL y SQL Server sin servidor de prueba); sin alerta ni bloqueo automático ante una diferencia sin explicar.",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_the_import_report_is_linked_to_the_sync_with_transformations_and_the_sync_reconciles_all_layers",
+    "backend/tests/Feature/DataQuality/SqlIngestionQualityTest.php::test_a_sync_that_returns_no_rows_reconciles_in_zero_without_a_bronze_object",
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_a_clean_load_is_balanced_with_source_bronze_and_silver_layers",
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_a_stale_version_is_explained_and_not_applied",
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_a_bronze_object_with_other_rows_than_the_ones_read_is_unexplained",
+    "backend/app/Services/DataCore/Quality/IngestionQuality.php::persistReconciliation; backend/app/Services/DataCore/Quality/SalesLoadTally.php"
+   ],
+   "note": "Cada sincronización SQL crea un reconciliation_reports (scope sync) con documentos, líneas, unidades, importe neto, anulados y notas de crédito leídos, el objeto Bronze (SHA-256, tamaño, filas) y lo escrito en Silver según las versiones vigentes, con las diferencias explicadas por categorías conocidas (cuarentena, versión anterior, duplicados, filas rechazadas) o marcadas sin explicar."
+  },
+  {
+   "id": "V25-UPL-011",
+   "status": "PARCIAL",
+   "gap": "Reconcilia las cargas de archivo y las sincronizaciones SQL (objeto Bronze → Silver), no las cargas del Bridge ni las de URL prefirmada (W6); el SHA-256 se calcula y se verifica al leer pero no se contrasta con un checksum declarado por el emisor; no hay alarmas ni cola de excepciones; Gold se concilia por ventana, no por carga.",
+   "evidence": [
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_a_clean_load_is_balanced_with_source_bronze_and_silver_layers",
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_a_bronze_object_with_other_rows_than_the_ones_read_is_unexplained",
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_non_sales_entities_reconcile_rows_with_the_rejected_ones_explained",
+    "backend/tests/Feature/Lineage/WindowReconciliationLoadsTest.php::test_real_loads_feed_the_source_layer_and_the_voided_document_is_explained_by_the_load",
+    "backend/tests/Feature/Lineage/WindowReconciliationLoadsTest.php::test_the_same_file_loaded_twice_is_counted_once",
+    "backend/tests/Feature/Lineage/BronzeStoreTest.php::test_read_verifies_the_sha256_and_detects_altered_missing_or_purged_content",
+    "backend/app/Services/DataCore/Reconciliation/WindowReconciler.php"
+   ],
+   "note": "Hay informe por carga (objeto → filas → documentos → Silver, con SHA-256 y tamaño del objeto) y reconciliación por ventana que los suma; el contenido de un objeto alterado o purgado se detecta al leerlo."
+  },
+  {
+   "id": "V25-DQE-022",
+   "status": "PARCIAL",
+   "gap": "Los gates configurables por módulo y empresa existen (demanda, Customer y abastecimiento) pero no bloquean ante una diferencia de reconciliación monetaria sin explicar ni ante fuga temporal, y el bloqueo por identidad es un DEGRADE a agregado en Customer; no hay gates de la fase de ingestión; sus umbrales no están calibrados con datos reales.",
+   "evidence": [
+    "engine/tests/unit/test_quality_gates.py::test_every_rule_passes_at_its_threshold_and_fires_one_step_beyond",
+    "engine/tests/unit/test_quality_gates.py::test_the_outcome_is_the_worst_severity_and_reasons_are_ordered",
+    "engine/tests/unit/test_quality_gates.py::test_thresholds_follow_the_core_profile_tenant_precedence_and_record_their_provenance",
+    "engine/tests/unit/test_quality_gates.py::test_a_tenant_override_changes_the_outcome_of_the_same_data_and_the_default_tenant_is_not_affected",
+    "engine/tests/unit/test_quality_gates.py::test_invalid_tenant_overrides_are_rejected_not_applied_silently",
+    "engine/tests/integration/test_quality_gates_integration.py::test_the_tenant_override_changes_the_gate_and_the_other_tenant_keeps_the_core_threshold",
+    "engine/tests/integration/test_quality_gates_integration.py::test_an_invalid_tenant_override_fails_the_run_with_a_clear_configuration_error",
+    "backend/tests/Feature/DataCore/EffectiveConfigApiTest.php::test_quality_gates_is_a_configurable_core_validated_by_the_engine",
+    "engine/predictily_engine/quality/rules.py; engine/predictily_engine/quality/gates.py; engine/predictily_engine/quality/thresholds.py; engine/predictily_engine/platform/config.py::quality_gates; backend/app/Http/Controllers/Api/DataCore/EffectiveConfigController.php::CORES"
+   ],
+   "note": "30 reglas con salida PASS/WARN/DEGRADE/BLOCK y código estable por módulo (demanda, Customer, abastecimiento), umbrales con la precedencia core → perfil → empresa (PUT /tenant/core-config/quality_gates validado por el motor; clave desconocida o fuera de rango se rechaza), efecto real (BLOCK detiene con insufficient_data, DEGRADE deshabilita features) y registro en data_quality_reports.gate_results con la procedencia de cada umbral."
+  },
+  {
+   "id": "V25-DQE-024",
+   "status": "PARCIAL",
+   "gap": "Los 33 umbrales por defecto tienen justificación escrita y la marca «a aprobar en el piloto», son configurables por empresa y quedan versionados en rules_version, pero ninguno está calibrado ni aprobado con datos reales y no hay análisis de sensibilidad (cuántas ejecuciones del piloto cambiarían de estado al mover cada umbral).",
+   "evidence": [
+    "engine/tests/unit/test_quality_gates.py::test_every_threshold_has_a_written_justification_marked_for_pilot_approval",
+    "engine/tests/unit/test_quality_gates.py::test_the_documentation_lists_every_threshold_with_its_default_value",
+    "engine/tests/unit/test_quality_gates.py::test_the_documentation_states_the_real_number_of_thresholds_and_the_generated_codes",
+    "engine/tests/unit/test_quality_gates.py::test_rules_version_changes_with_the_thresholds_and_is_a_sha256",
+    "docs/data/DATA_QUALITY_ENGINE.md §6.3; engine/predictily_engine/quality/thresholds.py"
+   ],
+   "note": "La tabla de umbrales de docs/data/DATA_QUALITY_ENGINE.md §6.3 (verificada por prueba contra el código) documenta valor, efecto, regla y justificación de cada uno; los de demanda y Customer parten de criterios ya usados por el producto (28 días de historia, 5 % de filas inválidas…) y los demás son valores iniciales de diseño. Aprobación bloqueada hasta el piloto."
+  },
+  {
+   "id": "V25-DQE-027",
+   "status": "PARCIAL",
+   "gap": "Los totales de «origen» son los calculados sobre lo leído, no totales de control del origen; la capa Bronze se compara solo por número de filas; Gold se compara por filas de ventas de la última ejecución de demanda que cubre la ventana (no por unidades ni importes, ni Customer o abastecimiento); solo ventas; una diferencia sin explicar no bloquea el Gate A.",
+   "evidence": [
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_declared_source_totals_that_match_silver_give_a_balanced_report_when_lineage_is_complete",
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_a_difference_between_source_and_silver_that_no_load_explains_is_unexplained",
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_a_voided_document_is_explained_by_the_load_report_in_the_w2a_format",
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_a_report_is_never_balanced_when_a_layer_was_not_compared",
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_gold_cells_are_compared_with_silver_at_the_cutoff_of_the_covering_run",
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_gold_without_sales_row_counts_is_unavailable_with_the_reason",
+    "backend/tests/Feature/Lineage/WindowReconciliationTest.php::test_the_command_writes_a_window_report_and_signals_unexplained_differences",
+    "backend/tests/Feature/Lineage/WindowReconciliationLoadsTest.php::test_real_loads_feed_the_source_layer_and_the_voided_document_is_explained_by_the_load",
+    "backend/tests/Feature/Lineage/WindowReconciliationLoadsTest.php::test_silver_altered_after_real_loads_is_unexplained",
+    "backend/tests/Feature/DataQuality/LoadReconciliationTest.php::test_voided_documents_are_written_but_do_not_count_as_sales_so_the_difference_is_explained",
+    "backend/app/Services/DataCore/Reconciliation/WindowReconciler.php; backend/app/Console/Commands/Lineage/ReconcileCommand.php; backend/app/Http/Controllers/Api/Lineage/ReconciliationController.php"
+   ],
+   "note": "php artisan predictily:reconcile y GET /api/v1/lineage/reconciliation comparan por ventana unidades, importe neto, documentos y líneas entre las cargas (capa fuente), Bronze, Silver (versiones vigentes) y Gold; las diferencias llevan categoría conocida o quedan unexplained, una capa no comparable nunca produce «balanced» y no se inventa ninguna cifra."
+  },
+  {
+   "id": "V25-HOR-001",
+   "status": "PARCIAL",
+   "gap": "H15 exige ventanas de backtest de al menos 15 días y TIERS no tiene ese escalón: con 84-149 días de historia el backtest es de 14 días y H15 queda insufficient_data (insufficient_horizon) aunque H14 esté ok, así que no se evalúa «como cualquier otro horizonte» con historia corta; los E2E (e2e/*.py) no se actualizaron y pueden fijar el catálogo antiguo.",
+   "evidence": [
+    "engine/tests/integration/test_horizon_15_integration.py::test_horizon_15_is_published_with_its_status_and_intervals",
+    "engine/tests/integration/test_horizon_15_integration.py::test_horizon_15_is_evaluated_on_the_independent_holdout_like_every_other_horizon",
+    "engine/tests/integration/test_horizon_15_integration.py::test_horizon_15_evaluation_does_not_know_what_was_learned_after_the_holdout_origin",
+    "engine/tests/integration/test_horizon_15_integration.py::test_the_service_capabilities_declare_the_catalog",
+    "engine/tests/unit/test_horizons.py::test_domain_supports_the_whole_catalog_and_rejects_others",
+    "engine/tests/unit/test_horizons.py::test_every_step_belongs_to_the_smallest_horizon_that_contains_it",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_horizon_15_is_accepted_only_by_the_plans_that_include_it",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_the_largest_allowed_horizon_of_each_plan_is_what_the_scheduler_asks_for",
+    "frontend/src/utils/__tests__/horizons.spec.ts::Growth y Enterprise (7/15/30) ven 15; Starter (7/30) y Básico (7/14/30) no",
+    "frontend/src/views/__tests__/DemandViews.spec.ts::Growth y Enterprise (7/15/30) ven el horizonte de 15 días; el catálogo completo habilitado lo incluye",
+    "engine/predictily_engine/demand/horizons.py; backend/app/Support/Horizons/HorizonCatalog.php; frontend/src/composables/useHorizons.ts"
+   ],
+   "note": "El 15 está en el catálogo del motor y del backend, el dominio de demanda, los planes y el programador, la CLI, OpenAPI y los selectores (con el motivo de la abstención); se calcula, se publica con estado e intervalos y se evalúa en el holdout independiente cuando la historia alcanza (paso 15 → su propio horizonte)."
+  },
+  {
+   "id": "V25-FAC-001",
+   "status": "PARCIAL",
+   "gap": "Los contratos, tablas, servicios y rutas existen, pero el pipeline de factores no está cableado en run_pipeline (solo registra factor_pipeline_not_connected), no hay conectores ni fuentes externas, la evaluación/ablation (T12) y el motor de aplicabilidad son solo tablas y la propuesta de eventos por LLM no existe.",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_every_table_of_the_contract_migration_has_its_model",
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_seeder_catalogs_the_17_families_all_inactive_with_complete_metadata",
+    "engine/tests/unit/test_factors_config.py::test_a_demand_run_with_the_pipeline_enabled_reports_that_it_is_not_connected_and_changes_nothing",
+    "engine/tests/integration/test_factors_t11_integration.py::test_with_the_pipeline_on_only_usable_factors_enter_and_the_rest_fall_back_to_the_model_without_them",
+    "backend/app/Services/Intelligence/; engine/predictily_engine/availability/; engine/predictily_engine/db/factors_repository.py; docs/intelligence/FACTOR_INTELLIGENCE.md"
+   ],
+   "note": "Dentro de Data Core hay catálogo público de 17 familias inactivas, activación por empresa, eventos externos con procedencia, taxonomía, perfiles, SharedForecastGrant desactivado, validador de disponibilidad y un pipeline de factores apagado por defecto que ya entra a FeatureBuilder (demostrado con fixtures); no cambia ningún pronóstico y los cores Demand, Customer y Supply no dependen de él."
+  },
+  {
+   "id": "V25-FAC-018",
+   "status": "PARCIAL",
+   "gap": "Los cinco esquemas existen como tablas y modelos (source_versions, factor_definitions, external_events, factor_applicability_rules, factor_evaluations), pero factor_applicability_rules y factor_evaluations no tienen escritor, API ni motor; solo external_events entra en el catálogo de contratos canónicos versionados (CanonicalContracts), y los demás no llevan versión de contrato propia.",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_every_table_of_the_contract_migration_has_its_model",
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_source_versions_are_isolated_and_public_ones_are_read_only",
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_applicability_rules_follow_the_public_or_own_rule_and_cannot_reference_foreign_definitions",
+    "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_factor_evaluations_are_isolated_and_never_promote_with_a_used_holdout",
+    "backend/tests/Feature/Intelligence/MassOperationsTest.php::test_a_company_cannot_mass_update_delete_or_touch_public_rows",
+    "backend/database/migrations/2026_03_04_000100_create_factor_intelligence_and_taxonomy_contracts.php; backend/app/Models/FactorDefinition.php; backend/app/Models/SourceVersion.php; backend/app/Models/FactorApplicabilityRule.php; backend/app/Models/FactorEvaluation.php; backend/app/Models/ExternalEvent.php"
+   ],
+   "note": "Tablas y modelos con aislamiento (filas públicas de solo lectura para las empresas, escritura del propietario de la plataforma, fail-closed sin empresa) y pruebas de integridad (factor_evaluations no promueve con el holdout usado)."
+  },
+  {
+   "id": "V25-FAC-020",
+   "status": "PARCIAL",
+   "gap": "Las 17 familias están catalogadas (al menos una definición por familia, todas inactivas) con clase de disponibilidad, almacenamiento, frecuencia, unidad, cobertura geográfica, estrategia de ausencia y justificación sectorial, pero sin licencia, permisos, fuente, versión de fuente ni retención para las familias externas (no hay integración: «sin fuente» y «a definir con la licencia»); el estado de calidad y frescura no se mide por familia y los umbrales de antigüedad son «a aprobar en el piloto».",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_seeder_catalogs_the_17_families_all_inactive_with_complete_metadata",
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_seeder_is_idempotent_and_never_overwrites_platform_owner_changes",
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_every_company_role_reads_the_public_catalog_with_state_and_where_the_data_lives",
+    "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_a_company_can_never_modify_delete_or_publish_catalog_rows",
+    "backend/database/seeders/FactorCatalogSeeder.php::definitions; backend/app/Services/Intelligence/FactorCatalogService.php; docs/intelligence/FACTOR_INTELLIGENCE.md §3"
+   ],
+   "note": "GET /api/v1/intelligence/factors entrega el catálogo con su estado y dónde vive el dato de cada factor; el seeder es idempotente y no sobrescribe cambios del propietario de la plataforma."
+  },
+  {
+   "id": "V25-FAC-059",
+   "status": "PARCIAL",
+   "gap": "Existen docs/intelligence/FACTOR_INTELLIGENCE.md, EXTERNAL_SOURCES.md y docs/ml/POINT_IN_TIME_VALIDATION.md con las marcas IMPLEMENTADO/DISEÑADO/BLOQUEADO/NO APLICA, pero falta docs/ml/FEATURE_SELECTION.md (la ablation T12 es DISEÑADA, V25-FAC-042).",
+   "evidence": [
+    "docs/intelligence/FACTOR_INTELLIGENCE.md",
+    "docs/intelligence/EXTERNAL_SOURCES.md",
+    "docs/ml/POINT_IN_TIME_VALIDATION.md",
+    "docs/data/FEATURE_CONTRACTS.md",
+    "engine/tests/unit/test_feature_contracts_docs.py::test_every_test_cited_by_the_docs_exists",
+    "engine/tests/unit/test_feature_contracts_docs.py::test_the_feature_contract_doc_lists_every_feature_and_the_registry_version",
+    "engine/tests/unit/test_quality_gates.py::test_every_test_named_in_the_documentation_exists"
+   ],
+   "note": "Tres de los cuatro documentos existen y sus pruebas citadas se verifican automáticamente (las del registro de contratos y las de los gates); EXTERNAL_SOURCES.md declara que hoy no hay ninguna integración activa."
+  },
+  {
+   "id": "V25-TAX-003",
+   "status": "PARCIAL",
+   "gap": "La clasificación a un corte pasado se reconstruye por vigencia (valid_from/valid_to y filtro as_of), no por fecha de conocimiento: un cambio registrado con efecto retroactivo reescribe el pasado reconstruido; los cambios de nombre o de padre se hacen con versiones del nodo pero la categoría del ERP (product_categories) sigue sin historial.",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_node_can_be_versioned_without_rewriting_history",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_assignment_history_is_kept_by_validity_and_overlaps_are_rejected",
+    "backend/app/Services/Intelligence/TaxonomyService.php"
+   ],
+   "note": "Los nodos se versionan (la versión anterior se cierra el día previo y no se reescribe) y las asignaciones producto → nodo conservan su historial por vigencia sin solapamientos."
+  },
+  {
+   "id": "V25-TAX-004",
+   "status": "PARCIAL",
+   "gap": "Hay alias de producto (product_aliases, V25-CAN-030) pero no de nodos de taxonomía; fusión y división de alias están DISEÑADAS.",
+   "evidence": [
+    "backend/tests/Feature/Lineage/IdentityAliasApiTest.php::test_product_alias_crud_with_validity_and_audit",
+    "backend/tests/Feature/Lineage/IdentityAliasApiTest.php::test_code_change_makes_the_new_code_visible_and_keeps_resolving_the_old_one_to_the_same_product",
+    "backend/tests/Feature/Lineage/CatalogResolverAliasTest.php::test_an_alias_is_resolved_before_the_sku_and_before_creating_a_new_product",
+    "backend/app/Services/Catalog/IdentityAliasService.php; backend/app/Models/ProductAlias.php"
+   ],
+   "note": "Los alias de producto y el cambio de código se resuelven en la ingestión con su vigencia y fuente; la taxonomía cuelga del producto canónico, así que un alias llega al mismo nodo."
+  },
+  {
+   "id": "V25-TAX-008",
+   "status": "PARCIAL",
+   "gap": "profile_key se valida solo por formato (no contra el registro de perfiles del motor), el motor no lee tenant_sector_profiles (asociar un perfil no cambia ninguna predicción), el único perfil registrado en el motor son dos SINTÉTICOS y el motor de aplicabilidad de factores es solo tabla.",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_multiple_sector_profiles_with_priority_and_scope",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_taxonomy_is_isolated_between_companies",
+    "backend/app/Services/Intelligence/SectorProfileService.php; backend/app/Models/TenantSectorProfile.php; backend/app/Http/Controllers/Api/Intelligence/SectorProfileController.php"
+   ],
+   "note": "Una empresa puede tener varios perfiles de relevancia activos con prioridad y alcance (empresa, sucursal, categoría o producto; gana el más específico y luego la menor prioridad), con API y auditoría."
+  },
+  {
+   "id": "V25-TAX-009",
+   "status": "PARCIAL",
+   "gap": "No existe el clasificador por LLM (PredictilyIntelligenceGateway, V25-FAC-019): la API pública solo crea asignaciones manuales y la entrada llm_proposed la usan el servicio y las pruebas; su esquema de salida validado y su confianza calibrada son DISEÑADOS.",
+   "evidence": [
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_an_llm_proposal_is_pending_review_and_never_used_as_truth_until_a_user_verifies_it",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_a_wrong_llm_proposal_can_be_rejected_and_leaves_no_truth_behind",
+    "backend/app/Services/Intelligence/TaxonomyService.php::proposeAssignment"
+   ],
+   "note": "El flujo de revisión existe: una propuesta lleva procedencia, queda pendiente, solo se usa verificada por un usuario (verified_by/verified_at) y una incorrecta se descarta."
+  },
+  {
+   "id": "V25-SCT-008",
+   "status": "PARCIAL",
+   "gap": "Existe docs/intelligence/SECTOR_PROFILES.md con los perfiles de V2.1 y los seis casos de §24.12, pero declarados P2/P3 PENDIENTES (ninguno cubierto); no existe docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md.",
+   "evidence": [
+    "docs/intelligence/SECTOR_PROFILES.md",
+    "backend/tests/Feature/Intelligence/TaxonomyTest.php::test_multiple_sector_profiles_with_priority_and_scope"
+   ],
+   "note": "El documento de perfiles distingue lo implementado (perfiles de relevancia por empresa) de lo diseñado y no declara aprobado ningún caso sectorial por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-UIX-013",
+   "status": "PARCIAL",
+   "gap": "El plan existe como datos configurables (1 sucursal, 750 series, horizontes 7/30, sin Customer), pero la restricción a CSV/Excel no se aplica por plan (solo se bloquea el acceso por API; los conectores SQL no se restringen), los topes que la fuente no fija son supuestos «a aprobar en el piloto» y no hay alta de planes por interfaz (PlanSeeder).",
+   "evidence": [
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_starter_growth_and_enterprise_are_configurable_plans_with_the_documented_hypotheses",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_no_price_is_ever_a_limit",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_active_series_over_the_plan_cap_block_a_new_forecast_run",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_starter_has_no_customer_core_and_every_customer_endpoint_says_so",
+    "backend/tests/Feature/Plans/SeriesCountTest.php::test_a_timed_out_count_never_blocks_and_falls_back_to_the_last_known_value",
+    "frontend/src/components/__tests__/PlanUsage.spec.ts; frontend/src/views/__tests__/CustomersView.spec.ts",
+    "backend/config/predictily.php::plans.starter; backend/app/Services/Plans/PlanLimitService.php; backend/app/Services/Plans/ActiveSeriesCounter.php"
+   ],
+   "note": "Starter se siembra como plan configurable; USD 49 es un metadato informativo (plans.metadata) y nunca un límite (una prueba lo afirma); max_series (402) se exige al pedir un pronóstico con un conteo cacheado y acotado en tiempo."
+  },
+  {
+   "id": "V25-UIX-014",
+   "status": "PARCIAL",
+   "gap": "Growth existe como datos (5 sucursales, 5 000 series, horizontes 7/15/30, Customer, API), pero no existen Bridge, agenda ni comparación, «Customer si IDs confiables» es una condición de datos del motor (no hay puntuación de confiabilidad de IDs) y los roles no se condicionan por plan.",
+   "evidence": [
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_starter_growth_and_enterprise_are_configurable_plans_with_the_documented_hypotheses",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_growth_runs_customer_on_its_subset_including_15",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_no_price_is_ever_a_limit",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_horizon_15_is_accepted_only_by_the_plans_that_include_it",
+    "backend/config/predictily.php::plans.growth; docs/product/RETAIL_STARTER_GROWTH.md"
+   ],
+   "note": "Growth se siembra como plan configurable con precio informativo (USD 119) fuera de los límites; el documento de planes lo declara hipótesis heredada, no estrategia obligatoria."
+  }
+ ]
+}
