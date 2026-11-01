@@ -89,9 +89,14 @@ def test_execute_writes_versioned_results(first_run, db_engine, tenants):
         n_recs = conn.execute(text("SELECT COUNT(*) FROM recommendations WHERE forecast_run_id = :r"),
                               {"r": run_id}).scalar_one()
         assert n_recs > 0
-        dq = conn.execute(text("SELECT score FROM data_quality_reports WHERE forecast_run_id = :r"),
+        # W2-C: la ejecución deja DOS informes: el de preparación (puntaje; consumidores existentes) y el de métricas/gates (scope `run`).
+        dq = conn.execute(text("SELECT score FROM data_quality_reports WHERE forecast_run_id = :r AND scope = 'forecasting_readiness'"),
                           {"r": run_id}).scalar_one()
         assert dq is not None
+        gate = conn.execute(text("SELECT dataset, as_of, rules_version, metrics, gate_results FROM data_quality_reports "
+                                 "WHERE forecast_run_id = :r AND scope = 'run'"), {"r": run_id}).mappings().one()
+        assert gate["dataset"] == "sales" and gate["as_of"] is not None and len(gate["rules_version"]) == 64
+        assert gate["gate_results"]["demand"]["outcome"] in ("PASS", "WARN") and gate["metrics"]["coverage"]["source_coverage_pct"] is not None
         assert conn.execute(text("SELECT COUNT(*) FROM forecast_features WHERE tenant_id IS NULL")).scalar_one() > 10
 
 

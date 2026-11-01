@@ -179,7 +179,12 @@ class CustomerRepository:
 
     def excluded_sales_stats(self, through: date, generic_codes: list[str], knowledge: date | None = None) -> dict[str, Any]:
         """Líneas y unidades de ventas válidas que NO se atribuyen a un comprador modelable (anónimas/genéricas), tal como se
-        conocían al corte `through` (o a `knowledge`; misma regla de visibilidad que las compras)."""
+        conocían al corte `through` (o a `knowledge`; misma regla de visibilidad que las compras).
+
+        EXCEPCIÓN (documentada, W2-C): la visibilidad as-of se aplica a las VENTAS; los atributos del comprador (`customers.deleted_at`,
+        `is_generic`, `external_code`) se leen en su estado ACTUAL porque el Customer Core no los versiona, así que en una reconstrucción
+        histórica un cliente dado de baja DESPUÉS del corte figura aquí como `deleted_customer`. Los gates de calidad (`quality.signals.identity`)
+        calculan la misma proporción con la baja AS-OF y la prefieren; esta cuenta es su respaldo (`identity.basis` lo declara)."""
         tz = self.base.timezone()
         know = to_day(through) if knowledge is None else max(to_day(through), to_day(knowledge))
         df = self._read(

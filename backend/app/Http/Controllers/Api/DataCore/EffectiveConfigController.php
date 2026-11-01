@@ -21,7 +21,7 @@ use Illuminate\Validation\Rule;
  */
 final class EffectiveConfigController extends Controller
 {
-    public const CORES = ['demand', 'customer', 'supply', 'cost', 'scenario'];
+    public const CORES = ['demand', 'customer', 'supply', 'cost', 'scenario', 'quality_gates'];
 
     public function __construct(private readonly PlatformEngineClient $engine, private readonly TenantContext $context, private readonly AuditLogger $audit) {}
 

@@ -15,6 +15,9 @@ from predictily_engine.db.supply_repository import SupplyRepository, write_plan
 from predictily_engine.db.writer import jdump
 from predictily_engine.platform.config import resolve_config
 from predictily_engine.platform.snapshot import DataSnapshot, persist_snapshot
+from predictily_engine.quality.features import apply_supply_degradation
+from predictily_engine.quality.persistence import insert_run_quality_report
+from predictily_engine.quality.service import resolve_policy, supply_gate
 from predictily_engine.supply.inputs import PlanInputError, PlanInputs, build_problem
 from predictily_engine.supply.present import present_solution, summarize
 from predictily_engine.supply.runs import complete_run
@@ -65,12 +68,20 @@ def run_plan(engine, tenant_id: int, run: dict[str, Any], job_id: int | None, pr
         opts = run.get("options") or {}
         overrides = {k: v for k, v in (opts.get("config") or {}).items()}
         cfg, cfg_version, provenance = resolve_config("supply", tenant["settings"], tenant.get("sector"), overrides or None)
+        resolve_policy(tenant)      # W2-C: una configuración `quality_gates` inválida se rechaza (422) antes de cargar datos
         progress("loading_data", 10)
         inputs, fr = load_inputs(repo, run, cfg)
         supplier_names, product_names = (repo.supplier_names(), repo.product_names()) if inputs else ({}, {})
     if inputs is None:
         return _finish_empty(engine, tenant_id, run_id, job_id, cfg, cfg_version, provenance, t0,
                              "No hay un pronóstico de demanda completado: sin demanda pronosticada no se puede planificar.")
+    # Gate de calidad (W2-C · ADR-V25-05) ANTES de planificar: BLOCK termina con insufficient_data; DEGRADE deshabilita políticas que
+    # dependen de plazos supuestos (ofertas implícitas, plazo observado); WARN continúa con avisos.
+    qa = supply_gate(tenant, inputs)
+    if qa.blocked:
+        return _finish_empty(engine, tenant_id, run_id, job_id, cfg, cfg_version, provenance, t0, qa.block_message(), as_of=inputs.as_of,
+                             forecast_run_id=int(fr["id"]), quality="insufficient_data", assessment=qa)
+    qa.applied_changes = apply_supply_degradation(inputs, qa.disabled_features)
     try:
         progress("building_model", 30)
         problem, report = build_problem(inputs)
@@ -120,6 +131,8 @@ def run_plan(engine, tenant_id: int, run: dict[str, Any], job_id: int | None, pr
     quality = _quality(outcome.status, report, len(problem.nodes), excluded, outcome.status)
     if outcome.status == "infeasible":
         quality = "degraded"
+    if qa.degraded and quality == "ok":    # W2-C: un gate DEGRADE nunca deja el plan en «ok»
+        quality = "degraded"
     snap = DataSnapshot("supply", inputs.as_of)
     snap.add_frame("forecast", inputs.forecast, ["branch_id", "product_id", "horizon_step", "yhat"], ["branch_id", "product_id", "horizon_step"])
     snap.add_frame("inventory", inputs.inventory, ["branch_id", "product_id", "on_hand", "reserved", "in_transit"], ["branch_id", "product_id"])
@@ -130,9 +143,10 @@ def run_plan(engine, tenant_id: int, run: dict[str, Any], job_id: int | None, pr
     snap.add_frame("capacities", pd.concat([inputs.capacities, inputs.warehouses], ignore_index=True) if not inputs.warehouses.empty or not inputs.capacities.empty else None, None, None)
     snap.add_frame("recipes", inputs.recipes, None, None)
     snap.add_value("config", {"config": cfg, "options": inputs.options.get("config") or {}})
+    snap.add_value("quality_gate", {"outcome": qa.outcome, "disabled_features": qa.disabled_features, "rules_version": qa.rules_version})
     horizon_end = inputs.as_of + timedelta(days=problem.period_days * problem.n_periods)
     assumptions = report["assumptions"]
-    limitations = report["limitations"] + outcome.notes
+    limitations = report["limitations"] + outcome.notes + qa.limitation_strings() + qa.applied_changes
     if sol.status in ("time_limit",):
         limitations.append("Se agotó el límite de tiempo: el plan es la mejor solución factible encontrada, NO probada óptima.")
     if outcome.status == "heuristic_fallback":
@@ -146,6 +160,7 @@ def run_plan(engine, tenant_id: int, run: dict[str, Any], job_id: int | None, pr
                        k: report["comparison_coverage"][k] for k in ("offers_received", "offers_comparable", "offers_excluded", "comparable_share")}}
     with engine.begin() as conn:
         snap_id = persist_snapshot(conn, tenant_id, snap)
+        run_summary["quality_gate"] = qa.manifest_block(insert_run_quality_report(conn, tenant_id, qa, core_run_id=run_id))   # W2-C
         write_plan(conn, tenant_id, run_id, int(fr["id"]), plan, presented["lines"], presented["shortfalls"])
         complete_run(conn, tenant_id, run_id, job_id, result_type="optimized_plan", quality_status=quality,
                      uncertainty_source=report["uncertainty_source"], as_of=inputs.as_of,
@@ -163,10 +178,14 @@ def run_plan(engine, tenant_id: int, run: dict[str, Any], job_id: int | None, pr
 
 
 def _finish_empty(engine, tenant_id: int, run_id: int, job_id: int | None, cfg, cfg_version, provenance, t0: float,
-                  reason: str, as_of=None, forecast_run_id: int | None = None, quality: str = "insufficient_data") -> dict[str, Any]:
+                  reason: str, as_of=None, forecast_run_id: int | None = None, quality: str = "insufficient_data",
+                  assessment=None) -> dict[str, Any]:
     duration_ms = int((time.perf_counter() - t0) * 1000)
     summary = {"solver_status": "not_solved", "reason": reason, "duration_ms": duration_ms, "lines": 0}
     with engine.begin() as conn:
+        if assessment is not None:    # W2-C: un gate BLOCK deja su informe de calidad (métricas y motivos) en la ejecución
+            summary["quality_gate"] = assessment.manifest_block(insert_run_quality_report(conn, tenant_id, assessment, core_run_id=run_id))
+            summary["reason_codes"] = assessment.reason_codes()
         complete_run(conn, tenant_id, run_id, job_id, result_type="optimized_plan", quality_status=quality,
                      uncertainty_source="none", as_of=as_of, horizon_start=None, horizon_end=None,
                      target_definition=TARGET_DEFINITION, config_version=cfg_version,
