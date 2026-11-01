@@ -434,7 +434,7 @@ de claves en `docs/ml/MODEL_REGISTRY.md`.
   (sin reabrir el archivo: sin TOCTOU). Si algo falla, **no se deserializa**: el Customer Core sirve la referencia validada del horizonte (o se abstiene) con el motivo en `limitations` y un registro sin PII.
 - **Sin firma**: rechazado, salvo `ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true` (legado de un entorno local, verificable por SHA-256). El indicador **nunca** acepta una firma inválida, una clave desconocida, un manifiesto corrupto ni
   un artefacto de otra empresa.
-- **Backend** (`ModelArtifactVerifier`): al revertir un modelo cuyo artefacto es visible comprueba el SHA-256 **y** la firma (`sodium_crypto_sign_verify_detached`) con las claves públicas de `engine.artifact_signing`;
+- **Backend** (`ModelArtifactVerifier`): al revertir un modelo cuyo artefacto es visible comprueba el SHA-256 **y** la firma (`sodium_crypto_sign_verify_detached`) con las claves públicas de `engine.artifact_signing`, y que el manifiesto firmado sea de esa empresa, de ese core y de ese archivo;
   `409 rollback_artifact_unsigned` / `rollback_artifact_signature_invalid` / `rollback_artifact_mismatch`. La marca `unsigned` que dejó el motor basta para rechazar aunque el backend no vea el archivo.
 - **Claves**: `python -m predictily_engine.cli keygen --key-id <id> --private-out <archivo>` crea el par (la privada con permisos 0600, nunca impresa). La privada vive solo en el entorno de entrenamiento
   (`ENGINE_SIGNING_PRIVATE_KEY`, preferible `file:` desde un secreto); la pública, en el motor de servicio y en el backend (`ENGINE_TRUSTED_PUBLIC_KEYS`).

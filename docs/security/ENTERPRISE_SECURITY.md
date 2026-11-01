@@ -1,6 +1,6 @@
 # Seguridad Enterprise · controles P0 de la V2.5 (paquete W1-B)
 
-Fecha: 31-oct-2026 · Rama `v25/enterprise-core` · Fuente: ADR-V25-15 (seguridad y aislamiento como bloqueo de release) y ADR-V25-20 (artefactos
+Fecha: 31-oct-2026 (actualizado el 1-nov-2026) · Rama `v25/enterprise-core` · Fuente: ADR-V25-15 (seguridad y aislamiento como bloqueo de release) y ADR-V25-20 (artefactos
 firmados antes de deserializar); defectos HIGH de `docs/roadmap/audit/2026-10-31/{conectores,seguridad_ui,modelos_aws}.json`.
 
 Este documento recoge **solo** los controles del paquete W1-B (endurecimiento P0). El plan general de seguridad, aislamiento multi-tenant y privacidad está en
@@ -82,6 +82,7 @@ Límites y variables: `docs/07` §16 y `backend/config/upload_safety.php`.
 | Backend: la reversión verifica la firma con `sodium_crypto_sign_verify_detached` y las claves públicas de confianza, además del SHA-256; sin firma/firma inválida → 409 | **IMPLEMENTADO / VERIFICADO** | `ModelArtifactSignatureTest` (19 casos: empresa y core ligados por el manifiesto, e incluida una firma producida por el motor Python y verificada por PHP) |
 | Formatos seguros sin pickle (texto de LightGBM, JSON) | **DISEÑADO / NO IMPLEMENTADO** | ADR-V25-20 |
 | Deserialización en subproceso sin credenciales de BD; endurecimiento del contenedor del motor | **DISEÑADO / NO IMPLEMENTADO** | defecto LOW «el contenedor del motor deserializa pickles sin endurecimiento» |
+| Separar el despliegue que entrena (con la clave privada) del que sirve (solo con las públicas) | **DISEÑADO / NO IMPLEMENTADO** | hoy un mismo proceso del motor entrena y sirve: la firma protege contra quien escribe filas o archivos del volumen, no contra una ejecución de código ya lograda dentro del motor (`docs/ml/MODEL_REGISTRY.md` §3) |
 | Claves en KMS/HSM, revocación explícita, re-firmado de artefactos legados, rotación sin ventana de rechazo | **DISEÑADO / NO IMPLEMENTADO** | `docs/ml/MODEL_REGISTRY.md` §5 |
 | Aprovisionar claves en la pila Docker/E2E | **BLOQUEADO** hasta decidir dónde vive la clave privada (secreto del entorno de entrenamiento autorizado) |  |
 

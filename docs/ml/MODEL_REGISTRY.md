@@ -1,6 +1,6 @@
 # Registro de modelos y firma de artefactos
 
-Fecha: 31-oct-2026 · Rama `v25/enterprise-core` · Fuentes: ADR-V25-07 (registro de modelos), ADR-V25-20 (artefactos firmados antes de deserializar), defecto HIGH de
+Fecha: 31-oct-2026 (actualizado el 1-nov-2026) · Rama `v25/enterprise-core` · Fuentes: ADR-V25-07 (registro de modelos), ADR-V25-20 (artefactos firmados antes de deserializar), defecto HIGH de
 `docs/roadmap/audit/2026-10-31/modelos_aws.json`.
 
 Este documento define **la firma y verificación de artefactos** (§2–§4), que está implementada y verificada, y deja explícito en §5 que **el resto de la gestión del registro
@@ -131,6 +131,9 @@ Las pruebas del motor generan un par de claves **efímero** por sesión (`engine
 ## 3. Límites conocidos de la firma
 
 - Confía en la custodia de la clave privada: quien la tenga puede firmar. Hoy es un archivo/secreto del entorno de entrenamiento; KMS/HSM está **DISEÑADO / NO IMPLEMENTADO**.
+- **Entrenamiento y serving comparten proceso.** Hoy el mismo despliegue del motor entrena (firma) y sirve (verifica), así que la clave privada es legible por el código del motor: la firma protege contra quien escribe una
+  fila de `model_registry` o un archivo del volumen, **no** contra una ejecución de código ya lograda dentro del motor. Separar el despliegue que entrena (con la privada) del que sirve (solo con las públicas) y deserializar en un
+  subproceso sin credenciales es **DISEÑADO / NO IMPLEMENTADO** (§5).
 - Un atacante con escritura en el volumen **y** que borre el manifiesto convierte un artefacto firmado en «sin firma»: se rechaza salvo `ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true`, por eso el indicador es solo para entornos locales.
 - No hay *replay* de versiones por firma: un artefacto antiguo con firma válida y SHA-256 coherente en su fila sigue siendo válido (es lo que hace la reversión). El control de qué versión sirve es el estado del registro (§5).
 - La verificación del backend exige que el archivo sea visible; si no, delega en el motor.

@@ -544,6 +544,59 @@ def test_a_backtest_window_does_not_change_when_data_known_after_its_cutoff_is_p
         assert pert.sales_knowledge["late_lines"] == 3
 
 
+def test_the_holdout_window_trains_with_what_was_known_at_its_origin(db_engine, tenants):
+    """El período final reservado (holdout) también entrena con lo conocido en SU origen `H`: una anulación y un documento tardío conocidos
+    DESPUÉS de `H` (pero antes del corte final), ambos con fecha de evento anterior a `H`, no cambian su pronóstico, clase ni escalas, y
+    las filas del holdout son idénticas a las de un estado en el que nunca ocurrieron. Sin conocimiento as-of sí cambiaban."""
+    from predictily_engine.backtest.rolling import plan_backtest
+
+    with rolled_back(db_engine) as conn:
+        w = existing_world(conn, tenants["A"])
+        repo = TenantRepository(conn, w.tenant_id)
+        repo.analytic_reads()
+        cutoff = repo.last_sale_date()
+        plan = plan_backtest(build_panel(load_tenant_data(repo, cutoff), DayRules()), 3)
+        assert plan is not None and plan.has_holdout, "la empresa de pruebas tiene historia para reservar un período final"
+        h0 = plan.holdout_cutoff
+        day = lambda off: (h0 + pd.Timedelta(days=off)).date().isoformat()  # noqa: E731
+
+        # estado de referencia: X (300 u.) conocida desde su día, sin anular; L no existe
+        add_document(conn, w, number="T02-HX", sale_date=day(-6), lines=[(0, 300, 10.0)])
+        base = load_tenant_data(repo_of(conn, w), cutoff)
+        bt_base, windows_base = backtest(base, plan, windows=True)
+        assert windows_base is None, "una carga histórica sin cambios no necesita ventanas as-of"
+
+        # perturbación posterior a H y anterior al corte final: X se anula el día H+5 y L (fecha de evento H-9) llega el día H+3
+        amend_document(conn, w, "T02-HX", known_from=local(day(5), 12), status="voided")
+        add_document(conn, w, number="T02-HL", sale_date=day(-9), lines=[(1, 400, 10.0)], mode="incremental", known_from=local(day(3), 9))
+        pert = load_tenant_data(repo_of(conn, w), cutoff)
+        assert pert.sales_versions.has_dynamic
+        bt_pert, windows = backtest(pert, plan, windows=True)
+        bt_leak, _ = backtest(pert, plan, windows=False)
+
+        def holdout(bt):
+            rows = bt[bt["is_holdout"]]
+            assert set(rows["window"]) == {plan.holdout_window}
+            return rows.set_index(["unique_id", "ds", "family"]).sort_index()
+
+        b, p, leak = holdout(bt_base), holdout(bt_pert), holdout(bt_leak)
+        assert len(b) == len(p) == len(leak) > 0 and set(b.index.get_level_values("family")) == set(FAMILIES)
+        # 1) con conocimiento as-of las filas del holdout son idénticas a las del estado donde nada de eso ocurrió
+        np.testing.assert_allclose(p["yhat"], b["yhat"], rtol=1e-9, atol=1e-9)
+        np.testing.assert_allclose(p["actual"], b["actual"], rtol=1e-9, atol=1e-9)
+        assert (p["demand_class"] == b["demand_class"]).all() and (p["stockout"] == b["stockout"]).all()
+        for col in ("scale", "scale_mae", "scale_mse", "price_fc"):
+            np.testing.assert_allclose(p[col].astype(float), b[col].astype(float), rtol=1e-9, atol=1e-9, equal_nan=True, err_msg=col)
+        # 2) sin conocimiento as-of (el comportamiento anterior) el holdout SÍ cambiaba: la prueba discrimina
+        uid = lambda product_idx: f"b{w.branch_ids[0]}-p{w.product_ids[product_idx]}"  # noqa: E731
+        wa = lambda rows, product_idx: rows.xs(uid(product_idx), level="unique_id").xs("window_average", level="family")["yhat"]  # noqa: E731
+        for product_idx in (0, 1):
+            assert not np.allclose(wa(leak, product_idx), wa(b, product_idx)), f"fuga en el holdout de la serie del producto {product_idx}"
+        # 3) auditoría: el origen del holdout reconstruyó su panel y registró qué no conocía todavía y qué se reemplazó después
+        entry = {i["origin"]: i for i in windows.info()}[h0.date().isoformat()]
+        assert entry["panel_rebuilt"] and (entry["lines_not_yet_known"], entry["lines_later_replaced"]) == (1, 1)
+
+
 def test_windows_that_equal_the_final_truth_reuse_it(db_engine, tenants):
     """Si lo que llegó tarde no toca el pasado de una ventana, esa ventana reutiliza el panel final (mismo resultado, sin reconstruir)."""
     with rolled_back(db_engine) as conn:

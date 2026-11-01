@@ -555,8 +555,10 @@ Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_
 mediana ≥ 5 líneas diarias en los 28 días previos; **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
 IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
 
-**16.4 Costo.** En los datos de la demo-ferretería (14 k líneas) la lectura de versiones tarda 0,19–0,28 s frente a 0,11–0,20 s de la consulta agregada anterior, y cada vista as-of adicional
-8–11 ms; con 714 k líneas (12 % tardías) la lectura tarda 4,1 s frente a 0,83 s y cada vista 10–20 ms. Una ventana solo reconstruye su panel cuando hay diferencias con la verdad.
+**16.4 Costo.** En los datos de la demo-ferretería (14 k líneas) la lectura de versiones tarda 0,15–0,28 s frente a 0,11–0,20 s de la consulta agregada anterior, y cada vista as-of adicional
+7–11 ms; `load_tenant_data` completo tarda 0,35–0,45 s frente a 0,58–0,89 s del motor anterior (el JIT apagado compensa la lectura de versiones). Con 714 k líneas (12 % tardías) la lectura tarda 4,1 s frente a 0,83 s y cada vista 10–20 ms.
+Una ventana solo reconstruye su panel cuando hay diferencias con la verdad. Con la regla inferida apagada el pronóstico de la demo sintética es idéntico al del motor anterior; con ella activa (por defecto) el total a 90 días sube un 0,23 % y el WAPE
+pasa de 0,4377 a 0,4358 (`TEMPORAL_AVAILABILITY.md` §5).
 
 **16.5 Estado de esta sección.**
 

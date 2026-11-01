@@ -4,6 +4,9 @@ Fecha: 31-oct-2026 · Rama: `v25/enterprise-core` · Responsable técnico: arqui
 Ejecución: subagentes de menor capacidad (Sonnet) implementan, revisan en forma adversarial y corrigen
 cada paquete; el arquitecto fija contratos (migraciones, ADR), revisa e integra.
 
+**Estado vigente, pendientes y próximos pasos:** [`V25-ESTADO-Y-PROXIMOS-PASOS.md`](../../V25-ESTADO-Y-PROXIMOS-PASOS.md)
+(raíz del repositorio). Contratos preparados y no activados: [`contracts/`](contracts/README.md).
+
 Fuentes: `docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md` (V2.5) y la
 auditoría con evidencia `docs/roadmap/audit/2026-10-31/` (requisitos extraídos y verificados,
 defectos, cotejo literal de V1 y V2, línea base). Decisiones: `docs/architecture/adr/V25-ADRS.md`.

@@ -139,7 +139,7 @@ deterministas: la base suma en `numeric` (exacto) y pandas ordena las celdas ant
 
 | Escenario | SQL anterior (celdas agregadas) | Lectura de versiones | Vista as-of adicional |
 |---|---|---|---|
-| Datos de la demo-ferretería (14 281 líneas, carga histórica) | 0,11–0,20 s | 0,19–0,28 s | 8–11 ms |
+| Datos de la demo-ferretería (14 281 líneas, carga histórica) | 0,11–0,20 s | 0,15–0,28 s | 7–11 ms |
 | 714 050 líneas, 12 % incrementales tardíos (54 364 filas con ventana) | 0,83 s | 4,1 s (PG 2,6–3,5 s + 0,6 s Python) | 10–20 ms (4 ventanas + final: 0,06 s) |
 
 La primera versión del lector transfería una fila por línea (12,9 s a 714 k líneas); agregar en la base por celda y ventana redujo la transferencia a una
@@ -148,10 +148,11 @@ agrupación con ocho claves). La huella de las versiones tarda < 10 ms. Para las
 **no se midió contra la base de desarrollo**.
 
 **Paridad y tiempo de la ejecución completa** (ferretería sintética `seed=42`, 10 productos, 14 281 líneas de carga histórica, cargada en `predictily_engine_test_w1b`; el motor anterior es el commit `5eae968`):
-con la regla inferida apagada (`day_status_infer_gaps = false`) los 5 164 `forecast_values` y las métricas (WAPE 0,4377, sesgo −0,0067, cobertura 80 % 0,870 y 95 % 0,984) son **idénticos** (rtol 1e-9)
-a los del motor anterior; `load_tenant_data` tarda 0,4–0,6 s frente a 0,9–1,0 s (el JIT apagado ahorra más de lo que cuesta la lectura de versiones) y el pipeline completo no muestra diferencia fuera del ruido de la máquina (12–35 s según la carga:
-no se crea ninguna ventana as-of cuando la carga es solo histórica). Con la regla inferida activa (por defecto) cambian 4 881 de las 5 164 filas de pronóstico (total diario −0,23 %) y mejora levemente el WAPE seleccionado
-(0,4377 → 0,4358), porque los feriados cerrados de los datos sintéticos dejan de entrenarse como ceros observados; es el efecto que debe aprobarse en el piloto (§12.4).
+con la regla inferida apagada (`day_status_infer_gaps = false`) los 5 164 `forecast_values` (11 columnas numéricas, diferencia absoluta máxima 0,0) y las métricas (WAPE 0,4377, sesgo −0,0067, cobertura 80 % 0,870 y 95 % 0,984, 2 558 observaciones) son **idénticos**
+a los del motor anterior; `load_tenant_data` completo tarda 0,35–0,45 s frente a 0,58–0,89 s (el JIT apagado ahorra más de lo que cuesta la lectura de versiones) y el pipeline completo no muestra diferencia fuera del ruido de la máquina (13,7 s el motor anterior, 14,4 s el nuevo con la regla apagada y 14,0 s
+con la regla activa, medidos con la máquina compartida; no se crea ninguna ventana as-of cuando la carga es solo histórica). Con la regla inferida activa (por defecto) se marcan 140 días-serie (0,86 % del panel; 14 sucursal-días inferidos) como `missing_source`, cambian 4 881 de las 5 164 filas de pronóstico
+(el total diario a 90 días **sube** un 0,23 %: 21 457 → 21 506 unidades) y mejora levemente el WAPE seleccionado (0,4377 → 0,4358; 2 548 observaciones evaluables), porque los feriados cerrados de los datos sintéticos dejan de entrenarse como ceros observados; es el efecto que debe aprobarse en el piloto (§12.4).
+Verificado en esta ejecución del paquete con un script de paridad que corre ambos motores sobre la misma empresa, semilla 42 y `n_jobs = 2` (no forma parte de la suite).
 
 ## 6. Demanda: backtest as-of por ventana
 
@@ -321,6 +322,9 @@ conteo) y la clasificación día a día vive en el panel en memoria de cada ejec
     Pasar una señal explícita de «ejecución vigente» desde `forecast_run.py` / `customer/service.py` lo resolvería, pero esos archivos solo admiten cambios en la carga de datos y no se tocaron: **pendiente de decisión del arquitecto**.
     Además, reconstruir después un corte que fue vigente NO reproduce al bit esa ejecución (ve menos: no conoce lo recibido tras su medianoche); lo que conoció queda en `knowledge.source.knowledge_date` y en la huella de datos.
 13. **Reconstrucción por ventana**: cada ventana con diferencias vuelve a construir su panel y sus variables (≈ el costo de un `build_panel` por ventana); en el Customer Core, una vista de eventos por corte con diferencias (se conservan dos). Sin diferencias no hay costo adicional.
+14. **Sesgo conservador en el borde de cada ventana con carga nocturna**: las ventanas del backtest y las observaciones del Customer Core aplican la regla estricta del ADR-V25-23, así que con documentos `incremental` que llegan tras la
+    medianoche (03:00 del día siguiente) cada ventana entrena sin las ventas de su último día, mientras que el pronóstico vigente sí las conoce (§3). Por eso el backtest es, en ese borde, ligeramente más pesimista que la producción. Es la consecuencia
+    literal de la regla (lo que se conocía el día `C`); una alternativa de diseño —un rezago de ingestión típico por fuente— no está implementada y requeriría decisión del arquitecto.
 
 ## 13. Pruebas y estado
 
@@ -330,7 +334,8 @@ conteo) y la clasificación día a día vive en el panel en memoria de cada ejec
 | `tests/unit/test_day_status.py` (15 casos) | Clasificación y precedencia, huecos, cobertura, cierres, regla inferida, perfilado, imputación, peso 0, filas del backtest, limitaciones/manifiesto/resumen/métricas, configuración | IMPLEMENTADO / VERIFICADO |
 | `tests/integration/test_asof_integration.py` (19 casos, PostgreSQL) | Escenarios T02 sobre las tablas del contrato; una sola lectura; aislamiento por empresa; fixtures por defecto = SQL anterior; huella; huecos/cierres/cobertura desde la BD; ventana de backtest estable ante perturbaciones posteriores (a nivel de `run_backtest` y de `run_pipeline` completo); ejecución vigente frente a reconstrucción histórica; costo de la lectura | IMPLEMENTADO / VERIFICADO |
 | `tests/integration/test_asof_customer_integration.py` (8 casos, PostgreSQL) | Contenido exacto de `purchases()/returns()`, as-of, variables vs etiquetas, dataset, regresión sin versiones, huella, corte final efectivo, ejecución vigente frente a histórica | IMPLEMENTADO / VERIFICADO |
-| `tests/unit/test_leakage.py`, `test_profiling.py`, `test_coverage.py`, `test_pipeline.py`, `test_snapshot_config.py`, `test_customer_dataset.py` | Pruebas de fuga y cobertura existentes, sin debilitar | IMPLEMENTADO / VERIFICADO (la suite completa del motor queda en verde; ver el informe del paquete) |
+| `tests/unit/test_leakage.py`, `test_profiling.py`, `test_coverage.py`, `test_pipeline.py`, `test_snapshot_config.py`, `test_customer_dataset.py` | Pruebas de fuga y cobertura existentes, sin modificar ni debilitar | IMPLEMENTADO / VERIFICADO (pasan en la suite completa) |
+| Suite completa del motor (`cd engine && ENGINE_TEST_DATABASE_URL=… .venv/bin/python -m pytest -q`) | 523 pruebas: las 418 de la línea base, las 73 de este paquete y 32 del paquete de firma de artefactos | IMPLEMENTADO / VERIFICADO: `523 passed, 1 warning in 3870.91s (1:04:30)` con la máquina compartida con otra suite (sin contención, las 73 pruebas nuevas tardan 78,5 s) |
 | Lectura as-of de Supply y Causal | — | DISEÑADO / NO IMPLEMENTADO (§12.10) |
 | Aceptación de `closure` por el backend | — | DISEÑADO / NO IMPLEMENTADO (§12.5) |
 
