@@ -198,41 +198,41 @@ compartido (fijaba el catálogo anterior). Demo con gate PASS (Ferretería WAPE 
 `fbb1739` (W2 integrado), para que los cambios en curso de W3 no lo afecten: el piloto ya usa Bronze, calidad,
 cuarentena y reconciliación.
 
-### Estado al cortar la sesión (1-nov-2026, 15:40 UTC)
+### Estado actual (1-nov-2026, tarde)
 
-- **W3 (sin confirmar, en el árbol de trabajo):** W3-A, W3-B y W3-C están implementados (motor 1022 pruebas en verde
-  antes de las correcciones). Revisión adversarial: W3-A 1 MEDIUM (resumen por segmentos demasiado pesado), W3-C 2 MEDIUM
-  (decisión del arquitecto: número de pedidos por modelo *hurdle* E(N) = P × E(N | N≥1), y ventana sin cifras cuando la
-  validación no da evidencia). Las correcciones de W3-A y W3-C y la revisión de W3-B quedaron **a medias** (se
-  detuvieron por límite de uso): reanudarlas, revisar W3-B, integrar (suites, demo, E2E) y confirmar. Después, W3-D
-  (API y UI).
-- **W4:** contrato activado (`7170174`); W4-A (`c77deab`) y W4-C (`bc54d9c`) confirmados tras revisión y corrección.
-  Falta W4-B (CLI y serving del motor; contrato de publicación en `docs/ml/MODEL_REGISTRY.md` §5.6), que se lanza
-  después de cerrar W3.
-- **Corrección transversal:** FKs compuestas `ON DELETE SET NULL (x_id)` (`e0378db`).
-- **W5 y W6:** contratos listos, no activados.
+- **W3 · motor confirmado:** W3-A (`a656521`), W3-B (`562f2b0`) y W3-C (`552f6c0`), cada uno tras revisión
+  adversarial y corrección (A: 1 MEDIUM + 7 LOW; B: 2 MEDIUM + 7 LOW; C: 2 MEDIUM + 7 LOW). Cada commit se probó
+  aislado (instantánea del índice). El cableado de `pipeline/core.py` de A y B va en el commit de B porque sus
+  líneas están intercaladas.
+- **W3-D (API y UI) en curso:** endpoints de evaluaciones, decisiones de promoción y shadow; columnas nuevas de
+  Customer; consumidores existentes de `model_evaluations` filtrados para que no cambie lo que muestran; bloque
+  `promotion` en la configuración efectiva por empresa. Al terminar: revisión, suites completas, E2E, demo frente a
+  la línea base, overlay de auditoría y gates; con eso se cierra W3.
+- **W4:** W4-A (`c77deab`) y W4-C (`bc54d9c`) confirmados. **W4-B (CLI y serving del motor) en curso**, en paralelo
+  con W3-D (no comparten archivos). Decisión del arquitecto: el motor sirve solo modelos con base `approved` o
+  `legacy_pipeline` (la misma política que `ModelServingPolicy` del backend) y firma válida; la promoción automática
+  del pipeline sigue como legado.
+- **Base de datos:** FKs compuestas `ON DELETE SET NULL` que solo anulan la referencia (`e0378db`) y nunca
+  `tenant_id`, tampoco donde es NULLABLE (`003fd69`, migración `2026_03_12_000500`; en `model_registry` borrar el
+  modelo anterior convertía el de la empresa en uno de plataforma).
+- **W5 y W6:** contratos listos; sus migraciones suben, bajan y vuelven a subir limpias sobre HEAD (base de prueba
+  desechable). Se activan después de cerrar W3 (W5-A depende de los campos de Customer y del endpoint de
+  evaluaciones de W3-D).
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
 - **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;
   el propietario debe iniciar sesión con la cuenta dueña del repositorio para subir la rama y abrir el PR.
 
-### Paso 1b · Oleada W3 · Calidad ML P0 (en curso)
+### Paso 1b · Oleada W3 · Calidad ML P0 (motor confirmado; API y UI en curso)
 
 Contrato activado (`4eb34f4`): `customer_predictions` con nº de pedidos, cantidad por pedido, unidades y ventana;
-`model_promotion_decisions`; `shadow_forecast_values`. Paquetes según `docs/roadmap/contracts/w3/workflow/v25-w3.js`:
-W3-A métricas por horizonte y segmento, W3-B política heredada y V2.5, champion/challenger, shadow y Optuna acotado,
-y W3-C Customer S05 (en implementación), más W3-D API y UI (después de A, B y C).
+`model_promotion_decisions`; `shadow_forecast_values`. Guion: `docs/roadmap/contracts/w3/workflow/v25-w3.js`.
 
-Guion: [`docs/roadmap/contracts/w2/workflow/v25-w2.js`](docs/roadmap/contracts/w2/workflow/v25-w2.js). Seis
-paquetes, cada uno con implementación, revisión adversarial y corrección:
-
-| Paquete | Alcance |
-|---|---|
-| W2-A | calidad de ingestión (hallazgos con clase), cuarentena revisable, mapeos de valores, deriva de esquema, captura Bronze antes de normalizar, linaje y reconciliación por carga |
-| W2-B | almacén Bronze completo (S3 contra emulador o bloqueo documentado, retención y purga), contratos canónicos versionados, alias de producto y cliente, reconciliación por ventana |
-| W2-C | métricas de dataset y gates por módulo `PASS / WARN / DEGRADE / BLOCK` antes de entrenar e inferir |
-| W2-D | validador de disponibilidad temporal, contratos de features y pruebas adversariales T11 |
-| W2-E | catálogo de horizontes 7/14/15/30/60/90 y planes Starter/Growth/Enterprise configurables |
-| W2-F | backend de Factor Intelligence P0, taxonomía básica y contrato `SharedForecastGrant` desactivado con pruebas negativas |
+| Paquete | Alcance | Estado |
+|---|---|---|
+| W3-A | métricas por horizonte y segmento (volumen y vida de la serie as-of), escenarios de forma de serie | ✅ `a656521` |
+| W3-B | política heredada parametrizada y V2.5, champion/challenger, shadow mode, Optuna acotado | ✅ `562f2b0` |
+| W3-C | Customer S05: nº de pedidos (hurdle), cantidad por pedido, unidades, ventana validada, ranking y calibración | ✅ `552f6c0` |
+| W3-D | API y UI de la calidad ML, exportación LOPDP de lo nuevo | en curso |
 
 ### Paso 2 · Piloto con datos reales (en cuanto exista la fuente)
 
