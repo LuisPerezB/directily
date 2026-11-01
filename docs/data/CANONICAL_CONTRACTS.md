@@ -84,7 +84,7 @@ verifica que ambas coinciden). La *Huella* es el SHA-256 completo en el código;
 | `external_signal` | ExternalSignal | `external_indicators`, `external_indicator_observations`, `external_events` | `external_signal@2026.03.1` | PARCIAL | `1d459e23f207` |
 | `action` | Action | — | `action@2026.03.0` | DISEÑADO | — |
 | `outcome` | Outcome | — | `outcome@2026.03.0` | DISEÑADO | — |
-| `forecast` | Forecast | `forecast_runs`, `forecast_values`, `core_runs`, `customer_predictions` | `forecast@2026.03.1` | PARCIAL | `7a05a108e4e8` |
+| `forecast` | Forecast | `forecast_runs`, `forecast_values`, `core_runs`, `customer_predictions` | `forecast@2026.03.2` | PARCIAL | `4922edb28276` |
 | `recommendation` | Recommendation | `recommendations` | `recommendation@2026.03.1` | PARCIAL | `98539cafb20b` |
 | `model_version` | ModelVersion | `model_registry` | `model_version@2026.03.1` | PARCIAL | `b162a7f75871` |
 | `data_quality_report` | DataQualityReport | `data_quality_reports`, `data_quality_issues`, `quarantine_records` | `data_quality_report@2026.03.1` | PARCIAL | `5a8ce89c8534` |

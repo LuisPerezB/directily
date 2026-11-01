@@ -36,3 +36,17 @@ falla en cuanto aparece una tabla nueva sin clasificar para la exportación LOPD
    pasos y suite completa del backend en verde.
 6. Confirmar y subir el contrato activado; lanzar el workflow `w2/workflow/v25-w2.js` pasando
    `args = { base: "<commit del contrato activado>" }` para que los revisores comparen contra esa base.
+
+## Contratos de W3 a W6
+
+| Carpeta | Contenido | Estado |
+|---|---|---|
+| `w3/` | Migración `2026_03_11_000100_add_ml_quality_promotion_and_shadow_contracts.php` y guion `v25-w3.js` (4 paquetes) | **Activado** el 1-nov-2026 (migración en `backend/database/migrations/`; tablas nuevas y columnas de `customer_predictions` clasificadas en la exportación LOPDP; contrato canónico `forecast@2026.03.2`) |
+| `w4/` | Migración `2026_03_12_000100_add_model_lifecycle_publication_and_usage_metering.php` y guion `v25-w4.js` (3 paquetes) | Preparado, no activado |
+| `w5/` | Migración `2026_03_13_000100_create_decision_radar_outcome_and_supply_contracts.php` y guion `v25-w5.js` (5 paquetes) | Preparado, no activado |
+| `w6/` | Migración `2026_03_14_000100_create_enterprise_security_bridge_and_gateway_contracts.php` y guion `v25-w6.js` (6 paquetes) | Preparado, no activado |
+
+Activación de cada oleada (igual que W2): copiar la migración, clasificar las tablas nuevas en `TenantDataExporter`,
+subir la versión de los contratos canónicos afectados (`CanonicalContractsTest`), verificar subida/reversión/subida y
+la suite del backend, confirmar y lanzar el guion con `args.base` = commit de activación.
+

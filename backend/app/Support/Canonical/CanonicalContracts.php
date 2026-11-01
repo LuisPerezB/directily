@@ -654,16 +654,16 @@ final class CanonicalContracts
         'forecast' => [
             'entity' => 'Forecast',
             'status' => 'PARCIAL',
-            'version' => 'forecast@2026.03.1',
+            'version' => 'forecast@2026.03.2',
             'tables' => ['forecast_runs', 'forecast_values', 'core_runs', 'customer_predictions'],
             'implemented_by' => null,
             'fields' => [
                 'forecast_runs' => 'id tenant_id version run_type status triggered_by user_id horizon_days frequency cutoff_date data_from data_to feature_set_version strategy options selection summary is_current error_message started_at completed_at created_at updated_at config_version effective_config data_snapshot_id evaluation_manifest',
                 'forecast_values' => 'id tenant_id forecast_run_id node_key level branch_id product_id category_id granularity target_date period_days horizon_step yhat lo_80 hi_80 lo_95 hi_95 model_registry_id model_family unit_price_assumed revenue_yhat p50 quality_status case_label',
                 'core_runs' => 'id tenant_id core operation version run_type status result_type quality_status uncertainty_source as_of horizons horizon_start horizon_end target_definition options config_version effective_config data_snapshot_id model_versions evaluation_manifest assumptions limitations summary is_current triggered_by user_id error_message started_at completed_at created_at updated_at',
-                'customer_predictions' => 'id tenant_id core_run_id customer_id product_id horizon_days as_of purchase_probability probability_raw probability_coherence_adjusted calibration_status quantity_if_purchase quantity_lo quantity_hi expected_quantity committed_quantity incremental_quantity total_view_quantity assumed_unit_price expected_amount currency median_interval_days days_since_last_purchase n_purchases model_family model_role quality_flags',
+                'customer_predictions' => 'id tenant_id core_run_id customer_id product_id horizon_days as_of purchase_probability probability_raw probability_coherence_adjusted calibration_status quantity_if_purchase quantity_lo quantity_hi expected_quantity committed_quantity incremental_quantity total_view_quantity assumed_unit_price expected_amount currency median_interval_days days_since_last_purchase n_purchases model_family model_role quality_flags expected_orders quantity_per_order expected_units window_p10_days window_p50_days window_p90_days window_status segment',
             ],
-            'fingerprint' => '7a05a108e4e88d669a3584585cf64cab4f099683d1c96a4b1b2ddb0331984d41',
+            'fingerprint' => '4922edb2827652531a0c5fa8471abeca07e7ee4916b2540f3e33a81237f20b7c',
             'required' => [
                 'source_system_id' => false,
                 'source_id' => false,
