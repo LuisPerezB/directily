@@ -43,6 +43,8 @@ Cuando cambie un JSON de `docs/roadmap/audit/2026-10-31` (estado de un requisito
 | Documento | Tipo | Contenido |
 | --- | --- | --- |
 | [`evidence/2026-10-31-baseline/`](evidence/2026-10-31-baseline/) | evidencia | Registros de la ejecución de la línea base (SUMMARY.txt, backend-phpunit.log, engine-pytest.log, frontend-build.log, frontend-lint.log, frontend-typecheck.log, frontend-vitest.log). |
+| [`evidence/2026-11-01-premerge/`](evidence/2026-11-01-premerge/) | evidencia | Registros de la ejecución de la línea base (SUMMARY.txt, backend-phpunit.log, engine-pytest.log, frontend-build.log, frontend-lint.log, frontend-typecheck.log, frontend-vitest.log). |
+| [`evidence/2026-11-01-w1-integration/`](evidence/2026-11-01-w1-integration/) | evidencia | Registros de la ejecución de la línea base (e2e-mvp-acceptance.log, e2e-stage2-acceptance.log). |
 
 ## Plan y criterios de salida
 
