@@ -701,13 +701,13 @@ final class CanonicalContracts
         'model_version' => [
             'entity' => 'ModelVersion',
             'status' => 'PARCIAL',
-            'version' => 'model_version@2026.03.1',
+            'version' => 'model_version@2026.03.2',
             'tables' => ['model_registry'],
             'implemented_by' => null,
             'fields' => [
-                'model_registry' => 'id tenant_id version model_family strategy_level scope sector demand_class status hyperparameters feature_set_version training_data_from training_data_to training_data_hash series_count artifact_path artifact_sha256 library_versions random_seed training_job_id forecast_run_id trained_at promoted_at retired_at notes created_at updated_at core role core_run_id validated_at artifact_compat',
+                'model_registry' => 'id tenant_id version model_family strategy_level scope sector demand_class status hyperparameters feature_set_version training_data_from training_data_to training_data_hash series_count artifact_path artifact_sha256 library_versions random_seed training_job_id forecast_run_id trained_at promoted_at retired_at notes created_at updated_at core role core_run_id validated_at artifact_compat purpose granularity previous_model_registry_id promotion_decision_id published_by published_object_key published_env published_at approved_by approved_at rejected_reason',
             ],
-            'fingerprint' => 'b162a7f75871115c0073944df0042999eac018b788c382ecb9555d98c8ec0940',
+            'fingerprint' => '525988a7aa64a5f8d06cd19605533e4cb291b3870739fd48d6d30b4b8f9877f3',
             'required' => [
                 'source_system_id' => false,
                 'source_id' => false,

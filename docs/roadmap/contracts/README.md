@@ -42,7 +42,7 @@ falla en cuanto aparece una tabla nueva sin clasificar para la exportación LOPD
 | Carpeta | Contenido | Estado |
 |---|---|---|
 | `w3/` | Migración `2026_03_11_000100_add_ml_quality_promotion_and_shadow_contracts.php` y guion `v25-w3.js` (4 paquetes) | **Activado** el 1-nov-2026 (migración en `backend/database/migrations/`; tablas nuevas y columnas de `customer_predictions` clasificadas en la exportación LOPDP; contrato canónico `forecast@2026.03.2`) |
-| `w4/` | Migración `2026_03_12_000100_add_model_lifecycle_publication_and_usage_metering.php` y guion `v25-w4.js` (3 paquetes) | Preparado, no activado |
+| `w4/` | Migración `2026_03_12_000100_add_model_lifecycle_publication_and_usage_metering.php` y guion `v25-w4.js` (3 paquetes) | **Activado** el 1-nov-2026 (CHECK de estados del registro, tablas nuevas exportadas sin `published_object_key`, contrato canónico `model_version@2026.03.2`) |
 | `w5/` | Migración `2026_03_13_000100_create_decision_radar_outcome_and_supply_contracts.php` y guion `v25-w5.js` (5 paquetes) | Preparado, no activado |
 | `w6/` | Migración `2026_03_14_000100_create_enterprise_security_bridge_and_gateway_contracts.php` y guion `v25-w6.js` (6 paquetes) | Preparado, no activado |
 

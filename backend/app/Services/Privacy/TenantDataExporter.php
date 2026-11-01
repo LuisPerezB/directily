@@ -104,7 +104,7 @@ final class TenantDataExporter
         'forecast_features' => ['id', 'feature_set_version', 'name', 'kind', 'description', 'config', 'is_active', 'created_at'],
         'forecasting_series' => ['id', 'branch_id', 'product_id', 'unique_id', 'first_sale_date', 'last_sale_date', 'history_days', 'nonzero_days', 'total_units', 'adi', 'cv2', 'demand_class', 'stockout_days', 'censored_days', 'is_active', 'last_profiled_at', 'lifecycle', 'created_at', 'updated_at'],
         // Sin `artifact_path` (ruta interna del artefacto en el servidor); sí su huella `artifact_sha256`.
-        'model_registry' => ['id', 'version', 'model_family', 'strategy_level', 'scope', 'sector', 'demand_class', 'status', 'core', 'role', 'hyperparameters', 'feature_set_version', 'training_data_from', 'training_data_to', 'training_data_hash', 'series_count', 'artifact_sha256', 'artifact_compat', 'library_versions', 'random_seed', 'training_job_id', 'forecast_run_id', 'core_run_id', 'trained_at', 'validated_at', 'promoted_at', 'retired_at', 'notes', 'created_at', 'updated_at'],
+        'model_registry' => ['id', 'version', 'model_family', 'strategy_level', 'scope', 'sector', 'demand_class', 'status', 'core', 'role', 'hyperparameters', 'feature_set_version', 'training_data_from', 'training_data_to', 'training_data_hash', 'series_count', 'artifact_sha256', 'artifact_compat', 'library_versions', 'random_seed', 'training_job_id', 'forecast_run_id', 'core_run_id', 'trained_at', 'validated_at', 'promoted_at', 'retired_at', 'notes', 'created_at', 'updated_at', 'purpose', 'granularity', 'previous_model_registry_id', 'promotion_decision_id', 'published_by', 'published_env', 'published_at', 'approved_by', 'approved_at', 'rejected_reason'],
         'model_evaluations' => ['id', 'model_registry_id', 'forecast_run_id', 'core_run_id', 'core', 'model_family', 'evaluation_type', 'level', 'level_key', 'horizon_days', 'is_baseline', 'is_selected', 'wape', 'mae', 'rmse', 'bias', 'coverage_80', 'coverage_95', 'n_obs', 'n_windows', 'cutoffs', 'extra', 'metrics', 'created_at'],
         // Sin `error_message` (texto técnico interno); el estado y el resultado sí.
         'training_jobs' => ['id', 'forecast_run_id', 'core_run_id', 'job_type', 'status', 'stage', 'progress', 'attempts', 'triggered_by', 'user_id', 'params', 'result', 'model_registry_id', 'queued_at', 'started_at', 'finished_at', 'duration_ms', 'created_at', 'updated_at'],
@@ -129,6 +129,9 @@ final class TenantDataExporter
         // ── V2.5 · W3 Calidad ML (ADR-V25-11 y -21): decisiones de promoción y pronósticos shadow (resultados de la empresa) ──
         'model_promotion_decisions' => ['id', 'core', 'forecast_run_id', 'core_run_id', 'scope_key', 'policy', 'policy_version', 'candidate_family', 'champion_family', 'candidate_model_registry_id', 'champion_model_registry_id', 'decision', 'is_effective', 'gates', 'metrics', 'reason', 'approved_by', 'approved_at', 'decided_at', 'created_at'],
         'shadow_forecast_values' => ['id', 'forecast_run_id', 'model_registry_id', 'model_family', 'node_key', 'level', 'branch_id', 'product_id', 'target_date', 'horizon_step', 'yhat', 'lo_80', 'hi_80', 'created_at'],
+        // ── V2.5 · W4 MLOps (ADR-V25-07): transiciones auditadas del registro y medición de uso por empresa (sin published_object_key) ──
+        'model_registry_events' => ['id', 'model_registry_id', 'from_status', 'to_status', 'actor_user_id', 'actor_kind', 'reason', 'evidence', 'created_at'],
+        'tenant_usage_records' => ['id', 'period', 'metric', 'quantity', 'unit', 'source', 'source_ref', 'created_at'],
     ];
 
     /**
