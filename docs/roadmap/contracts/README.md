@@ -1,17 +1,18 @@
-# Contratos preparados por el arquitecto (no activos)
+# Contratos y guiones de orquestación del arquitecto
 
-Esta carpeta guarda contratos y guiones de orquestación **preparados pero todavía no activados**, para que
-no se pierdan si el entorno de trabajo se recicla y para que cualquier sesión pueda continuar.
+Esta carpeta guarda contratos y guiones de orquestación preparados por el arquitecto, para que no se pierdan si el
+entorno de trabajo se recicla y para que cualquier sesión pueda continuar. Una vez activado, la copia de esta carpeta
+queda como registro histórico: la versión vigente es la de su ubicación definitiva.
 
 | Carpeta | Contenido | Estado |
 |---|---|---|
-| `w1/workflow/v25-w1-p0-fixes.js` | Guion del workflow de W1 (correcciones P0: A1 escritura temporal de ventas, A2 lectura as-of del motor, B seguridad) con implementación, revisión adversarial y corrección por paquete | **En ejecución** (ver `V25-ESTADO-Y-PROXIMOS-PASOS.md`) |
-| `w2/migrations/` | `2026_03_03_000100_create_data_quality_lineage_and_identity_tables.php` (ADR-V25-24) y `2026_03_04_000100_create_factor_intelligence_and_taxonomy_contracts.php` (ADR-V25-25) | Probadas (subida, reversión y subida) sobre el esquema de W1; **no activadas** |
-| `w2/backend/` | Interfaz `BronzeStore`, implementación mínima `FilesystemBronzeStore`, modelo `BronzeObject`, `config/bronze.php` y `CanonicalContracts` (versiones) | Compilan (`php -l`); **no activados** |
-| `w2/docs/data/DATA_QUALITY_ENGINE.md` | Esqueleto del documento con secciones asignadas a W2-A y W2-C | **No activado** |
-| `w2/workflow/v25-w2.js` | Guion del workflow de W2 (seis paquetes con archivos asignados) | Listo para lanzar tras activar el contrato |
+| `w1/workflow/v25-w1-p0-fixes.js` | Guion del workflow de W1 (correcciones P0: A1 escritura temporal de ventas, A2 lectura as-of del motor, B seguridad) con implementación, revisión adversarial y corrección por paquete | **Ejecutado y cerrado** el 1-nov-2026 (revisión adversarial y corrección de los tres paquetes; ver `V25-ESTADO-Y-PROXIMOS-PASOS.md`) |
+| `w2/migrations/` | `2026_03_03_000100_create_data_quality_lineage_and_identity_tables.php` (ADR-V25-24) y `2026_03_04_000100_create_factor_intelligence_and_taxonomy_contracts.php` (ADR-V25-25) | **Activadas** el 1-nov-2026 en `backend/database/migrations/` (subida, reversión y subida verificadas; Pint aplicado a la copia activa) |
+| `w2/backend/` | Interfaz `BronzeStore`, implementación mínima `FilesystemBronzeStore`, modelo `BronzeObject`, `config/bronze.php` y `CanonicalContracts` (versiones) | **Activados** en `backend/` (`BronzeStore` → `FilesystemBronzeStore` en `AppServiceProvider`; tablas nuevas clasificadas en `TenantDataExporter`) |
+| `w2/docs/data/DATA_QUALITY_ENGINE.md` | Esqueleto del documento con secciones asignadas a W2-A y W2-C | **Activado** en `docs/data/DATA_QUALITY_ENGINE.md` |
+| `w2/workflow/v25-w2.js` | Guion del workflow de W2 (seis paquetes con archivos asignados) | En ejecución (ver `V25-ESTADO-Y-PROXIMOS-PASOS.md`) |
 
-## Por qué no están activados
+## Por qué el contrato de W2 esperó al cierre de W1
 
 Mientras W1 corre, sus agentes migran bases de prueba propias con `migrate:fresh`. Poner ahora las migraciones
 de W2 en `backend/database/migrations/` cambiaría su esquema a mitad de trabajo; además, la prueba

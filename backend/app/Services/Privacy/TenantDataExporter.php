@@ -28,19 +28,19 @@ final class TenantDataExporter
         'customer_segments' => ['id', 'code', 'name'],
         'customers' => ['id', 'external_code', 'segment_id', 'customer_type', 'province', 'canton', 'commercial_zone', 'created_at'],
         'suppliers' => ['id', 'code', 'name', 'tax_id', 'country', 'default_lead_time_days'],
-        'sales' => ['id', 'branch_id', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at'],
+        'sales' => ['id', 'branch_id', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at', 'bronze_object_id', 'source_row', 'schema_version'],
         'sale_items' => ['id', 'sale_id', 'line_number', 'product_id', 'branch_id', 'sale_date', 'quantity', 'unit_price', 'discount_amount', 'net_amount', 'tax_amount', 'unit_cost', 'is_return'],
         // ── V2.5 · contrato temporal de ventas (ADR-V25-23): versiones reemplazadas de cada documento y huecos de cobertura ──
-        'sales_document_revisions' => ['id', 'sale_id', 'revision', 'document_type', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'source_recorded_at', 'known_from', 'known_until', 'import_job_id', 'superseded_by_import_job_id', 'data_source_id', 'change_kind', 'created_at'],
+        'sales_document_revisions' => ['id', 'sale_id', 'revision', 'document_type', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'source_recorded_at', 'known_from', 'known_until', 'import_job_id', 'superseded_by_import_job_id', 'data_source_id', 'change_kind', 'created_at', 'bronze_object_id', 'source_row', 'schema_version'],
         'sale_item_revisions' => ['id', 'sale_id', 'revision', 'line_number', 'product_id', 'branch_id', 'sale_date', 'quantity', 'unit_price', 'discount_amount', 'net_amount', 'tax_amount', 'unit_cost', 'is_return', 'created_at'],
         'data_coverage_gaps' => ['id', 'entity', 'data_source_id', 'branch_id', 'gap_from', 'gap_to', 'reason', 'basis', 'notes', 'created_at', 'updated_at'],
-        'inventory_snapshots' => ['id', 'branch_id', 'product_id', 'snapshot_date', 'on_hand', 'reserved', 'in_transit', 'unit_cost'],
+        'inventory_snapshots' => ['id', 'branch_id', 'product_id', 'snapshot_date', 'on_hand', 'reserved', 'in_transit', 'unit_cost', 'bronze_object_id', 'source_row', 'schema_version'],
         'supplier_lead_times' => ['id', 'supplier_id', 'product_id', 'branch_id', 'lead_time_days', 'lead_time_std_days', 'source'],
         'promotions' => ['id', 'name', 'promo_type', 'discount_pct', 'starts_on', 'ends_on', 'branch_id', 'product_id', 'category_id', 'known_at', 'deleted_at'],
         'promotion_revisions' => ['id', 'promotion_id', 'revision', 'name', 'promo_type', 'discount_pct', 'starts_on', 'ends_on', 'branch_id', 'product_id', 'category_id', 'known_at', 'deleted', 'source', 'recorded_at'],
         'product_price_history' => ['id', 'product_id', 'branch_id', 'price', 'currency', 'valid_from', 'valid_to', 'source'],
         'purchase_cost_history' => ['id', 'product_id', 'supplier_id', 'unit_cost', 'currency', 'valid_from', 'source'],
-        'import_jobs' => ['id', 'entity_type', 'original_filename', 'file_hash', 'status', 'created_at', 'finished_at'],
+        'import_jobs' => ['id', 'entity_type', 'original_filename', 'file_hash', 'status', 'created_at', 'finished_at', 'bronze_object_id'],
         'forecast_runs' => ['id', 'version', 'run_type', 'status', 'horizon_days', 'cutoff_date', 'feature_set_version', 'is_current', 'created_at', 'completed_at'],
         'recommendations' => ['id', 'forecast_run_id', 'branch_id', 'product_id', 'type', 'suggested_qty', 'risk_level', 'status', 'created_at'],
         'audit_logs' => ['id', 'user_id', 'action', 'auditable_type', 'auditable_id', 'created_at'],
@@ -57,9 +57,9 @@ final class TenantDataExporter
         // Solo los eventos DE LA EMPRESA (tenant_id = empresa): el calendario público (tenant_id NULL) no es de la empresa.
         'calendar_events' => ['id', 'scope', 'scope_ref', 'code', 'name', 'category', 'starts_on', 'ends_on', 'status', 'known_at', 'source', 'revision', 'created_at'],
         // Fuentes SIN `config` (host, usuario, base) ni `credentials_encrypted` ni `last_error`: nunca se exportan credenciales.
-        'data_sources' => ['id', 'type', 'connector_key', 'name', 'status', 'last_synced_at', 'created_at'],
+        'data_sources' => ['id', 'type', 'connector_key', 'name', 'status', 'last_synced_at', 'created_at', 'schema_fingerprint', 'schema_version'],
         'source_mappings' => ['id', 'data_source_id', 'entity', 'query', 'field_map', 'options', 'version', 'approved_by', 'approved_at', 'is_active', 'created_at'],
-        'source_syncs' => ['id', 'data_source_id', 'source_mapping_id', 'import_job_id', 'entity', 'mapping_version', 'mode', 'status', 'triggered_by', 'since', 'watermark', 'rows_extracted', 'pages', 'stats', 'started_at', 'finished_at', 'created_at'],
+        'source_syncs' => ['id', 'data_source_id', 'source_mapping_id', 'import_job_id', 'entity', 'mapping_version', 'mode', 'status', 'triggered_by', 'since', 'watermark', 'rows_extracted', 'pages', 'stats', 'started_at', 'finished_at', 'created_at', 'bronze_object_id'],
 
         // ── Etapa 2 · Comportamiento de compra (resultados por comprador; el nombre/identificación del comprador no se incluye aquí) ──
         'customer_predictions' => ['id', 'core_run_id', 'customer_id', 'product_id', 'horizon_days', 'as_of', 'purchase_probability', 'probability_raw', 'probability_coherence_adjusted', 'calibration_status', 'quantity_if_purchase', 'quantity_lo', 'quantity_hi', 'expected_quantity', 'committed_quantity', 'incremental_quantity', 'total_view_quantity', 'assumed_unit_price', 'expected_amount', 'currency', 'median_interval_days', 'days_since_last_purchase', 'n_purchases', 'model_family', 'model_role', 'quality_flags'],
@@ -107,7 +107,24 @@ final class TenantDataExporter
         'model_evaluations' => ['id', 'model_registry_id', 'forecast_run_id', 'core_run_id', 'core', 'model_family', 'evaluation_type', 'level', 'level_key', 'horizon_days', 'is_baseline', 'is_selected', 'wape', 'mae', 'rmse', 'bias', 'coverage_80', 'coverage_95', 'n_obs', 'n_windows', 'cutoffs', 'extra', 'metrics', 'created_at'],
         // Sin `error_message` (texto técnico interno); el estado y el resultado sí.
         'training_jobs' => ['id', 'forecast_run_id', 'core_run_id', 'job_type', 'status', 'stage', 'progress', 'attempts', 'triggered_by', 'user_id', 'params', 'result', 'model_registry_id', 'queued_at', 'started_at', 'finished_at', 'duration_ms', 'created_at', 'updated_at'],
-        'data_quality_reports' => ['id', 'import_job_id', 'forecast_run_id', 'scope', 'score', 'summary', 'issues', 'created_at'],
+        'data_quality_reports' => ['id', 'import_job_id', 'forecast_run_id', 'scope', 'score', 'summary', 'issues', 'created_at', 'core_run_id', 'bronze_object_id', 'dataset', 'as_of', 'issue_counts', 'metrics', 'gate_results', 'rules_version'],
+        // ── V2.5 · W2 Data Core (ADR-V25-24 y -25): Bronze, calidad, cuarentena, reconciliación, identidades, factores y taxonomía ──
+        // Sin `object_key` (clave interna del almacén); sí la huella, el tamaño y la procedencia del objeto.
+        'bronze_objects' => ['id', 'data_source_id', 'kind', 'entity', 'storage_driver', 'sha256', 'size_bytes', 'content_type', 'schema_fingerprint', 'schema_version', 'row_count', 'original_name', 'received_by_user_id', 'received_from_device', 'received_at', 'retention_until', 'status', 'metadata', 'created_at', 'updated_at'],
+        'data_quality_issues' => ['id', 'report_id', 'dq_class', 'code', 'entity', 'record_ref', 'source_row', 'field', 'original_value', 'proposed_value', 'applied', 'reason', 'status', 'resolved_by', 'resolved_at', 'created_at'],
+        'quarantine_records' => ['id', 'bronze_object_id', 'import_job_id', 'source_sync_id', 'entity', 'record_key', 'payload', 'issue_codes', 'status', 'resolved_by', 'resolved_at', 'created_at', 'updated_at'],
+        'reconciliation_reports' => ['id', 'scope', 'entity', 'data_source_id', 'bronze_object_id', 'import_job_id', 'source_sync_id', 'window_from', 'window_to', 'layers', 'discrepancies', 'status', 'created_at'],
+        'product_aliases' => ['id', 'product_id', 'data_source_id', 'source_code', 'kind', 'valid_from', 'valid_to', 'notes', 'created_by', 'created_at', 'updated_at'],
+        'customer_aliases' => ['id', 'customer_id', 'data_source_id', 'source_code', 'kind', 'valid_from', 'valid_to', 'notes', 'created_by', 'created_at', 'updated_at'],
+        // Las filas públicas (tenant_id NULL: catálogo de la plataforma) no son datos de la empresa y no se exportan.
+        'source_versions' => ['id', 'source_key', 'version_label', 'published_at', 'retrieved_at', 'license', 'terms_url', 'checksum', 'coverage', 'notes', 'created_at', 'updated_at'],
+        'factor_definitions' => ['id', 'family', 'key', 'name', 'availability_class', 'storage', 'external_indicator_id', 'unit', 'frequency', 'geo_scope', 'source_key', 'license', 'missing_strategy', 'max_staleness_days', 'retention_days', 'sector_justification', 'schema', 'is_active', 'is_informative_alert', 'created_at', 'updated_at'],
+        'external_events' => ['id', 'family', 'event_type', 'title', 'summary', 'source_url', 'source_ref', 'authority', 'published_at', 'available_at', 'effective_from', 'effective_to', 'jurisdiction', 'corroboration', 'status', 'extracted_by', 'extraction', 'affects', 'is_informative_alert', 'source_version_id', 'verified_by', 'verified_at', 'created_at', 'updated_at'],
+        'taxonomy_nodes' => ['id', 'parent_id', 'level', 'code', 'name', 'version', 'valid_from', 'valid_to', 'erp_category_id', 'attributes', 'created_at', 'updated_at'],
+        'product_taxonomy_assignments' => ['id', 'product_id', 'taxonomy_node_id', 'provenance', 'confidence', 'is_primary', 'proposed_by', 'verified_by', 'verified_at', 'valid_from', 'valid_to', 'created_at', 'updated_at'],
+        'tenant_sector_profiles' => ['id', 'profile_key', 'priority', 'scope', 'scope_ref', 'is_active', 'created_at', 'updated_at'],
+        'factor_applicability_rules' => ['id', 'factor_definition_id', 'profile_key', 'taxonomy_node_id', 'region', 'effect', 'rule', 'priority', 'justification', 'is_active', 'created_at', 'updated_at'],
+        'factor_evaluations' => ['id', 'factor_definition_id', 'family', 'factor_set', 'segment', 'horizon_days', 'cutoff', 'baseline_metrics', 'candidate_metrics', 'holdout_untouched', 'decision', 'cost', 'notes', 'created_at'],
     ];
 
     /**

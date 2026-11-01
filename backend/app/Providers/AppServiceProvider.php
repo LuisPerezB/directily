@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Models\PersonalAccessToken;
+use App\Services\DataCore\Bronze\BronzeStore;
+use App\Services\DataCore\Bronze\FilesystemBronzeStore;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
@@ -20,6 +22,8 @@ class AppServiceProvider extends ServiceProvider
     {
         // scoped: se reinicia por petición/trabajo (seguro con Octane y workers de cola).
         $this->app->scoped(TenantContext::class);
+        // Almacén Bronze inmutable (ADR-V25-24): implementación por sistema de archivos; el controlador S3 lo agrega W2-B.
+        $this->app->bind(BronzeStore::class, FilesystemBronzeStore::class);
     }
 
     public function boot(): void
