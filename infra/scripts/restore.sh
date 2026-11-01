@@ -16,10 +16,28 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-if [[ -f "$ROOT/.env" ]]; then
-  set -a; # shellcheck disable=SC1091
-  source <(grep -E '^(DB_|BACKUP_)[A-Z_]*=' "$ROOT/.env"); set +a
-fi
+
+# Carga DB_* y BACKUP_* del .env SOLO si no están ya definidas en el entorno (misma regla que backup.sh y recovery-check.sh).
+# BACKUP_IGNORE_ENV_FILE=true omite el .env.
+load_env_file() {
+  local file="$1" line key value
+  [[ "${BACKUP_IGNORE_ENV_FILE:-false}" == "true" ]] && return 0
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^(DB_|BACKUP_)[A-Z_]*= ]] || continue
+    key="${line%%=*}"; value="${line#*=}"
+    value="${value%$'\r'}"
+    value="${value%"${value##*[![:space:]]}"}"
+    case "$value" in
+      \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+      \"*|\'*) value="${value#?}" ;;
+      *) value="${value%%[[:space:]]#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
+    esac
+    if [[ -z "$(printenv "$key" || true)" ]]; then export "$key=$value"; fi
+  done < "$file"
+}
+load_env_file "$ROOT/.env"
+sha256_check() { if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "$1"; else shasum -a 256 -c "$1"; fi; }
 DB_USERNAME="${DB_USERNAME:-predictily}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-5432}"
@@ -34,7 +52,7 @@ $VERIFY && TARGET="predictily_restore_check"
 [[ -f "$SRC" ]] || { echo "No existe $SRC" >&2; exit 1; }
 
 if [[ -f "$SRC.sha256" ]]; then
-  (cd "$(dirname "$SRC")" && sha256sum -c "$(basename "$SRC").sha256" >/dev/null) \
+  (cd "$(dirname "$SRC")" && sha256_check "$(basename "$SRC").sha256" >/dev/null) \
     && echo "[restore] suma SHA-256 verificada" || { echo "[restore] ERROR: suma SHA-256 no coincide" >&2; exit 1; }
 fi
 

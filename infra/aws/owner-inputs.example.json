@@ -1,0 +1,17 @@
+{
+  "account": "<id de cuenta AWS de 12 dígitos>",
+  "region": "us-east-1",
+  "appDomainName": "app.su-dominio.com",
+  "originDomainName": "origen.su-dominio.com",
+  "albCertificateArn": "arn:aws:acm:us-east-1:<cuenta>:certificate/<uuid>",
+  "cloudFrontCertificateArn": "arn:aws:acm:us-east-1:<cuenta>:certificate/<uuid>",
+  "cloudFrontOriginPrefixListId": "pl-<id de com.amazonaws.global.cloudfront.origin-facing en la región>",
+  "availabilityZones": ["us-east-1a", "us-east-1b"],
+  "alertEmails": ["operaciones@su-dominio.com"],
+  "monthlyBudgetUsd": 0,
+  "trustedPublicKeys": "<kid>:<clave publica Ed25519 en base64>",
+  "signingKeyId": "<kid>",
+  "budgetFilterByEnvironmentTag": false,
+  "signingKeySecretName": "predictily/<entorno>/engine-signing-key",
+  "imageTag": "<etiqueta inmutable de las imágenes en ECR>"
+}
