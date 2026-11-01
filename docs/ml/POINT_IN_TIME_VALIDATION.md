@@ -1,0 +1,104 @@
+# Validación punto-en-el-tiempo: casos T02 y T11 (V2.5 §18 y §26)
+
+> **Alcance y estado.** Este documento describe **cómo se demuestra** que una feature o un factor no usa conocimiento futuro: el método, los casos
+> adversariales T02 (feature store y temporalidad) y T11 (factores externos, fuentes y tiempo) con la prueba que afirma cada uno y su estado
+> real. El modelo que decide qué era visible en un corte está en `engine/predictily_engine/availability/` y su contrato por feature en
+> `docs/data/FEATURE_CONTRACTS.md`; la lectura as-of de las ventas, en `docs/data/TEMPORAL_AVAILABILITY.md`. Implementa ADR-V25-06 y ADR-V25-25
+> (`docs/architecture/adr/V25-ADRS.md`).
+>
+> Cada afirmación lleva una de estas marcas: **IMPLEMENTADO / VERIFICADO** (con la prueba que lo demuestra), **DISEÑADO / NO IMPLEMENTADO**,
+> **BLOQUEADO** o **NO APLICA**. Las pruebas están en `engine/tests/` y se ejecutan desde un directorio **sin `.env`**:
+> `ENGINE_TEST_DATABASE_URL=postgresql+psycopg://<usuario>:<clave>@127.0.0.1:5432/<bd_de_pruebas> <venv>/bin/python -m pytest -q --rootdir=<repo>/engine -c <repo>/engine/pyproject.toml <repo>/engine/tests/<ruta>`
+> (la BD se migra con `cd backend && DB_DATABASE=<bd_de_pruebas> php artisan migrate:fresh --force`).
+
+## 1. Método
+
+1. **Se fija el corte `C`** (fecha local de la empresa) y se reconstruye lo que **se conocía** ese día, no lo que se sabe hoy:
+   disponibilidad `< medianoche local de (C+1)` (§2.2 de `FEATURE_CONTRACTS.md`), con la última **revisión** visible a esa fecha.
+2. **Fixtures adversariales con filas insertadas directamente** en las tablas del contrato (`external_indicator_observations`, `external_events`,
+   `calendar_events`, `factor_definitions`…), dentro de transacciones que se revierten: el dato «malo» tiene fecha de evento anterior al corte pero
+   se conoce, se publica, se emite o se verifica **después**.
+3. **Cada caso afirma tres cosas**: el estado exacto (`AVAILABLE`, `NOT_YET_AVAILABLE`, `STALE`, `INVALID`, `SCENARIO_ONLY`), su motivo (código estable) y que el valor
+   visible NO es el futuro (el valor previo, ninguno, o la fecha de uso correcta). Después se avanza el corte y se afirma que el dato **sí** aparece desde su disponibilidad
+   (la prueba no vale si el dato nunca fuera visible).
+4. **Fronteras exactas**: instantes a 0 y ±1 ns de `M(C+1)` en cinco zonas horarias con cambios de horario, comparados con las dos reglas que reutiliza el validador
+   (`data.asof.knowledge_boundary`, W1; `supply.availability.known_by`).
+5. **Entrenamiento por fecha**: las filas de entrenamiento de un factor usan lo conocido **cada día** (no la última revisión de hoy) y el futuro arrastra el último valor visible al corte con su antigüedad.
+6. **Sanidad de las pruebas** (verificación manual de este paquete, NO automatizada): se alteraron a propósito tres reglas —los pronósticos ignorando `issued_at`, las revisiones ignorando la visibilidad y el interruptor del pipeline ignorado— y las
+   pruebas T11 y del pipeline fallaron cada vez; se restauró el código y volvieron a pasar.
+
+## 2. T02 — Feature store y temporalidad (casos adversariales)
+
+V2.5 §18 T02: *precio de mañana, documento cargado tardíamente, climatología publicada después, descuento futuro, estado anulado posteriormente → prohibidos como feature disponible en fecha pasada*.
+
+| Caso T02 | Prueba que lo afirma | Estado |
+|---|---|---|
+| Precio de mañana | `test_leakage.py::test_features_do_not_use_future_data` y `::test_backtest_predictions_ignore_data_after_cutoff` (un precio ×3 posterior al corte no altera las features ni el backtest); el futuro se congela (`frozen_price`) salvo precio **confirmado** con `known_at` ≤ corte: `test_feature_contracts.py::test_a_confirmed_future_price_replaces_frozen_price_only_when_it_was_known_at_the_cutoff`, `::test_the_known_at_of_a_confirmed_price_follows_the_local_midnight_boundary` | IMPLEMENTADO / VERIFICADO |
+| Documento cargado tardíamente | `test_asof_visibility.py::test_incremental_document_loaded_late_is_invisible_before_its_ingestion_and_visible_after`; en BD `test_asof_integration.py::test_incremental_document_loaded_late_is_invisible_before_its_ingestion_and_visible_after` (W1) | IMPLEMENTADO / VERIFICADO |
+| Climatología publicada después | `test_availability_validator.py::test_t02_climatology_published_after_the_cutoff_is_not_available_on_a_past_date` (la serie de entrenamiento tampoco la ve antes de su publicación) | IMPLEMENTADO / VERIFICADO con datos ficticios; **BLOQUEADO** con un origen real (sin credenciales ni licencias) |
+| Descuento futuro | `test_promotions_as_of.py::test_audit_case_promotion_registered_after_cutoff_is_not_used`, `::test_modification_after_cutoff_does_not_change_that_cutoff`; para campañas de calendario: `test_factors_t11_integration.py::test_t11_campaign_known_in_advance_is_available_for_the_future_days_of_the_horizon` | IMPLEMENTADO / VERIFICADO |
+| Estado anulado posteriormente | `test_asof_visibility.py::test_a_voided_document_is_counted_before_the_voiding_and_excluded_after`; en BD `test_asof_integration.py::test_a_later_voiding_is_counted_before_it_and_excluded_after` (W1) | IMPLEMENTADO / VERIFICADO |
+| Reproducibilidad `dataset_fingerprint + cutoff + features_version` | La huella de las ventanas de conocimiento de las ventas está en W1 (`test_asof_visibility.py::test_the_digest_covers_knowledge_windows_not_only_values`). El registro de contratos tiene versión y huella propias (`contracts_digest()`, fijadas por `test_feature_contracts.py::test_the_contract_registry_is_pinned_by_version_and_digest`) | PARCIAL: la huella de contratos **no** se registra todavía en el manifiesto ni en el snapshot de la ejecución — DISEÑADO / NO IMPLEMENTADO |
+
+## 3. T11 — Factores externos, fuentes y tiempo
+
+V2.5 §26 T11: *documento sanitario publicado después, pronóstico meteorológico emitido mañana pero registrado hoy, precio de competencia actualizado retroactivamente, noticia sin fecha, nueva revisión de estadísticas, API fallida y evento de campaña conocido por anticipado*.
+Pruebas en `test_factors_t11_integration.py` (BD `predictily_engine_test_w2d`; filas ficticias insertadas directamente) y, para la regla pura, en `test_availability_validator.py`.
+
+| # | Caso | Estado esperado | Prueba (integración) | Prueba (regla pura) |
+|---|---|---|---|---|
+| 1 | Documento sanitario publicado después del corte (vigencia desde antes) | `NOT_YET_AVAILABLE` (`published_after_cutoff`; luego `verified_after_cutoff`; `AVAILABLE` solo publicado **y** verificado) | `test_t11_sanitary_document_published_after_the_cutoff_is_not_yet_available` | `test_only_a_verified_event_known_verified_and_published_before_the_cutoff_is_available` |
+| 2 | Pronóstico meteorológico emitido mañana pero registrado hoy | `NOT_YET_AVAILABLE` (`issued_after_cutoff`, marca `registered_before_issue`); con una emisión anterior, el visible es la de ayer, nunca la de mañana | `test_t11_weather_forecast_issued_tomorrow_but_registered_today_is_not_yet_available` | `test_a_forecast_issued_tomorrow_but_registered_today_is_not_available_today` |
+| 3 | Precio de competencia actualizado retroactivamente | Se ve la **revisión anterior** en `C` (`AVAILABLE`, revisión 0); la corregida solo desde que se publica | `test_t11_competitor_price_revised_retroactively_shows_the_previous_revision_at_the_cutoff` | `test_publication_lag_and_revisions_give_the_value_in_force_at_each_cutoff` |
+| 4 | Noticia sin fecha | `INVALID` (`missing_published_at`), en cualquier corte y también en una ejecución vigente | `test_t11_news_without_date_is_invalid` | `test_an_event_without_publication_date_is_invalid_whatever_its_status` |
+| 5 | Nueva revisión de estadísticas | La **revisión vigente en `C`** en cada corte (100 → 101 → 101,5 según se publica) | `test_t11_new_statistical_revision_is_the_one_in_force_at_each_cutoff` | `test_it_agrees_with_the_legacy_as_of_reader_wherever_the_legacy_reader_returns_a_value` |
+| 6 | API fallida | `STALE` con la antigüedad etiquetada (`age_days`); respaldo **sin el factor** (`disable_feature`) o último valor etiquetado (`last_valid_with_age`); sin ninguna observación, `NOT_YET_AVAILABLE` (`no_observations`) | `test_t11_failed_api_is_stale_with_its_age_and_the_factor_is_dropped`; con el pipeline: `test_a_factor_that_is_stale_at_the_cutoff_leaves_the_frames_identical_to_the_model_without_it` | `test_stale_when_the_api_goes_down_the_age_is_labeled_and_the_missing_strategy_decides_the_fallback` |
+| 7 | Evento de campaña conocido por anticipado | `AVAILABLE` para los días futuros del horizonte cubiertos (`known_in_advance`); `NOT_YET_AVAILABLE` (`known_after_cutoff`) si se anunció después; una cancelación posterior solo se ve desde que se conoce; `known_at` desconocido: excluido en retroactivo, aceptado en vigente | `test_t11_campaign_known_in_advance_is_available_for_the_future_days_of_the_horizon` | `test_known_in_advance_future_values_are_allowed_when_they_were_known_before_the_cutoff`, `::test_known_in_advance_uses_the_last_revision_known_at_the_cutoff` |
+| 8 | Escenario del usuario | `SCENARIO_ONLY`; no utilizable como feature y no elegible para precisión (`eligible_for_accuracy`). La exclusión **estructural** es que nunca llega al marco del modelo; `filter_for_accuracy` / `assert_accuracy_eligible` son guardas que NO están enganchadas a `evaluation/` (hoy ninguna métrica consume factores) | `test_t11_user_scenario_is_scenario_only_and_excluded_from_accuracy`; `test_with_the_pipeline_on_only_usable_factors_enter_and_the_rest_fall_back_to_the_model_without_them` | `test_a_user_scenario_is_scenario_only_and_never_enters_accuracy` |
+| 9 | Pronóstico de tercero sin historial de emisiones | `INVALID` (`no_issuance_history`); backtest **prohibido** (`ForecastBacktestForbidden`); en ejecución vigente se acepta | `test_t11_forecast_source_without_issuance_history_is_invalid_and_its_backtest_forbidden` | `test_a_source_without_archived_issuances_is_invalid_for_a_backtest_and_the_backtest_is_forbidden` |
+
+Estado de la fila completa: **IMPLEMENTADO / VERIFICADO** con fixtures adversariales ficticias. V2.5 §26 T11 pide además «un origen temporal real cuando se habiliten conectores P2»: **BLOQUEADO** (no hay conectores, credenciales ni licencias; la demostración con un proveedor real queda para P2).
+
+### 3.1 Otras garantías verificadas
+
+| Garantía | Prueba | Estado |
+|---|---|---|
+| Instantes con zona horaria llegan de PostgreSQL y se juzgan en la zona de la empresa (R-031, R-170); el adaptador heredado ya no falla | `test_timezone_aware_instants_from_postgres_are_read_and_judged_in_the_company_timezone` | IMPLEMENTADO / VERIFICADO |
+| Indicador público y privado con el mismo código nunca se combinan; precedencia explícita; el de otra empresa no existe (R-178) | `test_public_and_private_indicators_with_the_same_code_are_never_combined`, `test_inactive_indicators_and_foreign_definitions_are_not_visible` | IMPLEMENTADO / VERIFICADO |
+| Campañas de calendario: público y de la empresa con el mismo código nunca se combinan (precedencia explícita o error); solo alcances `country`/`tenant`/`sector`, el resto se descarta con `scope_unsupported`; una identidad por factor | `test_t11_public_and_private_calendar_events_with_the_same_code_are_never_combined`, `test_t11_calendar_events_with_an_unsupported_scope_are_discarded_with_a_reason`, `test_t11_calendar_events_accept_country_tenant_and_sector_but_never_mix_their_identities` | IMPLEMENTADO / VERIFICADO |
+| Un evento `EXPIRED` que nunca se verificó (PROPOSED → EXPIRED) no es utilizable ni en ejecución vigente ni retroactiva | `test_an_expired_event_never_verified_is_not_available_in_any_run_kind` | IMPLEMENTADO / VERIFICADO |
+| Solo el corte final puede ser vigente: toda ventana anterior se evalúa como retroactiva (disponibilidad desconocida o pronóstico sin emisiones no se usan en una ventana) | `test_the_windows_before_the_final_cutoff_are_always_retroactive_even_when_the_final_run_is_live` | IMPLEMENTADO / VERIFICADO |
+| La activación por factor es `tenants.settings.factor_activation.<clave>.active` Y `factors.enabled`; ninguna basta sola; `factor_definitions.is_active` no interviene | `test_a_factor_is_active_only_with_the_global_switch_and_its_own_activation`, `test_the_pipeline_follows_the_company_activation_and_not_the_catalog_flag_is_active` | IMPLEMENTADO / VERIFICADO |
+| Antigüedad × horizonte: el valor arrastrado envejece día a día hasta volverse `STALE` dentro del horizonte | `test_staleness_and_horizon_interact_the_carried_value_ages_until_it_turns_stale` | IMPLEMENTADO / VERIFICADO |
+| Con `factors.enabled = true` y el pipeline sin cablear, la demanda registra `factor_pipeline_not_connected` y no cambia ningún valor | `test_a_demand_run_with_the_pipeline_enabled_reports_that_it_is_not_connected_and_changes_nothing` | IMPLEMENTADO / VERIFICADO |
+| Una feature sin contrato no se confunde con un fallo de LightGBM (entrenamiento final y ventanas del backtest) | `test_a_feature_contract_error_in_a_backtest_window_is_not_disguised_as_a_lightgbm_failure`, `test_a_feature_contract_error_in_the_final_training_stops_the_run_instead_of_serving_the_fallback` | IMPLEMENTADO / VERIFICADO |
+| Los diagnósticos que cuentan filas posteriores al corte no entran en los resultados serializados | `test_diagnostics_about_rows_after_the_cutoff_stay_out_of_serialized_results` | IMPLEMENTADO / VERIFICADO |
+| Cada ventana del backtest usa lo conocido en SU corte: el futuro de una ventana anterior no ve publicaciones posteriores a su corte | `test_the_future_of_an_earlier_backtest_window_only_sees_what_was_published_before_its_cutoff` | IMPLEMENTADO / VERIFICADO (a nivel de `FeatureBuilder`; `asof_windows` aún no reenvía las opciones, ver `FEATURE_CONTRACTS.md` §9) |
+| Una columna de factor viaja al modelo (LightGBM/MLForecast) como exógena dinámica y se predice con la del futuro | `test_a_resolved_factor_column_trains_and_predicts_through_mlforecast` | IMPLEMENTADO / VERIFICADO |
+| Pipeline de factores APAGADO por defecto: cero consultas, marcos idénticos | `test_with_the_pipeline_switched_off_no_external_factor_enters_and_nothing_is_queried`, `test_factors_config.py` | IMPLEMENTADO / VERIFICADO |
+| Estado apagado del único interruptor previo, `demand.exceptional_events_flag` (R-179) | `test_exceptional_events_switch.py` (apagado = pronóstico idéntico al de una empresa sin eventos) | IMPLEMENTADO / VERIFICADO (motor); la prueba de API/auditoría que pide R-179 es del backend |
+| Las columnas de metadatos temporales y los adaptadores existentes no pueden eliminarse sin que falle una prueba (V25-FAC-069) | `test_temporal_metadata_columns_and_legacy_adapters_are_pinned` | IMPLEMENTADO / VERIFICADO |
+| Toda feature del builder (y las que genera MLForecast) tiene contrato; sin contrato la construcción falla | `test_feature_contracts.py` (ver `FEATURE_CONTRACTS.md` §3) | IMPLEMENTADO / VERIFICADO |
+
+## 4. Ablation por familia (T12): DISEÑADO para P2
+
+DISEÑADO / NO IMPLEMENTADO. V2.5 §24.7 pide, por `tenant × segmento × horizonte × cutoff`: (1) baseline sin factores externos; (2) una familia nueva a la vez; (3) combinaciones justificadas;
+(4) candidato final en validación temporal; (5) un **holdout independiente no usado** para elegir variables ni hiperparámetros; métricas WAPE/MAE/MASE o RMSSE, sesgo, cobertura/calibración, costo y fuentes caídas, con control de comparaciones
+múltiples y sin promover mejoras sin repetición; las alertas regulatorias, sanitarias y de seguridad se conservan como **alertas informativas verificadas** aunque no mejoren el error. La tabla `factor_evaluations`
+(`baseline_metrics`, `candidate_metrics`, `holdout_untouched`, decisión `promote | reject | inconclusive`) ya existe como contrato, pero **el motor no la escribe ni hay código de ablation**: ningún factor se promueve hoy
+y el pipeline de factores está apagado por defecto. Lo que este paquete deja listo para esa ablation es el requisito previo: cada factor candidato ya entra al modelo solo con valores *as-of*
+(validador, contratos, `FeatureBuilder(factors=...)`), de modo que baseline y candidato difieren únicamente en las columnas del factor.
+
+## 5. Lo que NO está validado (límites declarados)
+
+- **Origen real**: ningún dato externo real; todos los casos usan filas ficticias. BLOQUEADO hasta tener conectores, credenciales y licencias del propietario.
+- **`run_pipeline` no invoca el pipeline de factores**: lo demostrado es la API (`FactorPipeline` → `FeatureBuilder`), con las suites de demanda intactas. DISEÑADO / NO IMPLEMENTADO su conexión (`FEATURE_CONTRACTS.md` §7 y §9).
+- **Reglas de corte heredadas distintas** (V25-AVL-014): `load_calendar_events` corta en fin del día UTC y las promociones interpretan su `known_at` sin zona como hora local; el validador usa la medianoche local de C+1. DISEÑADO / NO IMPLEMENTADO unificarlas.
+- **Customer Core, abastecimiento y costos**: sus features no están en el registro de contratos; el Customer Core tiene su propia vista as-of por corte (W1). DISEÑADO / NO IMPLEMENTADO.
+- **Sin historial de estados de un evento**: se usa `verified_at`; un rechazo posterior no puede reconstruirse (un `REJECTED` nunca es utilizable).
+- **Antigüedades máximas** (`staleness_days_by_frequency`, `default_max_staleness_days`): valores iniciales de diseño, **a aprobar en el piloto**; no son universales.
+- **Calendario**: los traslados extraordinarios por decreto («puentes») no se modelan; el contrato declara `known_at = statutory_rule` y no promete lo contrario.
+- **Campañas de `calendar_events`**: se identifican por `schema.event_code` de la definición del factor; las revisiones del mismo evento se resuelven por número de revisión; los eventos de alcance sucursal, producto, categoría o región se descartan con `scope_unsupported` (DISEÑADO / NO IMPLEMENTADO su aplicación por serie).
+- **Escenarios y precisión**: la exclusión de los escenarios de la medición es estructural (no llegan al marco del modelo); las guardas `filter_for_accuracy` / `assert_accuracy_eligible` no están enganchadas a las métricas existentes.
+- **`FEATURE_SET_VERSION` sin cambio**: subirla alteraría la huella `config_version` de toda ejecución y la compatibilidad de los modelos registrados; queda PENDIENTE (ver `FEATURE_CONTRACTS.md` §9).
+- **Alcance de indicadores y demás límites del lector**: ver `FEATURE_CONTRACTS.md` §10.
