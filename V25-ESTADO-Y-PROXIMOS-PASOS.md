@@ -1,7 +1,8 @@
 # Predictily V2.5 · Estado actual, pendientes y próximos pasos
 
-**Corte de este informe:** 1-nov-2026, 02:20 UTC · **Rama:** `v25/enterprise-core` · **PR:**
-[LuisPerezB/directily#3](https://github.com/LuisPerezB/directily/pull/3) (hacia `main`).
+**Corte de este informe:** 1-nov-2026, 02:45 UTC · **Rama de trabajo:** `v25/enterprise-core` · **PR:**
+[LuisPerezB/directily#3](https://github.com/LuisPerezB/directily/pull/3), fusionado en `main` a pedido del
+propietario con la oleada W1 parcial.
 **Especificación en la que se basa el trabajo:**
 [`docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md`](docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md)
 (V2.5, en adelante «la especificación»). Plan detallado:
@@ -9,7 +10,8 @@
 
 > **En una línea:** la V2.5 terminó el inventario y la auditoría (pasos 1 y 2 del orden de trabajo, §23) y está a
 > mitad del paso 3: corregir primero datos, as-of, fugas, idempotencia y aislamiento (oleada **W1**). Ningún
-> criterio de salida está en GO. **No fusionar el PR #3** hasta integrar W1 (sección 5).
+> criterio de salida está en GO. El código de W1 ya está en `main` pero **sin cerrar**: lo próximo es terminar e
+> integrar W1 (sección 4, pasos 1 y 2) antes de empezar W2.
 
 ---
 
@@ -39,6 +41,24 @@ control), todavía **sin la revisión adversarial final ni las pruebas de acepta
 | **W1-A1 · Escritura temporal de ventas (backend)** | modo de ingestión backfill/incremental; versiones de documento archivadas antes de sobrescribir; descarte de versiones viejas (`stale_skipped`); tipos/estados desconocidos → `REVIEW_REQUIRED`; marca de agua acotada; API de huecos de cobertura | **Implementación terminada**: 507 pruebas del backend en su base (505 aprobadas, 2 omitidas, +56 nuevas), Pint y OpenAPI (187 operaciones) en verde. **Falta**: revisión adversarial y corrección |
 | **W1-A2 · Lectura as-of en el motor** | lectura desde la vista `sales_line_versions`; cada ventana del backtest con los datos conocidos en su corte; Customer as-of; clasificación de días `zero_confirmed / missing_source / stockout_censored / closed`; huella as-of; el pronóstico vigente conoce hasta la hora de ejecución | Implementación casi completa (código, pruebas adversariales T02 y documentación hechos). **Falta**: suite completa del motor, informe, revisión adversarial y corrección |
 | **W1-B · Seguridad** | SSRF de conectores SQL (IP fija, IPv6 mapeada, listas blancas, seguro por defecto); protección ZIP bomb en XLSX; firma Ed25519 de artefactos verificada antes de deserializar (motor y backend) | SSRF, ZIP y verificador del backend hechos. **Falta**: terminar la firma en el motor, suites completas, Pint, informe, revisión y corrección |
+
+**Interrupción y fusión (1-nov-2026):** el workflow de W1 se detuvo a las **02:13:41 UTC** (interrupción de la
+sesión) mientras A2 y B ejecutaban la suite completa del motor. Evidencia previa al corte: suite completa del motor
+de A2 a las 01:38 con **523 pruebas aprobadas** (línea base: 418); comparación de paridad del motor anterior
+contra el nuevo sobre datos históricos: con la regla de huecos inferidos apagada el resultado es **idéntico**
+(WAPE 0,4377, sesgo −0,0067) y con la regla encendida WAPE 0,4358 y sesgo −0,0051; suite de B en curso con 282
+pruebas aprobadas y ninguna fallida al cortarse. A pedido del propietario se ejecutaron las suites completas sobre
+el estado final (commit `1d3b876`; evidencia en `docs/roadmap/evidence/2026-11-01-premerge/`) y se fusionó el PR #3
+en `main` con W1 **parcial**:
+
+| Suite | Línea base (78c5029) | Antes de fusionar (1d3b876) |
+|---|---|---|
+| Backend (`php artisan test`) | 449 aprobadas, 2 omitidas | **696 aprobadas, 2 omitidas** (698) |
+| Motor (`pytest`) | 418 aprobadas | **524 aprobadas** |
+| Frontend (type-check, lint, vitest, build) | 313 aprobadas | **313 aprobadas**, build correcto |
+| E2E `mvp_acceptance.py` / `stage2_acceptance.py` | 32/32 · 256/256 | **no ejecutados con W1** (requieren migrar la base de desarrollo y configurar la firma; paso 2 de la sección 4) |
+
+Suites en verde no equivalen a W1 terminado: falta la revisión adversarial de los tres paquetes y los E2E.
 
 Guion del workflow: [`docs/roadmap/contracts/w1/workflow/v25-w1-p0-fixes.js`](docs/roadmap/contracts/w1/workflow/v25-w1-p0-fixes.js).
 Bases de prueba propias de cada paquete: `predictily_test_w1a`, `predictily_engine_test_w1b`, `predictily_test_w1c`,
@@ -209,9 +229,9 @@ CONDICIONAL / NO-GO del Gate E.
 
 ## 5. Avisos
 
-- **No fusionar el PR #3 todavía.** Contiene: los 22 commits de la etapa 2 que no llegaron a `main` (el PR #2 se
-  fusionó cuando la rama era un avance a medias), los entregables de W0 y puntos de control WIP de W1 sin revisión
-  final ni E2E.
+- **El PR #3 se fusionó en `main` a pedido del propietario con W1 parcial.** `main` contiene los 22 commits de la
+  etapa 2 que faltaban, los entregables de W0 y el código de W1 sin revisión adversarial final ni E2E. El trabajo
+  siguiente va en una rama nueva creada desde `main` (no sobre el PR ya fusionado).
 - **Commits WIP:** son puntos de control del trabajo de los subagentes para no perderlo; la entrega revisada de
   cada paquete llega en un commit de integración.
 - **Límites de uso:** las ejecuciones con subagentes se interrumpieron dos veces por el límite de 5 horas y se
@@ -220,6 +240,20 @@ CONDICIONAL / NO-GO del Gate E.
   precisión para una empresa real.
 
 ## 6. Cómo retomar el entorno
+
+**Después de hacer pull** (cambios de W1 que afectan el entorno local):
+
+1. `cd backend && php artisan migrate`: agrega versiones de documentos de venta, la vista `sales_line_versions` y
+   los huecos de cobertura. Si las pruebas del motor usan su propia base, migrarla también:
+   `DB_DATABASE=predictily_engine_test php artisan migrate:fresh --force`.
+2. `cd engine && .venv/bin/pip install -e .`: nueva dependencia `cryptography` (firma Ed25519).
+3. Firma de artefactos (ADR-V25-20): `python -m predictily_engine.cli keygen --key-id <id> --private-out <ruta segura>`
+   y configurar `ENGINE_SIGNING_KEY_ID`, `ENGINE_SIGNING_PRIVATE_KEY` y `ENGINE_TRUSTED_PUBLIC_KEYS` en el `.env` del
+   motor y las claves públicas en el del backend (ver `docs/ml/MODEL_REGISTRY.md` y los `.env.example`). Los
+   artefactos generados antes de W1 no tienen firma y se rechazan: re-entrenar, o activar
+   `ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true` solo en un entorno local.
+4. Conectores SQL: la política anti-SSRF ahora deniega redes privadas y loopback por defecto; para un ERP en la red
+   local o por VPN, declarar `PREDICTILY_SQL_ALLOWED_HOSTS` o `PREDICTILY_SQL_ALLOWED_CIDRS` (ver `backend/.env.example`).
 
 ```bash
 service postgresql start && service redis-server start
