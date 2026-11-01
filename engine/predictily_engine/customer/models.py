@@ -152,14 +152,15 @@ class LGBMQuantity:
             raise ValueError(objective)
         self.model = lgb.LGBMRegressor(**base)
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> LGBMQuantity:
+    def fit(self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None = None) -> LGBMQuantity:
+        """`sample_weight` (W3-C): cantidad POR PEDIDO ponderada por nº de pedidos de la ventana; sin pesos el ajuste es el de siempre."""
         if self.objective == "l2_log1p":
             ly = np.log1p(y)
-            self.model.fit(X, ly)
+            self.model.fit(X, ly, sample_weight=sample_weight)
             resid = ly - self.model.predict(X)
-            self.smear = float(np.mean(np.exp(resid)))  # Duan: retransformación sin sesgo multiplicativo
+            self.smear = float(np.average(np.exp(resid), weights=sample_weight))  # Duan: retransformación sin sesgo multiplicativo
         else:
-            self.model.fit(X, y)
+            self.model.fit(X, y, sample_weight=sample_weight)
         return self
 
     def predict(self, X: np.ndarray, ref=None) -> np.ndarray:  # noqa: ARG002
@@ -177,8 +178,9 @@ def quantity_objectives(y: np.ndarray) -> list[str]:
     return objectives
 
 
-def fit_quantity_candidates(X: np.ndarray, y: np.ndarray, seed: int, n_jobs: int) -> dict[str, Any]:
-    return {obj: LGBMQuantity(obj, seed=seed, n_jobs=n_jobs).fit(X, y) for obj in quantity_objectives(y)}
+def fit_quantity_candidates(X: np.ndarray, y: np.ndarray, seed: int, n_jobs: int,
+                            sample_weight: np.ndarray | None = None) -> dict[str, Any]:
+    return {obj: LGBMQuantity(obj, seed=seed, n_jobs=n_jobs).fit(X, y, sample_weight) for obj in quantity_objectives(y)}
 
 
 def ratio_scale(y: np.ndarray, pred: np.ndarray, lo: float = 0.5, hi: float = 2.0) -> float:

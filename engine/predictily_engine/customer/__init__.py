@@ -10,3 +10,5 @@ CORE = "customer"
 SUPPORTED_HORIZONS = tuple(sorted(HORIZONS["customer"]))
 FEATURE_SCHEMA_VERSION = "cust-fs-2026.10-v1"
 LABEL_DEFINITION_VERSION = "cust-label-2026.10-v1"
+# W3-C (docs/ml/CUSTOMER_REPURCHASE.md): nº de pedidos, cantidad por pedido, unidades, ventana, segmentos, ranking económico y drift.
+S05_VERSION = "cust-s05-2026.11-v1"

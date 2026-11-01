@@ -127,6 +127,63 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "retain_prediction_runs": 30,        # ejecuciones predict cuyas filas se conservan
         "top_k_stored": 10,
         "reconciliation_tolerance": 0.10,    # exceso de Σ compradores sobre el agregado que se considera mayor
+        # ── W3-C · Customer Core S05 (docs/ml/CUSTOMER_REPURCHASE.md, docs/ml/CALIBRATION_AND_RANKING.md). TODOS son valores INICIALES de
+        # diseño, «a aprobar en el piloto» con datos reales; ninguno es universal. Solo AGREGAN salidas y métricas: no cambian la probabilidad
+        # ni la cantidad condicionada servidas. `s05_enabled` apagado no calcula, no persiste y no declara nada de S05 (columnas, evaluaciones,
+        # limitaciones, definición del objetivo; tampoco el bloque `individual_recommendations` ni el ranking agregado de la degradación, que además
+        # solo se calculan cuando el gate de calidad deshabilita lo individual). ──
+        "s05_enabled": True,
+        # E(nº pedidos) = P × E(N | N ≥ 1) (hurdle): el conteo condicionado (1 + Poisson sobre los pedidos adicionales, ajustado solo con los positivos) solo se
+        # sirve si baja la desvianza de Poisson del E(N) FINAL servido frente a la referencia ≥ 2 % en el holdout (misma magnitud que
+        # `promotion_min_rel_brier_improvement`) y el sesgo agregado de ese E(N) final es ≤ 15 % en valor absoluto; la dispersión (binomial negativa, método de
+        # momentos) se acota a [0, orders_dispersion_max].
+        "orders_min_rel_deviance_improvement": 0.02,
+        "orders_max_abs_bias": 0.15,
+        "orders_dispersion_max": 10.0,
+        # Ventana = cuantiles P10/P50/P90 del tiempo hasta la próxima compra contado desde el corte (nunca un día exacto): empírica por
+        # intervalos propios (los `window_gap_k` últimos) con suavizado jerárquico hacia el comprador-categoría, la categoría y la empresa
+        # (`window_prior_weight` pseudo-observaciones; cada nivel pesa como máximo `window_prior_cap`). Con menos de `window_min_own_gaps`
+        # intervalos propios el estado es insufficient_data. `window_max_days` = `candidate_max_recency_days`. Se valida con la cobertura de
+        # [P10, P90] en cortes con `window_eval_days` de seguimiento (≤ `window_eval_max_cutoffs` cortes recientes): cobertura mínima
+        # aceptada = nominal (80 %) − `window_coverage_tolerance`. La evidencia se cuenta en relaciones y compradores DISTINTOS (`window_eval_min_rows` y
+        # `window_eval_min_customers` en lo global; `window_group_min_relations` en cada grupo de intervalos propios y en el estado overdue): sin evidencia
+        # o bajo la tolerancia, el estado servido es insufficient_data y los cuantiles son nulos.
+        "window_gap_k": 12,
+        "window_min_own_gaps": 2,
+        "window_prior_weight": 2.0,
+        "window_prior_cap": 6,
+        "window_max_days": 365,
+        "window_overdue_quantile": 0.9,      # = `inactivity_inactive_quantile`; atraso = brecha actual > ese cuantil propio + holgura
+        "window_eval_days": 90,
+        "window_eval_max_cutoffs": 12,
+        "window_eval_min_rows": 100,         # relaciones DISTINTAS evaluables mínimas para validar por cobertura (menos ⇒ insufficient_data)
+        "window_eval_min_customers": 30,     # compradores DISTINTOS evaluables mínimos para validar (las filas de una relación en cortes consecutivos no son independientes)
+        "window_eval_min_cutoffs": 4,        # cortes de evaluación mínimos para validar (con menos, una sola realización del calendario decidiría)
+        "window_group_min_relations": 50,    # relaciones distintas mínimas para validar un grupo (intervalos propios 1–3 / 4–7 / 8+ y estado overdue)
+        "window_eval_max_rows": 10000,       # tope de filas por corte en el ajuste/evaluación de la ventana (muestra reproducible; acota el costo)
+        "window_coverage_tolerance": 0.10,
+        # Segmentos de calibración: frecuencia y valor por terciles del bloque de calibración; antigüedad (días) por cortes fijos; cold start
+        # = relaciones con menos de `cold_start_min_purchases` compras. Un segmento con menos de `segment_min_rows` filas o
+        # `segment_min_positives` positivos en el holdout es insufficient_data (sin cifras). Un segmento está calibrado si la media predicha
+        # difiere de la tasa observada en ≤ `segment_calibration_tolerance` (relativo) y su ECE ≤ `ece_alert_threshold`. La recalibración por
+        # segmento se EVALÚA como candidato (no se sirve): ver docs/ml/CALIBRATION_AND_RANKING.md §3.
+        "segment_min_rows": 200,
+        "segment_min_positives": 20,
+        "segment_tenure_edges": [90, 365],
+        "segment_calibration_tolerance": 0.25,
+        "cold_start_min_purchases": 3,
+        # Ranking: lift global del `lift_global_fractions` superior de las filas y estabilidad entre cortes (filas mínimas por corte).
+        "lift_global_fractions": [0.01, 0.05, 0.10],
+        "stability_min_rows": 50,
+        # Drift: PSI entre distribuciones de probabilidad (convención 0,10 aviso / 0,25 alerta) y cambio relativo de la tasa observada.
+        "drift_bins": 10,
+        "drift_psi_warn": 0.10,
+        "drift_psi_alert": 0.25,
+        "drift_rate_rel_alert": 0.5,
+        "drift_min_positives": 30,
+        # Degradación a agregado: ranking agregado de productos (top N por demanda agregada o por unidades de los últimos N días).
+        "aggregate_ranking_top_n": 20,
+        "aggregate_ranking_days": 90,
         "seed": 42,
     },
     "supply": {
@@ -324,6 +381,43 @@ del _key, _value
 # ── W2-D · factors: rangos (los mapas anidados se validan en availability/pipeline.py, enganchado en `validate_overrides`) ──
 CONFIG_CONSTRAINTS[("factors", "default_max_staleness_days")] = {"min": 1, "max": 3650}
 
+# ── W3-C · customer S05: rangos validados (fracciones en [0, 1]; ventanas y conteos enteros acotados) ──
+CONFIG_CONSTRAINTS.update({
+    ("customer", "orders_min_rel_deviance_improvement"): {"min": 0.0, "max": 0.5},
+    ("customer", "orders_max_abs_bias"): {"min": 0.0, "max": 1.0},
+    ("customer", "orders_dispersion_max"): {"min": 0.0, "max": 100.0},
+    ("customer", "window_gap_k"): {"min": 2, "max": 50},
+    ("customer", "window_min_own_gaps"): {"min": 1, "max": 50},
+    ("customer", "window_prior_weight"): {"min": 0.0, "max": 50.0},
+    ("customer", "window_prior_cap"): {"min": 0, "max": 100},
+    ("customer", "window_max_days"): {"min": 30, "max": 1095},
+    ("customer", "window_overdue_quantile"): {"min": 0.5, "max": 0.999},
+    ("customer", "window_eval_days"): {"min": 7, "max": 365},
+    ("customer", "window_eval_max_cutoffs"): {"min": 1, "max": 200},
+    ("customer", "window_eval_min_rows"): {"min": 1, "max": 1_000_000},
+    ("customer", "window_eval_min_customers"): {"min": 1, "max": 1_000_000},
+    ("customer", "window_eval_min_cutoffs"): {"min": 1, "max": 200},
+    ("customer", "window_group_min_relations"): {"min": 1, "max": 1_000_000},
+    # listas: orden estrictamente creciente, longitud y rango de los elementos
+    ("customer", "segment_tenure_edges"): {"list_increasing": True, "list_max_len": 2, "list_elem_min_exclusive": 0, "list_elem_max": 3650},
+    ("customer", "lift_global_fractions"): {"list_increasing": True, "list_min_len": 1, "list_max_len": 10, "list_elem_min_exclusive": 0, "list_elem_max": 1},
+    ("customer", "window_eval_max_rows"): {"min": 100, "max": 10_000_000},
+    ("customer", "window_coverage_tolerance"): {"min": 0.0, "max": 0.5},
+    ("customer", "segment_min_rows"): {"min": 1, "max": 1_000_000},
+    ("customer", "segment_min_positives"): {"min": 1, "max": 1_000_000},
+    ("customer", "segment_calibration_tolerance"): {"min": 0.0, "max": 5.0},
+    ("customer", "cold_start_min_purchases"): {"min": 1, "max": 100},
+    ("customer", "stability_min_rows"): {"min": 1, "max": 1_000_000},
+    ("customer", "drift_bins"): {"min": 3, "max": 50},
+    ("customer", "drift_psi_warn"): {"min": 0.0, "max": 10.0},
+    ("customer", "drift_psi_alert"): {"min": 0.0, "max": 10.0},
+    ("customer", "drift_rate_rel_alert"): {"min": 0.0, "max": 10.0},
+    ("customer", "drift_min_positives"): {"min": 1, "max": 1_000_000},
+    ("customer", "aggregate_ranking_top_n"): {"min": 1, "max": 1000},
+    ("customer", "aggregate_ranking_days"): {"min": 7, "max": 730},
+})
+
+
 # ── W3-B · promotion: rangos validados (la mejora mínima de la política heredada es `demand.min_improvement`) ──
 CONFIG_CONSTRAINTS[("demand", "min_improvement")] = {"min": 0.0, "max": 0.5}
 CONFIG_CONSTRAINTS.update({
@@ -375,6 +469,20 @@ def _type_error(default: Any, value: Any) -> str | None:
     return None
 
 
+def _list_errors(value: list[Any], rule: dict[str, Any]) -> str | None:
+    """W3-C: reglas de listas numéricas (`list_*` en CONFIG_CONSTRAINTS): longitud, orden estrictamente creciente y rango de los elementos."""
+    if "list_max_len" in rule and len(value) > rule["list_max_len"]:
+        return f"debe tener a lo sumo {rule['list_max_len']} elementos"
+    if "list_min_len" in rule and len(value) < rule["list_min_len"]:
+        return f"debe tener al menos {rule['list_min_len']} elementos"
+    if rule.get("list_increasing") and any(b <= a for a, b in zip(value, value[1:])):
+        return "debe estar en orden estrictamente creciente"
+    lo, hi = rule.get("list_elem_min_exclusive"), rule.get("list_elem_max")
+    if any((lo is not None and v <= lo) or (hi is not None and v > hi) for v in value):
+        return f"cada elemento debe estar en el rango ({lo}, {hi}]"
+    return None
+
+
 def validate_overrides(core: str, overrides: dict[str, Any] | None, origin: str = "tenant") -> list[dict[str, Any]]:
     """Valida un conjunto de valores contra el esquema del core. No modifica nada. Devuelve la lista de errores."""
     if core not in CORE_DEFAULTS:
@@ -390,6 +498,11 @@ def validate_overrides(core: str, overrides: dict[str, Any] | None, origin: str 
             errors.append({"key": key, "code": "invalid_type", "message": problem})
             continue
         rule = CONFIG_CONSTRAINTS.get((core, key), {})
+        if isinstance(value, list) and any(k.startswith("list_") for k in rule):      # W3-C: listas numéricas
+            problem = _list_errors(value, rule)
+            if problem:
+                errors.append({"key": key, "code": "invalid_list", "message": problem})
+            continue
         if "min" in rule and value < rule["min"] or "max" in rule and value > rule["max"]:
             errors.append({"key": key, "code": "out_of_range", "message": f"debe estar entre {rule.get('min')} y {rule.get('max')}"})
         elif "choices" in rule and value not in rule["choices"]:
