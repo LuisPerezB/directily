@@ -336,3 +336,37 @@ exportación LOPDP.
 
 **Consecuencias.** Los contratos y pantallas existentes de calidad siguen funcionando; los nuevos campos
 son aditivos. La política de retención de Bronze por empresa queda configurable y su purga se registra.
+
+## ADR-V25-25 · Contratos P0 de Factor Intelligence y taxonomía sin segundo almacén de features
+
+**Contexto.** V2.1 (citada en V2.5 §24) exige catálogo de 17 familias de factores, siete fechas de
+disponibilidad por valor, eventos con procedencia y estados, ablation por familia, taxonomía versionada y
+contratos entre empresas; V2.5 §24.1 prohíbe un segundo Feature Store o un segundo gateway LLM. Ya existen
+`external_indicators` y `external_indicator_observations` (etapa 1, con `published_at` y revisión) y las
+tablas nativas de ventas, precios, promociones, calendario, compromisos e inventario.
+
+**Decisión** (migración `2026_03_04_000100_create_factor_intelligence_and_taxonomy_contracts`, aditiva):
+
+- `factor_definitions` es el **catálogo**: familia, clase de disponibilidad (ADR-V25-06), almacenamiento
+  nativo al que apunta, fuente, licencia, frecuencia, unidad, alcance geográfico, estrategia de ausencia,
+  antigüedad máxima (STALE), retención y justificación sectorial. Ninguna familia activa por defecto.
+- Las series externas siguen en `external_indicator_observations`, ampliada con `observed_at`,
+  `available_at`, vigencia, `issued_at` y horizonte (pronósticos de terceros), `source_version_id`,
+  alcance y banderas de calidad. Los datos públicos (tenant NULL) y privados no se mezclan aunque
+  compartan código: la resolución es por identificador y con precedencia explícita.
+- `external_events` con estado `PROPOSED / VERIFIED / REJECTED / EXPIRED`, procedencia (URL, autoridad,
+  publicación, vigencia, jurisdicción, corroboración) y extracción validada por esquema; sin fecha de
+  publicación un evento es `INVALID` como feature. Las alertas informativas verificadas se muestran aunque
+  no mejoren el error y se separan de las features predictivas.
+- `source_versions`, `factor_applicability_rules`, `factor_evaluations` (baseline vs candidato con holdout
+  intacto y decisión `promote / reject / inconclusive`).
+- `shared_forecast_grants` y su bitácora de accesos: contrato V2.1 §10 **diseñado y desactivado**, con
+  pruebas negativas de aislamiento P0; un pronóstico compartido no es un pedido confirmado.
+- Taxonomía: `taxonomy_nodes` (Sector → Industria → Categoría → Subcategoría, versionada y vinculable a
+  `product_categories`), `product_taxonomy_assignments` (procedencia `manual / llm_proposed / verified`;
+  una propuesta del LLM nunca es verdad oficial) y `tenant_sector_profiles` (uno o varios perfiles con
+  prioridad y alcance). El SKU canónico no se sustituye por la taxonomía.
+
+**Consecuencias.** El motor reutiliza `platform/extensions.py` y la precedencia de configuración de la
+etapa 2; el `FeatureAvailabilityValidator` resuelve el valor visible al corte para cualquier
+almacenamiento. Las integraciones externas reales y la ablation sectorial quedan en P2.
