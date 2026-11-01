@@ -1,0 +1,16 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:3:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.5 /home/user/directily/frontend
+
+
+ Test Files  35 passed (35)
+      Tests  313 passed (313)
+   Start at  13:29:18
+   Duration  22.39s (environment 52%, setup 16%, tests 15%, import 9%, transform 8%)
+
+Environment  jsdom was created 35 times · 30.62s total, 52% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

@@ -12,6 +12,8 @@ from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import insert_quality_report, jdump, mark_failed, upsert_series_profile
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import NotFoundError
+from predictily_engine.platform.config import effective_config_record
+from predictily_engine.profiling.days import DayRules
 from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import build_panel
 
@@ -38,7 +40,13 @@ def run_readiness(tenant_id: int, training_job_id: int | None = None) -> dict[st
                 panel = None
             else:
                 data = load_tenant_data(repo, last)
-                panel = build_panel(data)
+                # Misma clasificación de días que la ejecución (ADR-V25-03): la regla inferida sale de la configuración efectiva.
+                tenant = repo.tenant()
+                try:
+                    rules = DayRules.from_config(effective_config_record("demand", tenant.get("settings"), tenant.get("sector"))["effective_config"])
+                except ValueError:  # configuración inválida: la ejecución la rechaza; aquí se informa con los valores del core
+                    rules = DayRules()
+                panel = build_panel(data, rules)
                 readiness = compute_readiness(data, panel)
         with engine.begin() as conn:
             if panel is not None:
@@ -68,7 +76,7 @@ def _job(engine, tenant_id: int, job_id: int | None, status: str, result: dict |
         if status == "running":
             conn.execute(text(
                 "UPDATE training_jobs SET status = 'running', stage = 'profiling', progress = 10, "
-                "started_at = COALESCE(started_at, now()), attempts = attempts + 1, updated_at = now() "
+                "started_at = COALESCE(started_at, now()), updated_at = now() "
                 "WHERE id = :id AND tenant_id = :tenant_id"), {"id": job_id, "tenant_id": tenant_id})
         else:
             conn.execute(text(

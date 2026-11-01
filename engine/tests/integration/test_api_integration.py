@@ -69,11 +69,15 @@ def test_execute_writes_versioned_results(first_run, db_engine, tenants):
             "SELECT period_days, lo_80, hi_80 FROM forecast_values WHERE forecast_run_id = :r AND node_key = 'total' "
             "AND granularity = 'horizon' ORDER BY period_days"), {"r": run_id}).all()
         assert [h[0] for h in hz] == [7, 30, 90] and all(h[1] is not None for h in hz)
-        reg = conn.execute(text("SELECT model_family, status, training_data_hash, artifact_path, random_seed "
+        reg = conn.execute(text("SELECT model_family, status, role, core, training_data_hash, artifact_path, random_seed "
                                 "FROM model_registry WHERE forecast_run_id = :r"), {"r": run_id}).mappings().all()
         statuses = {r["model_family"]: r["status"] for r in reg}
-        assert "production" in statuses.values() and "fallback" in statuses.values() or \
-            any(r["status"] == "production" for r in reg)
+        # Estados de la etapa 2 (candidate | validated | production | retired | failed) y rol primary | fallback.
+        assert set(statuses.values()) <= {"candidate", "validated", "production", "failed"}
+        assert any(r["status"] == "production" and r["role"] == "primary" for r in reg)
+        assert any(r["status"] == "production" and r["role"] == "fallback" for r in reg) or \
+            any(r["role"] == "primary" for r in reg)
+        assert {r["core"] for r in reg} == {"demand"}
         assert all(r["training_data_hash"] and r["random_seed"] == 42 for r in reg)
         if "lightgbm_global" in statuses and statuses["lightgbm_global"] == "production":
             assert any(r["artifact_path"] for r in reg if r["model_family"] == "lightgbm_global")
@@ -154,7 +158,8 @@ def test_second_run_becomes_current_and_archives_models(first_run, client, db_en
         assert current == [run2]
         old = conn.execute(text("SELECT DISTINCT status FROM model_registry WHERE forecast_run_id = :r"),
                            {"r": first_run["run_id"]}).scalars().all()
-        assert set(old) <= {"archived", "rejected"}
+        assert set(old) <= {"retired", "validated"}, "los modelos de producción anteriores pasan a retired"
+        assert "production" not in old
 
 
 def test_historical_run_and_evaluate_actuals(client, db_engine, tenants):
@@ -162,6 +167,9 @@ def test_historical_run_and_evaluate_actuals(client, db_engine, tenants):
     with db_engine.connect() as conn:
         last = conn.execute(text("SELECT MAX(sale_date) FROM sales WHERE tenant_id = :t"), {"t": a}).scalar_one()
     cutoff = (pd.Timestamp(last) - pd.Timedelta(days=30)).date().isoformat()
+    with db_engine.connect() as conn:
+        current_before = conn.execute(text("SELECT id FROM forecast_runs WHERE tenant_id = :t AND is_current"), {"t": a}).scalars().all()
+    assert len(current_before) == 1, "precondición: hay una ejecución de producción vigente"
     with db_engine.begin() as conn:
         run_id, job_id = create_run(conn, a, run_type="historical", cutoff=cutoff)
     resp = _execute(client, run_id, a, job_id)
@@ -171,6 +179,9 @@ def test_historical_run_and_evaluate_actuals(client, db_engine, tenants):
         run = conn.execute(text("SELECT is_current, run_type FROM forecast_runs WHERE id = :r"),
                            {"r": run_id}).mappings().one()
         assert not run["is_current"]
+        # Una ejecución retroactiva nunca releva a la vigente de producción.
+        current_after = conn.execute(text("SELECT id FROM forecast_runs WHERE tenant_id = :t AND is_current"), {"t": a}).scalars().all()
+    assert current_after == current_before
     with db_engine.begin() as conn:
         _, eval_job = create_run(conn, a)
         conn.execute(text("UPDATE training_jobs SET job_type = 'evaluate_actuals', forecast_run_id = NULL "

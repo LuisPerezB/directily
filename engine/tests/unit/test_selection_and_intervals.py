@@ -107,3 +107,16 @@ def test_holdout_coverage_is_calibrated_only_with_earlier_residuals():
     pd.testing.assert_series_equal(scored["hi_80"].reset_index(drop=True),
                                    score_intervals(calib, wild.assign(actual=0.0))["hi_80"].reset_index(drop=True))
     assert holdout_coverage(calib.iloc[0:0], wild) == (None, None)
+
+
+def test_calibrator_without_residuals_abstains_instead_of_failing():
+    """E2-21: sin residuos (marco vacío de dtype object, como el de una historia sin backtest) la calibración queda
+    vacía y no inventa intervalos: ninguna fila recibe límites ni mediana."""
+    empty = pd.DataFrame(columns=["group", "step", "actual", "yhat", "scale"])
+    assert (empty.dtypes == object).all(), "el marco vacío por defecto de pandas es de dtype object"
+    cal = ConformalCalibrator(empty)
+    assert cal.empty
+    fc = pd.DataFrame({"group": ["smooth|window_average"] * 3, "step": [1, 2, 3], "yhat": [4.0, 5.0, 6.0], "scale": [1.0] * 3})
+    out = cal.apply(fc)
+    assert out[["lo_80", "hi_80", "lo_95", "hi_95", "p50"]].isna().all().all()
+    assert out["yhat"].tolist() == [4.0, 5.0, 6.0]

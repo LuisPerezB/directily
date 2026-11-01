@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Analytics;
 
 use App\Models\Scenario;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -19,9 +20,9 @@ class ScenarioResource extends JsonResource
             'name' => $this->name,
             'forecast_run_id' => $this->forecast_run_id,
             'horizon_days' => (int) $this->horizon_days,
-            'filters' => $this->filters,
-            'assumptions' => $this->assumptions,
-            'results' => $this->results,
+            'filters' => JsonMap::of($this->filters),
+            'assumptions' => JsonMap::of($this->assumptions),
+            'results' => JsonMap::of($this->results),
             'user_id' => $this->user_id,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

@@ -21,3 +21,6 @@ frontend/dist/
 frontend/coverage/
 engine/build/
 engine/*.egg-info/
+# Variantes locales de entorno (contienen claves): nunca se versionan.
+.env.*
+!.env.example

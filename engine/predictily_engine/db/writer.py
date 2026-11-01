@@ -93,6 +93,8 @@ class ProgressReporter:
 
 
 def mark_running(conn: Connection, tenant_id: int, run_id: int, job_id: int | None) -> None:
+    # `training_jobs.attempts` NO se toca aquí (ni en ninguna ruta del motor): lo cuenta solo el backend, una vez por intento real de
+    # la cola (`TrainingJobRecorder::markAttempt`). Si también lo sumara el motor, un trabajo ejecutado una vez informaría 2.
     conn.execute(text(
         "UPDATE forecast_runs SET status = 'running', started_at = now(), error_message = NULL, updated_at = now() "
         "WHERE id = :run_id AND tenant_id = :tenant_id"
@@ -100,7 +102,7 @@ def mark_running(conn: Connection, tenant_id: int, run_id: int, job_id: int | No
     if job_id is not None:
         conn.execute(text(
             "UPDATE training_jobs SET status = 'running', started_at = COALESCE(started_at, now()), "
-            "attempts = attempts + 1, progress = 1, stage = 'loading_data', error_message = NULL, updated_at = now() "
+            "progress = 1, stage = 'loading_data', error_message = NULL, updated_at = now() "
             "WHERE id = :id AND tenant_id = :tenant_id"
         ), {"id": job_id, "tenant_id": tenant_id})
 

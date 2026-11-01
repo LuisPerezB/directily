@@ -10,7 +10,9 @@ use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
 use App\Services\Connectors\ConnectorRegistry;
+use App\Services\Connectors\Sql\SqlConnectorInterface;
 use App\Services\Plans\PlanLimitService;
+use App\Support\Results\JsonMap;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -55,7 +57,13 @@ final class DataSourceController extends Controller
             'status' => 'active',
         ]);
         $connector = $this->connectors->get((string) $source->connector_key);
-        if ($connector !== null && $connector->status() !== 'available') {
+        if ($connector instanceof SqlConnectorInterface) {
+            // Etapa 2 · P3: host/puerto/base y credenciales se validan; la fuente queda activa solo si la conexión de solo lectura funciona.
+            $connector->validateInput((array) ($data['config'] ?? []), $data['credentials'] ?? null);
+            $result = $connector->test($source);
+            $source->status = $result->ok ? 'active' : 'inactive';
+            $source->last_error = $result->ok ? null : $result->message;
+        } elseif ($connector !== null && $connector->status() !== 'available') {
             $source->status = 'inactive';
             $source->last_error = $connector->test($source)->message;
         }
@@ -69,6 +77,13 @@ final class DataSourceController extends Controller
     public function update(Request $request, DataSource $dataSource): JsonResponse
     {
         $data = $this->validated($request, $dataSource);
+        $connector = $this->connectors->get((string) $dataSource->connector_key);
+        if ($connector instanceof SqlConnectorInterface && (array_key_exists('config', $data) || array_key_exists('credentials', $data))) {
+            $connector->validateInput(
+                array_key_exists('config', $data) ? (array) $data['config'] : (array) $dataSource->config,
+                array_key_exists('credentials', $data) ? $data['credentials'] : (array) $dataSource->credentials_encrypted,
+            );
+        }
         $attributes = array_intersect_key($data, array_flip(['name', 'config', 'status']));
         if (array_key_exists('credentials', $data)) {
             $attributes['credentials_encrypted'] = $data['credentials'];
@@ -161,7 +176,7 @@ final class DataSourceController extends Controller
             'connector' => $connector ? ['name' => $connector->name(), 'status' => $connector->status()] : null,
             'name' => $s->name,
             'status' => $s->status,
-            'config' => $s->config ?? (object) [],
+            'config' => JsonMap::orEmpty($s->config),
             'has_credentials' => $s->getRawOriginal('credentials_encrypted') !== null,
             'last_synced_at' => $s->last_synced_at?->toIso8601String(),
             'last_error' => $s->last_error,

@@ -134,14 +134,19 @@ final class SaleController extends Controller
         if ($token instanceof PersonalAccessToken && $token->exists && str_starts_with((string) $token->name, 'datasource:')) {
             $dataSourceId = (int) substr((string) $token->name, strlen('datasource:'));
         }
-        $result = $service->ingest($this->context->require(), $request->validated('documents'), $dataSourceId, $request->validated('options', []));
-        $this->audit->log('sales.batch', null, ['documents' => count($request->validated('documents')), 'created' => $result['created'], 'updated' => $result['updated'], 'rejected' => $result['rejected']]);
+        $result = $service->ingest($this->context->require(), $request->validated('documents'), $dataSourceId, $request->validated('options', []), $request->validated('ingestion_mode'));
+        $this->audit->log('sales.batch', null, [
+            'documents' => count($request->validated('documents')), 'created' => $result['created'], 'updated' => $result['updated'], 'rejected' => $result['rejected'],
+            'stale_skipped' => $result['stale_skipped'], 'revisions_archived' => $result['revisions_archived'], 'ingestion_mode' => $result['ingestion_mode'],
+        ]);
         if ($dataSourceId !== null) {
             DB::table('data_sources')->where('tenant_id', $this->context->id())->where('id', $dataSourceId)
                 ->update(['last_synced_at' => now(), 'status' => 'active', 'last_error' => null]);
         }
 
-        return response()->json(['data' => $result], $result['errors'] !== [] && ($result['created'] + $result['updated'] + $result['unchanged']) === 0 ? 422 : 200);
+        $processed = $result['created'] + $result['updated'] + $result['unchanged'] + $result['stale_skipped'];
+
+        return response()->json(['data' => $result], $result['errors'] !== [] && $processed === 0 ? 422 : 200);
     }
 
     /** @return array<string, mixed> */

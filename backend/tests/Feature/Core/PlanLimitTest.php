@@ -23,7 +23,7 @@ final class PlanLimitTest extends TestCase
         $tenant->forceFill(['plan_id' => Plan::query()->where('code', 'basico')->value('id')])->save();
         $service = app(PlanLimitService::class);
 
-        $this->assertSame([7, 30], $service->limits($tenant)['horizons']);
+        $this->assertSame([7, 14, 30], $service->limits($tenant)['horizons']);
         $this->assertTrue($service->allowsHorizon($tenant, 30));
         $this->assertFalse($service->allowsHorizon($tenant, 90));
         $this->assertFalse($service->allows($tenant, 'scenarios'));

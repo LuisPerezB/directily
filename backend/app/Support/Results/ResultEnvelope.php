@@ -20,12 +20,18 @@ final class ResultEnvelope
     public const RESULT_TYPES = ['forecast', 'conditional_simulation', 'causal_estimate', 'optimized_plan', 'evaluation'];
 
     /**
+     * Campos de la envoltura que son MAPAS (objeto JSON). Salen siempre como objeto, aunque estén vacíos o tengan claves numéricas
+     * (`model_version`: `{"7": …, "30": …}`); `assumptions`, `limitations` y `entity_keys` son listas y no se tocan.
+     */
+    public const MAP_FIELDS = ['target_definition', 'model_version'];
+
+    /**
      * @param  array<string, mixed>  $overrides  campos explícitos (entity_keys, unit, currency, target_definition, ...)
      * @return array<string, mixed>
      */
     public static function fromCoreRun(CoreRun $run, array $overrides = []): array
     {
-        return array_merge([
+        return self::normalize(array_merge([
             'tenant_id' => (int) $run->tenant_id,
             'run_id' => (int) $run->id,
             'core' => $run->core,
@@ -46,7 +52,7 @@ final class ResultEnvelope
             'limitations' => $run->limitations ?? [],
             'quality_status' => $run->quality_status,
             'uncertainty_source' => $run->uncertainty_source,
-        ], $overrides);
+        ], $overrides));
     }
 
     /**
@@ -59,7 +65,7 @@ final class ResultEnvelope
     {
         $cutoff = $run->cutoff_date;
 
-        return array_merge([
+        return self::normalize(array_merge([
             'tenant_id' => (int) $run->tenant_id,
             'run_id' => (int) $run->id,
             'core' => 'demand',
@@ -80,6 +86,23 @@ final class ResultEnvelope
             'limitations' => (array) ($run->summary['warnings'] ?? []),
             'quality_status' => $run->status === 'completed' ? 'ok' : null,
             'uncertainty_source' => 'conformal',
-        ], $overrides);
+        ], $overrides));
+    }
+
+    /**
+     * Aplica la forma JSON de los campos que son mapas (ver MAP_FIELDS), también cuando el llamador los sobrescribe con un arreglo.
+     *
+     * @param  array<string, mixed>  $envelope
+     * @return array<string, mixed>
+     */
+    public static function normalize(array $envelope): array
+    {
+        foreach (self::MAP_FIELDS as $field) {
+            if (array_key_exists($field, $envelope)) {
+                $envelope[$field] = JsonMap::of($envelope[$field]);
+            }
+        }
+
+        return $envelope;
     }
 }

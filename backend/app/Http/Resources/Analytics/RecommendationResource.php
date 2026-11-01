@@ -6,6 +6,7 @@ namespace App\Http\Resources\Analytics;
 
 use App\Models\Recommendation;
 use App\Services\Analytics\Support\Num;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -49,7 +50,7 @@ class RecommendationResource extends JsonResource
             'stockout_date_estimate' => $this->stockout_date_estimate?->toDateString(),
             'risk_level' => $this->risk_level,
             'status' => $this->status,
-            'assumptions' => $this->assumptions,
+            'assumptions' => JsonMap::of($this->assumptions),
             'acknowledged_at' => $this->acknowledged_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\DataCore\Sync;
 
 use App\Exceptions\DomainStateException;
+use App\Exceptions\PlanLimitExceededException;
 use App\Models\DataSource;
 use App\Models\ImportJob;
 use App\Models\SourceMapping;
@@ -12,12 +13,15 @@ use App\Models\SourceSync;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
+use App\Services\Connectors\Sql\SqlQueryRejected;
 use App\Services\Connectors\Sql\SqlSourceConnection;
 use App\Services\Connectors\Sql\SqlSourceException;
 use App\Services\DataCore\Coverage\CoverageService;
 use App\Services\Imports\ImportEntity;
 use App\Services\Imports\ImportService;
 use App\Services\Imports\ImportStatus;
+use App\Services\Sales\IngestionModeResolver;
+use App\Services\Sales\IngestionResolution;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -25,6 +29,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
@@ -42,11 +47,18 @@ final class SourceSyncService
         private readonly CoverageService $coverage,
         private readonly AuditLogger $audit,
         private readonly TenantContext $context,
+        private readonly IngestionModeResolver $ingestionModes,
     ) {}
 
-    /** Crea la sincronización en cola. @throws DomainStateException */
-    public function request(DataSource $source, string $entity, string $mode, ?User $user, string $trigger = 'user'): SourceSync
+    /**
+     * Crea la sincronización en cola. `$ingestionMode` (backfill | incremental) declara el modo de ingestión de las ventas
+     * (ADR-V25-23); sin declararlo manda el del mapeo (`options.ingestion_mode`) y, si tampoco, la regla de primera sincronización.
+     *
+     * @throws DomainStateException
+     */
+    public function request(DataSource $source, string $entity, string $mode, ?User $user, string $trigger = 'user', ?string $ingestionMode = null): SourceSync
     {
+        $requestedMode = IngestionModeResolver::normalize($ingestionMode);
         $this->mappings->connectorFor($source);
         if ($source->status === 'inactive') {
             throw new DomainStateException('La fuente está inactiva.', 'source_inactive');
@@ -60,7 +72,7 @@ final class SourceSyncService
         }
         try {
             // Savepoint: una carrera contra el índice único no debe abortar una transacción exterior.
-            $sync = DB::transaction(function () use ($source, $mapping, $user, $entity, $mode, $trigger): SourceSync {
+            $sync = DB::transaction(function () use ($source, $mapping, $user, $entity, $mode, $trigger, $requestedMode): SourceSync {
                 $sync = new SourceSync;
                 $sync->forceFill([
                     'data_source_id' => $source->id,
@@ -71,6 +83,8 @@ final class SourceSyncService
                     'mode' => $mode,
                     'status' => 'queued',
                     'triggered_by' => $trigger,
+                    // El modo declarado en la solicitud viaja hasta el trabajo asíncrono en las estadísticas (se reemplazan al terminar).
+                    'stats' => $requestedMode !== null ? ['ingestion_mode_requested' => $requestedMode] : null,
                 ])->save();
 
                 return $sync;
@@ -78,7 +92,7 @@ final class SourceSyncService
         } catch (UniqueConstraintViolationException) {
             throw $busy;
         }
-        $this->audit->log('datasource.sync_requested', $sync, ['data_source_id' => $source->id, 'entity' => $entity, 'mode' => $mode], userId: $user?->id);
+        $this->audit->log('datasource.sync_requested', $sync, ['data_source_id' => $source->id, 'entity' => $entity, 'mode' => $mode, 'ingestion_mode' => $requestedMode], userId: $user?->id);
 
         return $sync;
     }
@@ -102,10 +116,18 @@ final class SourceSyncService
             }
             $connector = $this->mappings->connectorFor($source);
             $options = (array) $mapping->options;
-            $query = $this->mappings->guard($mapping->query, $connector); // se revalida siempre antes de ejecutar
+            try {
+                $query = $this->mappings->validateQuery($mapping->query, $connector); // se revalida siempre antes de ejecutar
+            } catch (SqlQueryRejected $e) {
+                throw new DomainStateException('La consulta guardada ya no cumple la política de solo lectura y no se ejecutó: '.$e->getMessage(), 'sql_query_rejected');
+            }
 
-            [$mode, $since, $previous] = $this->window($sync, $mapping, $options);
+            [$mode, $since, $previous] = $this->window($sync, $mapping, $options, $startedAt);
             $sync->forceFill(['mode' => $mode, 'since' => $since])->save();
+            // Modo de ingestión de las ventas (ADR-V25-23): solicitud > mapeo > regla de primera sincronización.
+            $ingestion = $mapping->entity === 'sales'
+                ? $this->ingestionModes->forSync($sync, ((array) $sync->stats)['ingestion_mode_requested'] ?? null, $options['ingestion_mode'] ?? null)
+                : null;
 
             $stagedDir = sys_get_temp_dir().'/predictily-sync-'.Str::uuid();
             File::ensureDirectoryExists($stagedDir, 0700);
@@ -113,13 +135,25 @@ final class SourceSyncService
             $sourceTz = (string) ($options['source_timezone'] ?? $source->config['source_timezone'] ?? $tenant->timezone ?: 'America/Guayaquil');
 
             $connection = $connector->open($source);
-            $staged = $this->stager->stage($connection, $query, $mapping, $tenant, $sourceTz, $since, $file);
+            $staged = $this->stager->stage($connection, $query, $mapping, $tenant, $sourceTz, $since, $file, $startedAt);
             $connection->close();
             $connection = null;
 
+            // Marca de agua = min(máximo source_recorded_at extraído, inicio de la sincronización). Las fechas futuras o ilegibles
+            // no cuentan para el máximo (ver CanonicalStager) y se informan como anomalía.
             $usesRecorded = isset($mapping->field_map['source_recorded_at']);
-            $watermark = $usesRecorded ? ($staged->maxRecordedAt ?? $previous ?? $startedAt) : $startedAt;
+            $watermark = $usesRecorded ? $this->boundedWatermark($staged->maxRecordedAt ?? $previous ?? $startedAt, $startedAt) : $startedAt;
             $stats = ['mode' => $mode, 'rows_extracted' => $staged->rows, 'pages' => $staged->pages];
+            if ($usesRecorded) {
+                $stats['future_recorded_at'] = $staged->futureRecordedAt + $staged->unreadableRecordedAt;
+                $stats['recorded_at_unreadable'] = $staged->unreadableRecordedAt;
+                if ($stats['future_recorded_at'] > 0) {
+                    $stats['watermark_note'] = "{$stats['future_recorded_at']} filas traen una fecha de registro futura o ilegible: no adelantan la marca de agua (se acota al inicio de la sincronización).";
+                }
+            }
+            if ($ingestion !== null) {
+                $stats += $ingestion->toArray();
+            }
 
             if ($staged->rows === 0) {
                 $this->finish($sync, 'completed', $stats + ['import' => null, 'note' => 'La consulta no devolvió filas nuevas o modificadas.'], $watermark, $staged);
@@ -128,7 +162,7 @@ final class SourceSyncService
                 return;
             }
 
-            $job = $this->runImport($tenant, $sync, $source, $mapping, $file, $options);
+            $job = $this->runImport($tenant, $sync, $source, $mapping, $file, $options, $ingestion);
             $importStats = (array) ($job->stats ?? []);
             $clean = ($importStats['rows_error'] ?? 0) === 0;
             $sync->forceFill(['import_job_id' => $job->id])->save();
@@ -164,11 +198,12 @@ final class SourceSyncService
      * @param  array<string, mixed>  $options
      * @return array{0: string, 1: ?CarbonImmutable, 2: ?CarbonImmutable} [modo, since, marca de agua previa]
      */
-    private function window(SourceSync $sync, SourceMapping $mapping, array $options): array
+    private function window(SourceSync $sync, SourceMapping $mapping, array $options, CarbonImmutable $startedAt): array
     {
         $last = SourceSync::query()->where('data_source_id', $sync->data_source_id)->where('entity', $mapping->entity)
             ->where('status', 'completed')->whereNotNull('watermark')->where('id', '<', $sync->id)->orderByDesc('id')->first();
-        $previous = $last?->watermark ? CarbonImmutable::instance($last->watermark) : null;
+        // Una marca de agua guardada en el futuro (por una sincronización anterior a la cota) se acota también al leerla.
+        $previous = $last?->watermark ? $this->boundedWatermark(CarbonImmutable::instance($last->watermark), $startedAt) : null;
         if ($sync->mode === 'incremental' && $previous !== null) {
             $overlap = (int) ($options['overlap_minutes'] ?? config('connectors.sql.default_overlap_minutes', 120));
 
@@ -179,13 +214,22 @@ final class SourceSyncService
         return ['full', null, $previous];
     }
 
+    /** min(candidata, inicio de la sincronización): una marca de agua nunca queda en el futuro. */
+    private function boundedWatermark(CarbonImmutable $candidate, CarbonImmutable $startedAt): CarbonImmutable
+    {
+        return $candidate->greaterThan($startedAt) ? $startedAt : $candidate;
+    }
+
     /**
      * @param  array<string, mixed>  $options
      */
-    private function runImport(Tenant $tenant, SourceSync $sync, DataSource $source, SourceMapping $mapping, string $file, array $options): ImportJob
+    private function runImport(Tenant $tenant, SourceSync $sync, DataSource $source, SourceMapping $mapping, string $file, array $options, ?IngestionResolution $ingestion): ImportJob
     {
         $user = $sync->user_id !== null ? User::query()->find($sync->user_id) : null;
         $importOptions = (array) ($options['import'] ?? []);
+        if ($ingestion !== null) {
+            $importOptions['ingestion_mode'] = $ingestion->mode; // el import lo trata como declarado: la decisión ya se tomó aquí
+        }
 
         // Sin `skip_invalid_rows` en el mapeo, una fila con error deja la sincronización «para revisión» (no importa nada).
         return $this->runner->runFile($tenant, $user, ImportEntity::from($mapping->entity), $file, $this->stager->headers($mapping), $source->id, $importOptions, requireClean: ! ($importOptions['skip_invalid_rows'] ?? false));
@@ -214,7 +258,7 @@ final class SourceSyncService
 
     private function fail(SourceSync $sync, Throwable $e, ?SqlSourceConnection $connection): void
     {
-        $message = $e instanceof DomainStateException || $e instanceof SqlSourceException || $e instanceof \Illuminate\Validation\ValidationException
+        $message = $e instanceof DomainStateException || $e instanceof SqlSourceException || $e instanceof PlanLimitExceededException || $e instanceof ValidationException
             ? $e->getMessage()
             : 'La sincronización falló por un error interno. Revise los registros del servidor.';
         Log::error('Sincronización de fuente SQL fallida', ['sync_id' => $sync->id, 'data_source_id' => $sync->data_source_id, 'exception' => $e::class,

@@ -27,6 +27,7 @@ final class DemoCommand extends Command
     public function handle(DemoDataService $demo): int
     {
         $this->warn('DATOS FICTICIOS: las empresas demo no representan a ninguna empresa real.');
+        $this->line('Las ventas demo se cargan como histórico declarado (ingestion_mode = backfill, ADR-V25-23): conocidas desde el inicio de su día de negocio.');
         $slugs = $this->option('only') ? [(string) $this->option('only')] : array_keys((array) config('predictily.demo.tenants'));
 
         foreach ($slugs as $slug) {

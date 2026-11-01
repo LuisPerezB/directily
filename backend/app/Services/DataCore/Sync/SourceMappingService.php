@@ -15,6 +15,7 @@ use App\Services\Connectors\Sql\SqlQueryRejected;
 use App\Services\Connectors\Sql\ValidatedQuery;
 use App\Services\Imports\Fields\ImportFieldRegistry;
 use App\Services\Imports\ImportEntity;
+use App\Services\Sales\IngestionModeResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -30,7 +31,7 @@ final class SourceMappingService
     /** Campo de fecha del evento por entidad (cobertura de la fuente). */
     public const EVENT_DATE_FIELD = ['sales' => 'issued_at', 'commitments' => 'issued_at'];
 
-    private const OPTION_KEYS = ['page_size', 'overlap_minutes', 'max_rows', 'source_timezone', 'value_maps', 'coverage', 'import'];
+    private const OPTION_KEYS = ['page_size', 'overlap_minutes', 'max_rows', 'source_timezone', 'value_maps', 'coverage', 'import', 'ingestion_mode'];
 
     private const IMPORT_OPTION_KEYS = ['skip_invalid_rows', 'default_branch_code', 'create_missing_products', 'create_missing_branches', 'create_missing_categories'];
 
@@ -113,18 +114,26 @@ final class SourceMappingService
             ->where('is_active', true)->whereNotNull('approved_at')->orderByDesc('version')->first();
     }
 
-    /** @throws ValidationException */
+    /** @throws SqlQueryRejected */
+    public function validateQuery(string $query, SqlConnectorInterface $connector): ValidatedQuery
+    {
+        return SqlQueryGuard::validate($query, $connector->dialect()->name());
+    }
+
+    /** Versión para la API: la consulta rechazada responde 422 con `code: sql_query_rejected`. @throws ValidationException */
     public function guard(string $query, SqlConnectorInterface $connector): ValidatedQuery
     {
         try {
-            return SqlQueryGuard::validate($query, $connector->dialect()->name());
+            return $this->validateQuery($query, $connector);
         } catch (SqlQueryRejected $e) {
-            throw ValidationException::withMessages(['query' => [$e->getMessage()]])->response(response()->json([
+            $exception = ValidationException::withMessages(['query' => [$e->getMessage()]]);
+            $exception->response = response()->json([
                 'message' => 'La consulta no cumple la política de solo lectura: '.$e->getMessage(),
                 'code' => 'sql_query_rejected',
                 'reason' => $e->reason,
                 'errors' => ['query' => [$e->getMessage()]],
-            ], 422));
+            ], 422);
+            throw $exception;
         }
     }
 
@@ -163,7 +172,7 @@ final class SourceMappingService
                 $errors["field_map.{$key}"][] = "El campo obligatorio «{$definition->label}» no está mapeado.";
             }
         }
-        $options = $this->normalizeOptions((array) ($data['options'] ?? []), array_keys($definitions), $errors);
+        $options = $this->normalizeOptions((array) ($data['options'] ?? []), array_keys($definitions), $errors, $entity);
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);
         }
@@ -177,7 +186,7 @@ final class SourceMappingService
      * @param  array<string, list<string>>  $errors
      * @return array<string, mixed>
      */
-    private function normalizeOptions(array $options, array $fieldKeys, array &$errors): array
+    private function normalizeOptions(array $options, array $fieldKeys, array &$errors, string $entity): array
     {
         foreach (array_diff(array_keys($options), self::OPTION_KEYS) as $key) {
             $errors["options.{$key}"][] = "Opción no reconocida: {$key}.";
@@ -217,6 +226,17 @@ final class SourceMappingService
                 $errors['options.coverage.lag_days'][] = 'Debe estar entre 0 y 30.';
             }
             $clean['coverage'] = ['enabled' => (bool) ($coverage['enabled'] ?? true), 'lag_days' => (int) $lag];
+        }
+        // Modo de ingestión de las ventas (ADR-V25-23). Declararlo aquí lo fija para TODAS las sincronizaciones de esta versión del
+        // mapeo; sin él, la primera sincronización de la fuente es `backfill` y las siguientes `incremental`.
+        if (($options['ingestion_mode'] ?? null) !== null) {
+            if ($entity !== 'sales') {
+                $errors['options.ingestion_mode'][] = 'El modo de ingestión solo aplica a la entidad sales.';
+            } elseif (! is_string($options['ingestion_mode']) || ! in_array($options['ingestion_mode'], IngestionModeResolver::MODES, true)) {
+                $errors['options.ingestion_mode'][] = 'Debe ser backfill (carga histórica) o incremental.';
+            } else {
+                $clean['ingestion_mode'] = $options['ingestion_mode'];
+            }
         }
         if (isset($options['import'])) {
             $import = (array) $options['import'];

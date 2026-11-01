@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Analytics;
 
 use App\Models\Alert;
+use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -20,7 +21,7 @@ class AlertResource extends JsonResource
             'severity' => $this->severity,
             'title' => $this->title,
             'message' => $this->message,
-            'payload' => $this->payload,
+            'payload' => JsonMap::of($this->payload),
             'related_type' => $this->related_type,
             'related_id' => $this->related_id,
             'status' => $this->status,

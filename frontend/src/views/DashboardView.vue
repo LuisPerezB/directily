@@ -10,20 +10,20 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import ForecastChart from '@/components/charts/ForecastChart.vue'
 import RunForecastPanel from '@/components/forecast/RunForecastPanel.vue'
+import HorizonSupportNotice from '@/components/forecast/HorizonSupportNotice.vue'
 import { forecastApi, inventoryApi } from '@/api'
-import type { Horizon } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
+import { useHorizonSelection } from '@/composables/useHorizons'
 import { useTenantStore } from '@/stores/tenant'
 import { useCatalogStore } from '@/stores/catalog'
 import { formatCurrencyCompact, formatDate, formatDateTime, formatNumber, formatPercent, formatChange, formatProbability } from '@/utils/format'
-import { HORIZONS } from '@/utils/constants'
+import { horizonSupportView } from '@/utils/envelope'
 
 const { t } = useI18n()
 const tenant = useTenantStore()
 const catalog = useCatalogStore()
 
-const defaultHorizon = (tenant.tenant?.settings?.default_horizon_days ?? 30) as Horizon
-const horizon = ref<Horizon>(HORIZONS.includes(defaultHorizon) ? defaultHorizon : 30)
+const { horizon, options: horizonOptions, hasHorizons } = useHorizonSelection()
 const branchId = ref<number | null>(null)
 
 const summary = useAsync(() => forecastApi.dashboard({ horizon: horizon.value, branch_id: branchId.value ?? undefined }), { watch: [horizon, branchId] })
@@ -37,10 +37,13 @@ const s = computed(() => summary.data.value)
 const k = computed(() => s.value?.kpis ?? null)
 const status = computed(() => s.value?.data_status ?? null)
 const hasForecast = computed(() => !!status.value?.has_forecast && !!s.value?.run)
-const horizonOptions = computed(() => HORIZONS.map((h) => ({ value: h, label: t('common.days', { n: h }) })))
+const support = computed(() => horizonSupportView(s.value?.horizon_support))
+// Un horizonte sin respaldo no se presenta como completo: KPI en tono de advertencia y gráfico provisional.
+const unsupported = computed(() => support.value?.showAsComplete === false)
 const currency = computed(() => tenant.currency)
 
 const intervalHint = computed(() => {
+  if (support.value?.hideIntervals) return null
   if (!k.value || k.value.forecast_units_lo_80 == null || k.value.forecast_units_hi_80 == null) return null
   return t('dashboard.range80', { lo: formatNumber(k.value.forecast_units_lo_80, 0), hi: formatNumber(k.value.forecast_units_hi_80, 0) })
 })
@@ -76,7 +79,7 @@ function reload(): void {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <SegmentedControl v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
+        <SegmentedControl v-if="hasHorizons" v-model="horizon" :options="horizonOptions" :label="t('common.horizon')" />
         <label class="sr-only" for="dash-branch">{{ t('filters.branch') }}</label>
         <select id="dash-branch" v-model="branchId" class="select !w-auto min-w-[11rem]">
           <option :value="null">{{ t('filters.allBranches') }}</option>
@@ -104,23 +107,27 @@ function reload(): void {
       </div>
 
       <template v-else>
+        <HorizonSupportNotice :support="s.horizon_support" :horizon="horizon">
+          <RouterLink v-if="support?.needsNewRun && tenant.can('forecast.run')" :to="{ name: 'forecasts' }" class="font-semibold text-brand-strong block mt-1">{{ t('horizonSupport.runHint') }}</RouterLink>
+        </HorizonSupportNotice>
         <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" :aria-label="t('dashboard.kpis')">
           <KpiCard
             :question="t('dashboard.q1')"
             :label="t('dashboard.forecastUnits', { n: horizon })"
             :value="`${formatNumber(k?.forecast_units, 0)} ${t('chart.units')}`"
-            :hint="intervalHint"
-            :delta="k?.change_pct ?? null"
+            :hint="unsupported ? t('horizonSupport.unsupportedKpi') : intervalHint"
+            :delta="unsupported ? null : (k?.change_pct ?? null)"
             :delta-label="t('dashboard.vsPrevious')"
             icon="chart"
-            tone="brand"
+            :tone="unsupported ? 'warning' : 'brand'"
           />
           <KpiCard
             :question="t('dashboard.q1b')"
             :label="t('dashboard.forecastRevenue')"
             :value="formatCurrencyCompact(k?.forecast_revenue, currency)"
-            :hint="k?.previous_period_revenue != null ? t('dashboard.previousRevenue', { value: formatCurrencyCompact(k.previous_period_revenue, currency) }) : t('dashboard.priceAssumption')"
+            :hint="unsupported ? t('horizonSupport.unsupportedKpi') : k?.previous_period_revenue != null ? t('dashboard.previousRevenue', { value: formatCurrencyCompact(k.previous_period_revenue, currency) }) : t('dashboard.priceAssumption')"
             icon="trend-up"
+            :tone="unsupported ? 'warning' : 'default'"
           />
           <KpiCard
             :question="t('dashboard.q6')"
@@ -168,7 +175,7 @@ function reload(): void {
           </div>
           <LoadingState v-if="series.loading.value && !series.data.value" />
           <ErrorState v-else-if="series.error.value" :error="series.error.value" compact @retry="series.execute" />
-          <ForecastChart v-else-if="series.data.value" :history="series.data.value.history" :forecast="series.data.value.forecast" :title="t('dashboard.chartTitle')" :currency="currency" />
+          <ForecastChart v-else-if="series.data.value" :history="series.data.value.history" :forecast="series.data.value.forecast" :title="t('dashboard.chartTitle')" :currency="currency" :provisional="support?.hideIntervals === true" />
           <p v-if="series.data.value?.meta?.price_assumption" class="hint mt-2">{{ t('forecasts.priceAssumption', { value: series.data.value.meta.price_assumption }) }}</p>
         </section>
 

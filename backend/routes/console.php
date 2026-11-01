@@ -21,3 +21,16 @@ Schedule::command('predictily:evaluate-actuals')
 Schedule::command('predictily:schedule-forecasts')
     ->dailyAt('03:00')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
+
+// ── datacore (etapa 2 · P3): sincronización incremental de fuentes SQL programadas (hourly/daily) ──
+Schedule::command('predictily:sync-sources')
+    ->hourlyAt(17)->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();
+
+// ── comportamiento de compra (etapa 2 · P2): entrenamiento semanal y predicción diaria (la recencia cambia sin ventas nuevas) ──
+Schedule::command('predictily:customer-train')
+    ->weeklyOn(0, '02:40')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();
+Schedule::command('predictily:customer-predict')
+    ->dailyAt('04:20')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();

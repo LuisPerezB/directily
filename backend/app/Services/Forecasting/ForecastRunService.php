@@ -122,7 +122,7 @@ class ForecastRunService
     /** Mayor horizonte soportado por el motor e incluido en el plan; null si el plan no incluye ninguno. */
     public function maxAllowedHorizon(Tenant $tenant): ?int
     {
-        $supported = array_map('intval', (array) config('engine.horizons', [7, 30, 90]));
+        $supported = array_map('intval', (array) config('engine.horizons', [7, 14, 30, 60, 90]));
         $allowed = array_values(array_intersect($supported, CoreServices::allowedHorizons($tenant)));
 
         return $allowed === [] ? null : max($allowed);
@@ -130,7 +130,7 @@ class ForecastRunService
 
     private function validateHorizon(Tenant $tenant, int $horizonDays): void
     {
-        $supported = array_map('intval', (array) config('engine.horizons', [7, 30, 90]));
+        $supported = array_map('intval', (array) config('engine.horizons', [7, 14, 30, 60, 90]));
         if (! in_array($horizonDays, $supported, true)) {
             throw ValidationException::withMessages([
                 'horizon_days' => 'El horizonte debe ser uno de: '.implode(', ', $supported).' días.',

@@ -81,7 +81,7 @@ final class UnitConversionImportProcessor implements ImportProcessor
                 if ($natural !== null) {
                     $seen[$natural] = true;
                 }
-                $declared[$natural ?? ""] = $factor;
+                $declared[$natural ?? ''] = $factor;
                 $valid[] = ['product_id' => $productId, 'from_unit' => $from, 'to_unit' => $to, 'factor' => $factor, 'valid_from' => $validFrom, 'source' => $p->string($raw['source'] ?? null, 30) ?? 'import'];
             }
             $ctx->progress($n, $total, 5, 60);

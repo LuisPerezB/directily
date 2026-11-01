@@ -24,11 +24,11 @@ class PlanHorizonSchedulingTest extends TestCase
     use AnalyticsFixtures;
     use RefreshDatabase;
 
-    /** Plan con los límites reales del plan Básico de config/predictily.php (horizontes 7 y 30). */
+    /** Plan con los límites reales del plan Básico de config/predictily.php (horizontes 7, 14 y 30). */
     private function basicPlanId(): int
     {
         $limits = config('predictily.plans.basico.limits');
-        $this->assertSame([7, 30], $limits['horizons']);
+        $this->assertSame([7, 14, 30], $limits['horizons']);
 
         return (int) DB::table('plans')->insertGetId([
             'code' => 'basico', 'name' => 'Básico', 'limits' => json_encode($limits), 'is_active' => true,

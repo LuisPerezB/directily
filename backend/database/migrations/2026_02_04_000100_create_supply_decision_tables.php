@@ -271,7 +271,7 @@ return new class extends Migration
             $table->foreign(['tenant_id', 'supplier_id'])->references(['tenant_id', 'id'])->on('suppliers')->nullOnDelete();
         });
         // Un proveedor NULL y otro explícito son series distintas: unicidad por proveedor con COALESCE.
-        DB::statement("CREATE UNIQUE INDEX cost_forecasts_series_key ON cost_forecasts (tenant_id, core_run_id, product_id, COALESCE(supplier_id, 0), cost_source, currency)");
+        DB::statement('CREATE UNIQUE INDEX cost_forecasts_series_key ON cost_forecasts (tenant_id, core_run_id, product_id, COALESCE(supplier_id, 0), cost_source, currency)');
 
         Schema::create('scenario_evaluations', function (Blueprint $table) {
             $table->id();

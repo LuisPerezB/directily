@@ -479,7 +479,14 @@ paths:
     post:
       tags: [Ventas]
       summary: Ingesta por API REST (conector), idempotente por tipo+número de documento
-      description: Mismas reglas de normalización y validación que el importador de archivos. Máximo 500 documentos.
+      description: |-
+        Mismas reglas de normalización y validación que el importador de archivos. Máximo 500 documentos.
+
+        **Versiones (ADR-V25-23).** Un documento existente con contenido distinto se reemplaza archivando antes su versión vigente (cabecera y líneas) en `sales_document_revisions`/`sale_item_revisions`. Si la versión entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR, se descarta (`stale_skipped`) y no se escribe nada; si alguna no lo trae, gana la última ingestión (`updated_without_source_order`).
+
+        **Modo de ingestión.** `ingestion_mode` (`backfill` | `incremental`); por defecto `incremental`: la versión es conocida desde que Predictily la recibe y un documento que llega tarde no es visible en cortes anteriores. `backfill` declara una carga histórica (conocida desde el inicio de su día de negocio).
+
+        **Tipos y estados.** Un `document_type` o `status` NO vacío que no se reconoce no se cuenta como venta: es un error del documento (`unknown_document_type` / `unknown_document_status`, `dq_class: REVIEW_REQUIRED`) y no se escribe. Vacío = factura / completada.
       requestBody:
         required: true
         content:
@@ -488,6 +495,8 @@ paths:
               type: object
               required: [documents]
               properties:
+                ingestion_mode: {type: [string, 'null'], enum: [backfill, incremental, null], description: 'Por defecto incremental'}
+                options: {type: object, properties: {create_missing_products: {type: boolean}, create_missing_branches: {type: boolean}, create_missing_categories: {type: boolean}}}
                 documents:
                   type: array
                   maxItems: 500
@@ -505,6 +514,7 @@ paths:
                       customer_code: {type: string}
                       customer_segment: {type: string}
                       customer_province: {type: string}
+                      source_recorded_at: {type: [string, 'null'], description: Cuándo el sistema de origen registró o modificó el documento; ordena las versiones (stale_skipped)}
                       items:
                         type: array
                         items:
@@ -522,8 +532,8 @@ paths:
                             unit_cost: {type: number}
                             line_number: {type: integer}
       responses:
-        '200': {description: 'data: {created, updated, unchanged, rejected, errors:[{index, item?, field, code, severity, message}], warnings}'}
-        '422': {description: Ningún documento válido o error estructural}
+        '200': {description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}'}
+        '422': {description: 'Ningún documento válido ni descartado por versión anterior, o error estructural'}
   /imports:
     parameters: [{$ref: '#/components/parameters/TenantId'}]
     get:
@@ -590,7 +600,7 @@ paths:
       tags: [Importaciones]
       summary: Errores y advertencias por fila
       parameters: [{name: severity, in: query, schema: {type: string, enum: [error, warning]}}, {$ref: '#/components/parameters/Page'}]
-      responses: {'200': {description: 'data: [{row_number, column, error_code, severity, message, raw_value}]'}}
+      responses: {'200': {description: 'data: [{row_number, column, error_code, severity, message, raw_value, dq_class}]; dq_class = REVIEW_REQUIRED para unknown_document_type / unknown_document_status (null en los demás)'}}
   /imports/{import}/errors.csv:
     parameters: [{$ref: '#/components/parameters/TenantId'}, {$ref: '#/components/parameters/ImportId'}]
     get: {tags: [Importaciones], summary: Descargar errores en CSV, responses: {'200': {description: CSV, content: {text/csv: {}}}}}
@@ -731,7 +741,7 @@ components:
     TenantSettings:
       type: object
       properties:
-        default_horizon_days: {type: integer, enum: [7, 30, 90]}
+        default_horizon_days: {type: integer, enum: [7, 14, 30, 60, 90]}
         service_level: {type: number, minimum: 0.5, maximum: 0.999}
         review_period_days: {type: integer}
         default_lead_time_days: {type: integer}
@@ -834,6 +844,10 @@ components:
         create_missing_branches: {type: boolean, default: false}
         create_missing_categories: {type: boolean, default: true}
         skip_invalid_rows: {type: boolean, default: false, description: Los documentos con alguna fila inválida se omiten completos}
+        ingestion_mode:
+          type: [string, 'null']
+          enum: [backfill, incremental, null]
+          description: 'Solo ventas (ADR-V25-23). Vacío = automático: backfill si la empresa aún no tiene ventas al iniciar la escritura (primera carga histórica); si no, incremental. Al confirmar se guarda aquí el valor resuelto.'
     ImportJob:
       type: object
       properties:
@@ -853,7 +867,7 @@ components:
         normalized_preview: {type: array, items: {type: object}}
         stats:
           type: object
-          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid, documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes, return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id'
+          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid, documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes, return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load). En la validación las cifras de versiones son una proyección de lo que hará la confirmación.'
         quality_report: {type: [object, 'null'], properties: {score: {type: number}, issues: {type: array, items: {type: object}}, summary: {type: object}}}
         error_message: {type: [string, 'null']}
         created_at: {type: string, format: date-time}

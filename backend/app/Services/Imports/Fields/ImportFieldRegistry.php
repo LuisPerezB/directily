@@ -49,8 +49,8 @@ final class ImportFieldRegistry
     {
         return [
             new FieldDefinition('document_number', 'Número de documento', true, 'string', 'Número de factura o comprobante (p. ej. 001-001-000012345). Junto con el tipo identifica el documento y evita duplicados al reimportar.', ['numero_factura', 'nro_factura', 'num_factura', 'factura', 'numero_documento', 'nro_documento', 'num_documento', 'documento', 'comprobante', 'numero_comprobante', 'secuencial', 'invoice', 'invoice_number', 'doc_number', 'numero']),
-            new FieldDefinition('document_type', 'Tipo de documento', false, 'string', 'Factura, nota de venta o nota de crédito (devolución). Por defecto: factura.', ['tipo_documento', 'tipo_doc', 'tipo_comprobante', 'tipo', 'document_type', 'doc_type']),
-            new FieldDefinition('status', 'Estado', false, 'string', 'Anulada/anulado se excluye de la demanda. Por defecto: completada.', ['estado', 'anulada', 'anulado', 'estado_documento', 'status']),
+            new FieldDefinition('document_type', 'Tipo de documento', false, 'string', 'Factura, nota de venta, nota de crédito (devolución) u otro. Vacío = factura. Un tipo que no se reconozca (cotización, proforma, guía…) es un error de revisión: el documento no se importa.', ['tipo_documento', 'tipo_doc', 'tipo_comprobante', 'tipo', 'document_type', 'doc_type']),
+            new FieldDefinition('status', 'Estado', false, 'string', 'Completada (o vacío), anulada o pendiente; anulada se excluye de la demanda. Un estado que no se reconozca (rechazada, reversada, no autorizada…) es un error de revisión: el documento no se importa.', ['estado', 'anulada', 'anulado', 'estado_documento', 'status']),
             new FieldDefinition('issued_at', 'Fecha de emisión', true, 'datetime', 'Fecha o fecha-hora de la venta. Se interpreta en la zona horaria de la empresa.', ['fecha', 'fecha_emision', 'fecha_venta', 'fecha_factura', 'fecha_documento', 'fecha_hora', 'date', 'issued_at', 'sale_date']),
             new FieldDefinition('branch_code', 'Código de sucursal', false, 'string', 'Código del establecimiento. Requerido si la empresa tiene más de una sucursal y no se define una sucursal por defecto.', ['sucursal', 'codigo_sucursal', 'cod_sucursal', 'establecimiento', 'local', 'tienda', 'bodega', 'agencia', 'branch', 'branch_code', 'store']),
             new FieldDefinition('product_sku', 'Código de producto (SKU)', true, 'string', 'Código interno del producto.', ['codigo', 'codigo_producto', 'cod_producto', 'sku', 'item', 'codigo_item', 'cod_item', 'referencia', 'product_code', 'product_sku', 'codigo_articulo', 'articulo']),
@@ -84,6 +84,8 @@ final class ImportFieldRegistry
             new FieldDefinition('current_price', 'Precio actual', false, 'number', 'Precio de venta vigente (referencia; no reemplaza precios históricos).', ['precio', 'pvp', 'precio_venta', 'precio_actual', 'price', 'current_price']),
             new FieldDefinition('current_cost', 'Costo actual', false, 'number', 'Costo de compra vigente.', ['costo', 'costo_actual', 'costo_unitario', 'cost', 'current_cost']),
             new FieldDefinition('is_active', 'Activo', false, 'boolean', 'Sí/No. Por defecto: sí.', ['activo', 'estado', 'is_active', 'habilitado']),
+            new FieldDefinition('price_known_at', 'Precio conocido desde', false, 'datetime', 'Desde cuándo la fuente conocía el precio vigente (disponibilidad en la fuente). Vacío = desconocido (NULL); no se rellena con la fecha de la carga.', ['price_known_at', 'fecha_precio', 'precio_desde', 'fecha_actualizacion_precio']),
+            new FieldDefinition('cost_known_at', 'Costo conocido desde', false, 'datetime', 'Desde cuándo la fuente conocía el costo vigente (factura o lista de costos recibida). Vacío = desconocido (NULL).', ['cost_known_at', 'fecha_costo', 'costo_desde', 'fecha_actualizacion_costo']),
         ];
     }
 

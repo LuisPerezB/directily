@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
 
 from predictily_engine.calendar.regions import region_for_province
 from predictily_engine.db.repository import TenantRepository
@@ -54,8 +55,22 @@ class TenantData:
     currency: str | None = None
     sector: str | None = None
     exceptional_events: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Conteos de eventos extraordinarios NO usados por desconocerse (known_at nulo) o conocerse tras el corte.
+    exceptional_stats: dict[str, int] = field(default_factory=dict)
     coverage: dict[str, Any] = field(default_factory=dict)
     coverage_limitations: list[dict[str, str]] = field(default_factory=list)
+    # ADR-V25-23 · tiempo de conocimiento: versiones de las líneas de venta con su ventana [known_from, known_until) leídas
+    # UNA vez hasta el corte final (`data.asof.SalesVersions`); `sales`/`returns` son la vista al corte final y cada ventana
+    # del backtest deriva la suya (None = sin historial de versiones: todo se asume conocido desde su día). `sales_knowledge`
+    # resume esas versiones (líneas tardías, reemplazadas, huella) para el manifiesto y la huella de datos.
+    sales_versions: Any = None
+    sales_knowledge: dict[str, Any] = field(default_factory=dict)
+    # ADR-V25-03 · semántica de días: huecos internos de la fuente (`data_coverage_gaps`, columnas data_source_id, branch_id,
+    # gap_from, gap_to, reason, basis), cierres del calendario (`calendar_events.category = 'closure'`: branch_id nulo = toda la
+    # empresa, starts_on, ends_on, code) y sucursales que alimenta cada fuente (para los huecos declarados por fuente).
+    coverage_gaps: pd.DataFrame = field(default_factory=pd.DataFrame)
+    closures: pd.DataFrame = field(default_factory=pd.DataFrame)
+    source_branches: dict[int, list[int]] = field(default_factory=dict)
 
     @property
     def effective_settings(self) -> dict[str, Any]:
@@ -74,6 +89,13 @@ def _normalize(data: TenantData) -> TenantData:
     for col in ("current_price", "current_cost"):
         if col in data.products:
             data.products[col] = pd.to_numeric(data.products[col], errors="coerce")
+    for name, cols in (("coverage_gaps", ("gap_from", "gap_to")), ("closures", ("starts_on", "ends_on"))):
+        df = getattr(data, name)
+        if df is not None and not df.empty:
+            df = df.copy()
+            for col in cols:
+                df[col] = pd.to_datetime(df[col])
+            setattr(data, name, df)
     if data.exceptional_events is not None and not data.exceptional_events.empty:
         ev = data.exceptional_events.copy()
         for col in ("starts_on", "ends_on", "known_at"):
@@ -99,8 +121,18 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         cutoff = last
     if cutoff is None:
         raise ValueError("La empresa no tiene ventas válidas")
-    sales = repo.daily_sales(cutoff)
+    # Ventas as-of (ADR-V25-23): UNA lectura de las versiones hasta el corte final; `sales`/`returns` son la vista a ese
+    # corte y las ventanas del backtest derivan la suya de `sales_versions` (sin volver a leer la base). Ejecución vigente (corte =
+    # último dato): el período final conoce hasta HOY (una carga nocturna del último día cuenta, como las promociones); una
+    # reconstrucción histórica, solo hasta el propio corte. Los cortes anteriores (ventanas) usan siempre lo conocido en el suyo.
+    live = last is not None and cutoff >= last
+    known_until = _local_today(tenant.get("timezone")) if live else None
+    sales = repo.daily_sales(cutoff, known_until)
+    versions = repo.sales_versions(cutoff, known_until)
     first = pd.to_datetime(sales["ds"]).min().date() if not sales.empty else cutoff
+    gaps = repo.sales_coverage_gaps()
+    gap_sources = sorted({int(x) for x in gaps.loc[gaps["branch_id"].isna() & gaps["data_source_id"].notna(),
+                                                   "data_source_id"]}) if not gaps.empty else []
     data = TenantData(
         tenant_id=repo.tenant_id,
         settings=tenant["settings"],
@@ -109,7 +141,7 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         products=repo.products(),
         categories=repo.categories(),
         sales=sales,
-        returns=repo.daily_returns(cutoff),
+        returns=repo.daily_returns(cutoff, known_until),
         inventory=repo.inventory(first - timedelta(days=1), cutoff),
         latest_inventory=repo.latest_inventory(cutoff),
         promotions=repo.promotions(),
@@ -117,16 +149,48 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None) -> Tena
         suppliers=repo.suppliers(),
         # Corte retroactivo: solo órdenes que existían al corte (sin fuga de compras posteriores).
         open_purchase_orders=repo.open_purchase_orders(cutoff if last is not None and cutoff < last else None),
-        sales_stats=repo.sales_stats(),
+        sales_stats=repo.sales_stats(cutoff, known_until),
         promotion_revisions=repo.promotion_revisions(),
         # Ejecución vigente (corte = último dato): vale lo conocido hoy. Ejecución histórica: lo
         # conocido al corte (una promoción registrada después no puede usarse en ese pronóstico).
-        promotions_known_on=_local_today(tenant.get("timezone")) if last is not None and cutoff >= last else None,
+        promotions_known_on=known_until,
         currency=tenant.get("currency"),
         sector=tenant.get("sector"),
-        exceptional_events=repo.calendar_events(),
+        sales_versions=versions,
+        sales_knowledge=versions.summary(),
+        coverage_gaps=gaps,
+        closures=repo.closure_events(),
+        source_branches=repo.branches_by_source(gap_sources),
     )
+    data.exceptional_events, data.exceptional_stats = _exceptional_events(repo, cutoff)
     return _normalize(data)
+
+
+EXCEPTIONAL_LOOKAHEAD_DAYS = 180  # igual al tope del horizonte interno (inventory.MAX_INTERNAL_HORIZON)
+
+
+def _exceptional_events(repo: TenantRepository, cutoff: date) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Eventos extraordinarios del calendario conocidos al corte, leídos con el lector del core de Datos
+    (`extensions.data_core.load_calendar_events`: última revisión conocida; `known_at` nulo = desconocido, no se
+    devuelve con `as_of`). Devuelve también cuántos se dejaron fuera y por qué (nunca en silencio)."""
+    from predictily_engine.extensions.data_core import load_calendar_events
+
+    empty = (pd.DataFrame(), {"total": 0, "known_at_unknown_ignored": 0, "known_after_cutoff_ignored": 0})
+    if repo.conn.execute(text("SELECT to_regclass('calendar_events')")).scalar() is None:
+        return empty
+    start, end = cutoff + timedelta(days=1), cutoff + timedelta(days=EXCEPTIONAL_LOOKAHEAD_DAYS)
+    everything = load_calendar_events(repo.conn, repo.tenant_id, start, end, as_of=None)
+    known = load_calendar_events(repo.conn, repo.tenant_id, start, end, as_of=cutoff)
+    everything = everything[everything["category"] == "exceptional"]
+    known = known[known["category"] == "exceptional"].copy()
+    if "known_at" in known:  # a hora UTC sin zona: el corte compara contra el fin del día UTC (misma regla que el core de Datos)
+        known["known_at"] = pd.to_datetime(known["known_at"], utc=True).dt.tz_localize(None)
+    key = ["scope", "scope_ref", "code", "starts_on"]
+    unknown = everything["known_at"].isna()
+    seen = set(map(tuple, known[key].fillna("").astype(str).values.tolist())) if not known.empty else set()
+    late = ~unknown & ~everything[key].fillna("").astype(str).apply(tuple, axis=1).isin(seen)
+    return known, {"total": int(len(everything)), "known_at_unknown_ignored": int(unknown.sum()),
+                   "known_after_cutoff_ignored": int(late.sum())}
 
 
 def _local_today(timezone: str | None) -> date:

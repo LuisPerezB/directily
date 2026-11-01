@@ -24,6 +24,7 @@ class AccuracyService
         private readonly AccuracyExplainer $explainer,
         private readonly ForecastQuery $forecasts,
         private readonly HistoryQuery $history,
+        private readonly HorizonSupport $support,
     ) {}
 
     /** @return array<string, mixed> */
@@ -43,6 +44,10 @@ class AccuracyService
             ] : null,
             'backtest' => $backtest,
             'realized' => $realized,
+            // Etapa 2 (aditivo): protocolo de evaluación de la ejecución (E2-06) y respaldo de cada horizonte (E2-21).
+            'evaluation_manifest' => $run?->evaluation_manifest,
+            'horizon_support' => $run ? $this->support->all($run) : null,
+            'p50' => $run ? ($run->summary['p50'] ?? null) : null,
             'explanation' => $this->explainer->explain([
                 'backtest' => $backtest ?? [],
                 'realized' => $realized,
@@ -58,7 +63,7 @@ class AccuracyService
             ->where('tenant_id', $run->tenant_id)
             ->where('forecast_run_id', $run->id)
             ->where('evaluation_type', 'backtest')
-            ->whereIn('level', ['overall', 'horizon', 'demand_class', 'branch'])
+            ->whereIn('level', ['overall', 'horizon', 'horizon_total', 'demand_class', 'branch'])
             ->get();
 
         $overall = $rows->where('level', 'overall');
@@ -133,11 +138,45 @@ class AccuracyService
             'evaluation_scope' => $this->scope($selected ?? $baseline),
             'cutoffs' => $this->jsonList($selected?->cutoffs ?? $baseline?->cutoffs ?? null),
             'by_horizon' => $byHorizon,
+            // Etapa 2: error del TOTAL de H días (7/14/30/60/90) por serie y ventana, junto al del naive estacional.
+            'by_horizon_total' => $this->horizonTotals($rows),
             'by_demand_class' => $byClass,
             'by_branch' => $byBranch,
             'models' => $models,
             'selection_windows' => $this->selectionWindows($run),
         ];
+    }
+
+    /**
+     * @param  Collection<int, object>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function horizonTotals(Collection $rows): array
+    {
+        return $rows->where('level', 'horizon_total')->groupBy(fn ($r) => (string) $r->horizon_days)
+            ->map(function (Collection $group) {
+                $sel = $this->pickSelected($group);
+                $base = $this->pickBaseline($group);
+                $metrics = $this->decode($sel?->metrics);
+
+                return [
+                    'horizon_days' => (int) ($sel->horizon_days ?? $base->horizon_days ?? 0),
+                    'wape' => Num::ratio($sel?->wape),
+                    'baseline_wape' => Num::ratio($base?->wape),
+                    'bias' => Num::ratio($sel?->bias),
+                    'mae' => Num::units($sel?->mae),
+                    'money' => $metrics['money'] ?? null,
+                    'n_obs' => (int) ($sel->n_obs ?? 0),
+                ];
+            })->sortBy('horizon_days')->values()->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function decode(mixed $json): array
+    {
+        $value = is_string($json) ? json_decode($json, true) : $json;
+
+        return is_array($value) ? $value : [];
     }
 
     /**
@@ -339,7 +378,24 @@ class AccuracyService
     /** @return array<string, mixed> */
     private function metrics(object $r): array
     {
+        $extra = $this->decode($r->metrics ?? null);
+
         return [
+            // Etapa 2 (aditivo): MASE/RMSSE con escala de entrenamiento, pinball de P10/P50/P90 (P50 null si no se
+            // publicó), amplitud media de los intervalos, métricas en dinero aparte de las de unidades y muestra.
+            'mase' => Num::ratio($extra['mase'] ?? null),
+            'rmsse' => Num::ratio($extra['rmsse'] ?? null),
+            'pinball' => [
+                'p10' => Num::units($extra['pinball_p10'] ?? null),
+                'p50' => Num::units($extra['pinball_p50'] ?? null),
+                'p90' => Num::units($extra['pinball_p90'] ?? null),
+            ],
+            'interval_width' => [
+                '80' => Num::units($extra['interval_width_80'] ?? null),
+                '95' => Num::units($extra['interval_width_95'] ?? null),
+            ],
+            'money' => $extra['money'] ?? null,
+            'sample' => $extra['sample'] ?? null,
             'model_family' => $r->model_family,
             'label' => ModelCatalog::label($r->model_family),
             'wape' => Num::ratio($r->wape),

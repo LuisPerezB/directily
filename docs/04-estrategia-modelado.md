@@ -15,11 +15,18 @@ No se usa ningún LLM para calcular cifras.
   imputa de forma conservadora `max(venta, media móvil de 28 días sin quiebre)`; en LightGBM
   esos días tienen **peso 0**; y se **excluyen de todas las métricas**. Si no hay inventario,
   no se puede detectar la censura y el motor lo informa como limitación (readiness y warnings).
+- **Un día sin ventas no siempre es un cero** (ADR-V25-03, §16): cada día de una serie se clasifica en `day_status`
+  (`sale`, `zero_confirmed`, `missing_source`, `stockout_censored`, `closed`). Solo `zero_confirmed` es un cero
+  observado; los días de fuente ausente (fuera de la cobertura, en un hueco o inferidos) y los cierres declarados se
+  **excluyen** de las métricas y del perfilado y se imputan igual que los quiebres.
+- **Las ventas se leen tal como se conocían al corte** (ADR-V25-23, §16): un documento cargado tarde o una anulación
+  posterior no reescriben un corte pasado.
 - Series sin ventas en 180 días o de productos inactivos no se pronostican (se informa).
 
 ## 2. Perfilado y clases de demanda
 
-Clasificación Syntetos–Boylan sobre los últimos 365 días sin quiebre: ADI (intervalo medio
+Clasificación Syntetos–Boylan sobre los últimos 365 días limpios (sin quiebre, fuente ausente ni cierre: esos días no
+cuentan como ceros): ADI (intervalo medio
 entre ventas) y CV² (variabilidad de los tamaños no nulos) con umbrales 1,32 y 0,49:
 `smooth`, `erratic`, `intermittent`, `lumpy`; `insufficient` si hay < 28 días o < 4 días
 con venta. La selección de modelos se hace **por clase**.
@@ -63,6 +70,15 @@ la ejecución vigente usa lo conocido el día en que se ejecuta. Un histórico i
 `known_at` queda como conocido el día de la carga, de modo que el backtest lo trata como
 promoción no anunciada (`tests/unit/test_promotions_as_of.py`).
 
+**Ventas as-of por ventana (ADR-V25-23).** Cada ventana de selección y el período reservado entrenan con las ventas **tal como se conocían
+en SU corte**, no con el estado actual de los documentos: el panel, el perfil de demanda, las escalas, el precio supuesto y las variables
+de LightGBM de la ventana se arman con las versiones de documento visibles ese día (una versión es visible al corte `C` si `known_from <
+medianoche local de C+1` y `known_until` es nulo o `>=` esa medianoche). Un documento cargado después del corte o una anulación o
+corrección posterior no cambian lo que entrena una ventana anterior. Los **reales** con que se evalúa cada ventana son la **verdad disponible al
+corte final**: se mide contra lo que de verdad ocurrió, no contra lo que se creía entonces. Si lo tardío no toca el pasado de una
+ventana, esta reutiliza el panel final (mismo resultado, sin costo). El manifiesto (`evaluation_manifest.knowledge`) registra la política y, por
+ventana, si se reconstruyó y cuánto difería de la verdad. Detalle, regla en días, costo medido y pruebas en `docs/data/TEMPORAL_AVAILABILITY.md`.
+
 **Período final reservado (holdout, F6).** Si la historia alcanza, el plan reserva una ventana
 final con origen `H = corte − h` y fechas objetivo `(H, corte]`. Las ventanas de **selección**
 terminan sus fechas objetivo en o antes de `H`: no comparten fechas con el holdout y sus residuos
@@ -79,8 +95,31 @@ sirven para comparar modelos desde varios orígenes, no como prueba independient
 | < 70 días | sin backtest: promedio de la historia, intervalos no calibrados (warning) | | | |
 
 Se prefiere el mayor horizonte que admita un holdout independiente. Con 300–389 días ahora se
-usa h = 60 con holdout en vez de h = 90 sin holdout; los pasos 61–90 de producción se
-ensanchan con la regla de extrapolación (§7).
+usa h = 60 con holdout en vez de h = 90 sin holdout. Los pasos de producción que exceden el
+horizonte evaluado **ya no se presentan como completos** (ver «Horizontes y abstención» abajo).
+
+**Horizontes 7/14/30/60/90 y abstención explícita (etapa 2 · P1, E2-21).** El motor pronostica
+los cinco horizontes del dominio (Laravel pide solo los que el plan autoriza: básico 7/14/30; resto
+todos). Un horizonte H está **respaldado** únicamente si (1) la historia cubre ≥ 2×H días y (2) el
+backtesting tiene ventanas de ≥ H días y observaciones evaluadas. Si no, queda `insufficient_data` con
+sus motivos (`history_lt_2h`, `backtest_horizon_lt_h`, `no_backtest`, `no_evaluated_observations`): el
+número se calcula —la jerarquía y las recomendaciones lo necesitan— pero se marca en cada fila
+(`forecast_values.quality_status`), en el resumen (`horizon_support`), en la API y en la envoltura, y
+las filas `granularity='horizon'` de ese H salen **sin intervalo** (no se extrapola). Sin período final
+independiente, los horizontes respaldados quedan `degraded` (métricas optimistas). Por serie, una serie con
+menos de 2×H días de historia queda `insufficient_data` en los pasos de ese horizonte. Ejemplo
+(`tests/unit/test_horizons.py`): 118 días de historia ⇒ backtest de 14 días con holdout ⇒ 7 y 14 `ok`; 30, 60 y
+90 `insufficient_data`. Con 574 días (datos de prueba) o 730 (demo) los cinco horizontes son `ok`.
+
+**Manifiesto del protocolo (E2-06).** Cada ejecución guarda en `forecast_runs.evaluation_manifest` los
+períodos que usó cada fase, construidos de las filas reales del backtest: orígenes y rangos objetivo de
+las ventanas de selección, la fuente de los residuos de calibración y que eran observables en el origen del
+holdout (`calibration.observable_at`), el rango del período final y que **no** participó en selección,
+hiperparámetros, umbrales ni calibración (`used_for_* = false`), la maduración de las etiquetas, los
+orígenes superpuestos (`overlap`: fechas objetivo compartidas entre ventanas de selección y con el holdout)
+y qué ventanas decidieron qué (`decisions`). `demand.manifest.verify()` devuelve las violaciones del
+protocolo. Se expone en `GET /accuracy/summary` y `GET /forecast-runs/{id}`
+(`tests/unit/test_manifest.py`; docs/architecture/v2/P1-demanda.md §2.2).
 
 Con período reservado, el procedimiento evaluado es el mismo que se usa en producción, pero
 ejecutado al origen `H`: (1) elegir modelos por clase solo con las ventanas de selección; (2)
@@ -95,7 +134,10 @@ el futuro (`test_profiling.py`); en el pipeline completo, alterar ventas posteri
 la primera ventana (y añadir una serie que al corte tenía 2 días de venta) no cambia sus series,
 pronósticos ni clases; alterar el período reservado cambia sus métricas, pero no la selección
 usada para evaluarlo, ni sus pronósticos, ni las métricas de las ventanas de selección
-(`test_pipeline.py`). Los indicadores externos solo se usan desde su fecha real de publicación.
+(`test_pipeline.py`). La fuga por **fecha de conocimiento** (no solo por fecha de evento) se prueba contra PostgreSQL: un documento tardío, una
+anulación posterior y una corrección posterior, todos con fecha de evento anterior al corte de la ventana 0, no cambian sus pronósticos, clases ni
+escalas, y sin lectura as-of sí los cambiaban (`test_asof_integration.py::test_a_backtest_window_does_not_change_when_data_known_after_its_cutoff_is_perturbed`).
+Los indicadores externos solo se usan desde su fecha real de publicación.
 
 **Pendiente documentado: evaluación anidada.** El holdout mide el procedimiento en un único
 origen (90 días, una temporada). Para estimar su variabilidad se puede repetir todo el
@@ -111,9 +153,29 @@ ferretería), por lo que conviene como tarea programada y no en cada ejecución.
   (complementaria), **sesgo** = Σ(pred − real)/Σ real (positivo = sobreestima), **cobertura**
   de intervalos 80 % y 95 %.
 - Desgloses guardados en `model_evaluations`: total, clase de demanda, tramo de horizonte
-  (h1-7, h8-30, h31-90), sucursal, categoría, producto (`p{id}`) y serie (`b{id}-p{id}`).
+  (etapa 2: `h1-7`, `h8-14`, `h15-30`, `h31-60`, `h61-90`; antes `h1-7`, `h8-30`, `h31-90`), sucursal,
+  categoría, producto (`p{id}`) y serie (`b{id}-p{id}`). **Nuevo** `level = 'horizon_total'`
+  (`level_key = 'H30'`): error del **total de H días** (7/14/30/60/90) por serie y ventana, para el
+  seleccionado y el seasonal naive; es el error que importa al planear compras (en la demo el WAPE del
+  total de 30 días es 0,105 frente a 0,49 del paso diario).
+- **Métricas de la etapa 2** (jsonb `model_evaluations.metrics`, `demand-metrics-v1`):
+  - **MASE** = media de |e| / MAE del naive estacional de 7 días y **RMSSE** = √(media de e² / MSE del
+    mismo naive). La escala se calcula **por serie con datos de entrenamiento ≤ origen** (pares t, t−7
+    sin días censurados, ≥ 14 pares); ventas posteriores al origen no la cambian
+    (`test_scaled_metrics.py`). Escala indefinida (serie constante o < 14 pares) ⇒ la fila se excluye de
+    MASE/RMSSE y se cuenta en `exclusions.scale_undefined`; nunca se convierte en cero. MASE < 1 = mejor
+    que el naive estacional medido en entrenamiento.
+  - **Pinball** de P10, P50 y P90 y **amplitud media** de los intervalos 80/95 (unidades por serie-día y
+    relativa a lo vendido): solo con período final independiente, con intervalos calibrados fuera de
+    muestra; `null` en las ventanas de selección.
+  - **Dinero (ingresos) separado de unidades**: pronóstico = unidades × último precio neto conocido en
+    el origen; real = unidades × precio neto observado ese día; `money.{currency, wape, mae, bias,
+    actual_total, forecast_total, n_obs}`.
+  - **Muestra y exclusiones**: `sample.{n_obs, n_series, n_windows, n_scored_intervals,
+    exclusions.{stockout_days, scale_undefined, price_missing}}`. Los denominadores cero dejan WAPE/sesgo
+    en `null`, no en cero.
 - Fila compuesta `model_family = 'selection'` (`is_selected = true`) = combinación de
-  ganadores por clase; `seasonal_naive` con `is_baseline = true` es la referencia obligatoria.
+  ganadores **servidos** por clase; `seasonal_naive` con `is_baseline = true` es la referencia obligatoria.
 - **Qué métrica es la principal.** `evaluation_type = 'backtest'` (lo que leen Laravel, el
   resumen `summary.metrics` y la alerta de deriva) contiene las métricas del **período final
   reservado** cuando existe (`extra.evaluation_scope = 'holdout'`, `n_windows = 1`, `cutoffs` =
@@ -133,27 +195,50 @@ ferretería), por lo que conviene como tarea programada y no en cada ejecución.
 1. Por clase se evalúan los candidatos y el baseline. Cada fila del backtest cuenta en la clase
    que su serie tenía **en el corte de su ventana**, no en el corte final (F4).
 2. Gana el estadístico de menor WAPE.
-3. LightGBM solo lo reemplaza si mejora su WAPE ≥ 3 % (relativo, `ENGINE_MIN_IMPROVEMENT`) **y**
+3. LightGBM solo lo reemplaza si mejora su WAPE ≥ 3 % (relativo; configuración `demand.min_improvement`,
+   sobrescribible por empresa en `settings.cores.demand` o por el operador con `ENGINE_MIN_IMPROVEMENT`) **y**
    gana en ≥ 2/3 de las ventanas (estabilidad). Clases con poca evidencia usan la decisión agregada.
    La regla se aplica dos veces: con todas las ventanas para el modelo de producción y solo con
    las ventanas de selección para la evaluación en el período reservado (F6).
 4. Se registra un **modelo de respaldo** simple (mejor entre Seasonal Naive y Promedio móvil)
    que se usa si el ganador falla al entrenar o predecir.
+   **Modelo servido coherente (E2-19).** Si el entrenamiento final del ganador (LightGBM) falla, se sirve el
+   respaldo en las clases afectadas y TODO lo que acompaña al resultado corresponde al modelo servido:
+   las métricas del período final se calculan con las filas del backtest de la familia servida, los
+   intervalos se calibran con los residuos de esa familia (grupo clase|familia), cada fila se etiqueta con
+   la familia que la produjo, la selección persistida marca `planned_family` y `fallback_applied`, y el
+   registro deja al ganador en `failed` (con el error) y al respaldo en `production` con `role = fallback`.
+   `summary.served` y la limitación `fallback_served` lo declaran (`tests/unit/test_served_model.py`).
 5. Un modelo de producción **nunca se reemplaza sin evaluación**: cada ejecución reevalúa a
-   todos los candidatos (incluida la familia vigente) antes de promover. Los modelos
-   anteriores pasan a `archived`; los perdedores quedan `rejected` con sus métricas.
+   todos los candidatos (incluida la familia vigente) antes de promover. **Estados de la etapa 2**
+   (ADR-V2-07): `candidate` (ejecuciones históricas) → `validated` (evaluado con el protocolo y no elegido)
+   → `production` (servido; `role = primary`, o `fallback` para el respaldo en espera o que reemplazó a un
+   ganador fallido) → `retired` (los de producción anteriores, al completarse una ejecución de producción) o
+   `failed`; siempre con `core = 'demand'`, `validated_at` y `artifact_compat`. Los nombres de la etapa 1 se
+   derivan en la API (`fallback` = production + role fallback, `archived` = retired, `rejected` = validated).
+   La **reversión** (`POST /models/demand/rollback`) re-apunta la ejecución vigente a una de producción
+   completada **anterior**, con auditoría y verificación del SHA-256 de los artefactos visibles; no reentrena.
 
 ## 7. Intervalos de predicción
 
 Conformales a partir de los residuos del backtest del modelo elegido, normalizados por la
 escala de cada serie (media de 28 días). Nivel serie: cuantiles asimétricos por clase y tramo
 de horizonte (conteos sesgados). Niveles agregados: simétricos (|error|), más robustos cuando
-las ventanas comparten un sesgo estacional. Más allá del horizonte evaluado se ensanchan con
-√(paso/paso máximo). Semanal/mensual y totales del horizonte (7/30/90) se calibran con sumas de
-errores del backtest (`granularity = 'week' | 'month' | 'horizon'`).
+las ventanas comparten un sesgo estacional. Más allá del horizonte evaluado los pasos diarios se
+ensanchan con √(paso/paso máximo), **pero quedan marcados `insufficient_data`** (§4) y los totales de
+horizonte de ese H salen sin intervalo. Semanal/mensual y totales del horizonte (7/14/30/60/90) se
+calibran con sumas de errores del backtest (`granularity = 'week' | 'month' | 'horizon'`).
 
-- **Producción:** residuos del modelo elegido en todas las ventanas (incluido el holdout),
-  agrupados por la clase de la serie en el corte de cada ventana.
+- **Producción:** residuos del modelo elegido y **servido** en todas las ventanas (incluido el holdout),
+  agrupados por la clase de la serie en el corte de cada ventana y por familia.
+- **P10 / P50 / P90.** `lo_80` = P10 y `hi_80` = P90 son los límites del intervalo 80 %: a nivel serie-día son
+  los cuantiles 10/90 del error normalizado (conformal asimétrico); en niveles agregados el intervalo es
+  simétrico sobre |error| y solo se afirma que contiene el 80 %. Con ≥ 10 % de días en cero, `lo_80 = 0`.
+  **P50** (`forecast_values.p50`, solo serie-día) = pronóstico + mediana del error normalizado × escala; **se
+  publica únicamente si se evaluó con pinball en el período final independiente** (≥ 200 observaciones) **y
+  mejora** a «usar el pronóstico (media) como mediana»; si no, queda `null` en la base y en la API, y
+  `summary.p50` explica por qué. La suma de medianas no es la mediana de la suma: los niveles agregados nunca
+  llevan P50. En la demo ficticia no se publica (pinball 1,042 frente a 1,032; tampoco por clase de demanda).
 - **Cobertura anunciada (holdout):** el intervalo evaluado se calibra **solo** con los residuos de
   las ventanas de selección, ya observables en el origen del holdout, y se mide en el holdout
   (`holdout_coverage`). Es una prueba prospectiva.
@@ -256,6 +341,32 @@ con el mismo período que se evalúa. El pronóstico retroactivo de 30 días com
 reales (WAPE realizado 0,511, sesgo +0,5 %, cobertura 80 % de 0,807) se midió antes de esta
 corrección y no se repitió.
 
+### Recalculado en la etapa 2 (29-oct-2026, Ferretería Andina, semilla 42, en memoria, datos ficticios)
+
+`engine/scripts/benchmark_demand_v2.py` (pipeline en memoria, 183 series activas, corte 2026-10-26,
+holdout 2026-07-29 → 2026-10-26, 15.458 observaciones serie-día sin quiebre). **Antes** = código de
+`main` @ `6425692` + correcciones F1–F7 (`docs/validation/2026-10-29/CORRECCIONES.md`); **después** = etapa 2 · P1.
+
+| Métrica (holdout independiente) | Antes | Después |
+|---|---|---|
+| WAPE diario por serie, seleccionado / Seasonal Naive | 0,4926 / 0,6631 | 0,4926 / 0,6631 (idéntico: el protocolo y los modelos no cambian) |
+| WAPE del total diario | 0,0976 / 0,1164 | 0,0976 / 0,1164 |
+| Sesgo · cobertura 80 % / 95 % | −4,03 % · 85,39 % / 97,86 % | −4,03 % · 85,39 % / 97,86 % |
+| Modelos servidos | LightGBM 94 · AutoETS 89 | LightGBM 94 · AutoETS 89 |
+| **MASE** seleccionado / Seasonal Naive | no medido | **0,840 / 1,092** |
+| **RMSSE** seleccionado / Seasonal Naive | no medido | **0,764 / 1,079** |
+| **Pinball** P10 · P90 (P50 no publicada) | no medido | **0,371 · 0,635** (P50 candidata 1,042 vs 1,032 de la media como mediana ⇒ `null`) |
+| **Amplitud media** del intervalo 80 % · 95 % (unidades por serie-día) | no medido | **8,42 · 14,06** |
+| **Dinero** (ingresos): WAPE · sesgo, seleccionado / Seasonal Naive | no medido | **0,662 · −6,0 % / 0,888 · +6,9 %** (real 233.944,59 vs pronosticado 219.938,16; moneda `null` en memoria, USD en BD) |
+| WAPE del **total de H días** (seleccionado / Seasonal Naive) H = 7 · 14 · 30 · 60 · 90 | no medido | 0,218 / 0,284 · 0,156 / 0,246 · 0,105 / 0,213 · 0,090 / 0,208 · 0,076 / 0,213 |
+| WAPE diario por tramo `h1-7 · h8-14 · h15-30 · h31-60 · h61-90` | 0,480 · 0,493 (8–30) · 0,494 (31–90) | 0,480 · 0,529 · 0,479 · 0,483 · 0,506 |
+| Duración del pipeline (n_jobs = 2, CPU compartida) | 64,7 s | 66,7 s (+3 %) |
+
+Lectura honesta: el seleccionado supera al naive estacional **de entrenamiento** (MASE 0,84 < 1) y al de
+referencia en dinero; el total de 30 días se predice con 10,5 % de error (vs 49 % el paso diario); los
+horizontes cortos (7 días) tienen sesgo negativo de −13 %. Con un solo período de 90 días (una temporada) estas
+cifras no tienen intervalo de confianza y no certifican exactitud comercial.
+
 ## 12. Limitaciones conocidas (honestas)
 
 - Con < 1 año de historia la estacionalidad anual se estima con poca evidencia; las ventanas
@@ -270,3 +381,190 @@ corrección y no se repitió.
 - Elasticidad precio-demanda y efectos causales no se estiman (el simulador usa supuestos).
 - Sin inventario no se detecta la demanda no atendida ni se generan recomendaciones.
 - Los "puentes" por decreto ejecutivo no son predecibles; pueden añadirse como eventos.
+- **P50 no publicada en la demo** (no mejora a la media como mediana). Para demanda con muchos ceros el
+  intervalo 80 % tiene `lo_80 = 0`, por lo que «P10» es 0 y su cobertura de cola no es el 10 % nominal.
+- Los horizontes se respaldan con la historia **de la empresa** (≥ 2×H) y las ventanas de backtest; no hay
+  evaluación anidada de cada horizonte ni intervalos de confianza de las métricas (un solo período final).
+- Las métricas en dinero valoran lo pronosticado al último precio conocido en el origen (supuesto de precio
+  congelado, §9): incluyen el efecto de cambios de precio posteriores al origen.
+- Las series nuevas o de historia escasa se pronostican con un nivel plano (mediana de categoría o promedio
+  propio): no aprenden estacionalidad hasta tener ≥ 28 días; quedan marcadas `insufficient_data` en los
+  horizontes que su historia no respalda.
+- El cierre de sucursal solo se reconoce si está declarado (`branches.is_active = false`; no hay fecha de cierre):
+  una sucursal que deja de vender sin declaración se trata como series sin ventas recientes (abstención).
+- La cobertura de ventas (`data_coverage`) limita el corte de **toda** la empresa al menor `complete_through`
+  declarado; no hay cobertura por producto ni se verifica automáticamente (se declara o no se declara).
+- Los eventos extraordinarios solo se marcan; el motor no aprende su efecto (no hay histórico etiquetado).
+- La reversión solo verifica el SHA-256 de artefactos visibles desde el backend (volumen compartido con el
+  motor); en servidores distintos informa `artifacts_verified = null`.
+- **Conocimiento as-of (ADR-V25-23)**: una carga histórica (`backfill`) asume el estado final del documento desde su día de negocio (la fuente no
+  entrega el historial de estados: una anulación posterior cargada así no se puede reconstruir); inventario, catálogo, costos y calendario no están
+  versionados y se leen con su estado vigente; las declaraciones de cobertura, huecos y cierres se aplican con su estado vigente en todas las
+  ventanas. Los lectores de Supply y Causal siguen leyendo el estado vigente de las ventas (`docs/data/TEMPORAL_AVAILABILITY.md` §12). Una ejecución vigente (corte = último
+  dato) conoce hasta hoy —la carga nocturna del último día cuenta—, pero un corte que la cobertura declarada limita por debajo del último dato se trata como histórico
+  (conocimiento hasta el propio corte): ver §16.1 y `TEMPORAL_AVAILABILITY.md` §3 y §12.12.
+- **Regla inferida de días sin fuente (ADR-V25-03)**: activa por defecto y **pendiente de aprobación en el piloto**; confunde un cierre sin declarar
+  con una caída de la fuente (con datos sintéticos marca los feriados cerrados), no detecta caídas de más de ≈ 14 días ni sucursales de pocas líneas.
+  Los cierres se declaran con `calendar_events.category = 'closure'`, valor nuevo que el backend aún no acepta.
+
+## 13. Casos especiales, cobertura, huella y configuración (etapa 2 · P1)
+
+Detalle y contratos en `docs/architecture/v2/P1-demanda.md`.
+
+**Casos especiales (§6.D).** Cada serie lleva su etiqueta (`forecast_values.case_label`,
+`forecasting_series.lifecycle`, `summary.special_cases`) y su respaldo o abstención:
+
+| Caso | Tratamiento | Etiqueta |
+|---|---|---|
+| Producto nuevo (< 28 días) | mediana de la categoría (≥ 3 series maduras de la sucursal+categoría o de la empresa) si tiene poca venta propia; si no, su promedio | `new_product_category_median`, `new_product_own_average[_low_evidence]` |
+| Historia escasa (≥ 28 días, < 4 con venta) | promedio de su historia | `sparse_history` |
+| Descontinuado (catálogo inactivo) | cero explícito si vendió en el último año; si no, abstención | `discontinued_zero` |
+| Sin ventas recientes (> 180 días, catálogo activo) | **abstención** (no se inventa un cero) | `no_recent_sales` |
+| Sucursal cerrada (declarada) | cero explícito | `branch_closed_declared` |
+| Sucursal abierta hace ≤ 90 días | la serie empieza en su primera venta | `branch_opening` |
+| Evento extraordinario conocido al corte | bandera opcional; no cambia el valor; calidad `degraded` en sus fechas | `exceptional_event` |
+
+**Cobertura de fuentes.** `data_coverage` (ventas): el corte no supera el menor `complete_through`
+declarado; lo posterior (y lo anterior a `complete_from`) es dato **ausente**, no cero. Sin declaración:
+comportamiento anterior + limitación `coverage_undeclared`. Además, el panel clasifica `missing_source` los días de una sucursal
+fuera de SU cobertura (también una sucursal cerrada con cobertura propia), los de un hueco `data_coverage_gaps` y los que infiere la
+regla de actividad (§16).
+
+**Huella y configuración.** Cada ejecución enlaza `data_snapshots` (ventas, devoluciones, inventario, precios,
+costos, catálogo, promociones tal como se conocían al corte, calendario/feature set/eventos, indicadores
+externos, insumos de abastecimiento, configuración efectiva, reglas de elegibilidad y cobertura) y guarda
+`config_version` + `effective_config` (core → perfil sectorial → empresa → opciones de la ejecución). Mismo
+snapshot + configuración + semilla ⇒ mismos valores (`test_pipeline.py::test_reproducible_with_same_seed`,
+`test_snapshot_config.py`, `test_demand_v2_integration.py`). Los componentes `sales` y `costs` se calculan sobre los datos **as-of
+efectivamente usados** e incluyen sus ventanas de conocimiento: dos cortes con las mismas cifras pero distinto conocimiento no comparten huella,
+y lo que ocurra después del corte final no la altera (§16).
+
+## 14. Comportamiento de compra por comprador (Customer Core, etapa 2 · P2)
+
+Detalle, definiciones y limitaciones en `docs/architecture/v2/P2-comportamiento.md`. Es un modelo **distinto** del de demanda
+agregada: la unidad es comprador × producto, y la demanda agregada y la de compradores son dos vistas de la misma demanda que
+nunca se suman (§14.6).
+
+**14.1 Objetivos (7, 30 y 90 días, con modelos propios por horizonte).** `purchase_probability` = P(≥ 1 compra válida del producto en
+`(corte, corte+H]`, todas las sucursales, sin anuladas ni notas de crédito); `quantity_if_purchase` = suma de **todas** las compras
+de la ventana dado ≥ 1; `expected_quantity` = P × cantidad; `expected_amount` = esperanza × último precio neto de la relación
+(supuesto). La etiqueta madura solo si `corte+H ≤` último día completo (cobertura o última venta); la ventana con disponibilidad
+< 80 % en la sucursal habitual se **excluye** (censura: no es un negativo). Candidatos: relaciones con compras previas; sin
+compradores genéricos ni ventas anónimas; nuevos y productos nunca comprados no tienen predicción individual (residual de la reconciliación).
+
+**14.2 Protocolo.** Cortes cada 14 días; bloques cronológicos entrenamiento | H | calibración | H | selección | H | holdout (niveles
+`full`/`lean`/`reference_only`/abstención según los datos). Calibración (isotónica por grupos o Platt) con el bloque de calibración;
+el holdout solo evalúa y aplica la regla `cust-promotion-v1`. Filas de cortes consecutivos solapadas: no independientes.
+
+**14.3 Modelos.** Probabilidad: referencia frecuencia/recencia, regresión logística, `LGBMClassifier` (dos configuraciones).
+Cantidad: referencia histórica y `LGBMRegressor` con objetivos L2, L2 sobre log1p, Tweedie, Gamma (y Poisson solo con enteros) **comparados**.
+Se sirve el complejo solo si mejora a la referencia (Brier ≥ 2 %, log loss y ECE no peores; MAE ≥ 3 % y sesgo acotado); si no, la referencia con `role = fallback`.
+
+**14.4 Métricas (holdout, por horizonte, con n y fechas).** Probabilidad: Brier (y frente a la climatología), log loss, curva de calibración por grupos
+(n ≥ 30, intervalos de Wilson), ECE, PR-AUC, ROC-AUC (secundaria). Ranking: precision@k y recall@k (k = 1, 3, 5, 10) por unidad corte×comprador frente a
+popularidad, recencia y referencia. Cantidad: MAE, sesgo (Σ(pred−real)/Σreal), WAPE (nulo si Σreal = 0), RMSE y cobertura del intervalo 80 %, **condicionada y
+sobre todas las filas** (incluye no compradores), y monto. Inactividad: tasa de «sin compras en 90 días» por estado frente a la regla ingenua de 60 días; frecuencia: MAE/sesgo
+con ventanas 90/180/365.
+
+**14.4b Fuente del ranking (`cust-ranking-v1`, ADR-P2-01).** El ranking servido de productos probables usa, por horizonte, la fuente elegida en el holdout entre probabilidad del modelo servido, popularidad y recencia por precision@5, con popularidad por defecto y margen relativo mínimo de 5 %; la fuente queda en `ranking_source` (modelos, resumen, cada fila del ranking y la API).
+
+**14.5 Coherencia.** Máximo acumulado P7 ≤ P30 ≤ P90 (sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
+
+**14.6 Reconciliación y compromisos.** agregado = Σ max(esperanza, comprometido) + comprometido fuera del modelo + residual; `inconsistent` si compradores > agregado
+(sin alterar probabilidades). Comprometido = pedidos/contratos confirmados, conocidos al corte, no cancelados, con entrega en el horizonte (pendiente = cantidad − cumplida).
+
+**14.6b Conocimiento as-of (ADR-V25-23).** Las **variables** de cada corte `c` (recencia, frecuencia, intervalos, cantidades, precios, devoluciones, comprador y
+producto, actividad) se calculan con las compras tal como se conocían el día `c`; las **etiquetas** (compra y cantidad en `(c, c+H]`) usan el conocimiento más
+reciente al corte final (la verdad disponible). Un documento cargado después de `c` o una anulación posterior no alteran las variables del corte, pero sí cuentan
+como resultado. `CustomerRepository.purchases()/returns()` devuelven lo conocido al corte. Detalle y pruebas en `docs/data/TEMPORAL_AVAILABILITY.md` §7.
+
+**14.7 Resultados medidos (ficticios).** Generador de verdad conocida (`customer/synthetic.py`): la probabilidad servida coincide con la verdad analítica por grupos
+y el modelo complejo supera a la referencia en Brier 5–16 % en H = 7/30 (con la regla de promoción aplicada); demo Ferretería Andina: ver
+`docs/architecture/v2/P2-comportamiento.md` §13 y `docs/architecture/v2/P2-demo-ferreteria-andina.json` (compradores asignados al azar ⇒ modelo ≈ referencia ≈ climatología).
+
+## 15. Decisiones comunes: abastecimiento con restricciones, costos y escenarios (etapa 2 · P4)
+
+Detalle completo, modelo matemático y limitaciones en `docs/architecture/v2/P4-decisiones.md`. Resumen metodológico:
+
+* **Balance fechado.** Existencias utilizables = existencias − reservas; cada orden abierta llega en su fecha (saldo
+  pendiente si es parcial); fecha desconocida o vencida ⇒ política explícita (`lead_time_end`, `observed_lead_time`,
+  `exclude`), nunca disponible hoy; el tránsito del snapshot no se suma a las órdenes abiertas. Retrasos observados
+  (recibido − esperado) por proveedor alimentan la variabilidad del plazo con ≥ 5 órdenes recibidas hasta el corte. El
+  vencimiento es una capacidad opcional (`not_configured` sin lotes con fecha).
+* **Planificador de reposición (MILP, `scipy.optimize.milp`/HiGHS).** Variables de compra por producto × proveedor ×
+  período de emisión (lotes enteros, mínimo binario, costo fijo), producción por lotes, existencias, demanda no atendida
+  y déficit de stock de seguridad. Restricciones: balance, mínimos y múltiplos, capacidad de proveedor, presupuesto por
+  período de emisión, almacenamiento (pico tras recepciones), recursos y plazos. Objetivo `min_cost` (compra + gastos +
+  mantenimiento + penalización por faltante, **supuestos explícitos**) o `max_margin`. Estados: `optimal`,
+  `feasible_with_gap`, `time_limit` (nunca llamado óptimo), `infeasible` (con causa y alternativas calculadas, sin plan
+  que exceda presupuesto o capacidad), `heuristic_fallback`. Todo plan se re-simula de forma independiente.
+* **Proveedores.** Unidades vía `unit_conversions`, monedas vía tasas explícitas (`exchange_rates`), gastos de
+  adquisición explícitos; sin conversión o sin tasa ⇒ no comparable y se declara la cobertura de la comparación. Una
+  oferta barata que llega tarde no oculta faltantes: la demanda no atendida se penaliza y se muestra por período y causa.
+* **Costos.** Pronóstico mensual de costos unitarios por producto/proveedor/moneda/unidad con referencia (último valor),
+  media móvil, deriva y Holt amortiguado; selección antes del holdout temporal y mejora mínima de 3 %; intervalos
+  empíricos solo con ≥ 8 errores. Disponibilidad por `known_at` (NULL: aceptado en ejecuciones vigentes; en un corte
+  pasado NO es conocido y se excluye, salvo la política explícita `assume_valid_from`, que degrada la calidad). No se
+  pronostican cantidades.
+* **Escenarios.** Estrategias sobre el mismo corte, pronóstico, unidades y horizonte; ventas atendibles =
+  min(demanda, disponible); margen sobre lo vendido; entradas clasificadas observada / pronosticada / supuesta. Simulación
+  condicionada, no causal.
+* **Causalidad.** Contrato de requisitos (definición del efecto, variación y soporte de precios, confusores,
+  disponibilidad, supuestos de identificación). Sin estimador habilitado: `insufficient_evidence`.
+* **Simulación histórica de operación.** Re-juego semanal de la política actual, una referencia mín-máx y el planificador
+  con información disponible a cada fecha, con la misma demanda y los mismos retrasos aleatorios. Resultados en los datos
+  demo sintéticos y su lectura en `P4-decisiones.md` §10; no validan precisión comercial.
+
+## 16. Tiempo de conocimiento y semántica de días (W1-A2 · ADR-V25-23 y ADR-V25-03)
+
+Documento de referencia: `docs/data/TEMPORAL_AVAILABILITY.md` (regla de visibilidad, modos de ingestión, costo medido, limitaciones y lista de pruebas con su estado).
+Código: `engine/predictily_engine/data/asof.py` (lectura as-of), `profiling/days.py` (clasificación de días), `backtest/rolling.py` (`AsOfWindows`),
+`customer/features.py` (variables vs etiquetas) y `platform/snapshot.py` (huella).
+
+**16.1 Lectura as-of.** Las ventas se leen **una vez** de la vista `sales_line_versions` hasta el corte final y cada vista de un corte se deriva en pandas con filtros
+vectorizados; `daily_sales(cutoff)`, `daily_returns`, `last_sale_date` y `sales_stats` conservan su firma y devuelven lo conocido al corte. Los fixtures existentes (carga
+histórica, `ingestion_mode = 'backfill'`) se leen como antes. IMPLEMENTADO / VERIFICADO (`test_asof_integration.py`, `test_asof_visibility.py`).
+
+**Conocimiento del corte final.** La regla («visible al corte C si `known_from < medianoche local (C+1)`…») es estricta para todo corte **anterior** al final. Para el corte final depende de
+la ejecución: una **ejecución vigente** (corte = último dato) conoce hasta **hoy** —sin esto, con carga incremental el último día aparecería vacío porque sus documentos llegan tras la
+medianoche—, igual que ya hacían las promociones (`promotions_known_on`); una **reconstrucción histórica** (existen ventas posteriores al corte) conoce solo hasta el propio corte, de modo
+que lo que llegue después no cambia ni sus datos ni su huella. Las ventanas del backtest y las observaciones del Customer Core siguen siendo estrictas. Los reales con que se mide cada ventana
+son la verdad disponible (hasta hoy en la ejecución vigente). Queda en `knowledge.source.knowledge_date`. IMPLEMENTADO / VERIFICADO (`test_asof_visibility.py::test_a_live_*`,
+`test_asof_integration.py::test_a_live_run_*`, `test_asof_customer_integration.py::test_a_live_customer_run_*`).
+
+**16.2 Qué se entrena y qué se evalúa en cada ventana.**
+
+| Elemento de la ventana | Conocimiento |
+|---|---|
+| Panel, perfil de demanda, clase, elegibilidad, escalas, precio supuesto, variables de LightGBM | as-of el origen de la ventana |
+| Reales con que se mide (`actual`, `price_act`) y marca de día no evaluable | la verdad disponible al corte final (hasta hoy en una ejecución vigente) |
+| Selección y calibración de la evaluación | solo ventanas anteriores al período reservado (sin cambio) |
+
+**16.3 Clasificación de días (`day_status`).**
+
+| Estado | Entra como 0 | Tratamiento |
+|---|---|---|
+| `sale` | — | observado |
+| `zero_confirmed` | sí | cero observado (fuente completa, sucursal abierta, sin quiebre) |
+| `stockout_censored` | no | censurado: peso 0, fuera de métricas, imputado (lógica existente) |
+| `missing_source` | no | fuera de `data_coverage`, dentro de `data_coverage_gaps` o inferido: excluido de métricas y perfilado, imputado con la media móvil de 28 días, con su conteo en limitaciones y manifiesto |
+| `closed` | no | `calendar_events` con `category = 'closure'` (empresa o sucursal): igual que `missing_source` |
+
+Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_confirmed`. La **regla inferida** (por defecto activa; claves `day_status_infer_gaps`,
+`day_status_infer_min_median_lines` = 5 y `day_status_infer_lookback_days` = 28) marca `missing_source` con base `inferred` un día en que una sucursal no registra ninguna línea pese a una
+mediana ≥ 5 líneas diarias en los 28 días previos; **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
+IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
+
+**16.4 Costo.** En los datos de la demo-ferretería (14 k líneas) la lectura de versiones tarda 0,15–0,28 s frente a 0,11–0,20 s de la consulta agregada anterior, y cada vista as-of adicional
+7–11 ms; `load_tenant_data` completo tarda 0,35–0,45 s frente a 0,58–0,89 s del motor anterior (el JIT apagado compensa la lectura de versiones). Con 714 k líneas (12 % tardías) la lectura tarda 4,1 s frente a 0,83 s y cada vista 10–20 ms.
+Una ventana solo reconstruye su panel cuando hay diferencias con la verdad. Con la regla inferida apagada el pronóstico de la demo sintética es idéntico al del motor anterior; con ella activa (por defecto) el total a 90 días sube un 0,23 % y el WAPE
+pasa de 0,4377 a 0,4358 (`TEMPORAL_AVAILABILITY.md` §5).
+
+**16.5 Estado de esta sección.**
+
+| Estado | Elemento |
+|---|---|
+| IMPLEMENTADO / VERIFICADO | Lectura as-of desde `sales_line_versions` (una lectura, vistas derivadas); backtest as-of por ventana con reales de la verdad disponible; conocimiento del corte final (ejecución vigente hasta hoy, reconstrucción histórica hasta el corte); variables del Customer Core al corte y etiquetas con la verdad; clasificación `day_status`, exclusión de métricas y perfilado, imputación y trazabilidad; huella con ventanas de conocimiento (pruebas: `test_asof_visibility.py`, `test_day_status.py`, `test_asof_integration.py`, `test_asof_customer_integration.py`) |
+| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo, costos y calendario; lectura as-of de Supply y Causal; aceptación del valor `closure` en backend, frontend y extensiones; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen); aprobación de la regla inferida (piloto) |
+| BLOQUEADO | Estado histórico real de una carga `backfill` (la fuente no entrega el historial de estados: una anulación posterior cargada así no se puede reconstruir) |
+| NO APLICA | Reconstrucción de panel por ventana cuando la carga es solo histórica (se reutiliza el panel final); ventanas de conocimiento en entidades que no son documentos de venta |

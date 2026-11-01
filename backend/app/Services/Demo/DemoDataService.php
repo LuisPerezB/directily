@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\Imports\ImportEntity;
 use App\Services\Imports\ImportService;
 use App\Services\Imports\ImportStatus;
+use App\Services\Sales\IngestionModeResolver;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -98,7 +99,12 @@ final class DemoDataService
                 if ($job->status !== ImportStatus::AWAITING_MAPPING) {
                     throw new RuntimeException("No se pudo analizar {$kind}: {$job->error_message}");
                 }
-                $job = $this->imports->importNow($job, null, ['create_missing_products' => true, 'skip_invalid_rows' => true]);
+                // Los datos demo son una carga HISTÓRICA declarada: backfill explícito (ADR-V25-23), también al reimportar sobre una empresa con ventas.
+                $options = ['create_missing_products' => true, 'skip_invalid_rows' => true];
+                if ($entity === ImportEntity::Sales) {
+                    $options['ingestion_mode'] = IngestionModeResolver::BACKFILL;
+                }
+                $job = $this->imports->importNow($job, null, $options);
                 if ($job->status !== ImportStatus::COMPLETED) {
                     throw new RuntimeException("La importación de {$kind} terminó en estado {$job->status}: {$job->error_message}");
                 }

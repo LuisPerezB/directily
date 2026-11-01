@@ -15,6 +15,7 @@ from typing import Any
 
 import lightgbm as lgb
 import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -40,6 +41,23 @@ class ReferenceProbability:
         return np.asarray(ref, dtype=np.float64)
 
 
+class QuantileClipper(BaseEstimator, TransformerMixin):
+    """Acota cada variable al rango [P0,5; P99,5] visto en el entrenamiento (evita extrapolación lineal fuera de rango)."""
+
+    def fit(self, X, y=None):  # noqa: ARG002
+        X = np.asarray(X, dtype=np.float64)
+        with np.errstate(all="ignore"):
+            self.lo_ = np.nanpercentile(X, 0.5, axis=0)
+            self.hi_ = np.nanpercentile(X, 99.5, axis=0)
+        self.lo_ = np.where(np.isnan(self.lo_), -1e9, self.lo_)
+        self.hi_ = np.where(np.isnan(self.hi_), 1e9, self.hi_)
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=np.float64)
+        return np.where(np.isnan(X), np.nan, np.clip(X, self.lo_, self.hi_))
+
+
 class LogisticProbability:
     family = "logistic"
     kind = "complex"
@@ -47,6 +65,7 @@ class LogisticProbability:
     def __init__(self, C: float = 1.0, seed: int = 42) -> None:
         self.C = C
         self.pipe = Pipeline([
+            ("clip", QuantileClipper()),
             ("slog", FunctionTransformer(signed_log, validate=False)),
             ("impute", SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True)),
             ("scale", StandardScaler()),
@@ -85,12 +104,15 @@ LGBM_GRIDS: dict[str, dict[str, Any]] = {
 }
 
 
-def fit_probability_candidates(X: np.ndarray, y: np.ndarray, seed: int, n_jobs: int) -> dict[str, Any]:
+def fit_probability_candidates(X: np.ndarray, y: np.ndarray, seed: int, n_jobs: int,
+                               only: tuple[str, ...] | None = None) -> dict[str, Any]:
     """Ajusta los candidatos complejos con el bloque de entrenamiento. La referencia no se ajusta."""
     out: dict[str, Any] = {}
-    out["logistic"] = LogisticProbability(C=1.0, seed=seed).fit(X, y)
+    if only is None or "logistic" in only:
+        out["logistic"] = LogisticProbability(C=1.0, seed=seed).fit(X, y)
     for name, params in LGBM_GRIDS.items():
-        out[name] = LGBMProbability(params, seed=seed, n_jobs=n_jobs).fit(X, y)
+        if only is None or name in only:
+            out[name] = LGBMProbability(params, seed=seed, n_jobs=n_jobs).fit(X, y)
     return out
 
 

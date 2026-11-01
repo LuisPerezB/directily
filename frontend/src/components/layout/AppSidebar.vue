@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import AppIcon, { type IconName } from '@/components/ui/AppIcon.vue'
 import PredictilyLogo from '@/components/brand/PredictilyLogo.vue'
 import { useUiStore } from '@/stores/ui'
 import { useTenantStore } from '@/stores/tenant'
+import { useAssistantStore } from '@/stores/assistant'
 import type { Ability } from '@/utils/abilities'
 
 const props = withDefaults(defineProps<{ mobile?: boolean }>(), { mobile: false })
 const emit = defineEmits<{ navigate: [] }>()
 const ui = useUiStore()
 const tenant = useTenantStore()
+const assistant = useAssistantStore()
 const { t } = useI18n()
+// El enlace del asistente solo aparece si el servidor lo indica activo; si la consulta falla, queda oculto.
+watch(() => tenant.currentUuid, (uuid) => void assistant.ensureLoaded(uuid), { immediate: true })
 
 interface NavItem { name: string; label: string; icon: IconName; ability?: Ability }
 
@@ -23,9 +27,12 @@ const groups = computed<{ title: string; items: NavItem[] }[]>(() => [
       { name: 'dashboard', label: t('nav.dashboard'), icon: 'home' },
       { name: 'forecasts', label: t('nav.forecasts'), icon: 'chart', ability: 'forecast.view' },
       { name: 'products', label: t('nav.products'), icon: 'box', ability: 'data.view' },
+      { name: 'customers', label: t('nav.customers'), icon: 'users', ability: 'forecast.view' },
       { name: 'inventory', label: t('nav.inventory'), icon: 'warehouse', ability: 'forecast.view' },
+      { name: 'supply', label: t('nav.supply'), icon: 'layers', ability: 'forecast.view' },
       { name: 'accuracy', label: t('nav.accuracy'), icon: 'target', ability: 'forecast.view' },
       { name: 'scenarios', label: t('nav.scenarios'), icon: 'sliders', ability: 'forecast.view' },
+      ...(assistant.enabled ? [{ name: 'assistant', label: t('nav.assistant'), icon: 'info' as const, ability: 'data.view' as const }] : []),
     ],
   },
   {

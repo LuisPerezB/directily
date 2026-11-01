@@ -23,6 +23,7 @@ import pandas as pd
 
 from predictily_engine.calendar.ecuador import EcuadorCalendar
 from predictily_engine.config import FEATURE_SET_VERSION
+from predictily_engine.profiling.days import censored_days
 
 CALENDAR_FEATURES = list(EcuadorCalendar.FEATURES)
 COMMERCIAL_FEATURES = ["promo_discount", "price_ratio"]
@@ -257,13 +258,14 @@ class FeatureBuilder:
         return st[STATIC_FEATURES].reset_index()
 
     def training_frame(self, cutoff: pd.Timestamp, ids: list[str]) -> tuple[pd.DataFrame, pd.Series]:
-        """Datos ≤ corte con exógenas, estáticas y peso (0 en días con quiebre de stock)."""
+        """Datos ≤ corte con exógenas, estáticas y peso (0 en días con quiebre de stock, fuente ausente o cierre)."""
         train = self.panel_df[(self.panel_df["ds"] <= cutoff) & self.panel_df["unique_id"].isin(ids)]
         ref_price = train.groupby("unique_id")["price"].median()
-        df = self._exog(train[["unique_id", "branch_id", "ds", "y", "price", "stockout"]], self.promos)
+        keep = ["unique_id", "branch_id", "ds", "y", "price", "stockout"] + (["day_status"] if "day_status" in train else [])
+        df = self._exog(train[keep], self.promos)
         df["price_ratio"] = (df["price"] / df["unique_id"].map(ref_price)).replace([np.inf, -np.inf], np.nan)
         df["price_ratio"] = df["price_ratio"].fillna(1.0).clip(0.2, 5.0)
-        df["weight"] = np.where(df["stockout"], 0.0, 1.0)
+        df["weight"] = np.where(censored_days(df), 0.0, 1.0)
         df = df.merge(self._statics(train), on="unique_id", how="left")
         cols = ["unique_id", "ds", "y", *CALENDAR_FEATURES, *COMMERCIAL_FEATURES, *STATIC_FEATURES, "weight"]
         return df[cols].sort_values(["unique_id", "ds"]).reset_index(drop=True), ref_price

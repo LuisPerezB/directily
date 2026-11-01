@@ -210,7 +210,7 @@ erDiagram
 | Tabla | Propósito | Campos clave | Índices | Integridad / trazabilidad |
 |---|---|---|---|---|
 | `data_sources` | Origen de datos (archivo, REST, conector) | `type`, `connector_key`, `config` (no secreto), `credentials_encrypted` (nunca se devuelve por API), `status`, `last_synced_at`, `last_error` | UK `(tenant_id, id)`; `(tenant_id, type)` (listar por tipo) | Soft delete |
-| `import_jobs` | Ciclo de vida de una importación | `entity_type`, `stored_path` (`tenants/{id}/imports/...`), `file_hash`, `status` (uploaded → awaiting_mapping → validating → validated → importing → completed / failed / rejected), `detected_columns`, `suggested_mapping`, `column_mapping`, `options`, `preview`, `stats`, `progress` | `(tenant_id, created_at)` (historial); `(tenant_id, file_hash)` (detectar re-subida del mismo archivo) | Conserva archivo original y hash; `sales.import_job_id` apunta al último import que tocó cada documento |
+| `import_jobs` | Ciclo de vida de una importación | `entity_type`, `stored_path` (`tenants/{id}/imports/...`), `file_hash`, `status` (uploaded → awaiting_mapping → validating → validated → importing → completed / failed / rejected), `detected_columns`, `suggested_mapping`, `column_mapping`, `options` (ventas: `ingestion_mode` = `backfill` \| `incremental`; al confirmar se guarda el valor resuelto, §4.1), `preview`, `stats` (ventas, además de los conteos de documentos: `stale_skipped`, `revisions_archived`, `updated_without_source_order`, `ingestion_mode`, `ingestion_mode_basis`), `progress` | `(tenant_id, created_at)` (historial); `(tenant_id, file_hash)` (detectar re-subida del mismo archivo) | Conserva archivo original y hash; `sales.import_job_id` apunta al último import que tocó cada documento |
 | `import_errors` | Errores/advertencias por fila | `row_number`, `column`, `error_code`, `severity`, `raw_value` (truncado, sin PII completa) | `(import_job_id, severity, row_number)` (paginación de errores filtrada) | Cascada con el import |
 | `data_quality_reports` | Reporte de calidad de una importación o de aptitud para pronóstico | `scope`, `score` (0–100, orientativo), `summary`, `issues` | `(tenant_id, scope, created_at)` (último reporte por tipo) | FKs compuestas a import y a ejecución |
 
@@ -223,6 +223,8 @@ erDiagram
     branches ||--o{ sales : "emite"
     customers ||--o{ sales : "compra"
     sales ||--o{ sale_items : "contiene"
+    sales ||--o{ sales_document_revisions : "versiones reemplazadas"
+    sales ||--o{ sale_item_revisions : "líneas de versiones reemplazadas"
     sales ||--o{ sales : "nota de crédito → factura"
     products ||--o{ sale_items : "vendido"
     promotions ||--o{ sale_items : "aplica"
@@ -242,6 +244,24 @@ erDiagram
         char currency
         numeric total
         char source_hash
+        varchar ingestion_mode "backfill|incremental (ADR-V25-23)"
+        timestamptz version_known_from "NULL = inicio del día local (backfill)"
+        int current_revision "0 = primera versión"
+        timestamptz first_seen_at "inmutable"
+    }
+    sales_document_revisions {
+        bigint id PK
+        bigint sale_id FK
+        int revision "versión reemplazada"
+        timestamptz known_from "NULL = inicio del día local"
+        timestamptz known_until "known_from de su reemplazo"
+        varchar change_kind "status_changed|lines_changed|header_changed|mixed"
+    }
+    sale_item_revisions {
+        bigint id PK
+        bigint sale_id FK
+        int revision
+        int line_number
     }
     sale_items {
         bigint id PK
@@ -281,8 +301,11 @@ erDiagram
 
 | Tabla | Propósito | Campos clave | Índices (consulta) | Reglas de integridad |
 |---|---|---|---|---|
-| `sales` | Cabecera de documento comercial | `document_type`, `document_number` (p. ej. `001-001-000012345`), `status`, `issued_at`, `sale_date` (fecha local de la empresa), `channel`, `currency`, totales, `related_sale_id` (nota de crédito → factura), `source_hash` (hash del contenido normalizado), `import_job_id`, `data_source_id` | **UK `(tenant_id, document_type, document_number)`** = clave de idempotencia; `(tenant_id, sale_date)` (resúmenes por período); `(tenant_id, branch_id, sale_date)` (resumen por sucursal); `(tenant_id, customer_id)` (historial de cliente) | Reimportar: mismo hash → sin cambios; hash distinto → actualiza cabecera y reemplaza líneas; nunca duplica |
+| `sales` | Cabecera de documento comercial (versión VIGENTE) | `document_type`, `document_number` (p. ej. `001-001-000012345`), `status`, `issued_at`, `sale_date` (fecha local de la empresa), `channel`, `currency`, totales, `related_sale_id` (nota de crédito → factura), `source_hash` (hash del contenido normalizado), `import_job_id`, `data_source_id`; tiempo de conocimiento (ADR-V25-23): `ingestion_mode` (`backfill` \| `incremental`; DEFAULT `backfill` solo por compatibilidad de filas existentes: todo camino de escritura lo fija), `version_known_from` (NULL = inicio del día local de `sale_date`), `current_revision` (0 = primera), `first_seen_at` (primera ingestión; inmutable) | **UK `(tenant_id, document_type, document_number)`** = clave de idempotencia; `(tenant_id, sale_date)` (resúmenes por período); `(tenant_id, branch_id, sale_date)` (resumen por sucursal); `(tenant_id, customer_id)` (historial de cliente) | Reimportar: mismo hash → sin cambios; hash distinto y NO anterior en la fuente → archiva la versión vigente (§4.1), actualiza cabecera y reemplaza líneas con `current_revision + 1`; hash distinto y `source_recorded_at` anterior a la almacenada → `stale_skipped` (no se escribe nada); nunca duplica |
 | `sale_items` | Líneas con condiciones **históricas** | `quantity` (siempre positiva), `unit_price` (precio original antes de descuento), `discount_amount`, `net_amount` (sin impuestos), `tax_amount`, `unit_cost` (si el origen lo provee), `is_return`, `promotion_id`; `branch_id` y `sale_date` desnormalizados | UK `(sale_id, line_number)`; **`(tenant_id, sale_date, branch_id, product_id)`** → consulta principal del motor (series diarias); **`(tenant_id, product_id, sale_date)`** → histórico de un producto en el dashboard | FKs compuestas a venta, producto, sucursal y promoción. Las devoluciones no se restan de la demanda diaria: se reportan aparte |
+| `sales_document_revisions` | Cabecera de cada versión REEMPLAZADA de un documento (solo inserción) | `sale_id`, `revision` (versión reemplazada), copia de la cabecera (`document_type`, `status`, `issued_at`, `sale_date`, `branch_id`, `customer_id`, `channel`, `currency`, totales, `source_hash`, `source_recorded_at`, `ingestion_mode`), ventana `known_from` (NULL = inicio del día local) / `known_until`, `import_job_id` (import que tenía la versión), `superseded_by_import_job_id` (import que la reemplazó), `data_source_id`, `change_kind` | UK `(sale_id, revision)`; UK `(tenant_id, id)`; `(tenant_id, sale_id)` | FK compuesta `(tenant_id, sale_id)` → `sales` (cascada). La escribe `SalesDocumentWriter` en la misma transacción y bajo el mismo bloqueo por empresa que el reemplazo |
+| `sale_item_revisions` | Líneas de cada versión reemplazada (solo inserción) | `sale_id`, `revision`, `line_number`, producto, sucursal, `sale_date`, importes y `is_return` (copia de `sale_items` en el momento de reemplazarla) | UK `(sale_id, revision, line_number)`; `(tenant_id, sale_date, branch_id, product_id)` | FKs compuestas a venta, producto y sucursal |
+| `sales_line_versions` (VISTA) | Todas las versiones de línea (vigentes y reemplazadas) con su ventana de conocimiento | `revision`, `is_current`, estado y cabecera de su versión, línea, `known_from` = `COALESCE(version_known_from \| known_from, inicio del día local de sale_date)`, `known_until` (NULL en la vigente) | — | Fuente única de lectura as-of de Demand y Customer (motor). No es una tabla: no se escribe |
 | `promotions` | Promociones planificadas o históricas (covariables del motor) | `promo_type`, `discount_pct`, `starts_on`, `ends_on`, alcance por sucursal/producto/categoría (NULL = todos), **`known_at`** (timestamptz NOT NULL, defecto `CURRENT_TIMESTAMP`: momento en que el negocio conocía/registró la promoción; por defecto = `created_at`; importación y API aceptan la fecha real, nunca futura), `deleted_at` (baja lógica) | `(tenant_id, starts_on, ends_on)` (promociones vigentes en una fecha) | FKs compuestas a sucursal, producto y categoría. La baja es lógica para conservar el historial. Backfill de la migración `2026_01_03_000100`: `known_at = created_at` |
 | `promotion_revisions` | Versiones históricas de cada promoción (regla as-of del motor) | `revision` (1 = alta, +1 por cambio), copia de `name`, `promo_type`, `discount_pct`, `starts_on`, `ends_on`, alcance y `known_at`; `deleted` (versión de baja), `source` (`api`, `import`, `migration`), `recorded_at` (cuándo Predictily registró la versión) | UK `(tenant_id, promotion_id, revision)` (también sirve la lectura por empresa del motor) | **Solo inserción**, escrita por `PromotionObserver` / `PromotionRevisionRecorder` en la misma transacción que el alta, cambio de un campo versionado, baja o restauración. FK compuesta `(tenant_id, promotion_id)` → `promotions` (cascada solo con borrado definitivo) y a sucursal/producto/categoría. Backfill: una revisión 1 (`migration`) por promoción existente |
 | `product_price_history` | Historial de precios de lista | `price`, `valid_from`, `valid_to`, `branch_id` (NULL = general), `source` | `(tenant_id, product_id, valid_from)` (precio vigente en fecha) | Solo inserción |
@@ -290,6 +313,46 @@ erDiagram
 
 **Regla de negocio:** nunca se reconstruyen condiciones comerciales pasadas con `products.current_price`;
 el precio histórico vive en `sale_items` y en `product_price_history`.
+
+### 4.1 Tiempo de conocimiento y versiones de documentos de venta (ADR-V25-23)
+
+Cada versión de un documento tiene una ventana de conocimiento `[known_from, known_until)`: la vigente vive en
+`sales`/`sale_items` (`known_until` abierta) y las reemplazadas en `sales_document_revisions`/`sale_item_revisions`, con
+`known_until` = `known_from` de la versión que las reemplazó. Detalle operativo, ejemplos y pruebas en
+`docs/data/LINEAGE_AND_RECONCILIATION.md`.
+
+| `ingestion_mode` | Cuándo | `version_known_from` | Significado |
+|---|---|---|---|
+| `backfill` | Carga histórica declarada (primera carga de la empresa, demo, primera sincronización de una fuente) | NULL | Se ASUME conocida desde el inicio de su día de negocio (supuesto documentado: sin historial de estados de la fuente, el estado final se asume desde ese día) |
+| `incremental` | Cargas posteriores, `POST /sales/batch` por defecto, sincronizaciones siguientes | hora de la ingestión | Conocida desde que Predictily la recibió: un documento que llega tarde NO es visible en cortes anteriores |
+
+Orden de escritura de un documento existente con `source_hash` distinto (dentro de la transacción y del bloqueo por empresa):
+
+1. **Orden por la fuente**: si la entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR → `stale_skipped`
+   (no se escribe nada). Si alguna no lo trae, gana la última ingestión y se cuenta `updated_without_source_order`. Con marcas iguales se aplica.
+2. **Archivo**: se copia la versión vigente (cabecera + líneas) a las tablas de revisiones. `known_from` = el `version_known_from`
+   vigente (NULL si era backfill); `known_until` = instante de esta escritura si la nueva es `incremental`, o el inicio del día
+   local (`tenants.timezone`) de la `sale_date` ANTERIOR si la nueva es `backfill` (ventana vacía: una re-carga histórica
+   colapsa versiones); en ambos casos nunca por debajo del `known_from` efectivo (jamás una ventana invertida).
+   `change_kind`: `status_changed`, `lines_changed`, `header_changed` o `mixed` (varios a la vez).
+3. **Reemplazo**: cabecera y líneas nuevas con `current_revision + 1`, `ingestion_mode` y `version_known_from` de ESTA escritura.
+   `first_seen_at` no se actualiza nunca.
+
+**Visibilidad al corte C** (fecha local de la empresa): una versión es visible si `known_from < medianoche local de (C + 1)` y
+(`known_until IS NULL` o `known_until >= medianoche local de (C + 1)`).
+
+**Estado de implementación (paquete W1-A1)**
+
+| Estado | Qué | Prueba que lo demuestra |
+|---|---|---|
+| IMPLEMENTADO / VERIFICADO | Documento nuevo `backfill` (`version_known_from` NULL, `first_seen_at`) e `incremental` (conocido desde la ingestión, invisible antes de llegar) | `SalesTemporalWriteTest::test_new_backfill_document_is_known_since_the_start_of_its_business_day`, `::test_batch_defaults_to_incremental_and_a_late_document_is_not_visible_before_its_arrival` |
+| IMPLEMENTADO / VERIFICADO | Archivo de cabecera y líneas con ventanas correctas; la vista devuelve ambas versiones | `::test_incremental_update_archives_header_and_lines_with_correct_windows` |
+| IMPLEMENTADO / VERIFICADO | `status_changed` / `header_changed` / `mixed`; re-carga `backfill` que colapsa; sin ventanas invertidas | `::test_status_change_to_voided_is_recorded_as_status_changed`, `::test_header_only_and_mixed_changes_are_classified`, `::test_backfill_reload_collapses_versions_into_an_empty_window`, `::test_backfill_reload_of_an_incremental_document_never_leaves_an_inverted_window` |
+| IMPLEMENTADO / VERIFICADO | `stale_skipped` sin efectos (ni catálogos) y `updated_without_source_order` | `::test_older_incoming_version_is_stale_skipped_and_writes_nothing`, `::test_stale_documents_do_not_create_catalog_rows_and_do_not_block_the_rest_of_the_batch`, `::test_missing_source_timestamp_lets_the_last_ingestion_win_and_is_counted` |
+| IMPLEMENTADO / VERIFICADO | Aislamiento de revisiones entre empresas (scope fail-closed, vista, FK compuesta) | `::test_revisions_are_isolated_between_companies` |
+| IMPLEMENTADO / VERIFICADO | Sin consultas por documento al archivar (el número de consultas por lote es constante) | `::test_updating_many_documents_costs_the_same_number_of_queries_as_updating_a_few` |
+| DISEÑADO / NO IMPLEMENTADO | Lectura as-of de Demand y Customer desde `sales_line_versions` | Paquete W1-A2 (motor), no este paquete |
+| BLOQUEADO | Estado histórico real de una carga `backfill` (anulaciones posteriores) | La fuente no entrega historial de estados: limitación declarada del ADR-V25-23, no un dato inventado |
 
 ---
 
@@ -462,13 +525,13 @@ erDiagram
 
 | Tabla | Escribe | Propósito | Índices (consulta) | Versionado |
 |---|---|---|---|---|
-| `forecasting_series` | motor | Perfil por (sucursal, producto): historia, días con venta, ADI, CV², clase de demanda (smooth/erratic/intermittent/lumpy/insufficient), días sin stock y censurados | UK `(tenant_id, branch_id, product_id)` (upsert al perfilar) | Se actualiza en cada `readiness`/ejecución (`last_profiled_at`) |
+| `forecasting_series` | motor | Perfil por (sucursal, producto): historia, días con venta, ADI, CV², clase de demanda (smooth/erratic/intermittent/lumpy/insufficient), días sin stock y censurados; etapa 2: `lifecycle` (caso especial vigente: producto nuevo, descontinuado, sin ventas recientes, cierre/apertura…) | UK `(tenant_id, branch_id, product_id)` (upsert al perfilar) | Se actualiza en cada `readiness`/ejecución (`last_profiled_at`) |
 | `forecast_features` | motor | Registro de definiciones de características por `feature_set_version` | UK `(tenant_id, feature_set_version, name)` | Versión inmutable del conjunto |
 | `forecast_runs` | Laravel crea (queued); motor completa | Ejecución versionada (`version` correlativo por empresa), corte, rango de datos, selección y resumen | UK `(tenant_id, version)`; `(tenant_id, status, created_at)` (historial y "en curso"); **único parcial `(tenant_id) WHERE is_current`** (una vigente por empresa) | `run_type='historical'` (corte retroactivo) nunca es vigente |
 | `training_jobs` | Laravel crea; motor actualiza | Estado, etapa, progreso, intentos, duración, error, resultado | `(tenant_id, created_at)` (consultas del usuario); `(status, created_at)` (supervisión de trabajos atascados) | — |
-| `model_registry` | motor | Modelo entrenado: familia, nivel A–E, alcance, estado (candidate/production/fallback/archived/rejected), hiperparámetros, rango y **huella** de datos, artefacto + SHA-256, versiones de librerías, semilla | UK `(tenant_id, version)`; `(tenant_id, status)` (modelo en producción/respaldo) | Nunca se reemplaza producción sin evaluación |
-| `model_evaluations` | motor | Métricas de backtest (`backtest` = período final reservado; `selection_windows` = ventanas que eligieron el modelo; `extra.evaluation_scope`) y realizadas, por nivel (overall, demand_class, horizon, branch, category, product, series) y baseline | `(tenant_id, forecast_run_id, evaluation_type, level)` (pantalla de precisión); `(tenant_id, model_registry_id)` | Inmutable |
-| `forecast_values` | motor | Valores por nodo jerárquico (`node_key`), granularidad (day/week/month), fecha, paso de horizonte, `yhat` + intervalos 80/95, modelo y supuesto de precio/ingreso | UK `(forecast_run_id, node_key, granularity, target_date)` (gráfico de un nodo); `(forecast_run_id, level, granularity, target_date)` (rankings por producto/categoría) | Alto volumen: sin timestamps ni FKs a catálogos (los ids vienen del mismo tenant vía la ejecución, con FK compuesta). Retención por número de ejecuciones (docs/07) |
+| `model_registry` | motor | Modelo entrenado: familia, nivel A–E, alcance, estado de la etapa 2 (candidate/validated/production/retired/failed) + `role` (primary/fallback) + `core`; los nombres de la etapa 1 (fallback/archived/rejected) se derivan en la API; hiperparámetros, rango y **huella** de datos, artefacto + SHA-256, versiones de librerías, semilla | UK `(tenant_id, version)`; `(tenant_id, status)` (modelo en producción/respaldo) | Nunca se reemplaza producción sin evaluación |
+| `model_evaluations` | motor | Métricas de backtest (`backtest` = período final reservado; `selection_windows` = ventanas que eligieron el modelo; `extra.evaluation_scope`) y realizadas, por nivel (overall, demand_class, horizon, horizon_total, total, branch, category, product, series) y baseline; etapa 2: `metrics` jsonb (MASE, RMSSE, pinball P10/P50/P90, amplitud 80/95, dinero, muestra y exclusiones) | `(tenant_id, forecast_run_id, evaluation_type, level)` (pantalla de precisión); `(tenant_id, model_registry_id)` | Inmutable |
+| `forecast_values` | motor | Valores por nodo jerárquico (`node_key`), granularidad (day/week/month/horizon), fecha, paso de horizonte, `yhat` + intervalos 80/95, modelo y supuesto de precio/ingreso; etapa 2: `p50` (solo si se evaluó), `quality_status` (ok/degraded/insufficient_data: respaldo del horizonte de la fila), `case_label` (caso especial de la serie) | UK `(forecast_run_id, node_key, granularity, target_date)` (gráfico de un nodo); `(forecast_run_id, level, granularity, target_date)` (rankings por producto/categoría) | Alto volumen: sin timestamps ni FKs a catálogos (los ids vienen del mismo tenant vía la ejecución, con FK compuesta). Retención por número de ejecuciones (docs/07) |
 | `forecast_actuals` | motor | Pronóstico vs real observado, error absoluto y marca de censura | UK `(forecast_run_id, node_key, target_date)`; `(tenant_id, target_date)` | Recalculable |
 
 ---
@@ -499,3 +562,29 @@ pedidos ni compromete fondos.
 | Modelos | `model_registry` con huella de datos, artefacto SHA-256, semilla y versiones de librerías |
 | Auditoría | `audit_logs` de solo inserción para acciones sensibles |
 | Retención | Ventas según `tenants.data_retention_months` (60 por defecto); `forecast_values` de ejecuciones antiguas no vigentes purgables (se conservan métricas y `forecast_actuals`); purga definitiva de la empresa 30 días después de la solicitud |
+
+
+## 10. Core de Datos (etapa 2 · P3)
+
+Tablas de la migración `2026_02_02_000100` (contrato canónico común) y `2026_02_06_000100` (P3). Todas con `tenant_id` y FKs compuestas
+`(tenant_id, x_id)`, salvo `calendar_events` (calendario público con `tenant_id` NULL). Detalle de campos y reglas: `docs/architecture/v2/P3-datos.md` §2.
+
+| Tabla | Clave natural | Notas |
+|---|---|---|
+| `warehouses` | `(tenant_id, code)` | Un almacén por sucursal (`branch_id`). `storage_capacity` NULL = desconocida; `capacity_unit` obligatoria con capacidad (regla del importador). |
+| `unit_conversions` | `(tenant, producto\|general, from_unit, to_unit, valid_from)` | `cantidad_to = cantidad_from × factor`. Unidades normalizadas solo tipográficamente; no hay equivalencias implícitas ni cadenas. |
+| `commercial_commitments` | `(tenant_id, commitment_type, external_id)` | `quote|order|contract`; estado, fechas, `known_at` (NULL = desconocido), `cancelled_at`, `data_source_id`, `source_hash`. No es una venta. |
+| `commercial_commitment_items` | `(commitment_id, line_number)` | `quantity`, `quantity_fulfilled`, `unit`, `unit_price`, `delivery_date`; `source_quantity`/`source_unit`/`conversion_factor` conservan lo original cuando hubo una conversión declarada. |
+| `commercial_commitment_revisions` | `(commitment_id, revision)` | Solo inserción. Snapshot (cabecera + líneas, el código de cliente seudonimizado) con `known_at`, `cancelled_at`, `source_hash`, `import_job_id` y `recorded_at` (ingestión). Permite reconstruir el estado a un corte. |
+| `calendar_events` | `(COALESCE(tenant,0), scope, COALESCE(scope_ref,''), code, starts_on, revision)` | Alcance `country|region|tenant|branch|category|product|sector`; `scope_ref` normalizado (`EC`, `sierra`, `branch:3`, `product:45`, `sector:x`); `known_at` NULL = desconocido; una fila por revisión. |
+| `source_mappings` | `(tenant_id, data_source_id, entity, version)` | Consulta/vista **autorizada** (`query`), `field_map`, `options`; `approved_at/by`, `is_active`. Solo la versión aprobada y activa sincroniza. |
+| `source_syncs` | `id` | Ejecución de una sincronización: `mode` (`full|incremental`), `since`, `watermark` (= mínimo entre el máximo `source_recorded_at` LEGIBLE extraído y el inicio de la sincronización; las fechas futuras o ilegibles no la adelantan y se cuentan en `stats.future_recorded_at`), `rows_extracted`, `status`, `import_job_id`, `stats` (ventas: `ingestion_mode`, `ingestion_mode_basis`). Índice único parcial: una sola activa (`queued|running`) por fuente y entidad. |
+| `data_coverage` | `(tenant, entity, COALESCE(source,0), COALESCE(branch,0))` | `complete_from/through`; `basis`: `declared` (usuario) o `inferred` (conector, regla documentada). |
+| `data_coverage_gaps` | `id` (sin clave natural: pueden solaparse; el consumidor toma la UNIÓN) | V2.5 (ADR-V25-23). Hueco INTERNO de una fuente: `entity` (`sales`, `inventory`, `purchases`, `costs`, `promotions`, `customers`, `commitments`), `data_source_id` y `branch_id` opcionales (NULL = toda la empresa; FKs compuestas a la misma empresa), `gap_from`/`gap_to` (ambos incluidos; CHECK `gap_to >= gap_from`), `reason` (`integration_outage`, `source_missing`, `migration`, `unknown`), `basis` (`declared` para los creados por la API; `inferred` reservado a reglas documentadas), `notes`, `created_by`. Sus días son `missing_source`, nunca ceros (ADR-V25-03). API: `GET/POST /data-coverage/gaps`, `DELETE /data-coverage/gaps/{id}` (`docs/06` §3.14). |
+
+Columnas de las tres fechas: `sales.source_recorded_at`, `product_price_history.known_at`, `purchase_cost_history.known_at` (+ `unit`),
+`commercial_commitments.known_at`, `calendar_events.known_at`; `customers.is_generic` marca el código genérico (consumidor final).
+Todas aceptan NULL = «la fuente no declaró cuándo lo conocía» (jamás se rellenan con la fecha de ingestión).
+
+Configuración por precedencia: `tenants.settings.cores.<core>` guarda los valores de empresa de la etapa 2 (validados por el motor);
+`core_runs.effective_config` y `config_version` guardan, por ejecución, la configuración con la que se calculó.

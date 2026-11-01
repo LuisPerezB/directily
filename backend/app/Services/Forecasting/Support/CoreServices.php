@@ -53,7 +53,7 @@ final class CoreServices
     /** @return list<int> Horizontes permitidos por el plan efectivo (plan + overrides). */
     public static function allowedHorizons(Tenant $tenant): array
     {
-        $horizons = app(PlanLimitService::class)->limits($tenant)['horizons'] ?? config('engine.horizons', [7, 30, 90]);
+        $horizons = app(PlanLimitService::class)->limits($tenant)['horizons'] ?? config('engine.horizons', [7, 14, 30, 60, 90]);
 
         return array_values(array_map('intval', (array) $horizons));
     }

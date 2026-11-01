@@ -21,7 +21,7 @@ final class UpdateTenantRequest extends FormRequest
             'timezone' => ['sometimes', 'timezone:all'],
             'data_retention_months' => ['sometimes', 'integer', 'min:12', 'max:120'],
             'settings' => ['sometimes', 'array:default_horizon_days,service_level,review_period_days,default_lead_time_days,forecast_schedule,stockout_risk_threshold'],
-            'settings.default_horizon_days' => ['sometimes', 'integer', Rule::in([7, 30, 90])],
+            'settings.default_horizon_days' => ['sometimes', 'integer', Rule::in([7, 14, 30, 60, 90])],
             'settings.service_level' => ['sometimes', 'numeric', 'min:0.5', 'max:0.999'],
             'settings.review_period_days' => ['sometimes', 'integer', 'min:1', 'max:90'],
             'settings.default_lead_time_days' => ['sometimes', 'integer', 'min:1', 'max:365'],

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Connectors\Sql;
 
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Generator;
 use PDO;
@@ -28,7 +29,9 @@ final class SqlSourceConnection
     /** @throws SqlSourceException */
     public static function open(SqlDialect $dialect, SqlConnectionSettings $settings, string $username, string $password): self
     {
-        SqlHostPolicy::assertAllowed($settings->host);
+        // Política SSRF: resuelve A y AAAA, valida TODAS las respuestas y FIJA la IP; el dialecto se conecta a ella (sin segunda
+        // resolución que un atacante pueda cambiar: DNS rebinding).
+        $settings = $settings->pinnedTo(SqlHostPolicy::resolve($settings->host));
         try {
             $pdo = $dialect->connect($settings, $username, $password);
             $dialect->begin($pdo, $settings);
@@ -104,7 +107,7 @@ final class SqlSourceConnection
         if (! $query->usesSince) {
             return $query->render();
         }
-        $local = $since?->setTimezone($this->settings->sourceTimezone) ?? \Carbon\CarbonImmutable::parse(self::FULL_LOAD_SINCE, $this->settings->sourceTimezone);
+        $local = $since?->setTimezone($this->settings->sourceTimezone) ?? CarbonImmutable::parse(self::FULL_LOAD_SINCE, $this->settings->sourceTimezone);
 
         return $query->render($this->dialect->sinceLiteral($local));
     }

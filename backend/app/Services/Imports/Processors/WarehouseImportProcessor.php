@@ -67,6 +67,13 @@ final class WarehouseImportProcessor implements ImportProcessor
         foreach (DB::table('warehouses')->where('tenant_id', $tenant->id)->get() as $row) {
             $existing[CatalogResolver::norm($row->code)] = $row;
         }
+        // El código se compara sin distinguir mayúsculas: se conserva el ya guardado para actualizar en lugar de duplicar.
+        foreach ($valid as &$item) {
+            if (($known = $existing[CatalogResolver::norm($item['code'])] ?? null) !== null) {
+                $item['code'] = $known->code;
+            }
+        }
+        unset($item);
         foreach ($valid as $item) {
             $e = $existing[CatalogResolver::norm($item['code'])] ?? null;
             if ($e === null) {

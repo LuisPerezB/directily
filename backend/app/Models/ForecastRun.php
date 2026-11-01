@@ -31,6 +31,8 @@ class ForecastRun extends Model
             'options' => 'array',
             'selection' => 'array',
             'summary' => 'array',
+            'effective_config' => 'array',
+            'evaluation_manifest' => 'array',
             'is_current' => 'boolean',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',

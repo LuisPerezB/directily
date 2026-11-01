@@ -17,7 +17,7 @@ use Throwable;
 class ForecastCommand extends Command
 {
     protected $signature = 'predictily:forecast {tenant : UUID de la empresa}
-        {--horizon= : Horizonte en días (7, 30 o 90); por defecto, el mayor que permita el plan}
+        {--horizon= : Horizonte en días (7, 14, 30, 60 o 90); por defecto, el mayor que permita el plan}
         {--cutoff= : Fecha de corte AAAA-MM-DD (crea una ejecución histórica)}
         {--sync : Ejecuta el pipeline en este proceso en lugar de encolarlo}';
 

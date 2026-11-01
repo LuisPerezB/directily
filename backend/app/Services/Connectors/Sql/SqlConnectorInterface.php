@@ -6,6 +6,7 @@ namespace App\Services\Connectors\Sql;
 
 use App\Models\DataSource;
 use App\Services\Connectors\ConnectorInterface;
+use Illuminate\Validation\ValidationException;
 
 /** Conector SQL de solo lectura: lee únicamente consultas autorizadas (source_mappings) y entrega filas crudas. */
 interface SqlConnectorInterface extends ConnectorInterface
@@ -24,7 +25,7 @@ interface SqlConnectorInterface extends ConnectorInterface
      * @param  array<string, mixed>  $config
      * @param  array<string, mixed>|null  $credentials
      *
-     * @throws \Illuminate\Validation\ValidationException
+     * @throws ValidationException
      */
     public function validateInput(array $config, ?array $credentials): void;
 }

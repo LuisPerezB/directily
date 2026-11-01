@@ -1,0 +1,5 @@
+commit 1d3b876 inicio 2026-11-01T02:23:05Z
+backend rc=0 89s :: {"tool":"phpunit","result":"passed","tests":698,"passed":696,"assertions":14398,"duration_ms":88484,"skipped":2}
+frontend rc=0 80s ::       Tests  313 passed (313)
+engine rc=0 532s :: 524 passed, 1 warning in 529.93s (0:08:49)
+fin 2026-11-01T02:34:46Z

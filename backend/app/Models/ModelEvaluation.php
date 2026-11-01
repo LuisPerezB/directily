@@ -34,6 +34,7 @@ class ModelEvaluation extends Model
             'coverage_95' => 'float',
             'cutoffs' => 'array',
             'extra' => 'array',
+            'metrics' => 'array',
             'created_at' => 'datetime',
         ];
     }

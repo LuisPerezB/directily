@@ -28,6 +28,8 @@ class ModelRegistry extends Model
             'training_data_from' => 'date:Y-m-d',
             'training_data_to' => 'date:Y-m-d',
             'library_versions' => 'array',
+            'artifact_compat' => 'array',
+            'validated_at' => 'datetime',
             'trained_at' => 'datetime',
             'promoted_at' => 'datetime',
             'retired_at' => 'datetime',

@@ -18,6 +18,7 @@ use App\Services\Imports\Mapping\ColumnMatcher;
 use App\Services\Imports\Processors\ImportRunContext;
 use App\Services\Imports\Reading\ReaderFactory;
 use App\Services\Plans\PlanLimitService;
+use App\Services\Sales\IngestionModeResolver;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -42,6 +43,7 @@ final class ImportService
         private readonly QualityReportBuilder $quality,
         private readonly PlanLimitService $plans,
         private readonly AuditLogger $audit,
+        private readonly IngestionModeResolver $ingestion,
     ) {}
 
     public function disk(): Filesystem
@@ -236,7 +238,7 @@ final class ImportService
             $result = $this->execute($job, true);
             $job->forceFill(['status' => ImportStatus::COMPLETED, 'finished_at' => now(), 'progress' => 100])->save();
             $this->plans->recordUsage($tenant, 'import_rows', (int) ($result['stats']['rows_valid'] ?? 0));
-            $this->audit->log('import.completed', $job, array_intersect_key($result['stats'], array_flip(['rows_valid', 'documents_new', 'documents_updated', 'documents_unchanged', 'products_created'])));
+            $this->audit->log('import.completed', $job, array_intersect_key($result['stats'], array_flip(['rows_valid', 'documents_new', 'documents_updated', 'documents_unchanged', 'stale_skipped', 'revisions_archived', 'products_created', 'ingestion_mode'])));
             $this->afterCommit($job);
         } catch (Throwable $e) {
             $this->fail($job, $e, 'importación');
@@ -273,8 +275,21 @@ final class ImportService
         $tenant = Tenant::query()->findOrFail($job->tenant_id);
         DB::table('import_errors')->where('tenant_id', $job->tenant_id)->where('import_job_id', $job->id)->delete();
 
+        // Modo de ingestión de las ventas (ADR-V25-23): declarado en `options.ingestion_mode` o, si no, backfill cuando la empresa
+        // aún no tiene ventas y incremental en caso contrario. Se decide al INICIAR la escritura: en la validación es una
+        // proyección (se muestra en las estadísticas, no se fija); en la confirmación se fija en `options` para que un reintento
+        // del mismo import conserve el modo con el que empezó a escribir.
+        $ingestion = null;
+        if ($job->entity_type === ImportEntity::Sales->value) {
+            $declared = $job->options['ingestion_mode'] ?? null;
+            $ingestion = $this->ingestion->forImport($tenant, $declared);
+            if ($commit && $declared !== $ingestion->mode) {
+                $job->forceFill(['options' => array_merge($job->options ?? [], ['ingestion_mode' => $ingestion->mode])])->save();
+            }
+        }
+
         $reader = $this->readers->make($this->disk()->path($job->stored_path), $job->file_format, $job->options ?? []);
-        $ctx = new ImportRunContext($tenant, $job, $reader, $job->column_mapping ?? [], $commit);
+        $ctx = new ImportRunContext($tenant, $job, $reader, $job->column_mapping ?? [], $commit, $ingestion);
         $result = $this->processors->for(ImportEntity::from($job->entity_type))->run($ctx);
 
         $stats = $result['stats'];
@@ -396,6 +411,13 @@ final class ImportService
         }
         if ($entity === ImportEntity::LeadTimes && empty($mapping['product_sku']) && empty($mapping['supplier_code'])) {
             $errors['mapping.product_sku'][] = 'Mapee al menos el producto o el proveedor.';
+        }
+        if (($options['ingestion_mode'] ?? null) !== null) {
+            if ($entity !== ImportEntity::Sales) {
+                $errors['options.ingestion_mode'][] = 'El modo de ingestión solo aplica a la importación de ventas.';
+            } elseif (! in_array($options['ingestion_mode'], IngestionModeResolver::MODES, true)) {
+                $errors['options.ingestion_mode'][] = 'Debe ser backfill (carga histórica) o incremental.';
+            }
         }
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);

@@ -10,11 +10,18 @@
 
 return [
     'sql' => [
-        // Rechaza hosts en redes privadas/loopback (SSRF). Por defecto permitido: el ERP del cliente suele estar en
-        // una red privada accesible por VPN. En un entorno SaaS multi-inquilino público actívelo y use allowed_hosts.
-        'deny_private_networks' => (bool) env('PREDICTILY_SQL_DENY_PRIVATE', false),
-        // Si no está vacío, solo se permiten estos hosts (coma-separados en la variable de entorno).
+        // Política de destino (SSRF; SqlHostPolicy, ADR-V25-15). Seguro por defecto, sin interruptor que la abra:
+        // - Siempre denegados (ninguna lista los autoriza): metadatos de nube (169.254.0.0/16, fd00:ec2::254…), link-local,
+        //   0.0.0.0/8, multicast, broadcast y formas de transición IPv6 (6to4, Teredo, NAT64 local).
+        // - Denegados por defecto: loopback y redes privadas (RFC 1918, 100.64.0.0/10, ULA fc00::/7). Se autorizan SOLO con las
+        //   listas de abajo (ERP detrás de VPN). El loopback solo con una IP literal o un CIDR explícitos y nunca en producción.
+        // - Solo se aceptan nombres RFC 1123 o IP literales canónicas; se resuelven A y AAAA y la conexión usa la IP validada.
+        // Destinos autorizados explícitamente (nombres exactos o IP, separados por comas). Si no está vacío, SOLO se permiten estos
+        // destinos y pueden resolver a redes privadas. En un SaaS multiempresa defínalo siempre (alta de cliente = alta del host).
         'allowed_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('PREDICTILY_SQL_ALLOWED_HOSTS', ''))))),
+        // Redes privadas autorizadas (CIDR o IP, separadas por comas; p. ej. 10.20.0.0/16 de la VPN del cliente). Una dirección
+        // privada se acepta si cae en alguna; sin CIDR ni hosts, toda red privada queda denegada.
+        'allowed_cidrs' => array_values(array_filter(array_map('trim', explode(',', (string) env('PREDICTILY_SQL_ALLOWED_CIDRS', ''))))),
         'default_page_size' => 5000,
         'max_page_size' => 20_000,
         // Tope de filas por sincronización (protege memoria y disco).

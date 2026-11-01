@@ -49,7 +49,7 @@ def main(slug: str) -> None:
             run_id, job_id = create_run(conn, tenant, run_type=run_type, cutoff=str(cutoff) if cutoff else None)
         t = time.perf_counter()
         r = client.post(f"/v1/forecast-runs/{run_id}/execute", headers=auth,
-                        json={"tenant_id": tenant, "training_job_id": job_id, "horizons": [7, 30, 90]})
+                        json={"tenant_id": tenant, "training_job_id": job_id, "horizons": [7, 14, 30, 60, 90]})
         elapsed = time.perf_counter() - t
         body = r.json()
         with engine.connect() as conn:

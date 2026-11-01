@@ -33,9 +33,7 @@ final class MySqlDialect extends AbstractSqlDialect
     public function connect(SqlConnectionSettings $settings, string $username, string $password): PDO
     {
         $this->requireDriver();
-        $this->assertSafeDsnPart('host', $settings->host);
-        $this->assertSafeDsnPart('database', $settings->database);
-        $this->assertSafeDsnPart('charset', $settings->charset, '/^[a-z0-9_]+$/');
+        $dsn = $this->dsn($settings);
         $options = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_EMULATE_PREPARES => true,
@@ -45,9 +43,20 @@ final class MySqlDialect extends AbstractSqlDialect
         if (in_array($settings->sslMode, ['require', 'verify-ca', 'verify-full'], true) && defined('PDO::MYSQL_ATTR_SSL_CIPHER')) {
             $options[PDO::MYSQL_ATTR_SSL_CIPHER] = 'DEFAULT';
         }
-        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $settings->host, $settings->port, $settings->database, $settings->charset);
 
         return new PDO($dsn, $username, $password, $options);
+    }
+
+    /** DSN contra el literal IP fijado por SqlHostPolicy (sin segunda resolución: sin DNS rebinding). */
+    public function dsn(SqlConnectionSettings $settings): string
+    {
+        $this->assertSafeDsnPart('host', $settings->host);
+        $address = $settings->connectAddress();
+        $this->assertSafeDsnPart('host', $address);
+        $this->assertSafeDsnPart('database', $settings->database);
+        $this->assertSafeDsnPart('charset', $settings->charset, '/^[a-z0-9_]+$/');
+
+        return sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $address, $settings->port, $settings->database, $settings->charset);
     }
 
     public function begin(PDO $pdo, SqlConnectionSettings $settings): void

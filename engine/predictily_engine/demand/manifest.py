@@ -37,7 +37,8 @@ def _windows(rows: pd.DataFrame, role: str) -> list[dict[str, Any]]:
 def build_manifest(*, cutoff: date, data_from: date, plan: Any | None, bt: pd.DataFrame, min_improvement: float,
                    config_version: str | None, coverage: dict[str, Any] | None, horizon_support: dict[int, dict],
                    has_eval_selection: bool, p50: dict[str, Any] | None, seed: int,
-                   served: dict[str, Any] | None = None) -> dict[str, Any]:
+                   served: dict[str, Any] | None = None, day_status: dict[str, Any] | None = None,
+                   knowledge: dict[str, Any] | None = None) -> dict[str, Any]:
     cutoff_ts = pd.Timestamp(cutoff)
     history_days = int((cutoff_ts - pd.Timestamp(data_from)).days) + 1
     manifest: dict[str, Any] = {
@@ -45,6 +46,8 @@ def build_manifest(*, cutoff: date, data_from: date, plan: Any | None, bt: pd.Da
         "history": {"from": _d(data_from), "to": _d(cutoff), "days": history_days},
         "seed": seed, "min_improvement": min_improvement, "config_version": config_version,
         "source_coverage": coverage,
+        # ADR-V25-03: días excluidos por fuente ausente o cierre (con su base y cuántos se imputaron); ADR-V25-23: conocimiento usado.
+        "day_status": day_status, "knowledge": knowledge,
     }
     if plan is None or bt.empty:
         manifest.update({
@@ -117,7 +120,7 @@ def build_manifest(*, cutoff: date, data_from: date, plan: Any | None, bt: pd.Da
         "selection_evidence_end": _d(evidence_end_sel),
         "latest_selection_window_target_to": _d(residual_end),
         "holdout_evidence_end": _d(cutoff_ts),
-        "censored_days_excluded": "stockout",
+        "censored_days_excluded": "stockout, missing_source, closed",
         "source_complete_through": (coverage or {}).get("sales", {}).get("complete_through"),
     }
     manifest["overlap"] = {
@@ -131,7 +134,9 @@ def build_manifest(*, cutoff: date, data_from: date, plan: Any | None, bt: pd.Da
         "model_selection_for_evaluation": {"windows": [w["window"] for w in sel_w]},
         "interval_calibration_for_evaluation": {"windows": [w["window"] for w in sel_w]},
         "production_selection_and_calibration": {"windows": [w["window"] for w in sel_w + hold_w]},
-        "holdout_windows_used_for_decisions_of_the_evaluation": [] if has_holdout else [w["window"] for w in hold_w],
+        # Ventanas que a la vez se evalúan y deciden (no hay período final que las separe): vacío = protocolo
+        # limpio; con historia corta son todas las de selección y la métrica es optimista.
+        "evaluation_windows_that_also_took_decisions": [] if has_holdout else [w["window"] for w in sel_w + hold_w],
     }
     manifest["checks"] = {
         "holdout_disjoint_from_selection": holdout_shared == 0,

@@ -34,7 +34,7 @@ abstract class AnalyticsRequest extends FormRequest
     /** @return list<int> */
     protected function horizons(): array
     {
-        return array_map('intval', (array) config('engine.horizons', [7, 30, 90]));
+        return array_map('intval', (array) config('engine.horizons', [7, 14, 30, 60, 90]));
     }
 
     public function intOrNull(string $key): ?int

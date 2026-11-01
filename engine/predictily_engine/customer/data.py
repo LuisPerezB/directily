@@ -3,6 +3,12 @@
 `CustomerData` es independiente de la base de datos: las pruebas lo construyen en memoria (generador
 sintético) y el servicio lo carga con `load_customer_data`. Contiene SOLO compras de compradores
 identificables y no genéricos (anónimos y genéricos quedan fuera y se contabilizan aparte).
+
+Conocimiento as-of (ADR-V25-23): `purchases` y `returns` son la vista al corte final (`through`: la verdad disponible, con que se
+etiquetan los cortes). `purchase_versions` conserva las versiones de las líneas con su ventana de conocimiento, leídas una vez, para
+que el `FeatureBuilder` arme las VARIABLES de cada corte con lo que se conocía ese día (un documento cargado después o una
+anulación posterior no cambian las variables de un corte anterior). Sin versiones (datos sintéticos) todo se asume conocido
+desde su día de negocio.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from typing import Any
 
 import pandas as pd
 
+from predictily_engine.data.asof import local_today, to_day, with_knowledge
 from predictily_engine.db.customer_repository import CustomerRepository
 
 PURCHASE_COLUMNS = ["customer_id", "product_id", "branch_id", "ds", "currency", "qty", "net_amount",
@@ -33,6 +40,8 @@ class CustomerData:
     sales_last: date | None
     excluded: dict[str, Any] = field(default_factory=dict)
     tenant: dict[str, Any] = field(default_factory=dict)  # currency, timezone, sector
+    through: date | None = None       # los datos se cargaron hasta esta fecha (incluida)
+    purchase_versions: Any = None     # data.asof.PurchaseVersions: versiones de compras y devoluciones con su ventana de conocimiento
 
     def __post_init__(self) -> None:
         for col in ("ds",):
@@ -43,7 +52,10 @@ class CustomerData:
 
     # ── cobertura y madurez ──
     def last_complete_day(self) -> date | None:
-        return last_complete_day(self.coverage, self.sales_last)
+        complete = last_complete_day(self.coverage, self.sales_last)
+        if complete is not None and self.through is not None and self.through < complete:
+            return self.through
+        return complete
 
     def coverage_source(self) -> str:
         cov = self.coverage
@@ -81,16 +93,24 @@ def load_customer_data(repo: CustomerRepository, cfg: dict[str, Any], through: d
         complete = last_complete_day(coverage, last)
         if complete is not None and through is not None and complete < through:
             through = complete
-    purchases = repo.purchases(through, bool(cfg["exclude_generic_buyers"]), list(cfg["generic_buyer_codes"])) \
-        if through is not None else pd.DataFrame(columns=PURCHASE_COLUMNS)
-    returns = repo.returns(through) if through is not None else pd.DataFrame(columns=["customer_id", "product_id", "ds", "qty"])
+    # Una sola lectura de versiones hasta `through`: la vista al corte final (verdad disponible) y la de cada corte se derivan de ella.
+    # Ejecución vigente (corte = última venta): la verdad conoce hasta HOY (una carga nocturna del último día cuenta); reconstrucción
+    # histórica: solo hasta el propio corte. Las variables de cada corte anterior usan siempre lo conocido en ese corte.
+    known_until = local_today(repo.base.timezone()) if (through is not None and last is not None
+                                                          and to_day(through) >= to_day(last)) else None
+    versions = repo.purchase_versions(through, bool(cfg["exclude_generic_buyers"]), list(cfg["generic_buyer_codes"]), known_until) \
+        if through is not None else None
+    purchases = with_knowledge(versions.purchase_cells(through, known_until), versions) if versions is not None \
+        else pd.DataFrame(columns=PURCHASE_COLUMNS)
+    returns = versions.return_cells(through, known_until) if versions is not None \
+        else pd.DataFrame(columns=["customer_id", "product_id", "ds", "qty"])
     pids = sorted(int(p) for p in purchases["product_id"].unique()) if len(purchases) else []
     availability = repo.availability(pids, first, through) if (pids and first is not None) else pd.DataFrame(
         columns=["branch_id", "product_id", "ds", "available"])
-    excluded = repo.excluded_sales_stats(through, list(cfg["generic_buyer_codes"])) if through is not None else {}
+    excluded = repo.excluded_sales_stats(through, list(cfg["generic_buyer_codes"]), known_until) if through is not None else {}
     return CustomerData(
         purchases=purchases, returns=returns, products=repo.products(), branches=repo.branches(),
         availability=availability, coverage=coverage, promotions=repo.promotions(),
         promotion_revisions=repo.promotion_revisions(), sales_first=first, sales_last=last,
-        excluded=excluded, tenant=repo.tenant(),
+        excluded=excluded, tenant=repo.tenant(), through=through, purchase_versions=versions,
     )

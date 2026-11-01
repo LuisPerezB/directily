@@ -15,6 +15,8 @@ export interface ForecastChartData {
   history: Num[]
   stockout: boolean[]
   yhat: Num[]
+  /** Mediana (P50): solo se dibuja si el motor la publicó (algún valor no nulo). */
+  p50: Num[]
   lo80: Num[]
   band80: Num[]
   lo95: Num[]
@@ -22,6 +24,7 @@ export interface ForecastChartData {
   /** Índice del último punto histórico (−1 si no hay histórico). */
   cutoffIndex: number
   hasIntervals: boolean
+  hasP50: boolean
 }
 
 function bandWidth(lo: Num, hi: Num): Num {
@@ -41,12 +44,14 @@ export function buildForecastChartData(history: HistoryPoint[], forecast: Foreca
     history: [],
     stockout: [],
     yhat: [],
+    p50: [],
     lo80: [],
     band80: [],
     lo95: [],
     band95: [],
     cutoffIndex: sortedHistory.length - 1,
     hasIntervals: false,
+    hasP50: false,
   }
 
   for (const h of sortedHistory) {
@@ -54,6 +59,7 @@ export function buildForecastChartData(history: HistoryPoint[], forecast: Foreca
     out.history.push(metric === 'units' ? h.units : h.revenue)
     out.stockout.push(Boolean(h.stockout))
     out.yhat.push(null)
+    out.p50.push(null)
     out.lo80.push(null)
     out.band80.push(null)
     out.lo95.push(null)
@@ -66,6 +72,10 @@ export function buildForecastChartData(history: HistoryPoint[], forecast: Foreca
     out.history.push(null)
     out.stockout.push(false)
     out.yhat.push(metric === 'units' ? f.yhat : f.revenue)
+    // La mediana solo existe en unidades y cuando el motor la publicó; nunca se sustituye por yhat.
+    const p50 = metric === 'units' && typeof f.p50 === 'number' ? f.p50 : null
+    out.p50.push(p50)
+    if (p50 !== null) out.hasP50 = true
     const lo80 = useIntervals ? f.lo_80 : null
     const hi80 = useIntervals ? f.hi_80 : null
     const lo95 = useIntervals ? f.lo_95 : null

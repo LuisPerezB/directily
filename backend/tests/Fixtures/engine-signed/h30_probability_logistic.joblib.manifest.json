@@ -1,0 +1,7 @@
+{
+  "algorithm": "ed25519",
+  "format": "predictily-signed-manifest/1",
+  "key_id": "fixture-2026",
+  "manifest": "{\"artifact\":{\"file_name\":\"h30_probability_logistic.joblib\",\"format\":\"joblib\",\"sha256\":\"d323fc33e7543ff365cdc6556b8dfa0e9ae5f01ac32e1e1e7593d4c7f4e1b1c6\",\"size_bytes\":72},\"core\":\"customer\",\"created_at\":\"2026-10-31T21:08:54Z\",\"data_fingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"feature_schema_version\":\"cust-fs-2026.10-v1\",\"key_id\":\"fixture-2026\",\"libraries\":{\"lightgbm\":\"4.7.0\",\"scikit-learn\":\"1.9.1\"},\"name\":\"h30_probability_logistic\",\"run_id\":7,\"schema\":\"predictily-artifact-manifest/1\",\"tenant_id\":4242}",
+  "signature": "FqIo1fb/ahn44INmtQFX4oeci+vUqdfJzbfcVGO6bWQSmzPzjLfjGAM0JrtmititU988BmWJdjTJdG3h8t6+CA=="
+}

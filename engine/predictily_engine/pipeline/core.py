@@ -23,7 +23,9 @@ import numpy as np
 import pandas as pd
 
 from predictily_engine.backtest.rolling import (
+    AsOfWindows,
     BacktestPlan,
+    asof_windows,
     eligible_ids,
     plan_backtest,
     run_backtest,
@@ -55,8 +57,9 @@ from predictily_engine.models.ml import LightGBMGlobal
 from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL
 from predictily_engine.models.statistical import forecast_statistical
 from predictily_engine.pipeline.data import TenantData
-from predictily_engine.platform.config import config_hash, resolve_config
+from predictily_engine.platform.config import config_hash, effective_config_record
 from predictily_engine.platform.snapshot import DataSnapshot
+from predictily_engine.profiling.days import DayRules
 from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import Panel, build_panel
 from predictily_engine.reconciliation.hierarchy import AGG_LEVELS, aggregate, to_periods
@@ -120,7 +123,8 @@ def _noop(stage: str, pct: int) -> None:  # pragma: no cover
 
 
 def training_data_hash(panel: Panel) -> str:
-    cols = panel.df[["unique_id", "ds", "y", "stockout"]].sort_values(["unique_id", "ds"])
+    keep = ["unique_id", "ds", "y", "stockout"] + (["day_status"] if "day_status" in panel.df else [])
+    cols = panel.df[keep].sort_values(["unique_id", "ds"])
     hashed = pd.util.hash_pandas_object(cols, index=False).to_numpy()
     return hashlib.sha256(hashed.tobytes()).hexdigest()
 
@@ -136,7 +140,7 @@ def run_pipeline(
     progress: ProgressFn | None = None,
     force_families: list[str] | None = None,
     horizons: tuple[int, ...] = hz.SUPPORTED_HORIZONS,
-    core_config: dict[str, Any] | None = None,
+    config_record: dict[str, Any] | None = None,
 ) -> PipelineResult:
     progress = progress or _noop
     timings: dict[str, float] = {}
@@ -147,10 +151,13 @@ def run_pipeline(
     horizons = tuple(sorted({int(h) for h in horizons if int(h) <= horizon}))
 
     # Configuración efectiva (core → perfil sectorial → empresa → opciones de la ejecución), con su huella.
-    if core_config is None:
-        core_config, _, _ = resolve_config("demand", data.settings, data.sector)
+    # `config_record` = `platform.config.effective_config_record` (configuración, procedencia por clave, perfil aplicado
+    # y su hash); la ejecución lo conserva: cambiar después la configuración de la empresa no reescribe este registro.
+    record = config_record or effective_config_record("demand", data.settings, data.sector)
+    core_config = record["effective_config"]
     effective_config = {
-        "core": "demand", "config": core_config,
+        "core": "demand", "config": core_config, "provenance": record["provenance"], "profile": record["profile"],
+        "core_config_version": record["config_version"],
         "run": {"seed": seed, "horizon_days": horizon, "horizons": list(horizons), "min_improvement": min_improvement,
                 "max_backtest_windows": max_windows, "max_series_lgbm": max_series_lgbm,
                 "force_families": force_families, "feature_set_version": FEATURE_SET_VERSION},
@@ -158,8 +165,11 @@ def run_pipeline(
     config_version = config_hash(effective_config)
 
     progress("profiling", 10)
-    panel = build_panel(data)
+    # Semántica de días (ADR-V25-03): fuente ausente, huecos y cierres no son ceros; la regla inferida es configurable.
+    day_rules = DayRules.from_config(core_config)
+    panel = build_panel(data, day_rules)
     readiness = compute_readiness(data, panel)
+    limitations.extend(_day_limitations(panel.day_summary))
     if panel.profile.empty or not panel.profile["is_active"].any():
         raise InsufficientDataError("No hay series activas con ventas para pronosticar.",
                                     {"series_total": int(len(panel.profile))})
@@ -182,9 +192,13 @@ def run_pipeline(
     fc_horizon = max(horizon, min(MAX_INTERNAL_HORIZON, required_coverage_days(
         data.latest_inventory, data.lead_times, data.suppliers, data.effective_settings, active["unique_id"])))
     # Promociones as-of (F5): a futuro de cada corte solo lo conocido ese día (known_at / revisiones).
-    features = FeatureBuilder(panel.df, data.branches, data.promotions, (cutoff + pd.Timedelta(days=fc_horizon)).date(),
+    horizon_end = (cutoff + pd.Timedelta(days=fc_horizon)).date()
+    features = FeatureBuilder(panel.df, data.branches, data.promotions, horizon_end,
                               promotion_revisions=data.promotion_revisions,
                               promotions_known_on=data.promotions_known_on)
+    # Conocimiento as-of (ADR-V25-23): si hubo documentos tardíos, anulaciones o correcciones, cada ventana entrena con lo que
+    # se conocía en SU corte (panel, perfil y variables); sus promociones son las conocidas ese día (sin `promotions_known_on`).
+    windows = asof_windows(data, panel, features, horizon_end, day_rules)
     plan = plan_backtest(panel, max_windows)
     full_ids = eligible_ids(panel, cutoff)
     use_lgbm = 5 <= len(full_ids) <= max_series_lgbm
@@ -201,7 +215,7 @@ def run_pipeline(
     if plan is not None:
         progress("backtesting", 20)
         bt = run_backtest(panel, features, plan, families, seed, n_jobs, use_lgbm,
-                          progress=lambda frac: progress("backtesting", 20 + int(35 * frac)))
+                          progress=lambda frac: progress("backtesting", 20 + int(35 * frac)), windows=windows)
     else:
         bt = pd.DataFrame()
         warnings.append("Historia insuficiente para backtesting (< 70 días): se usa el promedio de la historia "
@@ -300,7 +314,7 @@ def run_pipeline(
     evaluations, eval_info = ev.evaluate(bt, served, eval_served, cat, data.currency)
     history_days = int((cutoff - panel.df["ds"].min()).days) + 1
     support = hz.horizon_support(horizon, history_days, plan, ev.horizon_obs(evaluations))
-    p50_info = ev.p50_decision(eval_info["quantiles"])
+    p50_info = eval_info["p50"]
     if not p50_info["published"]:
         limitations.append({"code": "p50_not_published", "message": p50_info["message"]})
     if plan is not None and not plan.has_holdout:
@@ -334,6 +348,8 @@ def run_pipeline(
     series_fc["quality_status"] = hz.row_status(series_fc["step"].to_numpy(), support, hist_days)
     series_fc["case_label"] = series_fc["unique_id"].map(lifecycle.labels)
     ex_events, ex_stats = known_events(data.exceptional_events, cutoff)
+    if data.exceptional_stats:  # el lector de Datos ya dejó fuera lo desconocido o posterior al corte: se informa
+        ex_stats = {**ex_stats, **data.exceptional_stats}
     flag_on = bool(core_config.get("exceptional_events_flag", True))
     ex_mask, ex_used = (flag_events(series_fc, ex_events, data.branches) if flag_on
                         else (np.zeros(len(series_fc), dtype=bool), []))
@@ -364,6 +380,14 @@ def run_pipeline(
     t3 = time.perf_counter()
     agg_fc = aggregate(series_fc, ["yhat", "revenue_yhat"], ["ds", "step"], AGG_LEVELS)
     node_hist = aggregate(panel.df.assign(y_clean=panel.df["y"]), ["y_clean"], ["ds"], AGG_LEVELS)
+    # Escala de cada nodo en cada ventana: con el conocimiento de ESA ventana (ADR-V25-23), no con la historia final.
+    window_hist = {}
+    if windows is not None:
+        for info in windows.info():
+            if info["panel_rebuilt"]:
+                origin = pd.Timestamp(info["origin"])
+                wp = windows.at(origin)[0]
+                window_hist[origin] = aggregate(wp.df.assign(y_clean=wp.df["y"]), ["y_clean"], ["ds"], AGG_LEVELS)
     agg_cal_day, agg_cal_week, agg_cal_month, agg_bt = None, None, None, pd.DataFrame()
     if not sel_bt.empty:
         b = sel_bt.copy()
@@ -372,7 +396,7 @@ def run_pipeline(
                      product_id=b["unique_id"].str.extract(r"-p(\d+)")[0].astype(int))
         b["category_id"] = b["product_id"].map(cat)
         agg_bt = aggregate(b, ["actual", "yhat"], ["window", "cutoff", "ds", "step"], AGG_LEVELS)
-        agg_bt["scale"] = _node_scales_at(node_hist, agg_bt)
+        agg_bt["scale"] = _node_scales_at(node_hist, agg_bt, window_hist)
         agg_cal_day = ConformalCalibrator(agg_bt.assign(group=agg_bt["level"]), "group", day_bucket, "absolute")
         for gran in ("week", "month"):
             per = to_periods(agg_bt.drop(columns=["cutoff", "scale"]), gran, ["actual", "yhat"], ["window"])
@@ -482,7 +506,11 @@ def run_pipeline(
         f"Ingresos = unidades × {PRICE_ASSUMPTION}.",
         "Intervalos 80/95 % conformales con residuos del backtest del modelo servido; P10/P90 = límites del intervalo 80 %.",
         "P50 solo a nivel serie-día y únicamente si se evaluó con pinball en un período final independiente.",
-        "La historia de cada serie empieza en su primera venta; los días sin venta dentro de la cobertura son ceros observados.",
+        "La historia de cada serie empieza en su primera venta; solo los días sin venta con la fuente cubierta, la sucursal abierta y "
+        "sin quiebre de stock (`zero_confirmed`) son ceros observados: la fuente ausente (`missing_source`) y los cierres (`closed`) "
+        "se excluyen de las métricas y del perfilado de ceros, y se imputan con la media móvil de 28 días para ajustar los modelos.",
+        "Cada ventana del backtest entrena con los datos tal como se conocían en su corte; los reales con que se evalúa son la "
+        "verdad disponible al corte final (versión vigente de cada documento a esa fecha).",
     ]
     snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage)
     families_info = _families_info(served, selection, series_fc, bt, active, failed)
@@ -493,10 +521,12 @@ def run_pipeline(
         "note": ("Se sirve el respaldo porque falló el entrenamiento final del ganador: métricas, intervalos y "
                  "etiquetas corresponden al modelo servido." if failed else "Se sirve el modelo ganador del backtest."),
     }
+    knowledge = _knowledge(data, windows)
     manifest = build_manifest(
         cutoff=cutoff.date(), data_from=panel.df["ds"].min().date(), plan=plan, bt=bt, min_improvement=min_improvement,
         config_version=config_version, coverage=data.coverage or None, horizon_support=support,
-        has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info)
+        has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info,
+        day_status=panel.day_summary, knowledge=knowledge)
     summary = _summary(series_fc, forecast_values, served, evaluations, plan, readiness, recs, horizon, active, lgbm,
                        warnings, eval_served, support=support, horizons=horizons)
     summary.update({
@@ -509,6 +539,7 @@ def run_pipeline(
         "coverage": data.coverage, "limitations": limitations, "limitation_codes": [x["code"] for x in limitations],
         "assumptions": assumptions, "config_version": config_version, "data_snapshot_hash": snapshot.hash,
         "history_days": history_days, "horizon_days": horizon, "horizons_requested": list(horizons),
+        "day_status": panel.day_summary, "knowledge": knowledge,
     })
     timings["total"] = time.perf_counter() - t0
     summary["timings_seconds"] = {k: round(v, 1) for k, v in timings.items()}
@@ -526,11 +557,65 @@ def run_pipeline(
 
 # ───────────────────────────── auxiliares ─────────────────────────────
 
-def _node_scales_at(node_hist: pd.DataFrame, agg_bt: pd.DataFrame) -> pd.Series:
-    """Escala de cada nodo al corte de cada ventana (media de 28 días previos)."""
+def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
+    """Limitaciones de la semántica de días (ADR-V25-03) con sus conteos: nada se excluye o imputa en silencio."""
+    out: list[dict[str, str]] = []
+    days = day_summary.get("series_days") or {}
+    by_basis = day_summary.get("series_days_by_basis") or {}
+    total = int(day_summary.get("series_days_total") or 0)
+    missing, closed = int(days.get("missing_source", 0)), int(days.get("closed", 0))
+    imputed, not_imputable = int(day_summary.get("excluded_days_imputed", 0)), int(day_summary.get("excluded_days_not_imputable", 0))
+    tail = (f" Para ajustar los modelos se imputaron con la media móvil de 28 días de los días limpios ({imputed} imputados; "
+            f"{not_imputable} sin historia suficiente quedan con su valor observado).")
+    if missing:
+        out.append({"code": "days_missing_source", "message": (
+            f"{missing} días-serie ({missing / max(total, 1):.1%} del panel) se clasificaron `missing_source` (fuera de la cobertura "
+            "declarada de la fuente, dentro de un hueco o inferidos por la regla de actividad de la sucursal): no son ceros observados "
+            "y se excluyen de las métricas y de la proporción de ceros del perfilado." + tail)})
+    rules = day_summary.get("rules") or {}
+    engine_inferred = int((day_summary.get("branch_days") or {}).get("missing_source_engine_inferred", 0))
+    if engine_inferred:
+        out.append({"code": "days_missing_source_inferred", "message": (
+            f"{engine_inferred} sucursal-días se marcaron `missing_source` con base inferida por el motor: la sucursal no registró ninguna "
+            f"línea pese a una mediana de al menos {rules.get('infer_min_median_lines')} líneas diarias en los "
+            f"{rules.get('infer_lookback_days')} días previos ({by_basis.get('missing_source:inferred', 0)} días-serie). La regla es configurable "
+            "(`day_status_infer_gaps`) y debe aprobarse en el piloto: un cierre sin declarar en el calendario se confunde con una caída de la fuente.")})
+    if closed:
+        out.append({"code": "days_closed", "message": (
+            f"{closed} días-serie corresponden a cierres declarados en el calendario (`closure`): no son ceros observados y se excluyen "
+            "de las métricas." + tail)})
+    return out
+
+
+def _knowledge(data: TenantData, windows: AsOfWindows | None) -> dict[str, Any]:
+    """Política de conocimiento (ADR-V25-23) y lo que realmente se usó en cada ventana, para el manifiesto y el resumen."""
+    versions = data.sales_versions
+    return {
+        "policy": {
+            "visibility_rule": "una versión es visible al corte C si known_from < medianoche local (C+1) y "
+                               "(known_until es nulo o known_until >= medianoche local (C+1))",
+            "training": "cada ventana del backtest y el período final entrenan con los datos tal como se conocían en SU corte "
+                        "(panel, perfil de demanda, escalas y variables)",
+            "evaluation_actuals": "los reales con que se evalúa cada ventana son la verdad disponible al corte final",
+            "final_cutoff_knowledge": "el corte final de una ejecución vigente (corte = último dato) conoce hasta la fecha de ejecución "
+                                      "(`knowledge_date`: lo recibido después de la medianoche del último día, p. ej. la carga nocturna, sí cuenta); "
+                                      "una reconstrucción histórica, solo hasta su propio corte",
+            "static_catalog": "inventario, catálogo y calendario no están versionados: se usa su estado vigente",
+        },
+        "source": versions.summary() if versions is not None else {
+            "versions": False, "assumption": "sin historial de versiones: cada documento se asume conocido desde su día de negocio"},
+        "as_of_windows_active": windows is not None,
+        "windows": windows.info() if windows is not None else [],
+    }
+
+
+def _node_scales_at(node_hist: pd.DataFrame, agg_bt: pd.DataFrame,
+                    window_hist: dict[pd.Timestamp, pd.DataFrame] | None = None) -> pd.Series:
+    """Escala de cada nodo al corte de cada ventana (media de 28 días previos). `window_hist`: historia por nodo con el
+    conocimiento de las ventanas cuyo panel difiere de la verdad final (as-of)."""
     out = pd.Series(np.nan, index=agg_bt.index)
     for cutoff, idx in agg_bt.groupby("cutoff").groups.items():
-        sc = _node_scale_final(node_hist, pd.Timestamp(cutoff))
+        sc = _node_scale_final((window_hist or {}).get(pd.Timestamp(cutoff), node_hist), pd.Timestamp(cutoff))
         out.loc[idx] = agg_bt.loc[idx, "node_key"].map(sc).to_numpy()
     return out.fillna(0.05)
 

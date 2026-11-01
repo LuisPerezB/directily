@@ -195,3 +195,19 @@ Módulos sectoriales (Retail/Export/Industry/Agro) como entregables; entrenamien
 empresas; estimadores causales activos; modelos fundacionales (Chronos/AutoGluon/TimeGPT) salvo como
 candidatos opcionales que demuestren valor; validación con datos reales (🔌, pendiente de acceso
 autorizado a Soyoda/Resgasa desde la red del cliente).
+
+## 8. Cierre de la etapa 2 (31-oct-2026)
+
+Paquetes ejecutados: P0/P0b (arquitecto), P1–P4 en paralelo, P5a (interfaz), P5b (plataforma),
+P6 (correcciones de integración), P7 (E2E de la etapa 2), P8 (defectos del E2E), P9 (paginación y
+corte del plan de abastecimiento en la interfaz). Las decisiones ADR-V2-01..13 se mantuvieron; se
+agregaron dos reglas de arquitecto durante la revisión:
+
+- **`cust-ranking-v1`:** la fuente del ranking de productos por cliente se elige en el holdout por
+  precision@5 con margen; si el modelo no supera a la popularidad, se sirve popularidad.
+- **Visibilidad de compromisos:** `effective_known_at = COALESCE(known_at, ingestión)`; un compromiso es
+  visible en el corte C si `effective_known_at` ≤ fin del día local C (misma regla en PHP y Python).
+
+Resultado: todos los casos E2-01..E2-26 tienen código y prueba automatizada; ninguno está validado con
+datos reales. E2-20 (operación real) queda 🔌 hasta tener acceso autorizado al histórico de
+Resgasa/Soyoda. Estado por caso y evidencia: `PREDICTILY_V2_ACCEPTANCE_MATRIX.md`.

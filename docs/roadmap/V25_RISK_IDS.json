@@ -1,0 +1,798 @@
+{
+ "version": 1,
+ "note": "Libro de IDs de riesgo generado por infra/scripts/v25_roadmap_docs.py. Conserva la correspondencia clave -> ID para que los R-nnn no cambien al regenerar; no editar a mano. Las claves retiradas nunca se reutilizan.",
+ "entries": [
+  {
+   "id": "R-001",
+   "key": "defecto|datos|las ventas cargadas tarde contaminan cortes pasados: el as-of de ventas solo usa la fecha de evento"
+  },
+  {
+   "id": "R-002",
+   "key": "defecto|datos|una anulación o corrección posterior reescribe el pasado: los documentos de venta no tienen versiones"
+  },
+  {
+   "id": "R-003",
+   "key": "defecto|datos|tipos y estados de documento desconocidos se cuentan como venta (cotizaciones, proformas, guías, rechazadas)"
+  },
+  {
+   "id": "R-004",
+   "key": "defecto|datos|los huecos internos de la fuente (caída de integración, cierre) entran como ceros en el panel de demanda"
+  },
+  {
+   "id": "R-005",
+   "key": "defecto|datos|la cobertura inferida avanza con consultas vacías y con un rezago fijo de 1 día"
+  },
+  {
+   "id": "R-006",
+   "key": "defecto|datos|los lectores interpretan el instante de corte con tres criterios distintos (fin del día local, fin del día utc, inicio del día utc)"
+  },
+  {
+   "id": "R-007",
+   "key": "defecto|datos|el known_at del calendario puede adelantarse sin revisión ni auditoría"
+  },
+  {
+   "id": "R-008",
+   "key": "defecto|datos|inventario y atributos de catálogo se sobrescriben sin versión ni disponibilidad en la fuente"
+  },
+  {
+   "id": "R-009",
+   "key": "defecto|datos|ventas e inventario no tienen unidad y products.unit se sobrescribe sin historial ni advertencia"
+  },
+  {
+   "id": "R-010",
+   "key": "defecto|datos|sales.related_sale_id nunca se escribe y la documentación lo da por vigente"
+  },
+  {
+   "id": "R-011",
+   "key": "defecto|datos|las estadísticas de importación (units_total, net_amount_total, date_from/date_to, missing_days) incluyen anuladas y notas de crédito"
+  },
+  {
+   "id": "R-012",
+   "key": "defecto|datos|bronze con pii en claro, sin cifrado adicional ni ttl, mientras otros orígenes no conservan el original"
+  },
+  {
+   "id": "R-013",
+   "key": "defecto|datos|la retención borra ventas sin comprobar dependencias, retención legal ni otras tablas y sin dejar manifiesto"
+  },
+  {
+   "id": "R-014",
+   "key": "defecto|datos|los umbrales de calidad son fijos, no configurables ni justificados y un puntaje bajo no bloquea nada"
+  },
+  {
+   "id": "R-015",
+   "key": "defecto|datos|un código de producto nuevo crea un producto por defecto y fragmenta la serie"
+  },
+  {
+   "id": "R-016",
+   "key": "defecto|datos|dos definiciones de 'devolución' divergen en el estado del documento"
+  },
+  {
+   "id": "R-017",
+   "key": "defecto|datos|el hmac de identidad de clientes usa app_key global, sin separación por empresa"
+  },
+  {
+   "id": "R-018",
+   "key": "defecto|datos|identificadores sensibles fuera del patrón ecuatoriano y el ruc de proveedor se guardan en claro"
+  },
+  {
+   "id": "R-019",
+   "key": "defecto|datos|product_price_history guarda la fecha de la carga como vigencia y nunca cierra el intervalo"
+  },
+  {
+   "id": "R-020",
+   "key": "defecto|datos|la huella de un corte pasado incluye el precio y costo actuales del catálogo"
+  },
+  {
+   "id": "R-021",
+   "key": "defecto|datos|detecciones de calidad existentes sin prueba que las afirme"
+  },
+  {
+   "id": "R-022",
+   "key": "defecto|datos|cambiar tenants.timezone no recalcula sale_date de lo ya cargado"
+  },
+  {
+   "id": "R-023",
+   "key": "defecto|datos|el mapeo automático de la columna 'estado' puede invertir las ventas: '1', 'si' y 'true' se interpretan como anulado"
+  },
+  {
+   "id": "R-024",
+   "key": "defecto|datos|el informe de calidad extendido afirma que los días sin ventas no se convertirán en ceros, pero el panel de demanda sí los convierte cuando no hay cobertura declarada"
+  },
+  {
+   "id": "R-025",
+   "key": "defecto|datos|external_indicator_observations no tiene tenant_id y los modelos de indicadores externos no están acotados por empresa; varias referencias de modelos y pronósticos usan fks simples"
+  },
+  {
+   "id": "R-026",
+   "key": "defecto|datos|descuento mayor al bruto, precio cero e importes negativos se normalizan sin incidencia"
+  },
+  {
+   "id": "R-027",
+   "key": "defecto|datos|las líneas idénticas de un documento sin número de línea se descartan como duplicadas y subestiman unidades"
+  },
+  {
+   "id": "R-028",
+   "key": "defecto|datos|get /data-quality/extended?persist=1 escribe en la base con la habilidad de solo lectura data.view"
+  },
+  {
+   "id": "R-029",
+   "key": "defecto|datos|las promociones registradas o modificadas después del corte se usan como hecho observado en fechas anteriores o iguales al corte"
+  },
+  {
+   "id": "R-030",
+   "key": "defecto|datos|las conversiones de unidades se actualizan y se borran en sitio, sin versión ni traza del factor usado"
+  },
+  {
+   "id": "R-031",
+   "key": "defecto|datos|el lector as-of de indicadores externos falla con published_at con zona horaria y aplica un cuarto criterio de corte"
+  },
+  {
+   "id": "R-032",
+   "key": "defecto|datos|la documentación de la etapa 2 sobre el exportador lopdp está desactualizada"
+  },
+  {
+   "id": "R-033",
+   "key": "defecto|conectores|la marca de agua de la sincronización incremental puede saltar al futuro y dejar de extraer datos nuevos"
+  },
+  {
+   "id": "R-034",
+   "key": "defecto|conectores|un reintento o lote tardío con una versión anterior de un documento sobrescribe la versión nueva (escritura fuera de orden)"
+  },
+  {
+   "id": "R-035",
+   "key": "defecto|conectores|la política ssrf de los conectores sql es evadible (notación hexadecimal e ipv4 mapeado en ipv6, sin aaaa ni fijar la ip resuelta)"
+  },
+  {
+   "id": "R-036",
+   "key": "defecto|conectores|el validador sqlqueryguard se evade en postgresql con identificadores entrecomillados y unicode-escape"
+  },
+  {
+   "id": "R-037",
+   "key": "defecto|conectores|retry_after de redis (1020/1100 s) es menor que el timeout de los trabajos de ingesta (3600/1800 s)"
+  },
+  {
+   "id": "R-038",
+   "key": "defecto|conectores|pausar una fuente rest no detiene la ingesta y el siguiente lote la reactiva"
+  },
+  {
+   "id": "R-039",
+   "key": "defecto|conectores|el token de fuente rest concede lectura amplia y vive hasta un año; el limitador es por usuario, no por token/dispositivo"
+  },
+  {
+   "id": "R-040",
+   "key": "defecto|conectores|una fuente con credenciales rechazadas se reintenta cada hora indefinidamente y los errores no se clasifican"
+  },
+  {
+   "id": "R-041",
+   "key": "defecto|conectores|mapeos «incrementales» sin :since releen la tabla completa en cada ejecución sin avisar"
+  },
+  {
+   "id": "R-042",
+   "key": "defecto|conectores|tls hacia el origen no es obligatorio y la verificación de certificado no se aplica en mysql ni es configurable en postgresql"
+  },
+  {
+   "id": "R-043",
+   "key": "defecto|conectores|importadores de archivos sin límites de filas ni de tamaño descomprimido (xlsx/zip)"
+  },
+  {
+   "id": "R-044",
+   "key": "defecto|conectores|importaciones que mueren a mitad (timeout o fallo del worker) quedan en `validating`/`importing` sin recuperación"
+  },
+  {
+   "id": "R-045",
+   "key": "defecto|conectores|el catálogo declara contífico como `requires_credentials` aunque no tiene ninguna implementación"
+  },
+  {
+   "id": "R-046",
+   "key": "defecto|conectores|el sugeridor de mapeo propone coincidencias erróneas sin señal de confianza"
+  },
+  {
+   "id": "R-047",
+   "key": "defecto|conectores|sql server se lee con read committed sin instantánea durante extracciones largas"
+  },
+  {
+   "id": "R-048",
+   "key": "defecto|conectores|las líneas idénticas legítimas sin número de línea se descartan como duplicadas y subestiman la venta"
+  },
+  {
+   "id": "R-049",
+   "key": "defecto|conectores|la detección de privilegios de escritura en postgresql ignora los privilegios heredados de un rol de grupo y los concedidos a public"
+  },
+  {
+   "id": "R-050",
+   "key": "defecto|conectores|reprocesar con `queue:retry` una sincronización fallida es un no-op silencioso y borra el registro del fallo"
+  },
+  {
+   "id": "R-051",
+   "key": "defecto|conectores|la vista previa de mapeos de sql server falla con consultas que llevan order by o with"
+  },
+  {
+   "id": "R-052",
+   "key": "defecto|conectores|el archivo de preparación de una sincronización en `needs_review` conserva identificadores personales en claro sin caducidad"
+  },
+  {
+   "id": "R-053",
+   "key": "defecto|demanda|las ventas cargadas tarde o anuladas después reescriben los cortes pasados y el backtest de demand"
+  },
+  {
+   "id": "R-054",
+   "key": "defecto|demanda|los huecos internos de la fuente (caída de integración, cierre) entran al panel de demanda como ceros observados"
+  },
+  {
+   "id": "R-055",
+   "key": "defecto|demanda|los agregados de demanda suman unidades de medida distintas (sacos, galones, cajas, kg…) como si fueran «unidades»"
+  },
+  {
+   "id": "R-056",
+   "key": "defecto|demanda|un modelo que pierde contra el baseline en el holdout independiente se publica igual, y el modelo de producción se elige con el holdout"
+  },
+  {
+   "id": "R-057",
+   "key": "defecto|demanda|una única selección por clase sirve a todos los horizontes y los horizontes cortos se evalúan con pocos orígenes"
+  },
+  {
+   "id": "R-058",
+   "key": "defecto|demanda|los intervalos de series de respaldo (sku nuevos) provienen de residuos agrupados de otras series pero se presentan como conformales"
+  },
+  {
+   "id": "R-059",
+   "key": "defecto|demanda|la exportación csv de pronósticos omite calidad, intervalos, unidad y horizonte: un número provisional sale sin marca"
+  },
+  {
+   "id": "R-060",
+   "key": "defecto|demanda|las ejecuciones históricas usan el estado actual del catálogo y de las sucursales (is_active), no el vigente al corte"
+  },
+  {
+   "id": "R-061",
+   "key": "defecto|demanda|la promoción del modelo es automática: no compara con el champion, no consulta la calidad de los datos ni exige aprobación"
+  },
+  {
+   "id": "R-062",
+   "key": "defecto|demanda|series_level es un target encoding por serie calculado con todo el entrenamiento (no out-of-fold)"
+  },
+  {
+   "id": "R-063",
+   "key": "defecto|demanda|el umbral inclusivo del 3 % es sensible al redondeo de punto flotante"
+  },
+  {
+   "id": "R-064",
+   "key": "defecto|demanda|min_improvement acepta cualquier número y max_backtest_windows mayor que 3 no tiene efecto"
+  },
+  {
+   "id": "R-065",
+   "key": "defecto|demanda|el manifiesto y la documentación dicen «≥ 2/3 de las ventanas» pero la regla es ceil(2n/3) (3 de 4 en producción)"
+  },
+  {
+   "id": "R-066",
+   "key": "defecto|demanda|las promociones de fechas ≤ corte se usan «tal como ocurrieron» aunque se registraran después del corte"
+  },
+  {
+   "id": "R-067",
+   "key": "defecto|demanda|post /forecast-runs no acepta idempotency-key; la protección es el 409 por run activo"
+  },
+  {
+   "id": "R-068",
+   "key": "defecto|demanda|la lógica de deriva (umbral y mínimo de días) no tiene pruebas del motor"
+  },
+  {
+   "id": "R-069",
+   "key": "defecto|demanda|el artefacto joblib (pickle) de lightgbm se guarda sin firma ni procedencia"
+  },
+  {
+   "id": "R-070",
+   "key": "defecto|demanda|sin detección de cambio de régimen: una ruptura estacional o de nivel mantiene calidad «ok» e intervalos del régimen anterior"
+  },
+  {
+   "id": "R-071",
+   "key": "defecto|demanda|desempate implícito y decisión agregada que puede asignar una familia fuera de los candidatos de la clase"
+  },
+  {
+   "id": "R-072",
+   "key": "defecto|demanda|el manifiesto certifica que el período final «no participa en decisiones» con banderas constantes, aunque el modelo y los intervalos de producción sí lo usan"
+  },
+  {
+   "id": "R-073",
+   "key": "defecto|demanda|los puntos semanales y mensuales que la api agrega al vuelo desde los días pierden quality_status y case_label"
+  },
+  {
+   "id": "R-074",
+   "key": "defecto|demanda|el guardia de aislamiento del repositorio del motor es una comprobación de subcadena y solo tres de sus 24 lecturas tienen prueba de disjunción entre empresas"
+  },
+  {
+   "id": "R-075",
+   "key": "defecto|cliente|compras y devoluciones se leen con el estado actual del documento y sin tiempo de conocimiento (fuga as-of en ventas)"
+  },
+  {
+   "id": "R-076",
+   "key": "defecto|cliente|la población de entrenamiento y evaluación se selecciona con el stock futuro de la ventana (stockouts futuros)"
+  },
+  {
+   "id": "R-077",
+   "key": "defecto|cliente|el mismo holdout decide la promoción (probabilidad y cantidad) y la fuente del ranking, y después se informa como evaluación final"
+  },
+  {
+   "id": "R-078",
+   "key": "defecto|cliente|la corrección de coherencia entre horizontes puede dejar quantity_if_purchase fuera de su propio intervalo del 80 %"
+  },
+  {
+   "id": "R-079",
+   "key": "defecto|cliente|ordenar por expected_amount (desc) pone primero las filas sin precio (nulls first en postgresql)"
+  },
+  {
+   "id": "R-080",
+   "key": "defecto|cliente|los overrides del customer core no se validan por rango (solo horizons)"
+  },
+  {
+   "id": "R-081",
+   "key": "defecto|cliente|la referencia frecuencia/recencia da probabilidades extremas para relaciones con una sola compra"
+  },
+  {
+   "id": "R-082",
+   "key": "defecto|cliente|el customer core suma sale_items.quantity sin unidad ni conversión (mezcla de unidades posible)"
+  },
+  {
+   "id": "R-083",
+   "key": "defecto|cliente|el catálogo de horizontes del customer core está duplicado en 8 lugares y varias pruebas fijan el contrato antiguo"
+  },
+  {
+   "id": "R-084",
+   "key": "defecto|cliente|los artefactos joblib se cargan tras verificar solo un sha-256 guardado en la misma bd y la ruta almacenada puede ser absoluta"
+  },
+  {
+   "id": "R-085",
+   "key": "defecto|cliente|el aviso de identidad usa un umbral universal fijo (0,3) y no está conectado al customer core"
+  },
+  {
+   "id": "R-086",
+   "key": "defecto|cliente|documentación desactualizada: p2 afirma que openapi no incluye las rutas de comportamiento de compra"
+  },
+  {
+   "id": "R-087",
+   "key": "defecto|cliente|la prueba de «anuladas y notas de crédito no son compras» valida el generador de pruebas, no la consulta sql de producción (y sus definiciones divergen)"
+  },
+  {
+   "id": "R-088",
+   "key": "defecto|cliente|aserciones vacuas o inertes en pruebas del customer core"
+  },
+  {
+   "id": "R-089",
+   "key": "defecto|cliente|el catálogo de horizontes del customer core aparece en más sitios que los 8 documentados (incluye una regex funcional de reversión y los contratos openapi)"
+  },
+  {
+   "id": "R-090",
+   "key": "defecto|cliente|la referencia de cantidad sobrestima a los compradores regulares en horizontes cortos (multiplicador de poisson truncado)"
+  },
+  {
+   "id": "R-091",
+   "key": "defecto|modelos_aws|joblib.load deserializa un pickle con el sha-256 como única garantía: ejecución de código arbitrario si fila y archivo son manipulables"
+  },
+  {
+   "id": "R-092",
+   "key": "defecto|modelos_aws|resolve_stored_path no confina la ruta guardada al directorio de artefactos (rutas absolutas y '..')"
+  },
+  {
+   "id": "R-093",
+   "key": "defecto|modelos_aws|la reversión permite servir candidatos 'validated' que no superaron la regla de promoción (elude el gate)"
+  },
+  {
+   "id": "R-094",
+   "key": "defecto|modelos_aws|reversión de modelos de producción abierta al rol analista, sin motivo obligatorio ni mfa"
+  },
+  {
+   "id": "R-095",
+   "key": "defecto|modelos_aws|el reentrenamiento retira al champion vigente sin compararlo con él"
+  },
+  {
+   "id": "R-096",
+   "key": "defecto|modelos_aws|la purga de una empresa no elimina sus artefactos de modelos (la documentación afirma que sí)"
+  },
+  {
+   "id": "R-097",
+   "key": "defecto|modelos_aws|registro y almacenamiento de artefactos desalineados, sin conciliación ni retención"
+  },
+  {
+   "id": "R-098",
+   "key": "defecto|modelos_aws|el esquema del registro admite modelos sin tenant o con alcance global/sectorial y no impone coherencia entre tenants"
+  },
+  {
+   "id": "R-099",
+   "key": "defecto|modelos_aws|token del motor estático con valor por defecto conocido y credenciales de bd compartidas con laravel"
+  },
+  {
+   "id": "R-100",
+   "key": "defecto|modelos_aws|el healthcheck del motor no detecta la caída de la base de datos"
+  },
+  {
+   "id": "R-101",
+   "key": "defecto|modelos_aws|respaldos sin cifrar por defecto, sin artefactos y sin evidencia de una restauración"
+  },
+  {
+   "id": "R-102",
+   "key": "defecto|modelos_aws|no hay ci efectivo: los workflows están bajo backend/.github (no ejecutables) y apuntan a master/sqlite"
+  },
+  {
+   "id": "R-103",
+   "key": "defecto|modelos_aws|el estado 'validated' mezcla significados y la migración de la etapa 2 reasignó 'rejected' a 'validated'"
+  },
+  {
+   "id": "R-104",
+   "key": "defecto|modelos_aws|audit_logs no usa el global scope por tenant (filtro manual en un único controlador)"
+  },
+  {
+   "id": "R-105",
+   "key": "defecto|modelos_aws|el customer core nunca registra el inicio de la ventana de entrenamiento (training_data_from null en 108 de 108 filas)"
+  },
+  {
+   "id": "R-106",
+   "key": "defecto|modelos_aws|los artefactos lightgbm de demanda se escriben en cada corrida y nunca se cargan"
+  },
+  {
+   "id": "R-107",
+   "key": "defecto|modelos_aws|un único volumen de artefactos montado en todos los contenedores laravel"
+  },
+  {
+   "id": "R-108",
+   "key": "defecto|modelos_aws|los mensajes de excepción crudos del motor llegan a training_jobs.error_message, visible para el tenant"
+  },
+  {
+   "id": "R-109",
+   "key": "defecto|modelos_aws|el archivo .sha256 de los respaldos guarda la ruta absoluta del volcado: restore.sh verifica el archivo original (no la copia que restaura) o aborta en otro servidor"
+  },
+  {
+   "id": "R-110",
+   "key": "defecto|modelos_aws|la documentación afirma que el volumen engine-artifacts se respalda, pero backup.sh solo hace pg_dump y deploy.md lo deja como copia manual opcional"
+  },
+  {
+   "id": "R-111",
+   "key": "defecto|modelos_aws|restore.sh --verify no compara ni falla: imprime recuentos de 6 tablas sin referencia, por lo que una restauración vacía o parcial pasa la «prueba mensual»"
+  },
+  {
+   "id": "R-112",
+   "key": "defecto|modelos_aws|toctou en load_artifact: el sha-256 se calcula sobre un read_bytes() pero joblib.load reabre el archivo por ruta"
+  },
+  {
+   "id": "R-113",
+   "key": "defecto|modelos_aws|un artefacto de otro tenant se carga sin error si la fila del registro apunta a su ruta (load_artifact no valida el prefijo del tenant)"
+  },
+  {
+   "id": "R-114",
+   "key": "defecto|modelos_aws|prueba débil: test_audit_log_endpoint_is_tenant_scoped no distinguiría un endpoint sin filtro de tenant"
+  },
+  {
+   "id": "R-115",
+   "key": "defecto|modelos_aws|el registro de modelos no impone invariantes en la bd: ni una sola producción por slot del customer core, ni check de estados"
+  },
+  {
+   "id": "R-116",
+   "key": "defecto|modelos_aws|el contenedor del motor deserializa pickles sin endurecimiento (read_only, cap_drop, no-new-privileges, seccomp)"
+  },
+  {
+   "id": "R-117",
+   "key": "defecto|modelos_aws|la documentación afirma que el entrenamiento se dispara «al completar una importación inicial» y no existe código que lo haga"
+  },
+  {
+   "id": "R-118",
+   "key": "defecto|supply_decision|d1 · plan y escenarios retroactivos usan el precio actual del catálogo (precio posterior al corte)"
+  },
+  {
+   "id": "R-119",
+   "key": "defecto|supply_decision|d2 · resolve_lead_time ignora supplier_lead_times.valid_from (fuga temporal en cortes pasados)"
+  },
+  {
+   "id": "R-120",
+   "key": "defecto|supply_decision|d3 · la simulación sobre datos de la empresa aplica costo y precio del fin de la ventana a todas las decisiones"
+  },
+  {
+   "id": "R-121",
+   "key": "defecto|supply_decision|d4 · sobrerreserva (reservado > físico) se recorta a 0 en plan, escenarios y simulación sin advertencia"
+  },
+  {
+   "id": "R-122",
+   "key": "defecto|supply_decision|d5 · la huella (data_snapshot) del plan no cubre todos sus insumos y se reutiliza entre planes distintos"
+  },
+  {
+   "id": "R-123",
+   "key": "defecto|supply_decision|d6 · el estado de la recomendación y el reconocimiento de alertas no persisten entre corridas"
+  },
+  {
+   "id": "R-124",
+   "key": "defecto|supply_decision|d7 · el ajuste de empresa `stockout_risk_threshold` no tiene ningún efecto en el motor"
+  },
+  {
+   "id": "R-125",
+   "key": "defecto|supply_decision|d8 · umbral de sobrestock fijo (120 días de cobertura y 1,5× demanda a 90 d), ajeno a perecibilidad, sector o empresa"
+  },
+  {
+   "id": "R-126",
+   "key": "defecto|supply_decision|d9 · con límite de tiempo el plan milp no es reproducible bit a bit"
+  },
+  {
+   "id": "R-127",
+   "key": "defecto|supply_decision|d10 · el cambio de estado de una recomendación no es una máquina de estados y la auditoría no es transaccional"
+  },
+  {
+   "id": "R-128",
+   "key": "defecto|supply_decision|d11 · en cortes retroactivos las recepciones parciales cuentan la orden completa como pendiente y las cancelaciones usan el estado actual"
+  },
+  {
+   "id": "R-129",
+   "key": "defecto|supply_decision|d12 · sin presupuesto ni capacidad configurados el plan no lo declara (lo desconocido se trata como ilimitado en silencio)"
+  },
+  {
+   "id": "R-130",
+   "key": "defecto|supply_decision|d13 · la simulación usa una sola trayectoria aleatoria y reporta diferencias de ~1 % sin intervalos"
+  },
+  {
+   "id": "R-131",
+   "key": "defecto|supply_decision|d14 · aserción mal agrupada en una prueba de simulación"
+  },
+  {
+   "id": "R-132",
+   "key": "defecto|supply_decision|d15 · riesgo de doble conteo entre `reserved` y la demanda pronosticada (diseño no documentado ni probado)"
+  },
+  {
+   "id": "R-133",
+   "key": "defecto|supply_decision|d16 · la simulación ignora el multiplicador de penalización por faltante configurado"
+  },
+  {
+   "id": "R-134",
+   "key": "defecto|supply_decision|d17 · solve_plan conserva y run_plan persiste líneas no factibles cuando ni el solver ni el respaldo pasan la verificación (estado not_solved)"
+  },
+  {
+   "id": "R-135",
+   "key": "defecto|supply_decision|d18 · no existe ninguna vía productiva de ingesta de órdenes de compra y recepciones (purchase_orders/purchase_order_items)"
+  },
+  {
+   "id": "R-136",
+   "key": "defecto|supply_decision|d19 · la recomendación visible de la etapa 1 y el kpi «inversión de compra» ignoran presupuesto, capacidad, moq y múltiplos, y omiten en silencio las series sin costo"
+  },
+  {
+   "id": "R-137",
+   "key": "defecto|supply_decision|d20 · la causa por período del faltante del plan se atribuye por coincidencia de restricciones activas y puede etiquetar como «budget» un faltante económico"
+  },
+  {
+   "id": "R-138",
+   "key": "defecto|supply_decision|d21 · el tránsito del snapshot no explicado por las órdenes abiertas se descarta sin advertencia"
+  },
+  {
+   "id": "R-139",
+   "key": "defecto|supply_decision|d22 · sin prueba del stock de seguridad de la ruta empírica del backtest (la de producción con historia)"
+  },
+  {
+   "id": "R-140",
+   "key": "defecto|seguridad_ui|la política anti-ssrf de los conectores sql es abierta por defecto y se elude con ipv4 mapeada a ipv6"
+  },
+  {
+   "id": "R-141",
+   "key": "defecto|seguridad_ui|sin protección zip bomb: un xlsx de 680 kb consume 23 s de cpu dentro de la petición de subida"
+  },
+  {
+   "id": "R-142",
+   "key": "defecto|seguridad_ui|la única prueba de aislamiento de la bitácora no es discriminante y el filtro es manual en un solo controlador"
+  },
+  {
+   "id": "R-143",
+   "key": "defecto|seguridad_ui|los datos de las empresas se envían al proveedor llm sin autorización por empresa (incluido por defecto)"
+  },
+  {
+   "id": "R-144",
+   "key": "defecto|seguridad_ui|la purga definitiva de una empresa no elimina los artefactos de modelos"
+  },
+  {
+   "id": "R-145",
+   "key": "defecto|seguridad_ui|la retención documentada de archivos importados (90 días) y de ip (12 meses) no está implementada"
+  },
+  {
+   "id": "R-146",
+   "key": "defecto|seguridad_ui|la documentación de seguridad afirma controles que el código no implementa"
+  },
+  {
+   "id": "R-147",
+   "key": "defecto|seguridad_ui|laravel, colas, programador y motor comparten una cuenta de base de datos propietaria con ddl; no hay rls"
+  },
+  {
+   "id": "R-148",
+   "key": "defecto|seguridad_ui|el canal de log monthly no enmascara pii"
+  },
+  {
+   "id": "R-149",
+   "key": "defecto|seguridad_ui|la exportación completa lopdp no neutraliza fórmulas csv"
+  },
+  {
+   "id": "R-150",
+   "key": "defecto|seguridad_ui|la verificación numérica del asistente acepta cifras de turnos de historial aportados por el cliente"
+  },
+  {
+   "id": "R-151",
+   "key": "defecto|seguridad_ui|alta de miembros: contraseña temporal sin cambio obligatorio, indicador account_created y alta de usuarios existentes sin aceptación"
+  },
+  {
+   "id": "R-152",
+   "key": "defecto|seguridad_ui|la descarga firmada de la exportación no revalida membresía ni estado de la empresa"
+  },
+  {
+   "id": "R-153",
+   "key": "defecto|seguridad_ui|67 rutas autenticadas de empresa no tienen limitador de laravel y no existe equidad por empresa"
+  },
+  {
+   "id": "R-154",
+   "key": "defecto|seguridad_ui|cuentas demo con contraseña conocida y borrado de empresas por nombre sin guardia de producción"
+  },
+  {
+   "id": "R-155",
+   "key": "defecto|seguridad_ui|registro abierto sin verificación de correo, creación ilimitada de empresas y enumeración de correos"
+  },
+  {
+   "id": "R-156",
+   "key": "defecto|seguridad_ui|tenant::$fillable incluye plan_id, plan_overrides y status (la protección depende solo de validated())"
+  },
+  {
+   "id": "R-157",
+   "key": "defecto|seguridad_ui|advisory abierto en dependencias y sin ci que lo detecte"
+  },
+  {
+   "id": "R-158",
+   "key": "defecto|seguridad_ui|la cookie de sesión secure depende de un override de producción"
+  },
+  {
+   "id": "R-159",
+   "key": "defecto|seguridad_ui|el token bearer de inicio de sesión concede todas las habilidades por 30 días sin alcance ni vínculo a empresa"
+  },
+  {
+   "id": "R-160",
+   "key": "defecto|seguridad_ui|el selector de empresa no recarga el dashboard cuando ya está activo: se muestran datos de la empresa anterior"
+  },
+  {
+   "id": "R-161",
+   "key": "defecto|seguridad_ui|los límites de cómputo del asistente no tienen prueba y el deadline es blando"
+  },
+  {
+   "id": "R-162",
+   "key": "defecto|seguridad_ui|el motor python se instala sin lockfile ni hashes"
+  },
+  {
+   "id": "R-163",
+   "key": "defecto|seguridad_ui|el pseudónimo de cédula/ruc (hmac) es global: el mismo comprador produce el mismo valor en todas las empresas"
+  },
+  {
+   "id": "R-164",
+   "key": "defecto|seguridad_ui|la bitácora de auditoría falla en abierto y no está protegida contra modificación"
+  },
+  {
+   "id": "R-165",
+   "key": "defecto|seguridad_ui|restore.sh --verify imprime conteos pero no compara con el origen ni falla ante diferencias"
+  },
+  {
+   "id": "R-166",
+   "key": "defecto|seguridad_ui|el csv de errores de importación vuelca el valor crudo de la celda sin neutralizar fórmulas"
+  },
+  {
+   "id": "R-167",
+   "key": "defecto|factores_sector|los perfiles sectoriales no pueden asignarse a ningún tenant creado por la api"
+  },
+  {
+   "id": "R-168",
+   "key": "defecto|factores_sector|los modelos externalindicator y externalindicatorobservation no tienen alcance de tenant (aislamiento latente)"
+  },
+  {
+   "id": "R-169",
+   "key": "defecto|factores_sector|as_of_series propaga el último valor indefinidamente (sin tolerancia de antigüedad ni estado stale)"
+  },
+  {
+   "id": "R-170",
+   "key": "defecto|factores_sector|as_of_value falla con published_at con zona horaria y la semántica de zona no está definida"
+  },
+  {
+   "id": "R-171",
+   "key": "defecto|factores_sector|la bandera de plan external_indicators se anuncia pero no tiene efecto"
+  },
+  {
+   "id": "R-172",
+   "key": "defecto|factores_sector|el asistente envía resultados de la empresa a un proveedor llm externo sin autorización explícita por tenant"
+  },
+  {
+   "id": "R-173",
+   "key": "defecto|factores_sector|event_series ignora scope_ref para los alcances country y sector"
+  },
+  {
+   "id": "R-174",
+   "key": "defecto|factores_sector|tres fronteras distintas del as_of para fechas sin hora (calendario php, calendario del motor y compromisos)"
+  },
+  {
+   "id": "R-175",
+   "key": "defecto|factores_sector|el árbol de categorías admite ciclos y la unicidad por nombre impide repetir nombres bajo padres distintos"
+  },
+  {
+   "id": "R-176",
+   "key": "defecto|factores_sector|los proveedores sintéticos de restricciones no filtran por as_of y el contrato no valida el tipo connector"
+  },
+  {
+   "id": "R-177",
+   "key": "defecto|factores_sector|la documentación declara 'implementadas' las extensiones sectoriales, pero los proveedores no se ejecutan en ningún pipeline"
+  },
+  {
+   "id": "R-178",
+   "key": "defecto|factores_sector|load_observations y as_of_series mezclan el indicador público y el privado que comparten código"
+  },
+  {
+   "id": "R-179",
+   "key": "defecto|factores_sector|el único interruptor por empresa de una familia de factores (demand.exceptional_events_flag) no tiene prueba del estado apagado"
+  },
+  {
+   "id": "R-180",
+   "key": "dependencia|whatsapp"
+  },
+  {
+   "id": "R-181",
+   "key": "dependencia|windows"
+  },
+  {
+   "id": "R-182",
+   "key": "dependencia|legal"
+  },
+  {
+   "id": "R-183",
+   "key": "dependencia|responsabilidades"
+  },
+  {
+   "id": "R-184",
+   "key": "dependencia|aws"
+  },
+  {
+   "id": "R-185",
+   "key": "dependencia|datos"
+  },
+  {
+   "id": "R-186",
+   "key": "entorno|docker: cli 29.9.2 y plugin compose v5.6.1 presentes pero sin daemon (`docker ps` → «canno"
+  },
+  {
+   "id": "R-187",
+   "key": "entorno|sin servidores mysql/mariadb/sql server: `mysql`, `mysqld`, `mariadb`, `sqlcmd`, `sqlservr"
+  },
+  {
+   "id": "R-188",
+   "key": "entorno|sin gpu (`nvidia-smi` ausente): solo cpu. recursos: 4 vcpu, 16 gb ram, disco 252 gb con ~1"
+  },
+  {
+   "id": "R-189",
+   "key": "entorno|red de salida mediante proxy de agente (ca /root/.ccr/ca-bundle.crt): head responde en pyp"
+  },
+  {
+   "id": "R-190",
+   "key": "entorno|python del sistema 3.13.17 vs motor 3.12.3 (requires-python >=3.12,<3.13): usar siempre en"
+  },
+  {
+   "id": "R-191",
+   "key": "entorno|ci/cd: no existe `.github/` en la raíz (los workflows de backend/.github/workflows son pla"
+  },
+  {
+   "id": "R-192",
+   "key": "entorno|head de v25/enterprise-core se mueve durante la auditoría (otros agentes comitean docs/adr"
+  },
+  {
+   "id": "R-193",
+   "key": "regresion|V1|implementados"
+  },
+  {
+   "id": "R-194",
+   "key": "regresion|V1|sin-implementar"
+  },
+  {
+   "id": "R-195",
+   "key": "regresion|V2|implementados"
+  },
+  {
+   "id": "R-196",
+   "key": "regresion|V2|sin-implementar"
+  },
+  {
+   "id": "R-197",
+   "key": "regresion|V2C|implementados"
+  },
+  {
+   "id": "R-198",
+   "key": "regresion|V2C|sin-implementar"
+  }
+ ]
+}

@@ -26,6 +26,7 @@ dependencies = [
     "scikit-learn==1.9.1",
     "holidays==0.107",
     "joblib==1.6.0",
+    "cryptography==50.0.2",   # firma Ed25519 de artefactos (ADR-V25-20)
 ]
 
 [project.optional-dependencies]

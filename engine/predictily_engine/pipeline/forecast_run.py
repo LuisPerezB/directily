@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -17,7 +16,6 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-import joblib
 import pandas as pd
 from sqlalchemy import Connection, text
 
@@ -41,9 +39,10 @@ from predictily_engine.features.builder import feature_registry
 from predictily_engine.models.registry import FAMILIES
 from predictily_engine.pipeline.core import InsufficientDataError, PipelineResult, run_pipeline
 from predictily_engine.pipeline.data import load_tenant_data
-from predictily_engine.pipeline.errors import ConflictError, NotFoundError
+from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
 from predictily_engine.pipeline.schemas import ExecuteRequest
-from predictily_engine.platform.config import resolve_config
+from predictily_engine.platform.artifacts import SavedArtifact, save_signed_artifact
+from predictily_engine.platform.config import effective_config_record
 from predictily_engine.platform.snapshot import persist_snapshot
 
 log = logging.getLogger(__name__)
@@ -143,14 +142,15 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             # Configuración efectiva (core → perfil sectorial → empresa): se valida y se registra en el run.
             tenant = repo.tenant()
             try:
-                core_config, _, _ = resolve_config("demand", tenant.get("settings"), tenant.get("sector"))
+                config_record = effective_config_record("demand", tenant.get("settings"), tenant.get("sector"))
             except ValueError as exc:
-                raise InsufficientDataError(f"Configuración de demanda inválida: {exc}") from exc
+                raise InvalidConfigurationError(f"Configuración de demanda inválida: {exc}") from exc
+            core_config = config_record["effective_config"]
             # Cobertura declarada de la fuente de ventas: el corte no la supera y lo posterior es dato ausente.
             branches = repo.branches()
             active_branches = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
-                               if "is_active" in branches else None)
-            coverage = SalesCoverage.from_rows(repo.sales_coverage(), active_branches)
+                               if "is_active" in branches else set(branches["branch_id"].astype(int)))
+            coverage = SalesCoverage.resolve(conn, tenant_id, repo.sales_coverage(), active_branches)
             cutoff = coverage.limit_cutoff(cutoff)
             data = coverage.apply(load_tenant_data(repo, cutoff))
             data.coverage_limitations = coverage.limitations()
@@ -167,7 +167,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             data, horizon=max(req.horizons), seed=seed, n_jobs=settings.n_jobs,
             min_improvement=min_improvement, max_windows=max_windows,
             max_series_lgbm=settings.max_series_lgbm, progress=progress,
-            force_families=req.options.force_models, horizons=tuple(req.horizons), core_config=core_config,
+            force_families=req.options.force_models, horizons=tuple(req.horizons), config_record=config_record,
         )
         progress("persisting", 92)
         result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)
@@ -180,7 +180,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
         with engine.connect() as conn:
             final = TenantRepository(conn, tenant_id).forecast_run(run_id)
         return _response(final, duration_ms)
-    except InsufficientDataError as exc:
+    except (InsufficientDataError, InvalidConfigurationError) as exc:
         mark_failed(engine, tenant_id, run_id, job_id, str(exc), int((time.perf_counter() - t0) * 1000))
         raise
     except Exception as exc:
@@ -206,13 +206,16 @@ def _as_date(v: Any) -> date | None:
     return date.fromisoformat(str(v)[:10])
 
 
+def _save_signed_artifact(tenant_id: int, run_id: int, family: str, obj: Any, *, data_fingerprint: str | None = None) -> SavedArtifact:
+    """Guarda el artefacto y lo FIRMA (ADR-V25-20): manifiesto Ed25519 junto al archivo; sin clave privada queda `unsigned`."""
+    path = Path(get_settings().artifacts_dir) / str(tenant_id) / f"run-{run_id}" / f"{family}.joblib"
+    return save_signed_artifact(obj, path, tenant_id=tenant_id, core="demand", run_id=run_id, name=family, data_fingerprint=data_fingerprint,
+                                feature_schema_version=FEATURE_SET_VERSION, libraries=library_versions())
+
+
 def _save_artifact(tenant_id: int, run_id: int, family: str, obj: Any) -> tuple[str, str]:
-    base = Path(get_settings().artifacts_dir) / str(tenant_id) / f"run-{run_id}"
-    base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{family}.joblib"
-    joblib.dump(obj, path, compress=3)
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    return str(path), digest
+    saved = _save_signed_artifact(tenant_id, run_id, family, obj)
+    return saved.stored_path, saved.sha256      # ruta relativa a ENGINE_ARTIFACTS_DIR (ver platform/artifacts.py)
 
 
 def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int | None, result: PipelineResult,
@@ -245,9 +248,10 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
                 status = "candidate"
         if status == "failed":
             notes = (notes + " " if notes else "") + f"Falló el entrenamiento final: {info.get('error')}"
-        artifact_path = artifact_sha = None
+        artifact_path = artifact_sha = artifact_signature = None
         if fam == "lightgbm_global" and result.lgbm is not None:
-            artifact_path, artifact_sha = _save_artifact(tenant_id, run_id, fam, result.lgbm.mlf)
+            saved = _save_signed_artifact(tenant_id, run_id, fam, result.lgbm.mlf, data_fingerprint=result.training_data_hash)
+            artifact_path, artifact_sha, artifact_signature = saved.stored_path, saved.sha256, saved.signature.as_compat()
         elif FAMILIES[fam].kind == "statistical":
             notes = (notes + " " if notes else "") + "Modelo estadístico determinista: se reentrena con la configuración registrada."
         hp = dict(info["hyperparameters"])
@@ -257,6 +261,8 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         compat = {"input_schema": "demand-panel-v1", "feature_set_version": FEATURE_SET_VERSION, "libraries": versions,
                   "artifact_kind": "mlforecast_joblib" if artifact_path else "statistical_refit",
                   "frequency": "D", "season_length": 7}
+        if artifact_signature is not None:
+            compat["signature"] = artifact_signature      # firma Ed25519 del manifiesto (signed | unsigned), ADR-V25-20
         evaluated = status in ("production", "validated", "candidate") and info.get("evaluated", False)
         rid = conn.execute(text(
             """
