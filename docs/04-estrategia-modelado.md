@@ -557,3 +557,12 @@ IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
 
 **16.4 Costo.** En los datos de la demo-ferretería (14 k líneas) la lectura de versiones tarda 0,19–0,28 s frente a 0,11–0,20 s de la consulta agregada anterior, y cada vista as-of adicional
 8–11 ms; con 714 k líneas (12 % tardías) la lectura tarda 4,1 s frente a 0,83 s y cada vista 10–20 ms. Una ventana solo reconstruye su panel cuando hay diferencias con la verdad.
+
+**16.5 Estado de esta sección.**
+
+| Estado | Elemento |
+|---|---|
+| IMPLEMENTADO / VERIFICADO | Lectura as-of desde `sales_line_versions` (una lectura, vistas derivadas); backtest as-of por ventana con reales de la verdad disponible; conocimiento del corte final (ejecución vigente hasta hoy, reconstrucción histórica hasta el corte); variables del Customer Core al corte y etiquetas con la verdad; clasificación `day_status`, exclusión de métricas y perfilado, imputación y trazabilidad; huella con ventanas de conocimiento (pruebas: `test_asof_visibility.py`, `test_day_status.py`, `test_asof_integration.py`, `test_asof_customer_integration.py`) |
+| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo, costos y calendario; lectura as-of de Supply y Causal; aceptación del valor `closure` en backend, frontend y extensiones; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen); aprobación de la regla inferida (piloto) |
+| BLOQUEADO | Estado histórico real de una carga `backfill` (la fuente no entrega el historial de estados: una anulación posterior cargada así no se puede reconstruir) |
+| NO APLICA | Reconstrucción de panel por ventana cuando la carga es solo histórica (se reutiliza el panel final); ventanas de conocimiento en entidades que no son documentos de venta |

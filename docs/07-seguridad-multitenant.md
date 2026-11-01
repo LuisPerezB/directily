@@ -296,7 +296,9 @@ Estado de lo que NO cubre (honesto):
 - **BLOQUEADO para verificar en este entorno**: MySQL/MariaDB y SQL Server no tienen servidor ni extensión (`pdo_sqlsrv`) aquí; para ellos solo se verifica el DSN generado
   (`SqlHostPolicyTest::test_the_validated_ip_is_pinned…`), no una conexión real. Con SQL Server y `Encrypt=1`, conectar al literal IP exige un certificado que cubra la IP o
   `trust_server_certificate`: **limitación conocida** de conectar a la IP fijada.
-- **Variable obsoleta**: `docker-compose.yml` y `.env.example` de la raíz aún pasan `PREDICTILY_SQL_DENY_PRIVATE` (se ignora); falta añadir allí `PREDICTILY_SQL_ALLOWED_HOSTS`/`_CIDRS`.
+- **Variable obsoleta / infraestructura pendiente del arquitecto** (fuera de los archivos de este paquete): `docker-compose.yml` y el `.env.example` de la raíz aún pasan o documentan
+  `PREDICTILY_SQL_DENY_PRIVATE` (se ignora), no pasan `PREDICTILY_SQL_ALLOWED_CIDRS` (`PREDICTILY_SQL_ALLOWED_HOSTS` sí se pasa) y la pila no declara el host del origen: el E2E
+  (`e2e/stage2_acceptance.py`) conecta a `127.0.0.1` y necesita `PREDICTILY_SQL_ALLOWED_HOSTS=127.0.0.1` en un entorno distinto de producción.
 - Usar TLS en la conexión a la base (`sslmode=verify-full` en PostgreSQL) cuando el trayecto no sea un túnel cifrado. Otros topes: `PREDICTILY_SQL_MAX_ROWS` (filas por sincronización) y
   paginación por cursor.
 
