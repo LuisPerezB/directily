@@ -179,7 +179,9 @@ SQL,
 
     public function test_failed_connection_reports_error_without_secrets(): void
     {
-        $this->patchJson("/api/v1/data-sources/{$this->sourceId}", ['credentials' => ['username' => 'predictily', 'password' => 'clave-incorrecta-123']])->assertOk();
+        // Rol inexistente además de una clave incorrecta: la conexión falla también en un PostgreSQL local con autenticación `trust`
+        // (Homebrew), que aceptaría cualquier clave para un rol existente.
+        $this->patchJson("/api/v1/data-sources/{$this->sourceId}", ['credentials' => ['username' => 'predictily_rol_inexistente', 'password' => 'clave-incorrecta-123']])->assertOk();
         $result = $this->postJson("/api/v1/data-sources/{$this->sourceId}/test")->assertOk();
         $result->assertJsonPath('data.ok', false);
         $this->assertStringNotContainsString('clave-incorrecta-123', $result->getContent());
