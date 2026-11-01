@@ -232,6 +232,53 @@ def _save_artifact(tenant_id: int, run_id: int, family: str, obj: Any) -> tuple[
     return saved.stored_path, saved.sha256      # ruta relativa a ENGINE_ARTIFACTS_DIR (ver platform/artifacts.py)
 
 
+# W3-A · persistencia de `model_evaluations`. Capacidad numérica de las columnas escalares (migración 2026_01_01_000700): un valor que no
+# cabe (p. ej. un WAPE enorme con un denominador pequeño) se guarda NULO —nunca revienta la transacción de toda la ejecución— y la
+# columna queda anotada en `extra.column_overflow`; el valor completo sigue en el jsonb `metrics` cuando la fila lo trae.
+EVALUATION_COLUMN_LIMITS = {"wape": 1e6, "bias": 1e6, "mae": 1e10, "rmse": 1e10, "coverage_80": 100.0, "coverage_95": 100.0}
+
+
+def _fit_evaluation_columns(e: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Valores escalares de la fila con NaN/Inf → NULL y los que exceden la capacidad de su columna → NULL (con la lista de columnas)."""
+    fitted, overflow = {}, []
+    for k, v in e.items():
+        if k in ("cutoffs", "extra", "metrics"):
+            continue
+        v = none_if_nan(v)
+        limit = EVALUATION_COLUMN_LIMITS.get(k)
+        if limit is not None and v is not None and abs(float(v)) >= limit - 1e-6:
+            overflow.append(k)
+            v = None
+        fitted[k] = v
+    return fitted, overflow
+
+
+def persist_evaluations(conn: Connection, tenant_id: int, run_id: int, evaluations: list[dict[str, Any]],
+                        registry_ids: dict[str, int]) -> int:
+    """Inserta las filas de `model_evaluations` de una ejecución de Demanda (backtest, ventanas de selección, segmentos). Devuelve cuántas."""
+    if not evaluations:
+        return 0
+    payload = []
+    for e in evaluations:
+        scalars, overflow = _fit_evaluation_columns(e)
+        extra = {"composite": e["model_family"] == "selection", **(e.get("extra") or {})}   # evaluation_scope: 'holdout' | 'selection_windows'
+        if overflow:
+            extra["column_overflow"] = overflow
+        payload.append({**scalars, "tenant_id": tenant_id, "run_id": run_id, "rid": registry_ids.get(e["model_family"]),
+                        "cutoffs": jdump(e.get("cutoffs", [])), "metrics": jdump(e.get("metrics") or {}), "extra": jdump(extra)})
+    conn.execute(text(
+        """
+        INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type,
+            level, level_key, horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80,
+            coverage_95, n_obs, n_windows, cutoffs, extra, core, metrics, created_at)
+        VALUES (:tenant_id, :rid, :run_id, :model_family, :evaluation_type, :level, :level_key, :horizon_days,
+            :is_baseline, :is_selected, :wape, :mae, :rmse, :bias, :coverage_80, :coverage_95, :n_obs, :n_windows,
+            CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), 'demand', CAST(:metrics AS jsonb), now())
+        """
+    ), payload)
+    return len(payload)
+
+
 def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int | None, result: PipelineResult,
                     seed: int, duration_ms: int) -> None:
     run = conn.execute(text(
@@ -303,24 +350,8 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         }).scalar_one()
         registry_ids[fam] = int(rid)
 
-    # ── Evaluaciones (backtest) ──
-    if result.evaluations:
-        conn.execute(text(
-            """
-            INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type,
-                level, level_key, horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80,
-                coverage_95, n_obs, n_windows, cutoffs, extra, core, metrics, created_at)
-            VALUES (:tenant_id, :rid, :run_id, :model_family, :evaluation_type, :level, :level_key, :horizon_days,
-                :is_baseline, :is_selected, :wape, :mae, :rmse, :bias, :coverage_80, :coverage_95, :n_obs, :n_windows,
-                CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), 'demand', CAST(:metrics AS jsonb), now())
-            """
-        ), [{
-            **{k: none_if_nan(v) for k, v in e.items() if k not in ("cutoffs", "extra", "metrics")},
-            "tenant_id": tenant_id, "run_id": run_id, "rid": registry_ids.get(e["model_family"]),
-            "cutoffs": jdump(e.get("cutoffs", [])), "metrics": jdump(e.get("metrics") or {}),
-            # evaluation_scope: 'holdout' (período final reservado) o 'selection_windows'
-            "extra": jdump({"composite": e["model_family"] == "selection", **(e.get("extra") or {})}),
-        } for e in result.evaluations])
+    # ── Evaluaciones (backtest, ventanas de selección y segmentos por horizonte) ──
+    persist_evaluations(conn, tenant_id, run_id, result.evaluations, registry_ids)
 
     # ── Valores pronosticados ──
     copy_forecast_values(conn, tenant_id, run_id, result.forecast_values, registry_ids)

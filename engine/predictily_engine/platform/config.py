@@ -46,6 +46,34 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "day_status_infer_gaps": True,
         "day_status_infer_min_median_lines": 5,
         "day_status_infer_lookback_days": 28,
+        # ── W3-A · métricas por horizonte y segmento (docs/ml/FORECAST_VALIDATION.md §3). TODOS son valores INICIALES de diseño, «a aprobar
+        # en el piloto» con datos reales; ninguno es universal y ninguno cambia lo servido (solo qué métricas se persisten y cómo se marcan). ──
+        # Interruptor: apagado no calcula ni persiste las filas level='segment' (las demás métricas no cambian).
+        "segment_metrics_enabled": True,
+        # WAPE con denominador (Σ reales en unidades) menor que esto es `wape_unstable`: se reporta la métrica alternativa y la columna
+        # `wape` queda nula. 30 unidades = el mismo piso con que el selector agrupa clases con poca evidencia (Σ ventas < 30).
+        "wape_min_denominator": 30.0,
+        # Un segmento con menos de `segment_min_series` series distintas o menos de `segment_min_obs` series-día evaluables es
+        # `insufficient_data` (sin cifras): 3 series = el mínimo con que el selector evalúa una clase por separado; 90 series-día = una
+        # serie durante un trimestre (≈ 13 semanas completas de la estacionalidad semanal).
+        "segment_min_series": 3,
+        "segment_min_obs": 90,
+        # Tramo de volumen: el `segment_volume_top_share` superior de las series (por unidades imputadas de los últimos
+        # `segment_volume_lookback_days` días hasta el corte de cada ventana) frente al resto; 20 % (regla de Pareto, V2.5 §6).
+        "segment_volume_top_share": 0.2,
+        "segment_volume_lookback_days": 90,
+        # Vida de la serie: «nueva» si al corte de la ventana tenía menos de `segment_new_series_days` días de historia (V2.5 §6).
+        "segment_new_series_days": 90,
+        # Tope de valores por dimensión de alta cardinalidad (categorías, sucursales): se conservan los de mayor volumen.
+        "segment_max_values": 50,
+        # Diferencia relativa de error por debajo de la cual baseline y seleccionado se consideran «similares» (= min_improvement).
+        "segment_similar_tolerance": 0.03,
+        # Coeficiente de variación del WAPE entre ventanas por encima del cual el segmento se marca inestable entre ventanas.
+        "segment_stability_cv_warn": 0.5,
+        # Tope de celdas «que merecen atención» (peor que el baseline, WAPE indefinido/inestable, sin datos) que el resumen de la ejecución
+        # (`forecast_runs.summary.segment_metrics`) lista; el detalle completo está en model_evaluations. 20 celdas ≈ 4 KB: el backend
+        # devuelve el resumen entero en cada listado de ejecuciones.
+        "segment_summary_max_cells": 20,
     },
     "customer": {
         "horizons": list(HORIZONS["customer"]),
@@ -235,6 +263,17 @@ CONFIG_CONSTRAINTS: dict[tuple[str, str], dict[str, Any]] = {
     ("demand", "horizons"): {"subset_of": list(HORIZONS["demand"]), "non_empty": True},
     ("demand", "day_status_infer_min_median_lines"): {"min": 1, "max": 100000},
     ("demand", "day_status_infer_lookback_days"): {"min": 7, "max": 90},
+    # W3-A · métricas por segmento
+    ("demand", "wape_min_denominator"): {"min": 0.0, "max": 1_000_000_000},
+    ("demand", "segment_min_series"): {"min": 1, "max": 100000},
+    ("demand", "segment_min_obs"): {"min": 1, "max": 100_000_000},
+    ("demand", "segment_volume_top_share"): {"min": 0.01, "max": 0.99},
+    ("demand", "segment_volume_lookback_days"): {"min": 7, "max": 365},
+    ("demand", "segment_new_series_days"): {"min": 28, "max": 365},
+    ("demand", "segment_max_values"): {"min": 1, "max": 1000},
+    ("demand", "segment_similar_tolerance"): {"min": 0.0, "max": 1.0},
+    ("demand", "segment_stability_cv_warn"): {"min": 0.0, "max": 100.0},
+    ("demand", "segment_summary_max_cells"): {"min": 0, "max": 200},
     ("customer", "horizons"): {"subset_of": list(HORIZONS["customer"]), "non_empty": True},
     ("cost", "horizons"): {"subset_of": list(HORIZONS["cost"]), "non_empty": True},
 }

@@ -11,6 +11,10 @@
   excluidas y se cuentan en `n_scale_undefined`). MASE < 1: mejor que el naive estacional EN ENTRENAMIENTO.
 - Dinero (ingresos): las filas llevan `price_fc` (precio supuesto al origen) y `price_act` (precio neto
   observado); el error en dinero se calcula aparte del de unidades, sobre las filas con ambos precios.
+- W3-A (V2.5 §8 «Métricas Demand»): WAPE con DENOMINADOR explícito. `wape_status` distingue `ok`, `unstable` (denominador positivo
+  pero menor que el umbral configurable `wape_min_denominator`) e `undefined` (denominador 0, nunca un WAPE); en los dos últimos casos
+  la métrica alternativa explícita es el MAE escalado (MASE) y, si la escala no existe, el error absoluto agregado. La estabilidad
+  entre ventanas es el desvío del WAPE por ventana (`window_stability`).
 No se convierte ninguna métrica en un "% de precisión" comercial.
 """
 
@@ -108,3 +112,74 @@ def pinball_loss(q: float, actual, pred) -> float | None:
         return None
     e = a[ok] - p[ok]
     return float(np.maximum(q * e, (q - 1.0) * e).mean())
+
+
+# ───────────────────────────── W3-A · WAPE con denominador, métrica alternativa y estabilidad ─────────────────────────────
+
+WAPE_OK = "ok"
+WAPE_UNSTABLE = "unstable"      # denominador > 0 pero menor que el umbral: el cociente depende de muy pocas unidades
+WAPE_UNDEFINED = "undefined"    # denominador 0 (o no finito): no existe WAPE
+ALT_MASE = "mase"
+ALT_AGGREGATE_ABSOLUTE_ERROR = "aggregate_absolute_error"
+
+
+def wape_status(denominator: float | None, min_denominator: float = 0.0) -> str:
+    """Estado del WAPE según su denominador (Σ de reales): `undefined` si es 0 o no finito, `unstable` si es positivo pero
+    menor que `min_denominator`, `ok` en otro caso. Con `min_denominator = 0` solo hay `ok` o `undefined`."""
+    if denominator is None or not np.isfinite(denominator) or denominator <= 0:
+        return WAPE_UNDEFINED
+    return WAPE_UNSTABLE if denominator < min_denominator else WAPE_OK
+
+
+def guarded_wape(sum_abs_error: float, denominator: float, min_denominator: float = 0.0) -> dict:
+    """WAPE = Σ|error| / Σ reales con su estado. `value` solo existe si el denominador es positivo (nunca divide por 0);
+    `trusted` es el valor únicamente cuando el estado es `ok` (lo que se persiste en la columna `wape`)."""
+    status = wape_status(denominator, min_denominator)
+    value = float(sum_abs_error / denominator) if status != WAPE_UNDEFINED else None
+    return {"value": value, "trusted": value if status == WAPE_OK else None, "status": status,
+            "unstable": status != WAPE_OK, "denominator": float(denominator), "sum_abs_error": float(sum_abs_error)}
+
+
+def alternative_metric(sum_abs_error: float, n_obs: int, sum_scaled_abs: float | None = None, n_scaled: int = 0) -> dict:
+    """Métrica alternativa explícita para cuando el WAPE es indefinido o inestable (series de ceros o casi ceros).
+
+    1) MAE escalado (MASE = media de |e| / MAE del naive estacional de entrenamiento) si la escala existe en alguna observación;
+    2) si no (serie constante o de ceros: escala 0), el error absoluto agregado Σ|e| y su promedio por día evaluable."""
+    if n_scaled and sum_scaled_abs is not None and np.isfinite(sum_scaled_abs):
+        return {"name": ALT_MASE, "value": float(sum_scaled_abs / n_scaled), "n_scaled": int(n_scaled),
+                "definition": "MAE escalado: media de |error| / MAE del naive estacional (7 d) de entrenamiento"}
+    return {"name": ALT_AGGREGATE_ABSOLUTE_ERROR, "value": float(sum_abs_error),
+            "per_evaluable_day": None if n_obs <= 0 else float(sum_abs_error / n_obs), "unit": "unidades",
+            "definition": "Σ|error| sobre los días evaluables (la escala del naive de entrenamiento no existe o es 0)"}
+
+
+def window_stability(per_window: dict, cv_warn: float | None = None, min_denominator: float = 0.0) -> dict:
+    """Estabilidad entre ventanas: desvío del WAPE por ventana. `per_window`: {ventana: (wape | None, denominador)}.
+
+    Solo cuentan las ventanas con WAPE definido (denominador > 0) Y denominador ≥ `min_denominator` (el mismo umbral que hace estable al
+    WAPE: con menos unidades el WAPE de la ventana es ruido); las demás se listan con `used = false` y se cuentan en
+    `n_windows_small_denominator`. Con una sola ventana usable el desvío no es estimable (`single_window`), no cero; si todas las ventanas
+    con datos tienen denominador insuficiente el estado es `insufficient_denominator`. `unstable_across_windows` = coeficiente de variación
+    mayor que `cv_warn` (umbral configurable)."""
+    defined = {w: (v, d) for w, (v, d) in per_window.items() if v is not None and np.isfinite(v)}
+    pts = {w: (v, d) for w, (v, d) in defined.items() if d >= min_denominator}
+    vals = np.array([v for v, _ in pts.values()], float)
+    out: dict = {"n_windows": int(len(pts)), "n_windows_without_wape": int(len(per_window) - len(defined)),
+                 "n_windows_small_denominator": int(len(defined) - len(pts)), "min_denominator": float(min_denominator),
+                 "cv_warn": cv_warn,
+                 "per_window": [{"window": w, "wape": float(v), "denominator": float(d), "used": w in pts}
+                                for w, (v, d) in sorted(defined.items())],
+                 "wape_mean": None, "wape_std": None, "wape_cv": None, "wape_min": None, "wape_max": None,
+                 "unstable_across_windows": None}
+    if len(vals) == 0:
+        return {**out, "status": "insufficient_denominator" if defined else "no_data"}
+    out.update(wape_mean=float(vals.mean()), wape_min=float(vals.min()), wape_max=float(vals.max()))
+    if len(vals) == 1:
+        return {**out, "status": "single_window"}
+    std = float(vals.std(ddof=1))
+    out.update(wape_std=std, status="estimated")
+    if out["wape_mean"] > 0:
+        out["wape_cv"] = std / out["wape_mean"]
+        if cv_warn is not None:
+            out["unstable_across_windows"] = bool(out["wape_cv"] > cv_warn)
+    return out
