@@ -63,6 +63,8 @@ final class ModelArtifactVerifier
 
     public const REASON_TENANT_MISMATCH = 'artifact_tenant_mismatch';
 
+    public const REASON_CORE_MISMATCH = 'artifact_core_mismatch';
+
     public const REASON_SHA256_MISMATCH = 'artifact_sha256_mismatch';
 
     public const REASON_VERIFIER_UNAVAILABLE = 'signature_verifier_unavailable';
@@ -151,7 +153,8 @@ final class ModelArtifactVerifier
 
                 continue;
             }
-            $inspection = $this->inspect($file, (int) $model->tenant_id, (string) $model->artifact_sha256);
+            $core = is_string($model->core ?? null) && $model->core !== '' ? $model->core : null;
+            $inspection = $this->inspect($file, (int) $model->tenant_id, (string) $model->artifact_sha256, $core);
             if (! $inspection['ok']) {
                 throw $this->rejection($model, $inspection['reason']);
             }
@@ -184,11 +187,12 @@ final class ModelArtifactVerifier
 
     /**
      * Verifica un archivo visible: SHA-256 del registro, manifiesto firmado, clave de confianza, firma Ed25519 sobre los bytes
-     * del manifiesto y coherencia (SHA-256, tamaño, nombre de archivo y empresa). No deserializa nada.
+     * del manifiesto y coherencia (SHA-256, tamaño, nombre de archivo, empresa y —si se indica— core, igual que el motor). No
+     * deserializa nada.
      *
      * @return array{ok: bool, status: string, reason: ?string, key_id: ?string}
      */
-    public function inspect(string $file, int $tenantId, string $expectedSha256): array
+    public function inspect(string $file, int $tenantId, string $expectedSha256, ?string $core = null): array
     {
         $digest = hash_file('sha256', $file);
         if ($digest === false || ! hash_equals(strtolower($expectedSha256), $digest)) {
@@ -250,6 +254,9 @@ final class ModelArtifactVerifier
         }
         if (($manifest['tenant_id'] ?? null) !== $tenantId) {
             return $this->rejected(self::REASON_TENANT_MISMATCH);
+        }
+        if ($core !== null && ($manifest['core'] ?? null) !== $core) {
+            return $this->rejected(self::REASON_CORE_MISMATCH);   // un artefacto firmado de otro core no se hace pasar por este modelo
         }
 
         return ['ok' => true, 'status' => 'signed', 'reason' => null, 'key_id' => $keyId];

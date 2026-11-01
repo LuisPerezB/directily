@@ -293,6 +293,9 @@ Se configuran por empresa en `tenants.settings.cores.demand` (validación en `va
 El perfil por serie (`forecasting_series`) no tiene columnas para los días `missing_source`/`closed`: se calculan en memoria (`missing_source_days`, `closed_days` de `profile_at`) y se reportan en el
 manifiesto; añadir columnas requeriría una migración (no incluida).
 
+**Persistencia día a día: DISEÑADO / NO IMPLEMENTADO.** El ADR-V25-03 pide que la clasificación se persista en el dataset Gold y su resumen en el informe de calidad. Hoy se persiste el **resumen** (informe de calidad, manifiesto y resumen del run, limitaciones con su
+conteo) y la clasificación día a día vive en el panel en memoria de cada ejecución (`day_status`, `day_basis`; entra al `training_data_hash`). El dataset Gold pertenece al Data Core P0 (ADR-V25-24) y no existe todavía en el esquema.
+
 ## 12. Limitaciones y supuestos declarados
 
 1. **`backfill` asume el estado final desde el día de negocio**: una anulación o corrección posterior cargada como histórico no se puede reconstruir. **BLOQUEADO** por el origen (la fuente no entrega el historial de estados).
@@ -307,6 +310,9 @@ manifiesto; añadir columnas requeriría una migración (no incluida).
 8. **Un día `closed` o `missing_source` con ventas registradas** se excluye de la medición aunque la venta sea real (decisión conservadora: la fuente o el calendario dicen que el día no es representativo).
 9. **Zonas con cambio de horario a medianoche**: la equivalencia por días se verificó con Santiago y Nueva York en las fechas de cambio; una medianoche inexistente se adelanta y una ambigua usa la primera ocurrencia. Ecuador no tiene horario de verano.
 10. **Otros lectores de ventas** (`db/supply_repository.py`, `causal/runner.py`) siguen leyendo el estado vigente: fuera del alcance de este paquete (Supply y Causal). `evaluation/actuals.py` (exactitud posterior de pronósticos ya publicados) usa `daily_actuals` = verdad más reciente, que es lo deseado para esa medición.
+    `supply/simulation_runner.py` llama a `repo.daily_sales(as_of)`: con la firma pública conservada recibe ahora la vista as-of **estricta** de `as_of` (es lo pedido: «los llamadores existentes la obtienen sin cambios»). En una simulación vigente
+    (`as_of` = última venta) los documentos de ese último día recibidos tras su medianoche local con `ingestion_mode = incremental` no entran a esa corrida; afecta solo al último día del re-juego. Pasarle `knowledge` (hoy) es un cambio de una línea
+    en el paquete de Supply: **pendiente de decisión del arquitecto**.
 11. **Costo**: la lectura transfiere una fila por celda y ventana (no por línea) pero la agregación de la vista en PostgreSQL crece con las líneas (§5). Con `enable_nestloop = off` (lecturas analíticas) el costo estimado dispara la compilación JIT (0,6–0,9 s por consulta medidos): `analytic_reads()` y las lecturas de versiones la apagan (`SET LOCAL jit = off`).
 12. **Qué es una «ejecución vigente»** (§3): el corte es el último dato (`cutoff ≥ last_sale_date()`), la misma convención de `promotions_known_on`. Un corte que la cobertura declarada limita por debajo del último dato
     —p. ej. hay ventas parciales de hoy y `complete_through` es ayer— se trata como **histórico**: la carga nocturna de ayer, recibida tras la medianoche con `ingestion_mode = incremental`, no entra a esa ejecución.
@@ -331,6 +337,6 @@ manifiesto; añadir columnas requeriría una migración (no incluida).
 | Estado | Elemento |
 |---|---|
 | IMPLEMENTADO / VERIFICADO | Lectura única de `sales_line_versions` con vistas as-of derivadas (`daily_sales`, `daily_returns`, `last_sale_date`, `sales_stats`); backtest as-of por ventana con reales de la verdad final; conocimiento del corte final (vigente: hasta hoy; histórica: hasta el corte); Customer Core con variables al corte y etiquetas con la verdad; clasificación `day_status` (cobertura, huecos, cierres, regla inferida, quiebres); exclusión de métricas y perfilado; imputación y trazabilidad; huella con ventanas de conocimiento; claves de configuración |
-| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo y calendario; lectores de Supply y Causal as-of; aceptación del valor `closure` en el backend; columnas de perfil para días excluidos |
+| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo y calendario; lectores de Supply y Causal as-of; aceptación del valor `closure` en el backend; columnas de perfil para días excluidos; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen) |
 | BLOQUEADO | Estado histórico real de una carga `backfill` (la fuente no lo entrega) |
 | NO APLICA | Ventanas de conocimiento en entidades que no son documentos de venta; reconstrucción por ventana cuando la carga es solo histórica (se reutiliza la verdad) |

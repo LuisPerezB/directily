@@ -89,8 +89,8 @@ de nivel WARNING con el motivo, la empresa y la versión del modelo (sin rutas n
 ### 2.5 Verificación al revertir (backend)
 
 `ModelArtifactVerifier` (usado por `POST /models/demand/rollback` y `POST /models/customer/rollback`): si el archivo es visible en `engine.artifacts_dir`, comprueba el SHA-256 y la firma (`sodium_crypto_sign_verify_detached`, extensión `sodium`)
-con las claves públicas de `engine.artifact_signing.trusted_public_keys`, y que el manifiesto sea de la empresa y del archivo. Respuestas 409: `rollback_artifact_mismatch` (SHA-256), `rollback_artifact_unsigned` (sin firma, salvo el indicador) y
-`rollback_artifact_signature_invalid` (firma inválida, clave desconocida, manifiesto corrupto o de otra empresa; con el motivo en `context.reason`). La respuesta añade `artifact_verification.signed` y `.unsigned_allowed`.
+con las claves públicas de `engine.artifact_signing.trusted_public_keys`, y que el manifiesto sea de la empresa, del core (`demand`/`customer`, el de la fila del registro) y del archivo. Respuestas 409: `rollback_artifact_mismatch` (SHA-256), `rollback_artifact_unsigned` (sin firma, salvo el indicador) y
+`rollback_artifact_signature_invalid` (firma inválida, clave desconocida, manifiesto corrupto, de otra empresa o de otro core; con el motivo en `context.reason`). La respuesta añade `artifact_verification.signed` y `.unsigned_allowed`.
 Si el archivo no es visible desde el backend, se informa como hasta ahora (lo verifica el motor al cargar), pero la marca `artifact_compat.signature.status = unsigned` que dejó el motor basta para rechazar.
 
 ### 2.6 Artefactos legados

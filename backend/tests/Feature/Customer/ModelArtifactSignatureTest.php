@@ -199,6 +199,19 @@ final class ModelArtifactSignatureTest extends TestCase
         $this->assertSame(ModelArtifactVerifier::REASON_TENANT_MISMATCH, $this->verifier()->inspect($other, 7, $otherSha)['reason']);
     }
 
+    public function test_the_manifest_binds_the_core_like_the_engine_does(): void
+    {
+        [$file, $sha] = $this->artifact(7);
+        $this->signArtifactFile($file, 7, ['core' => 'demand']);                    // firmado y de la empresa, pero de otro core
+        $this->assertSame(ModelArtifactVerifier::REASON_CORE_MISMATCH, $this->verifier()->inspect($file, 7, $sha, 'customer')['reason']);
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha, 'demand')['ok']);
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha)['ok'], 'sin core indicado no se compara (compatibilidad de la API)');
+
+        $this->signArtifactFile($file, 7, ['core' => 'customer']);
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha, 'customer')['ok']);
+        $this->assertSame(ModelArtifactVerifier::REASON_CORE_MISMATCH, $this->verifier()->inspect($file, 7, $sha, 'demand')['reason']);
+    }
+
     public function test_a_tampered_file_is_rejected_by_the_sha256_before_looking_at_the_signature(): void
     {
         [$file, $sha] = $this->artifact(7);
@@ -334,6 +347,18 @@ final class ModelArtifactSignatureTest extends TestCase
 
         $this->rollback($old, $userA, $a)->assertStatus(409)->assertJsonPath('code', 'rollback_artifact_signature_invalid')
             ->assertJsonPath('context.reason', 'artifact_tenant_mismatch');
+    }
+
+    public function test_rollback_rejects_a_signed_artifact_of_another_core(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser();
+        [$file, $sha] = $this->artifact($tenant->id);
+        $this->signArtifactFile($file, $tenant->id, ['core' => 'demand']);           // firma legítima de la empresa, pero de un modelo de demanda
+        $old = $this->model($tenant, 'h30:probability', 'retired', 'v1-otro-core', $file, $sha);   // fila del Customer Core
+
+        $this->rollback($old, $user, $tenant)->assertStatus(409)->assertJsonPath('code', 'rollback_artifact_signature_invalid')
+            ->assertJsonPath('context.reason', 'artifact_core_mismatch');
+        $this->assertDatabaseHas('model_registry', ['id' => $old, 'status' => 'retired']);
     }
 
     public function test_the_unsigned_mark_left_by_the_engine_blocks_a_rollback_even_when_the_file_is_not_visible(): void
