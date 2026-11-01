@@ -18,6 +18,8 @@
         </include>
     </source>
     <php>
+        <!-- Igual que el php.ini CLI de Docker (backend/docker/php/cli.ini): la suite completa supera los 128 MB por defecto de PHP. -->
+        <ini name="memory_limit" value="1024M"/>
         <env name="APP_ENV" value="testing"/>
         <!-- PostgreSQL real (FKs compuestas, jsonb, índices parciales). Sobrescribible: DB_DATABASE=predictily_test_b2 php artisan test -->
         <env name="DB_CONNECTION" value="pgsql"/>

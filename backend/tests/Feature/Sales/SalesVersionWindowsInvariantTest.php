@@ -249,7 +249,9 @@ final class SalesVersionWindowsInvariantTest extends TestCase
 
         $this->assertSame(336, $sequences, '16 + 64 + 256 secuencias de 2, 3 y 4 escrituras');
         $this->assertSame([], array_slice($violations, 0, 15), count($violations).' de '.$sequences.' secuencias violan la invariante (primeras 15)');
-        $this->assertLessThan(15.0, microtime(true) - $started, 'la enumeración debe acotarse a unos segundos');
+        // Cota de reloj de pared (no funcional): ~5 s en una máquina libre; con varias suites en paralelo llegó a 19-23 s.
+        // 60 s sigue detectando una explosión combinatoria (sin SAVEPOINT serían ~1 075 escrituras por zona y minutos).
+        $this->assertLessThan(60.0, microtime(true) - $started, 'la enumeración debe acotarse a segundos, no minutos');
     }
 
     /**
