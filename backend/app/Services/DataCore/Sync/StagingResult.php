@@ -9,7 +9,7 @@ use Carbon\CarbonImmutable;
 final class StagingResult
 {
     /**
-     * `maxRecordedAt`: máximo de `source_recorded_at` LEGIBLE y no posterior al inicio de la sincronización (candidato a marca de agua).
+     * `maxRecordedAt`: máximo de `source_recorded_at` LEGIBLE y no posterior a la cota (inicio de la sincronización + tolerancia; candidato a marca de agua).
      * `futureRecordedAt` / `unreadableRecordedAt`: filas cuya fecha de registro en la fuente es futura o ilegible; son anomalías y
      * NUNCA adelantan la marca de agua.
      */

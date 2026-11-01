@@ -26,7 +26,7 @@ final class SalesBatchService
      *
      * @param  list<array<string, mixed>>  $documents
      * @param  array<string, mixed>  $options
-     * @return array{created: int, updated: int, unchanged: int, stale_skipped: int, revisions_archived: int, updated_without_source_order: int, rejected: int, ingestion_mode: string, ingestion_mode_basis: string, errors: list<array<string, mixed>>, warnings: list<array<string, mixed>>}
+     * @return array{created: int, updated: int, unchanged: int, stale_skipped: int, revisions_archived: int, updated_without_source_order: int, unchanged_mode_mismatch: int, future_recorded_at: int, recorded_at_unreadable: int, document_number_shared_with_unknown_type: int, rejected: int, ingestion_mode: string, ingestion_mode_basis: string, errors: list<array<string, mixed>>, warnings: list<array<string, mixed>>}
      */
     public function ingest(Tenant $tenant, array $documents, ?int $dataSourceId = null, array $options = [], ?string $ingestionMode = null): array
     {
@@ -40,14 +40,26 @@ final class SalesBatchService
         $valid = [];
         $seen = [];
         $lines = 0;
+        $recordedAnomalies = ['future' => 0, 'unreadable' => 0];
+        $headerOf = fn (array $document): array => array_intersect_key($document, array_flip([
+            'document_number', 'document_type', 'status', 'issued_at', 'branch_code', 'currency', 'channel',
+            'customer_code', 'customer_segment', 'customer_province', 'source_recorded_at',
+        ]));
+        // Números que traen algún documento de tipo NO reconocido (error REVIEW_REQUIRED, no se escribe): un documento reconocido con
+        // el mismo número en el lote SÍ se escribe (la numeración suele ser por tipo o serie) y recibe un aviso (SalesLineNormalizer::sharedNumberWarning).
+        $sharedNumberDocuments = 0;
+        $unknownTypeNumbers = [];
+        foreach ($documents as $document) {
+            $documentKey = $normalizer->documentKey($headerOf($document));
+            if ($documentKey !== null && SalesLineNormalizer::isUnknownTypeKey($documentKey)) {
+                $unknownTypeNumbers[SalesLineNormalizer::numberOfKey($documentKey)] = true;
+            }
+        }
 
         foreach ($documents as $index => $document) {
             $assembler = new SalesDocumentAssembler;
             $docErrors = [];
-            $header = array_intersect_key($document, array_flip([
-                'document_number', 'document_type', 'status', 'issued_at', 'branch_code', 'currency', 'channel',
-                'customer_code', 'customer_segment', 'customer_province', 'source_recorded_at',
-            ]));
+            $header = $headerOf($document);
             foreach (($document['items'] ?? []) as $itemIndex => $item) {
                 $raw = $header + array_intersect_key($item, array_flip([
                     'product_sku', 'product_name', 'category', 'quantity', 'unit_price', 'discount', 'tax', 'net_amount', 'unit_cost', 'line_number',
@@ -62,6 +74,9 @@ final class SalesBatchService
                     }
                 }
                 foreach ($issues as $issue) {
+                    if (($anomaly = SalesLineNormalizer::recordedAtAnomaly($issue)) !== null) {
+                        $recordedAnomalies[$anomaly]++;
+                    }
                     $entry = ['index' => $index, 'item' => $itemIndex] + $issue->toArray();
                     if ($issue->isError()) {
                         $docErrors[] = $entry;
@@ -88,10 +103,18 @@ final class SalesBatchService
             }
             $seen[$key] = true;
             $valid[] = $docs[0];
+            if ($key !== null && ! SalesLineNormalizer::isUnknownTypeKey($key) && isset($unknownTypeNumbers[SalesLineNormalizer::numberOfKey($key)])) {
+                $sharedNumberDocuments++;
+                $warnings[] = ['index' => $index] + SalesLineNormalizer::sharedNumberWarning(SalesLineNormalizer::numberOfKey($key))->toArray();
+            }
         }
 
         $result = [
             'created' => 0, 'updated' => 0, 'unchanged' => 0, 'stale_skipped' => 0, 'revisions_archived' => 0, 'updated_without_source_order' => 0,
+            'unchanged_mode_mismatch' => 0,
+            // Marcas `source_recorded_at` descartadas (posteriores a ahora + tolerancia, o ilegibles): la fila se escribe sin orden de versión.
+            'future_recorded_at' => $recordedAnomalies['future'] + $recordedAnomalies['unreadable'], 'recorded_at_unreadable' => $recordedAnomalies['unreadable'],
+            'document_number_shared_with_unknown_type' => $sharedNumberDocuments,
             'rejected' => count($documents) - count($valid), ...$ingestion->toArray(), 'errors' => $errors, 'warnings' => array_slice($warnings, 0, 200),
         ];
         if ($valid === []) {
@@ -111,6 +134,7 @@ final class SalesBatchService
         $result['stale_skipped'] = $written['stale_skipped'];
         $result['revisions_archived'] = $written['revisions_archived'];
         $result['updated_without_source_order'] = $written['updated_without_source_order'];
+        $result['unchanged_mode_mismatch'] = $written['unchanged_mode_mismatch'];
 
         return $result;
     }

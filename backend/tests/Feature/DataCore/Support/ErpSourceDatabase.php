@@ -26,6 +26,9 @@ final class ErpSourceDatabase
         $this->pdo = new PDO("pgsql:host={$host};port={$port};dbname={$database}", $username, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     }
 
+    /** Causa de la última conexión fallida de `tryConnect` (sin credenciales: el mensaje de PDO no las incluye), para el informe de omisión. */
+    private static ?string $lastFailure = null;
+
     public static function tryConnect(): ?self
     {
         try {
@@ -36,12 +39,37 @@ final class ErpSourceDatabase
                 username: (string) (getenv('TEST_ERP_USERNAME') ?: 'predictily'),
                 password: (string) (getenv('TEST_ERP_PASSWORD') ?: 'secret'),
             );
-        } catch (PDOException) {
+        } catch (PDOException $e) {
+            self::$lastFailure = trim(preg_replace('/\s+/', ' ', $e->getMessage()) ?? '');
+
             return null;
         }
         $erp->authorizeInConnectorPolicy();
 
         return $erp;
+    }
+
+    /**
+     * Mensaje de `markTestSkipped` para las pruebas que necesitan la base «ERP de origen»: la omisión NO es un fallo, pero debe ser
+     * ruidosa y explicable en el informe de la suite. Dice qué comportamiento queda SIN VERIFICAR y cómo crear la base.
+     *
+     * @param  string  $unverified  comportamiento que esa prueba deja sin verificar
+     * @param  ?string  $cause  causa de la conexión fallida, si quien llama la conoce (por defecto, la de `tryConnect`)
+     */
+    public static function skipMessage(string $unverified, ?string $cause = null): string
+    {
+        $database = (string) (getenv('TEST_ERP_DATABASE') ?: 'predictily_erp_source_p3');
+        $host = (string) (getenv('TEST_ERP_HOST') ?: '127.0.0.1');
+        $port = (string) (getenv('TEST_ERP_PORT') ?: '5432');
+        $user = (string) (getenv('TEST_ERP_USERNAME') ?: 'predictily');
+        $cause = trim(preg_replace('/\s+/', ' ', $cause ?? self::$lastFailure ?? '') ?? '');
+        $cause = $cause !== '' ? ' Causa: '.mb_substr($cause, 0, 220).'.' : '';
+
+        return "OMITIDA SIN VERIFICAR (no es un fallo): no hay base «ERP de origen» de pruebas ({$database} en {$host}:{$port}, usuario {$user}).{$cause}"
+            ." QUEDA SIN VERIFICAR: {$unverified}"
+            ." CÓMO CREARLA: createdb -h {$host} -p {$port} -U {$user} {$database} (base vacía; cada prueba crea y elimina su propio esquema ficticio),"
+            .' y relanzar la suite con TEST_ERP_DATABASE=<nombre> (más TEST_ERP_HOST, TEST_ERP_PORT, TEST_ERP_USERNAME, TEST_ERP_PASSWORD si difieren).'
+            .' Detalle: docs/data/LINEAGE_AND_RECONCILIATION.md §12.';
     }
 
     /**

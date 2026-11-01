@@ -75,6 +75,10 @@ return [
         'preview_rows' => 20,
         'max_stored_errors' => 10_000,
         'batch_documents' => 1000,
+        // Tolerancia (minutos) de `source_recorded_at` respecto de la hora actual (desfase de reloj de la fuente). Una marca posterior a
+        // ahora + tolerancia no se guarda como orden de versión (queda NULL) y se cuenta en `future_recorded_at` (importaciones,
+        // /sales/batch y sincronizaciones SQL: SalesLineNormalizer::recordedAtBound).
+        'source_recorded_at_tolerance_minutes' => (int) env('PREDICTILY_RECORDED_AT_TOLERANCE_MINUTES', 5),
     ],
 
     'privacy' => [

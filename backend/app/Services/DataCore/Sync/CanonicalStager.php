@@ -13,6 +13,7 @@ use App\Services\Imports\Fields\FieldDefinition;
 use App\Services\Imports\Fields\ImportFieldRegistry;
 use App\Services\Imports\ImportEntity;
 use App\Services\Imports\Parsing\ValueParser;
+use App\Services\Sales\SalesLineNormalizer;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use DateTimeInterface;
@@ -41,8 +42,10 @@ final class CanonicalStager
     }
 
     /**
-     * `$notAfter` es la cota superior de las fechas de registro en la fuente que pueden mover la marca de agua (el inicio de la
-     * sincronización; por defecto, ahora): una fecha posterior o ilegible se cuenta como anomalía y no la adelanta.
+     * `$notAfter` es el instante de referencia (el inicio de la sincronización; por defecto, ahora) de la cota superior de las fechas
+     * de registro en la fuente que pueden mover la marca de agua: ESA cota es la misma que aplica el normalizador de ventas a
+     * `source_recorded_at` (referencia + tolerancia configurable, 5 minutos por defecto; `SalesLineNormalizer::recordedAtBound`).
+     * Una fecha posterior a la cota o ilegible se cuenta como anomalía y no adelanta la marca.
      *
      * @throws SqlSourceException
      */
@@ -62,7 +65,7 @@ final class CanonicalStager
         $result = new StagingResult;
         $tenantTimezone = $tenant->timezone ?: 'America/Guayaquil';
         $recordedParser = new ValueParser($tenantTimezone);
-        $bound = $notAfter ?? CarbonImmutable::now();
+        $bound = SalesLineNormalizer::recordedAtBound($notAfter);
         $handle = fopen($path, 'wb');
         if ($handle === false) {
             throw new SqlSourceException('No se pudo crear el archivo de preparación.');
@@ -232,7 +235,8 @@ final class CanonicalStager
     }
 
     /**
-     * Fecha de registro en la fuente de una fila: solo una fecha legible y no posterior a `$bound` es candidata a marca de agua.
+     * Fecha de registro en la fuente de una fila: solo una fecha legible y no posterior a `$bound` (referencia + tolerancia) es
+     * candidata a marca de agua (que luego se acota al inicio de la sincronización).
      * Una futura o ilegible es una anomalía que se cuenta (`future_recorded_at` en las estadísticas) y no la adelanta: una sola
      * fila con `modificado_en` = 2099 dejaría a todas las incrementales siguientes sin extraer nada.
      */

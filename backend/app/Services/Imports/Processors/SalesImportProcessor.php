@@ -31,13 +31,19 @@ final class SalesImportProcessor implements ImportProcessor
         $assembler = new SalesDocumentAssembler;
         $batchSize = (int) config('predictily.imports.batch_documents', 1000);
 
-        // Pasada A
+        // Pasada A. Además de la última fila de cada documento, anota los números que traen filas de tipo NO reconocido: un documento
+        // reconocido con ese mismo número se escribe igual, pero con un aviso (ver SalesLineNormalizer::sharedNumberWarning).
         $lastRow = [];
+        $unknownTypeNumbers = [];
+        $sharedNumberWarned = [];
         $rowsTotal = 0;
         foreach ($ctx->canonicalRows() as $n => $raw) {
             $rowsTotal = $n;
             if (($key = $normalizer->documentKey($raw)) !== null) {
                 $lastRow[$key] = $n;
+                if (SalesLineNormalizer::isUnknownTypeKey($key)) {
+                    $unknownTypeNumbers[SalesLineNormalizer::numberOfKey($key)] = true;
+                }
             }
         }
 
@@ -45,7 +51,8 @@ final class SalesImportProcessor implements ImportProcessor
             'rows_total' => $rowsTotal, 'rows_valid' => 0, 'rows_error' => 0, 'rows_warning' => 0, 'duplicates_in_file' => 0,
             'documents_total' => count($lastRow), 'documents_valid' => 0, 'documents_invalid' => 0,
             'documents_new' => 0, 'documents_updated' => 0, 'documents_unchanged' => 0,
-            'stale_skipped' => 0, 'revisions_archived' => 0, 'updated_without_source_order' => 0,
+            'stale_skipped' => 0, 'revisions_archived' => 0, 'updated_without_source_order' => 0, 'unchanged_mode_mismatch' => 0,
+            'future_recorded_at' => 0, 'recorded_at_unreadable' => 0, 'document_number_shared_with_unknown_type' => 0,
             'ingestion_mode' => $ingestion->mode, 'ingestion_mode_basis' => $ingestion->basis,
             'voided_documents' => 0, 'credit_notes' => 0, 'return_lines' => 0, 'lines_valid' => 0,
             'date_from' => null, 'date_to' => null, 'missing_days' => 0,
@@ -71,12 +78,13 @@ final class SalesImportProcessor implements ImportProcessor
                 $stats['stale_skipped'] += $result['stale_skipped'];
                 $stats['revisions_archived'] += $result['revisions_archived'];
                 $stats['updated_without_source_order'] += $result['updated_without_source_order'];
+                $stats['unchanged_mode_mismatch'] += $result['unchanged_mode_mismatch'];
                 $stats['products_created'] += $result['products_created'];
                 $stats['branches_created'] += $result['branches_created'];
                 $stats['lines_written'] += $result['lines_written'];
             } else {
                 // Validación: proyección de lo que hará la confirmación (cada documento actualizado archiva una versión).
-                foreach ($this->writer->classify($tenant, $batch) as $class) {
+                foreach ($this->writer->classify($tenant, $batch, $ingestion->mode) as $class) {
                     $stats[match ($class['state']) {
                         SalesDocumentWriter::STATE_NEW => 'documents_new',
                         SalesDocumentWriter::STATE_UPDATED => 'documents_updated',
@@ -88,6 +96,9 @@ final class SalesImportProcessor implements ImportProcessor
                     }
                     if ($class['without_order']) {
                         $stats['updated_without_source_order']++;
+                    }
+                    if ($class['mode_mismatch']) {
+                        $stats['unchanged_mode_mismatch']++;
                     }
                 }
             }
@@ -127,6 +138,20 @@ final class SalesImportProcessor implements ImportProcessor
                     $skipped = count(array_filter($assemblerIssues, fn ($i) => $i->code === 'duplicate_in_file' && ! $i->isError())) > 0;
                     $issues = array_merge($issues, $assemblerIssues);
                 }
+            }
+            foreach ($issues as $issue) {
+                if (($anomaly = SalesLineNormalizer::recordedAtAnomaly($issue)) !== null) {
+                    $stats['future_recorded_at']++; // futuras e ilegibles (como en la sincronización); la ilegible, además, aparte
+                    $stats['recorded_at_unreadable'] += $anomaly === 'unreadable' ? 1 : 0;
+                }
+            }
+            // El documento reconocido que comparte número con filas de tipo desconocido SE ESCRIBE (su numeración puede ser por tipo o
+            // serie); solo se avisa, una vez por documento, para que el caso quede visible en los errores, el reporte y las estadísticas.
+            if ($key !== null && ! isset($sharedNumberWarned[$key]) && ! SalesLineNormalizer::isUnknownTypeKey($key)
+                && isset($unknownTypeNumbers[SalesLineNormalizer::numberOfKey($key)])) {
+                $sharedNumberWarned[$key] = true;
+                $stats['document_number_shared_with_unknown_type']++;
+                $issues[] = SalesLineNormalizer::sharedNumberWarning(SalesLineNormalizer::numberOfKey($key));
             }
             $ctx->issues->addMany($n, $issues);
 
@@ -196,6 +221,10 @@ final class SalesImportProcessor implements ImportProcessor
         if ($stats['stale_skipped'] > 0) {
             $issues[] = ['code' => 'stale_document_skipped', 'severity' => 'warning', 'count' => $stats['stale_skipped'],
                 'message' => "{$stats['stale_skipped']} documentos traen una versión ANTERIOR (fecha de registro en la fuente) a la ya guardada y no se aplicarán."];
+        }
+        if ($stats['unchanged_mode_mismatch'] > 0) {
+            $issues[] = ['code' => 'unchanged_mode_mismatch', 'severity' => 'info', 'count' => $stats['unchanged_mode_mismatch'],
+                'message' => "{$stats['unchanged_mode_mismatch']} documentos no cambiaron (mismo contenido) y conservan el modo de ingestión con que se cargaron, distinto del declarado en esta carga ({$stats['ingestion_mode']}): declarar otro modo no reescribe un documento sin cambios."];
         }
         if ($stats['updated_without_source_order'] > 0) {
             $issues[] = ['code' => 'updated_without_source_order', 'severity' => 'info', 'count' => $stats['updated_without_source_order'],

@@ -38,7 +38,11 @@ final class SqlSyncTemporalContractTest extends TestCase
         parent::setUp();
         $erp = ErpSourceDatabase::tryConnect();
         if ($erp === null) {
-            $this->markTestSkipped('No hay base de datos «ERP de origen» de pruebas (predictily_erp_source_p3 o TEST_ERP_DATABASE).');
+            $this->markTestSkipped(ErpSourceDatabase::skipMessage(
+                'el contrato temporal de la sincronización SQL de ventas contra un ERP real: modo de ingestión (primera sincronización = backfill, siguientes = incremental, declarable en la solicitud y en el mapeo), '
+                .'versiones archivadas por la sincronización, reenvío de una versión anterior del ERP (stale_skipped), marca de agua acotada (fecha de registro futura o ilegible, marca previa envenenada), '
+                .'sincronización vacía y estado desconocido en revisión.'
+            ));
         }
         $this->erp = $erp;
         $this->erp->createSchema();
@@ -92,6 +96,25 @@ final class SqlSyncTemporalContractTest extends TestCase
         $this->assertSame(1, $second['stats']['import']['documents_updated'], 'la corrección se extrajo');
         $this->assertSame(1, $second['stats']['future_recorded_at']);
         $this->assertTrue(CarbonImmutable::parse($second['watermark'])->lessThanOrEqualTo(CarbonImmutable::parse($second['started_at'])));
+    }
+
+    public function test_the_sync_and_the_normalizer_share_the_same_recorded_at_bound(): void
+    {
+        // Una cota ÚNICA (ahora + tolerancia, 5 minutos): antes el normalizador aceptaba hasta el fin de mañana y la preparación de la
+        // sincronización acotaba al inicio de la sincronización, así que una marca a +10 minutos se guardaba como orden de versión
+        // pero se contaba otra cosa en las estadísticas de la sincronización. Ahora ambos coinciden.
+        $this->erp->pdo->exec("UPDATE erp_facturas SET modificado_en = now() + interval '2 minutes' WHERE num_factura = '001-001-000000002'");  // 1 línea, dentro de la tolerancia
+        $this->erp->pdo->exec("UPDATE erp_facturas SET modificado_en = now() + interval '10 minutes' WHERE num_factura = '001-001-000000004'"); // 2 líneas, fuera
+        $this->approveErpMapping($this->erpSalesMapping());
+
+        $sync = $this->runSync('full');
+        $this->assertSame('completed', $sync['status'], json_encode($sync));
+        $this->assertSame(2, $sync['stats']['future_recorded_at'], 'preparación: las 2 filas de la factura 4');
+        $this->assertSame(2, $sync['stats']['import']['future_recorded_at'], 'importación: las mismas 2 filas');
+        $this->assertSame(0, $sync['stats']['recorded_at_unreadable']);
+        $this->assertNotNull($this->sale('001-001-000000002')->source_recorded_at, 'a +2 min: dentro de la tolerancia, ordena versiones');
+        $this->assertNull($this->sale('001-001-000000004')->source_recorded_at, 'a +10 min: no se guarda como orden de versión');
+        $this->assertTrue(CarbonImmutable::parse($sync['watermark'])->lessThanOrEqualTo(CarbonImmutable::parse($sync['started_at'])), 'la marca de agua sigue acotada al inicio de la sincronización');
     }
 
     public function test_unreadable_recorded_at_is_an_anomaly_and_falls_back_to_the_sync_start(): void

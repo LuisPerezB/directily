@@ -57,6 +57,34 @@ trait ReadsSalesVersions
         return $visible;
     }
 
+    /**
+     * Versiones visibles en CADA corte de un rango (una sola consulta; misma regla de visibilidad que `visibleAt`), por corte y
+     * documento: [fecha de corte => [número de documento => 'lista de revisiones visibles' (p. ej. '0,2')]]. Solo aparecen los cortes con
+     * alguna versión visible. Sirve para comprobar invariantes sobre muchos cortes sin una consulta por corte.
+     *
+     * @return array<string, array<string, string>>
+     */
+    protected function visibleRevisionsByCutoff(Tenant $tenant, string $fromCutoff, int $days): array
+    {
+        $rows = DB::select(
+            'SELECT (?::date + g.n)::text AS cutoff, s.document_number, string_agg(DISTINCT v.revision::text, \',\' ORDER BY v.revision::text) AS revisions'
+            .' FROM generate_series(0, ?) AS g(n)'
+            .' JOIN tenants t ON t.id = ?'
+            .' JOIN sales_line_versions v ON v.tenant_id = t.id'
+            .'   AND v.known_from < (((?::date + g.n) + 1)::timestamp AT TIME ZONE t.timezone)'
+            .'   AND (v.known_until IS NULL OR v.known_until >= (((?::date + g.n) + 1)::timestamp AT TIME ZONE t.timezone))'
+            .' JOIN sales s ON s.tenant_id = v.tenant_id AND s.id = v.sale_id'
+            .' GROUP BY 1, 2',
+            [$fromCutoff, $days, $tenant->id, $fromCutoff, $fromCutoff],
+        );
+        $visible = [];
+        foreach ($rows as $row) {
+            $visible[$row->cutoff][$row->document_number] = $row->revisions;
+        }
+
+        return $visible;
+    }
+
     /** Todas las versiones de línea de un documento en la vista: [revisión => ['current' => bool, 'known_from' => utc, 'known_until' => utc|null, 'lines' => [línea => cantidad]]]. */
     protected function versionsView(Tenant $tenant, string $number): array
     {

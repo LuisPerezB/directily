@@ -48,7 +48,11 @@ final class SqlSourceSyncTest extends TestCase
         parent::setUp();
         $erp = ErpSourceDatabase::tryConnect();
         if ($erp === null) {
-            $this->markTestSkipped('No hay base de datos «ERP de origen» de pruebas (predictily_erp_source_p3).');
+            $this->markTestSkipped(ErpSourceDatabase::skipMessage(
+                'el conector SQL de punta a punta contra un ERP PostgreSQL real: prueba y fallo de conexión sin filtrar secretos, política de solo lectura (rechazo de escrituras y transacción de solo lectura), '
+                .'sincronización completa por el pipeline de importación con procedencia, reimportación sin duplicados y corrección del origen, mapeos sin aprobar, filas inválidas, cobertura declarada, aislamiento entre empresas, '
+                .'permisos, sincronización programada y una sola sincronización activa por fuente y entidad.'
+            ));
         }
         $this->erp = $erp;
         $this->erp->createSchema();

@@ -2972,7 +2972,7 @@ components:
         stats:
           type: object
           additionalProperties: true
-          description: 'mode, rows_extracted, pages, import (estadísticas del import), note; ventas (ADR-V25-23): ingestion_mode, ingestion_mode_basis (declared | first_sync | subsequent_sync); con `source_recorded_at` mapeado: future_recorded_at (fechas de registro futuras o ilegibles, que NUNCA adelantan la marca de agua), recorded_at_unreadable, watermark_note. La marca de agua es min(máximo source_recorded_at legible, inicio de la sincronización).'
+          description: 'mode, rows_extracted, pages, import (estadísticas del import), note; ventas (ADR-V25-23): ingestion_mode, ingestion_mode_basis (declared | first_sync | subsequent_sync); con `source_recorded_at` mapeado: future_recorded_at (fechas de registro posteriores al inicio de la sincronización + tolerancia de 5 minutos, o ilegibles, que NUNCA adelantan la marca de agua), recorded_at_unreadable, watermark_note. La marca de agua es min(máximo source_recorded_at legible ?? marca previa ?? inicio de la sincronización, inicio de la sincronización). stats.import trae las estadísticas del import, con unchanged_mode_mismatch, future_recorded_at y recorded_at_unreadable.'
         error_message:
           type: [string, 'null']
         started_at:

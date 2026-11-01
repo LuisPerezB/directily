@@ -19,6 +19,17 @@ use InvalidArgumentException;
  *
  * Una declaración válida (`backfill` | `incremental`) siempre manda sobre la regla. La `basis` queda registrada junto al
  * modo (estadísticas del import, de la sincronización y respuesta del lote) para poder auditar cómo se decidió.
+ *
+ * Concurrencia (LIMITACIÓN DOCUMENTADA, docs/data/LINEAGE_AND_RECONCILIATION.md §5 y §10): las reglas automáticas se evalúan
+ * FUERA del bloqueo de aviso por empresa del escritor (`SalesDocumentWriter::write`).
+ *  - Importación: la decisión de «primera carga» (`tenantHasSales`) se toma una vez, al iniciar la escritura del import, y vale para
+ *    todos sus lotes y para sus reintentos (se guarda en `import_jobs.options`). Resolverla bajo el bloqueo exigiría decidirla en el
+ *    primer lote y propagarla a los demás y al reintento, y el bloqueo se toma por lote y se libera al confirmar cada uno: no es
+ *    barato ni local. Dos importaciones SIN modo declarado que empiecen a escribir a la vez sobre una empresa vacía pueden resolver
+ *    ambas `backfill`. Mitigación: declarar `options.ingestion_mode` (la declaración manda y no consulta nada).
+ *  - Sincronización: no aplica entre sincronizaciones de la misma fuente y entidad (el índice único de sincronizaciones activas las
+ *    serializa y `forSync` solo mira esa fuente y entidad).
+ *  - /sales/batch: sin regla automática (siempre `incremental` salvo declaración).
  */
 final class IngestionModeResolver
 {

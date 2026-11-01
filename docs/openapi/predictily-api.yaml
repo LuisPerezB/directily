@@ -2514,7 +2514,8 @@ paths:
       responses:
         '200':
           description: 'data: [{row_number, column, error_code, severity, message, raw_value, dq_class}]; dq_class
-            = REVIEW_REQUIRED para unknown_document_type / unknown_document_status (null en los demás)'
+            = REVIEW_REQUIRED para unknown_document_type / unknown_document_status (null en los demás; document_number_shared_with_unknown_type
+            es un aviso sin dq_class)'
   /imports/{import}/errors.csv:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -3348,7 +3349,14 @@ paths:
         **Versiones (ADR-V25-23).** Un documento existente con contenido distinto se reemplaza archivando antes
         su versión vigente (cabecera y líneas) en `sales_document_revisions`/`sale_item_revisions`. Si la versión
         entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR, se descarta (`stale_skipped`)
-        y no se escribe nada; si alguna no lo trae, gana la última ingestión (`updated_without_source_order`).
+        y no se escribe nada; si alguna no lo trae, gana la última ingestión (`updated_without_source_order`), y
+        la marca almacenada NO se borra. Un documento con el mismo contenido no se reescribe; si su `ingestion_mode`
+        almacenado difiere del declarado se cuenta `unchanged_mode_mismatch`.
+
+
+        **Cota de `source_recorded_at`.** Una marca posterior a ahora + tolerancia (5 minutos por defecto, configurable)
+        o ilegible NO se guarda como orden de versión (queda NULL; el documento sí se escribe) y se cuenta en `future_recorded_at`
+        (`recorded_at_unreadable` es la parte ilegible).
 
 
         **Modo de ingestión.** `ingestion_mode` (`backfill` | `incremental`); por defecto `incremental`: la versión
@@ -3358,7 +3366,9 @@ paths:
 
         **Tipos y estados.** Un `document_type` o `status` NO vacío que no se reconoce no se cuenta como venta:
         es un error del documento (`unknown_document_type` / `unknown_document_status`, `dq_class: REVIEW_REQUIRED`)
-        y no se escribe. Vacío = factura / completada.'
+        y no se escribe. Vacío = factura / completada. Un documento reconocido que comparte número con otro del
+        lote de tipo no reconocido SE ESCRIBE con sus propias líneas (la numeración suele ser por tipo o serie)
+        y recibe el aviso `document_number_shared_with_unknown_type` (warning, contado en `document_number_shared_with_unknown_type`).'
       requestBody:
         required: true
         content:
@@ -3456,6 +3466,7 @@ paths:
       responses:
         '200':
           description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order,
+            unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type,
             rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message,
             dq_class?}], warnings}'
         '422':
@@ -6492,9 +6503,12 @@ components:
           description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid,
             documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes,
             return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas
-            (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis
-            (declared | first_load | subsequent_load). En la validación las cifras de versiones son una proyección
-            de lo que hará la confirmación.'
+            (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch
+            (documentos sin cambios cuyo modo almacenado difiere del declarado), future_recorded_at y recorded_at_unreadable
+            (filas con source_recorded_at posterior a ahora + tolerancia o ilegible: la marca se descarta), document_number_shared_with_unknown_type
+            (documentos reconocidos que comparten número con filas de tipo desconocido: se escriben, con aviso),
+            ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load). En la validación las
+            cifras de versiones son una proyección de lo que hará la confirmación.'
         quality_report:
           type:
           - object
@@ -7943,9 +7957,11 @@ components:
           additionalProperties: true
           description: 'mode, rows_extracted, pages, import (estadísticas del import), note; ventas (ADR-V25-23):
             ingestion_mode, ingestion_mode_basis (declared | first_sync | subsequent_sync); con `source_recorded_at`
-            mapeado: future_recorded_at (fechas de registro futuras o ilegibles, que NUNCA adelantan la marca de
-            agua), recorded_at_unreadable, watermark_note. La marca de agua es min(máximo source_recorded_at legible,
-            inicio de la sincronización).'
+            mapeado: future_recorded_at (fechas de registro posteriores al inicio de la sincronización + tolerancia
+            de 5 minutos, o ilegibles, que NUNCA adelantan la marca de agua), recorded_at_unreadable, watermark_note.
+            La marca de agua es min(máximo source_recorded_at legible ?? marca previa ?? inicio de la sincronización,
+            inicio de la sincronización). stats.import trae las estadísticas del import, con unchanged_mode_mismatch,
+            future_recorded_at y recorded_at_unreadable.'
         error_message:
           type:
           - string

@@ -109,9 +109,13 @@ import conserva el modo con el que empezó). Un valor inválido, o enviarlo para
 `document_conflict` (misma clave con distinto contenido dentro del archivo),
 `unknown_document_type` y `unknown_document_status` (**error**, `dq_class = REVIEW_REQUIRED`; antes el tipo desconocido era una
 advertencia y se contaba como venta `other`, y el estado desconocido se contaba como completada),
+`document_number_shared_with_unknown_type` (**warning**, sin `dq_class`: un documento reconocido comparte número con filas de tipo no reconocido del mismo
+archivo o lote; el documento reconocido SE ESCRIBE con sus propias líneas —la numeración suele ser por tipo o serie— y las filas de tipo desconocido siguen siendo
+error; se cuenta una vez por documento en `stats.document_number_shared_with_unknown_type`),
 `voided_document` (info), `existing_document_changed` (warning: se actualizará y la versión anterior se archiva),
 `stale_document_skipped` (warning, reporte: documentos con una versión ANTERIOR a la guardada, no se aplican),
-`updated_without_source_order` (info, reporte: actualizaciones sin fecha de registro en la fuente; gana la última carga),
+`updated_without_source_order` (info, reporte: actualizaciones sin fecha de registro en la fuente; gana la última carga; la marca almacenada se conserva),
+`unchanged_mode_mismatch` (info, reporte: documentos sin cambios cuyo modo de ingestión almacenado difiere del declarado; no se reescriben),
 `missing_dates` (reporte: días sin ventas en el rango).
 
 `dq_class` (ADR-V25-05) acompaña a los hallazgos que exigen revisión humana: `REVIEW_REQUIRED` en `unknown_document_type` y
@@ -240,7 +244,7 @@ Códigos: `known_at_unknown`, `known_after_start`, `scope_ref_ignored`.
 |---|---|---|
 | GET | `/sales` [T] | query `date_from, date_to, branch_id, status, document_type, page` → `[{id, document_type, document_number, status, issued_at, sale_date, branch:{id,code,name}, total, items_count}]` |
 | GET | `/sales/{id}` [T] | con `items` |
-| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
+| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
 | GET | `/sales/summary` [T] | query `date_from, date_to, branch_id, category_id, product_id, granularity(day|week|month)` → `{data:{series:[{period, units, revenue, documents}], totals:{units, revenue, documents, returns_units}}}` (excluye anuladas) |
 
 ### 3.6 Importaciones
@@ -260,7 +264,7 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 | GET | `/import-templates/{entity_type}` | CSV de plantilla con encabezados canónicos |
 | GET | `/import-fields/{entity_type}` | definición de campos (para el asistente): `[{key, label, required, type, description, synonyms}]` |
 
-`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load)}, quality_report:{score, issues:[{code, severity, message, count}]}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
+`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load)}, quality_report:{score, issues:[{code, severity, message, count}]}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
 
 ### 3.7 Fuentes de datos
 | Método | Ruta | Detalle |
@@ -446,10 +450,18 @@ Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calend
 - **Versiones**: un documento existente con contenido distinto archiva su versión vigente (`sales_document_revisions` / `sale_item_revisions`)
   antes de reemplazarla; `current_revision` avanza en 1 y `first_seen_at` no cambia.
 - **Orden**: una versión entrante con `source_recorded_at` ANTERIOR a la almacenada se descarta (`stale_skipped`, no se escribe nada). Sin marca
-  de tiempo en alguna de las dos gana la última ingestión (`updated_without_source_order`). Estadísticas aditivas en importaciones, lotes y
-  sincronizaciones: `stale_skipped`, `revisions_archived`, `updated_without_source_order`.
-- **Tipos y estados**: no vacíos y desconocidos ⇒ error de fila `REVIEW_REQUIRED`, no se escribe (vacío = factura / completada).
-- **Marca de agua** de las sincronizaciones: acotada al inicio de la sincronización (futuras o ilegibles = anomalía `future_recorded_at`).
+  de tiempo en alguna de las dos gana la última ingestión (`updated_without_source_order`) y la marca almacenada no se borra. Estadísticas aditivas
+  en importaciones, lotes y sincronizaciones: `stale_skipped`, `revisions_archived`, `updated_without_source_order`, `unchanged_mode_mismatch`
+  (documentos sin cambios con modo almacenado distinto del declarado: no se reescriben) y `future_recorded_at` / `recorded_at_unreadable`.
+- **Cota de `source_recorded_at`**: ahora + tolerancia (5 minutos por defecto, `predictily.imports.source_recorded_at_tolerance_minutes`), igual en
+  importaciones, `POST /sales/batch` y sincronizaciones SQL. Una marca posterior o ilegible no se guarda como orden de versión (NULL; la fila se escribe).
+- **Ventanas de conocimiento**: las de las versiones de un documento son disjuntas; una re-carga `backfill` colapsa TODA la cadena archivada del
+  documento (no solo la versión inmediata) para que ningún corte lo vea dos veces.
+- **Tipos y estados**: no vacíos y desconocidos ⇒ error de fila `REVIEW_REQUIRED`, no se escribe (vacío = factura / completada); un documento
+  reconocido con el mismo número que filas de tipo desconocido SE ESCRIBE con sus propias líneas y recibe el aviso `document_number_shared_with_unknown_type`
+  (contado en `stats` de importaciones y en `data` de `POST /sales/batch`).
+- **Marca de agua** de las sincronizaciones: acotada al inicio de la sincronización (futuras o ilegibles = anomalía `future_recorded_at`); sin fechas legibles
+  conserva la marca previa (acotada) y, en la primera sincronización, cae en el inicio de la sincronización.
 - **Huecos de cobertura**: `GET/POST /data-coverage/gaps`, `DELETE /data-coverage/gaps/{id}`.
 
 | Estado | Qué | Prueba que lo demuestra |
@@ -596,7 +608,27 @@ Petición `{"training_job_id": 55, "lookback_runs": 10}` → para cada run compl
 objetivo ya observadas, inserta/actualiza `forecast_actuals` y `model_evaluations`
 (`evaluation_type='realized'`). Si el WAPE realizado supera al de backtest por más del umbral
 (`max(1.3×backtest, backtest+0.10)`) en ≥14 días observados, crea alerta `forecast_drift`
-(deduplicada por `dedup_key`). Respuesta `{"evaluated_runs": [...], "drift_detected": bool, "realized_wape": 0.27}`.
+(deduplicada por `dedup_key`). Respuesta `{"evaluated_runs": [...], "drift_detected": bool, "realized_wape": 0.27}`
+más, de forma **aditiva** (ADR-V25-03), `exclusions`.
+
+Días excluidos de las métricas realizadas y de la detección de deriva (`exclusions`, aditivo; los consumidores existentes lo ignoran). Un
+día sin ventas NO es siempre un cero: los días-serie del pronóstico que la fuente no cubre o en que la sucursal cerró no son ceros observados,
+se marcan censurados (`forecast_actuals.is_censored`) y no entran a las métricas realizadas ni al drift, así que una caída de la integración no se
+lee como un deterioro del pronóstico. Se clasifican con la misma función del entrenamiento (`profiling.days.classify_days`) y con el conocimiento
+más reciente de las declaraciones. `exclusions` es un objeto de conteos enteros por clase, presente en cada elemento de `evaluated_runs[]`
+(`evaluated_runs[].exclusions`, de ese run) y en la raíz de la respuesta (`exclusions`, suma de los runs evaluados):
+
+| Clave | Significado |
+|---|---|
+| `series_days` | series-día del pronóstico comparadas con la realidad (nivel serie) |
+| `evaluated_series_days` | series-día que SÍ entran a las métricas (no censuradas) |
+| `missing_source_days` | excluidos por `missing_source`: fuera de la cobertura declarada de la fuente (`data_coverage`), dentro de un hueco declarado o inferido (`data_coverage_gaps`) o inferidos por la regla de actividad de la sucursal |
+| `missing_source_inferred_days` | subconjunto de `missing_source_days` cuya base es `inferred` (regla, no declaración) |
+| `closed_days` | excluidos por cierre: `calendar_events.category = 'closure'` de alcance empresa o sucursal |
+| `stockout_days` | excluidos por quiebre de stock (la lógica previa a ADR-V25-03) |
+
+Los cuatro conteos de exclusión son disjuntos entre sí salvo `missing_source_inferred_days` (contenido en `missing_source_days`); `series_days = evaluated_series_days + stockout_days + missing_source_days + closed_days`.
+Los mismos conteos se guardan en `model_evaluations.extra.exclusions` de la evaluación `realized` de cada run.
 
 ### 4.4 Estados y valores permitidos que el motor escribe
 - `training_jobs.status`: queued, running, succeeded, failed · `stage`: ver migración.

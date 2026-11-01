@@ -7,6 +7,7 @@ namespace App\Services\Sales;
 use App\Services\Imports\Parsing\ValueParser;
 use App\Services\Imports\Support\Issue;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 
 /**
  * Normaliza una línea de venta expresada con campos canónicos (docs/06 §2.1) y
@@ -15,15 +16,52 @@ use Carbon\CarbonImmutable;
  */
 final class SalesLineNormalizer
 {
+    /** Tolerancia por defecto (minutos) de `source_recorded_at` respecto de la hora actual: desfases de reloj de la fuente. */
+    public const DEFAULT_RECORDED_AT_TOLERANCE_MINUTES = 5;
+
     private CarbonImmutable $maxDate;
+
+    private CarbonImmutable $recordedBound;
 
     public function __construct(
         private readonly ValueParser $parser,
         private readonly string $currency = 'USD',
         private readonly string $timezone = 'America/Guayaquil',
         ?CarbonImmutable $now = null,
+        ?int $recordedAtToleranceMinutes = null,
     ) {
         $this->maxDate = ($now ?? CarbonImmutable::now($timezone))->setTimezone($timezone)->endOfDay()->addDay();
+        $this->recordedBound = self::recordedAtBound($now, $recordedAtToleranceMinutes);
+    }
+
+    /**
+     * Cota superior de `source_recorded_at`: ahora + tolerancia (`predictily.imports.source_recorded_at_tolerance_minutes`, por
+     * defecto 5 minutos). Una marca posterior NO se guarda como orden de versión (queda NULL) y se cuenta como anomalía
+     * (`future_recorded_at`). Es la ÚNICA cota: la usan el normalizador (importaciones y /sales/batch) y la preparación de la
+     * sincronización SQL (`CanonicalStager`), para que los tres caminos coincidan.
+     */
+    public static function recordedAtBound(?CarbonInterface $now = null, ?int $toleranceMinutes = null): CarbonImmutable
+    {
+        $minutes = max(0, $toleranceMinutes ?? (int) config('predictily.imports.source_recorded_at_tolerance_minutes', self::DEFAULT_RECORDED_AT_TOLERANCE_MINUTES));
+
+        return CarbonImmutable::instance($now ?? CarbonImmutable::now())->addMinutes($minutes);
+    }
+
+    /**
+     * Anomalía de `source_recorded_at` que un hallazgo del normalizador representa: `future` (posterior a la cota), `unreadable`
+     * (ilegible) o null (otro hallazgo). Permite contarlas igual en importaciones y en /sales/batch.
+     */
+    public static function recordedAtAnomaly(Issue $issue): ?string
+    {
+        if ($issue->column !== 'source_recorded_at') {
+            return null;
+        }
+
+        return match ($issue->code) {
+            'future_date' => 'future',
+            'invalid_date' => 'unreadable',
+            default => null,
+        };
     }
 
     /**
@@ -39,6 +77,30 @@ final class SalesLineNormalizer
         $type = ValueParser::documentType($this->parser->string($raw['document_type'] ?? null, 50)) ?? 'unknown';
 
         return $type.'|'.mb_strtoupper($number);
+    }
+
+    /** ¿La clave de documento corresponde a una fila con tipo NO vacío y no reconocido (marcador `unknown`)? */
+    public static function isUnknownTypeKey(string $key): bool
+    {
+        return str_starts_with($key, 'unknown|');
+    }
+
+    /** Número de documento (en MAYÚSCULAS) de una clave `tipo|NÚMERO`. */
+    public static function numberOfKey(string $key): string
+    {
+        return substr($key, (int) strpos($key, '|') + 1);
+    }
+
+    /**
+     * Aviso (WARNING, no error) sobre un documento RECONOCIDO cuyo número también traen filas de tipo NO reconocido (misma fuente:
+     * mismo archivo o mismo lote). En los ERP la numeración suele ser por tipo o serie (la factura 100 y la proforma o guía 100 son
+     * documentos distintos), así que el documento reconocido SE ESCRIBE completo con sus propias líneas; las filas de tipo
+     * desconocido siguen siendo error REVIEW_REQUIRED y no se escriben. El aviso solo deja visible el caso, por si esas filas fueran
+     * líneas del propio documento con el tipo mal escrito (el documento quedaría sin ellas).
+     */
+    public static function sharedNumberWarning(string $number): Issue
+    {
+        return Issue::warning('document_number_shared_with_unknown_type', "El número {$number} también aparece en filas de un tipo de documento no reconocido, que se descartan para revisión. Este documento se escribe con sus propias líneas: confirme que la numeración es por tipo o serie y que esas filas no eran líneas suyas con el tipo mal escrito.", 'document_number', $number);
     }
 
     /**
@@ -204,8 +266,8 @@ final class SalesLineNormalizer
             $parsedRecorded = $p->dateTime($rawRecorded);
             if ($parsedRecorded === null) {
                 $issues[] = Issue::warning('invalid_date', 'Fecha de registro en la fuente no válida; se deja desconocida.', 'source_recorded_at', $rawRecorded);
-            } elseif ($parsedRecorded[0]->greaterThan($this->maxDate)) {
-                $issues[] = Issue::warning('future_date', 'La fecha de registro en la fuente está en el futuro; se deja desconocida.', 'source_recorded_at', $rawRecorded);
+            } elseif ($parsedRecorded[0]->greaterThan($this->recordedBound)) {
+                $issues[] = Issue::warning('future_date', 'La fecha de registro en la fuente es posterior a la hora actual (más la tolerancia); se deja desconocida y no ordena versiones.', 'source_recorded_at', $rawRecorded);
             } else {
                 $recordedAt = $parsedRecorded[0]->utc()->format('Y-m-d H:i:sP');
             }
