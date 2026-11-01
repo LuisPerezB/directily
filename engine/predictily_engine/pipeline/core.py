@@ -3,7 +3,7 @@
 Entrada: TenantData de UNA empresa. Salida: PipelineResult con todo lo necesario para
 persistir (valores por nodo, evaluaciones, selección, recomendaciones, resumen, huella, manifiesto).
 
-Etapa 2 · P1 (docs/architecture/v2/P1-demanda.md): horizontes 7/14/30/60/90 con abstención explícita,
+Etapa 2 · P1 (docs/architecture/v2/P1-demanda.md): horizontes 7/14/15/30/60/90 con abstención explícita,
 métricas MASE/RMSSE/pinball/dinero, P50 solo si se evalúa, modelo SERVIDO coherente (E2-19), casos
 especiales (productos nuevos, descontinuados, aperturas/cierres, eventos extraordinarios), huella de
 datos completa, configuración efectiva y manifiesto del protocolo de evaluación.
@@ -45,6 +45,8 @@ from predictily_engine.demand.lifecycle import (
 )
 from predictily_engine.demand.manifest import build_manifest
 from predictily_engine.demand.snapshot import build_snapshot
+from predictily_engine.availability.contracts import FeatureContractError
+from predictily_engine.availability.pipeline import factor_pipeline_limitations
 from predictily_engine.features.builder import PRICE_ASSUMPTION, FeatureBuilder, last_known_price
 from predictily_engine.intervals.conformal import ConformalCalibrator, day_bucket, identity_bucket
 from predictily_engine.inventory.recommendations import (
@@ -62,6 +64,7 @@ from predictily_engine.platform.snapshot import DataSnapshot
 from predictily_engine.profiling.days import DayRules
 from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import Panel, build_panel
+from predictily_engine.quality.assessment import QualityAssessment, assess_demand
 from predictily_engine.reconciliation.hierarchy import AGG_LEVELS, aggregate, to_periods
 from predictily_engine.selection.selector import Selection, select_models, selected_rows
 
@@ -77,9 +80,11 @@ SCOPE_SELECTION_WINDOWS = ev.SCOPE_SELECTION_WINDOWS
 
 
 class InsufficientDataError(ValueError):
-    def __init__(self, message: str, details: dict | None = None) -> None:
+    def __init__(self, message: str, details: dict | None = None, assessment: Any = None) -> None:
         super().__init__(message)
         self.details = details or {}
+        # W2-C: `QualityAssessment` cuando la causa es un gate BLOCK (el llamador lo persiste en data_quality_reports).
+        self.assessment = assessment
 
 
 @dataclass
@@ -116,6 +121,7 @@ class PipelineResult:
     limitations: list[dict[str, str]] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     lifecycle: LifecyclePlan | None = None
+    quality: QualityAssessment | None = None  # W2-C: métricas de dataset y gate de calidad de la ejecución
 
 
 def _noop(stage: str, pct: int) -> None:  # pragma: no cover
@@ -129,6 +135,18 @@ def training_data_hash(panel: Panel) -> str:
     return hashlib.sha256(hashed.tobytes()).hexdigest()
 
 
+
+def recent_unit_costs(recent_sales: pd.DataFrame) -> pd.Series:
+    """Costo unitario por (sucursal, producto) = Σ costo / Σ unidades con costo, NaN si ninguna línea trae costo.
+
+    Las sumas se fuerzan a float: sin ningún costo informado las columnas llegan como objetos (Decimal/None) y
+    `0 / 0` entre enteros de Python lanzaba ZeroDivisionError y abortaba la ejecución (p. ej. un ERP sin costos)."""
+    if recent_sales.empty:
+        return pd.Series(dtype=float)
+    cost = recent_sales.groupby(["branch_id", "product_id"])[["cost_amount", "cost_units"]].sum().astype(float)
+    units = cost["cost_units"]
+    return cost["cost_amount"] / units.where(units > 0)
+
 def run_pipeline(
     data: TenantData,
     horizon: int = 90,
@@ -141,6 +159,7 @@ def run_pipeline(
     force_families: list[str] | None = None,
     horizons: tuple[int, ...] = hz.SUPPORTED_HORIZONS,
     config_record: dict[str, Any] | None = None,
+    quality_signals: dict[str, Any] | None = None,
 ) -> PipelineResult:
     progress = progress or _noop
     timings: dict[str, float] = {}
@@ -170,9 +189,18 @@ def run_pipeline(
     panel = build_panel(data, day_rules)
     readiness = compute_readiness(data, panel)
     limitations.extend(_day_limitations(panel.day_summary))
+    limitations.extend(factor_pipeline_limitations(data.settings, data.sector))   # W2-D: factors.enabled sin cablear ⇒ limitación explícita
     if panel.profile.empty or not panel.profile["is_active"].any():
         raise InsufficientDataError("No hay series activas con ventas para pronosticar.",
                                     {"series_total": int(len(panel.profile))})
+    # Gate de calidad de datos (W2-C · ADR-V25-05), ANTES de entrenar: BLOCK detiene la ejecución con un motivo de código estable
+    # (insufficient_data); DEGRADE deshabilita features opcionales (quality.features); WARN continúa con avisos. `quality_signals` son
+    # las señales de la base as-of (informes de ingestión, alias, desfase); sin ellas esas reglas quedan «no evaluadas», no «aprobadas».
+    dq = assess_demand(data, panel, signals=quality_signals)
+    if dq.blocked:
+        raise InsufficientDataError(dq.block_message(), dq.block_details(), assessment=dq)
+    limitations.extend(dq.limitation_items())
+    warnings.extend(dq.warning_messages())
     cutoff = panel.cutoff
     prof = panel.profile
     # Casos especiales (nuevos, descontinuados, aperturas/cierres): cada serie con su etiqueta y respaldo.
@@ -195,10 +223,14 @@ def run_pipeline(
     horizon_end = (cutoff + pd.Timedelta(days=fc_horizon)).date()
     features = FeatureBuilder(panel.df, data.branches, data.promotions, horizon_end,
                               promotion_revisions=data.promotion_revisions,
-                              promotions_known_on=data.promotions_known_on)
+                              promotions_known_on=data.promotions_known_on,
+                              disabled_features=dq.disabled_features)   # DEGRADE (W2-C): el builder omite las features que el gate deshabilitó
     # Conocimiento as-of (ADR-V25-23): si hubo documentos tardíos, anulaciones o correcciones, cada ventana entrena con lo que
     # se conocía en SU corte (panel, perfil y variables); sus promociones son las conocidas ese día (sin `promotions_known_on`).
     windows = asof_windows(data, panel, features, horizon_end, day_rules)
+    if windows is not None and features.disabled_features:   # las ventanas as-of reconstruidas aplican la MISMA política del builder
+        windows.make_features = lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
+                                                          promotion_revisions=data.promotion_revisions, **features.options())
     plan = plan_backtest(panel, max_windows)
     full_ids = eligible_ids(panel, cutoff)
     use_lgbm = 5 <= len(full_ids) <= max_series_lgbm
@@ -257,6 +289,8 @@ def run_pipeline(
             lgbm = LightGBMGlobal(seed=seed, n_jobs=n_jobs).fit(tr)
             progress("predicting", 72)
             preds.append(lgbm.predict(fc_horizon, features.future_frame(cutoff, full_ids, fc_horizon, ref)))
+        except FeatureContractError:
+            raise     # una feature sin contrato es un defecto de programación: no se disfraza de fallo de LightGBM
         except Exception as exc:  # respaldo: el pipeline sigue con el modelo de respaldo
             log.exception("LightGBM final falló")
             failed["lightgbm_global"] = f"{type(exc).__name__}: {exc}"[:300]
@@ -465,8 +499,7 @@ def run_pipeline(
         warnings.append("Sin datos de inventario: no se generan recomendaciones de abastecimiento.")
     else:
         recent_sales = data.sales[data.sales["ds"] > pd.Timestamp(cutoff) - pd.Timedelta(days=90)]
-        cost = recent_sales.groupby(["branch_id", "product_id"])[["cost_amount", "cost_units"]].sum()
-        unit_costs = (cost["cost_amount"] / cost["cost_units"]).where(cost["cost_units"] > 0)
+        unit_costs = recent_unit_costs(recent_sales)
         prod_cost = data.products.set_index("product_id")["current_cost"]
         error_model = LeadTimeErrorModel(sel_bt if not sel_bt.empty else pd.DataFrame(
             columns=["unique_id", "window", "step", "actual", "yhat", "stockout", "scale"]), cls_map)
@@ -502,6 +535,8 @@ def run_pipeline(
     quality = hz.run_quality(support)
     if failed or (quality == hz.STATUS_OK and plan is not None and not plan.has_holdout):
         quality = hz.worst(quality, hz.STATUS_DEGRADED)
+    if dq.degraded:   # W2-C: un gate DEGRADE nunca deja el resultado en «ok»
+        quality = hz.worst(quality, hz.STATUS_DEGRADED)
     assumptions = [
         f"Ingresos = unidades × {PRICE_ASSUMPTION}.",
         "Intervalos 80/95 % conformales con residuos del backtest del modelo servido; P10/P90 = límites del intervalo 80 %.",
@@ -527,6 +562,7 @@ def run_pipeline(
         config_version=config_version, coverage=data.coverage or None, horizon_support=support,
         has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info,
         day_status=panel.day_summary, knowledge=knowledge)
+    manifest["data_quality_gate"] = dq.manifest_block()   # W2-C: resultado del gate de calidad de datos (ADR-V25-05)
     summary = _summary(series_fc, forecast_values, served, evaluations, plan, readiness, recs, horizon, active, lgbm,
                        warnings, eval_served, support=support, horizons=horizons)
     summary.update({
@@ -539,7 +575,7 @@ def run_pipeline(
         "coverage": data.coverage, "limitations": limitations, "limitation_codes": [x["code"] for x in limitations],
         "assumptions": assumptions, "config_version": config_version, "data_snapshot_hash": snapshot.hash,
         "history_days": history_days, "horizon_days": horizon, "horizons_requested": list(horizons),
-        "day_status": panel.day_summary, "knowledge": knowledge,
+        "day_status": panel.day_summary, "knowledge": knowledge, "quality_gate": dq.manifest_block(),
     })
     timings["total"] = time.perf_counter() - t0
     summary["timings_seconds"] = {k: round(v, 1) for k, v in timings.items()}
@@ -551,7 +587,7 @@ def run_pipeline(
         backtest=bt, evaluation_selection=eval_served, planned_selection=selection, failed_families=failed,
         snapshot=snapshot, manifest=manifest, effective_config=effective_config, config_version=config_version,
         horizon_support=support, quality_status=quality, limitations=limitations, assumptions=assumptions,
-        lifecycle=lifecycle,
+        lifecycle=lifecycle, quality=dq,
     )
 
 
@@ -637,7 +673,7 @@ def _horizon_rows(agg_fc: pd.DataFrame, agg_bt: pd.DataFrame, final_scale: pd.Se
     """Totales del horizonte H por nodo agregado, con intervalo del TOTAL del horizonte.
 
     granularity='horizon', period_days=horizon_step=H, target_date=corte+H (último día del
-    horizonte; así los cinco horizontes no colisionan en la clave única). El intervalo es conformal
+    horizonte; así los horizontes del catálogo no colisionan en la clave única). El intervalo es conformal
     simétrico sobre el error de la suma de H días en cada ventana de backtest, normalizado por
     escala×H y agrupado por nivel (o todos los niveles si hay pocos puntos). Sin ventana de backtest
     de H días, o con el horizonte sin respaldo (`insufficient_data`), NO hay intervalo (nulo): no se

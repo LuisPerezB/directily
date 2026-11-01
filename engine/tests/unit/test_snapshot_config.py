@@ -101,7 +101,7 @@ def test_reproducibility_same_snapshot_config_and_seed_gives_same_values(small_d
 
 def test_effective_config_follows_core_profile_tenant_precedence_and_has_a_hash():
     core, v0, src0 = resolve_config("demand", {}, None)
-    assert core["horizons"] == [7, 14, 30, 60, 90] and core["min_improvement"] == 0.03
+    assert core["horizons"] == [7, 14, 15, 30, 60, 90] and core["min_improvement"] == 0.03
     assert set(src0.values()) == {"core"}
     # Configuración de la empresa: claves de la etapa 1 y sección settings.cores.demand.
     tuned, v1, src1 = resolve_config("demand", {"service_level": 0.9, "cores": {"demand": {"min_improvement": 0.05}}}, None)
@@ -115,10 +115,10 @@ def test_effective_config_follows_core_profile_tenant_precedence_and_has_a_hash(
 
 def test_pipeline_records_run_options_inside_the_effective_config(pipeline_result):
     eff = pipeline_result.effective_config
-    assert eff["config"]["horizons"] == [7, 14, 30, 60, 90]
+    assert eff["config"]["horizons"] == [7, 14, 15, 30, 60, 90]
     run = eff["run"]
     assert run["seed"] == 42 and run["min_improvement"] == 0.03 and run["horizon_days"] == 90
-    assert run["horizons"] == [7, 14, 30, 60, 90] and run["feature_set_version"].startswith("fs-")
+    assert run["horizons"] == [7, 14, 15, 30, 60, 90] and run["feature_set_version"].startswith("fs-")
     assert pipeline_result.config_version == config_hash(eff)
     # Registro de P3 (`effective_config_record`): procedencia por clave, perfil sectorial aplicado y el hash del core.
     assert eff["provenance"]["horizons"] == "core" and eff["profile"] is None

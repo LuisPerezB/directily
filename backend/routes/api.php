@@ -22,4 +22,8 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/customer.php';
     require __DIR__.'/api/supply.php';
     require __DIR__.'/api/platform.php';
+    // V2.5 · W2-F: Factor Intelligence y taxonomía (catálogo de factores, eventos, taxonomía, perfiles; concesiones desactivadas por bandera).
+    require __DIR__.'/api/intelligence.php';
+    // V2.5 · W2-B: linaje (Bronze), reconciliación e identidades (alias).
+    require __DIR__.'/api/lineage.php';
 });

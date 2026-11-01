@@ -6,6 +6,7 @@ namespace App\Services\Privacy;
 
 use App\Models\Tenant;
 use App\Models\TenantExport;
+use App\Services\Intelligence\SharedGrants\SharedForecastGrantExport;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -119,7 +120,7 @@ final class TenantDataExporter
         // Las filas públicas (tenant_id NULL: catálogo de la plataforma) no son datos de la empresa y no se exportan.
         'source_versions' => ['id', 'source_key', 'version_label', 'published_at', 'retrieved_at', 'license', 'terms_url', 'checksum', 'coverage', 'notes', 'created_at', 'updated_at'],
         'factor_definitions' => ['id', 'family', 'key', 'name', 'availability_class', 'storage', 'external_indicator_id', 'unit', 'frequency', 'geo_scope', 'source_key', 'license', 'missing_strategy', 'max_staleness_days', 'retention_days', 'sector_justification', 'schema', 'is_active', 'is_informative_alert', 'created_at', 'updated_at'],
-        'external_events' => ['id', 'family', 'event_type', 'title', 'summary', 'source_url', 'source_ref', 'authority', 'published_at', 'available_at', 'effective_from', 'effective_to', 'jurisdiction', 'corroboration', 'status', 'extracted_by', 'extraction', 'affects', 'is_informative_alert', 'source_version_id', 'verified_by', 'verified_at', 'created_at', 'updated_at'],
+        'external_events' => ['id', 'family', 'event_type', 'title', 'summary', 'source_url', 'source_ref', 'authority', 'published_at', 'available_at', 'effective_from', 'effective_to', 'jurisdiction', 'corroboration', 'status', 'extracted_by', 'proposed_by', 'extraction', 'affects', 'is_informative_alert', 'source_version_id', 'verified_by', 'verified_at', 'review_note', 'created_at', 'updated_at'],
         'taxonomy_nodes' => ['id', 'parent_id', 'level', 'code', 'name', 'version', 'valid_from', 'valid_to', 'erp_category_id', 'attributes', 'created_at', 'updated_at'],
         'product_taxonomy_assignments' => ['id', 'product_id', 'taxonomy_node_id', 'provenance', 'confidence', 'is_primary', 'proposed_by', 'verified_by', 'verified_at', 'valid_from', 'valid_to', 'created_at', 'updated_at'],
         'tenant_sector_profiles' => ['id', 'profile_key', 'priority', 'scope', 'scope_ref', 'is_active', 'created_at', 'updated_at'],
@@ -196,6 +197,8 @@ final class TenantDataExporter
                 $zip->addFile($tmp, $table.'.csv');
                 $summary[$table] = $count;
             }
+            // V2.5 · W2-F: concesiones de pronóstico compartido (sin tenant_id: pertenecen a dos empresas; cada parte exporta lo suyo).
+            $summary += app(SharedForecastGrantExport::class)->addTo($zip, $tenant->id, $tmpFiles);
             // Nombres de clientes (cifrados en reposo) en archivo separado.
             $tmp = tempnam(sys_get_temp_dir(), 'pexp');
             $tmpFiles[] = $tmp;
@@ -222,6 +225,7 @@ final class TenantDataExporter
                 'Quedan fuera los indicadores y el calendario públicos compartidos (no son de la empresa) y las rutas internas de archivos y artefactos del servidor.',
                 'Las cédulas/RUC de clientes no se almacenan en claro en Predictily; solo existe una huella irreversible.',
                 'No se incluyen credenciales de conectores, tokens de acceso ni la configuración de conexión de las fuentes de datos.',
+                'Concesiones de pronóstico compartido (shared_forecast_grants_*.csv): cada empresa recibe lo que le corresponde como emisora o receptora; nunca los usuarios, los identificadores internos ni los datos de la otra parte.',
             ]));
             $zip->addFromString('tenant.json', json_encode([
                 'uuid' => $tenant->uuid, 'name' => $tenant->name, 'legal_name' => $tenant->legal_name, 'tax_id' => $tenant->tax_id,

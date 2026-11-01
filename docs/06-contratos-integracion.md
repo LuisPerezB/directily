@@ -101,6 +101,11 @@ no tiene ninguna fila en `sales` cuando EMPIEZA la escritura (primera carga hist
 validación se muestra como proyección (`stats.ingestion_mode`, `stats.ingestion_mode_basis`); al confirmar se decide con
 las ventas existentes en ese momento y el valor resuelto queda en `import_jobs.options.ingestion_mode` (un reintento del mismo
 import conserva el modo con el que empezó). Un valor inválido, o enviarlo para otra entidad, es 422 `options.ingestion_mode`.
+`value_maps` (solo ventas, ADR-V25-24): `{document_type: {"<crudo>": "<canónico>"}, status: {...}}`, se aplican ANTES del reconocimiento de
+vocabulario (coincidencia exacta y, si no, por clave sin tildes ni mayúsculas); el destino debe ser un valor del vocabulario canónico
+(`factura`, `nota de venta`, `nota de crédito`, `otro` / `completada`, `anulada`, `pendiente`, o sus equivalentes en inglés) o es 422
+`options.value_maps.<campo>`; se registran en `metrics.transformations` y en `rules_version` del informe de calidad. Con `skip_invalid_rows`, un
+documento con hallazgos `REVIEW_REQUIRED` o `QUARANTINED` se retiene en la cuarentena (§3.14.2) en lugar de descartarse.
 
 ### 2.6 Códigos de error/advertencia de importación
 `required`, `invalid_date`, `future_date`, `invalid_number`, `negative_quantity` (warning: devolución),
@@ -121,6 +126,10 @@ error; se cuenta una vez por documento en `stats.document_number_shared_with_unk
 `dq_class` (ADR-V25-05) acompaña a los hallazgos que exigen revisión humana: `REVIEW_REQUIRED` en `unknown_document_type` y
 `unknown_document_status`, y `null` en los demás. No es una columna de `import_errors`: se deriva del código y se entrega en
 `GET /imports/{id}/errors` (`dq_class`), en `errors.csv` (columna `clase_calidad`) y en el detalle de errores de `POST /sales/batch`.
+La clase de TODOS los códigos (cinco clases: `BLOCKER`, `REVIEW_REQUIRED`, `QUARANTINED`, `WARNING`, `AUTO_FIX_SAFE`) está en el catálogo único
+`DataQualityCatalog` y en `data_quality_issues.dq_class` (`docs/data/DATA_QUALITY_ENGINE.md` §2). Códigos nuevos de W2-A: `schema_drift`,
+`date_format_ambiguous`, `documents_quarantined`, `empty_file`, `unreadable_file`, `bronze_capture_failed`, `source_columns_missing` y las normalizaciones
+agregadas `whitespace_trimmed`, `decimal_separator_normalized`, `date_format_normalized`, `code_case_normalized`.
 
 ### 2.7 Datos de demostración
 `data/demo/` contiene datasets **ficticios** generados por `engine/predictily_engine/synthetic`
@@ -244,7 +253,7 @@ Códigos: `known_at_unknown`, `known_after_start`, `scope_ref_ignored`.
 |---|---|---|
 | GET | `/sales` [T] | query `date_from, date_to, branch_id, status, document_type, page` → `[{id, document_type, document_number, status, issued_at, sale_date, branch:{id,code,name}, total, items_count}]` |
 | GET | `/sales/{id}` [T] | con `items` |
-| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
+| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, bronze_object_id, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — el cuerpo se guarda íntegro en Bronze (`api_batch`) ANTES de normalizar y cada documento escrito lleva `bronze_object_id`, `source_row` (posición en el lote) y `schema_version`; si Bronze no está disponible: 409 `bronze_unavailable` y no se procesa nada. Idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
 | GET | `/sales/summary` [T] | query `date_from, date_to, branch_id, category_id, product_id, granularity(day|week|month)` → `{data:{series:[{period, units, revenue, documents}], totals:{units, revenue, documents, returns_units}}}` (excluye anuladas) |
 
 ### 3.6 Importaciones
@@ -259,12 +268,12 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 | PUT | `/imports/{id}/mapping` [T] | `{mapping:{campo: columna|null}, options:{...}}` → 202, pasa a `validating` (Job asíncrono). Repetible para corregir (desde `awaiting_mapping`, `validated` o `failed`) |
 | GET | `/imports/{id}/errors` [T] | query `severity, page` → `[{row_number, column, error_code, severity, message, raw_value, dq_class}]` (`dq_class` = `REVIEW_REQUIRED` en `unknown_document_type` / `unknown_document_status`; `null` en los demás) |
 | GET | `/imports/{id}/errors.csv` [T] | descarga de errores |
-| POST | `/imports/{id}/confirm` [T] | 202 → `importing` (solo desde `validated`; 409 si hay errores y `skip_invalid_rows=false`) |
+| POST | `/imports/{id}/confirm` [T] | 202 → `importing` (solo desde `validated`; 409 `has_errors` si hay errores y `skip_invalid_rows=false`; 409 `blocked_by_quality` si el informe tiene un hallazgo BLOCKER, también con `skip_invalid_rows`) |
 | POST | `/imports/{id}/reject` [T] | → `rejected` |
 | GET | `/import-templates/{entity_type}` | CSV de plantilla con encabezados canónicos |
 | GET | `/import-fields/{entity_type}` | definición de campos (para el asistente): `[{key, label, required, type, description, synonyms}]` |
 
-`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load)}, quality_report:{score, issues:[{code, severity, message, count}]}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
+`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load); calidad (ADR-V25-24): documents_quarantined}, quality_report:{score, issues:[{code, severity, message, count}], summary}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
 
 ### 3.7 Fuentes de datos
 | Método | Ruta | Detalle |
@@ -279,19 +288,19 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 ### 3.8 Pronósticos y trabajos  (backend-analytics)
 | Método | Ruta | Detalle |
 |---|---|---|
-| POST | `/forecast-runs` [T] `forecast.run` | `{horizon_days?: 7|14|30|60|90 (def. el mayor que permita el plan), cutoff_date?: date (crea run histórico)}` → 202 `{data: ForecastRun}` (status queued) + `training_job` |
+| POST | `/forecast-runs` [T] `forecast.run` | `{horizon_days?: 7|14|15|30|60|90 (def. el mayor que permita el plan), cutoff_date?: date (crea run histórico)}` → 202 `{data: ForecastRun}` (status queued) + `training_job` |
 | GET | `/forecast-runs` [T] | paginado, más reciente primero |
 | GET | `/forecast-runs/{id}` [T] | `ForecastRun` |
 | GET | `/jobs/{id}` [T] | `TrainingJob = {id, job_type, status, stage, progress, attempts, error_message, queued_at, started_at, finished_at, duration_ms, result, forecast_run_id}`. `attempts` = intentos reales de ejecución: **lo cuenta solo el backend** (una vez por intento de la cola, `TrainingJobRecorder::markAttempt`); el motor nunca lo incrementa (un trabajo ejecutado una vez informa 1; con un reintento, 2) |
 | GET | `/forecasts/series` [T] | ver abajo |
-| GET | `/forecasts/products` [T] | query `run_id?, horizon(7|14|30|60|90), branch_id?, category_id?, search?, sort(change_pct|-change_pct|forecast_units|-forecast_units|revenue), page` → `[{product:{id,sku,name,category}, history_units (mismo nº de días previos), forecast_units, change_pct, trend: up|down|flat, forecast_revenue, lo_80, hi_80, model_family, case_label (etapa 2: caso especial de la serie o null), demand_class, wape (backtest de la serie si existe)}]`; respuesta con `horizon_support` (§3.8.1) |
+| GET | `/forecasts/products` [T] | query `run_id?, horizon(7|14|15|30|60|90), branch_id?, category_id?, search?, sort(change_pct|-change_pct|forecast_units|-forecast_units|revenue), page` → `[{product:{id,sku,name,category}, history_units (mismo nº de días previos), forecast_units, change_pct, trend: up|down|flat, forecast_revenue, lo_80, hi_80, model_family, case_label (etapa 2: caso especial de la serie o null), demand_class, wape (backtest de la serie si existe)}]`; respuesta con `horizon_support` (§3.8.1) |
 | GET | `/forecasts/categories` [T] | igual por categoría |
-| GET | `/dashboard/summary` [T] | query `horizon(7|14|30|60|90, def tenant.default_horizon_days), branch_id?` → ver abajo; añade `horizon_support` |
+| GET | `/dashboard/summary` [T] | query `horizon(7|14|15|30|60|90, def tenant.default_horizon_days), branch_id?` → ver abajo; añade `horizon_support` |
 
 `ForecastRun = {id, version, run_type, status, triggered_by, horizon_days, cutoff_date, data_from, data_to, feature_set_version, is_current, selection, summary, error_message, started_at, completed_at, created_at, training_job:{...}, config_version, data_snapshot_id, effective_config, evaluation_manifest (solo en GET /forecast-runs/{id}), envelope}` — los seis últimos son **aditivos** (etapa 2 · P1).
 
 `GET /forecasts/series` query: `run_id?` (def. vigente), `branch_id?`, `category_id?`, `product_id?`,
-`granularity` (day|week|month, def. day), `horizon` (7|14|30|60|90), `history_days` (def. 90; máx 730).
+`granularity` (day|week|month, def. day), `horizon` (7|14|15|30|60|90), `history_days` (def. 90; máx 730).
 Selección de nodo: sin filtros→`total`; branch→`branch:{b}`; category→`category:{c}`;
 branch+category→`branch_category:{b}:{c}`; product→`product:{p}`; product+branch→`series:{b}:{p}`.
 Respuesta:
@@ -332,7 +341,7 @@ Si no hay pronóstico vigente: `run:null`, KPIs de pronóstico `null` y `data_st
 
 #### 3.8.1 Etapa 2 · P1 Demanda: respaldo por horizonte y envoltura
 
-- **`horizon_support`** (series, productos, categorías y dashboard): `{horizon, status, reasons[{code,message}], history_days,
+- **`horizon_support`** (series, productos, categorías y dashboard): `{horizon, status, reasons[{code, reason_code, message}], history_days,
   required_history_days, backtest_horizon_days, independent_holdout, evaluated_obs}`. `status`: `ok` · `degraded` (sin período final
   independiente) · `insufficient_data` (historia < 2×H o backtest sin ventanas de H días: el número existe pero **no debe presentarse como
   completo**) · `not_computed` (H mayor que el horizonte de la ejecución) · `unknown` (ejecución anterior a la etapa 2).
@@ -386,7 +395,7 @@ Semántica (validación 2026-10-28, F1–F3):
 | GET/POST | `/scenarios` [T] | guardar/listar escenarios `{name, horizon_days, filters, assumptions}` |
 | GET/DELETE | `/scenarios/{id}` [T] | |
 
-Petición: `{horizon_days: 7|30|90, filters:{branch_id?, category_id?, product_id?}, assumptions:{price_change_pct: -0.5..1.0, discount_pct: 0..0.9, cost_change_pct: -0.5..1.0, demand_change_pct: -0.9..2.0, lead_time_days?: 1..180, purchase_budget?: number, macro_note?: string}}`.
+Petición: `{horizon_days: 7|14|15|30|60|90, filters:{branch_id?, category_id?, product_id?}, assumptions:{price_change_pct: -0.5..1.0, discount_pct: 0..0.9, cost_change_pct: -0.5..1.0, demand_change_pct: -0.9..2.0, lead_time_days?: 1..180, purchase_budget?: number, macro_note?: string}}`.
 Respuesta:
 ```json
 {"data":{
@@ -422,13 +431,16 @@ conocido × (1+cost_change_pct). Si falta costo para productos, se informa `cost
 | GET/POST | `/data-sources/{id}/mappings`, GET `/{mapping}` [T] `datasources.manage` | consultas autorizadas: `{entity, query, field_map, options}`; cada cambio crea una versión **sin aprobar**. 422 `sql_query_rejected` (`reason`) si no es un único SELECT de solo lectura |
 | POST | `/data-sources/{id}/mappings/{mapping}/preview`, `/approve`, `/deactivate` [T] `datasources.manage` | vista previa de campos canónicos (sin importar); aprobar activa la versión; solo la aprobada sincroniza |
 | POST | `/data-sources/{id}/sync` [T] `datasources.manage` | `{entity, mode: full|incremental, ingestion_mode?: backfill\|incremental}` → 202 `SourceSync`; 409 `mapping_not_approved` / `sync_in_progress`. Job `SyncDataSource` (cola `imports`). `ingestion_mode` (solo `sales`; 422 para otra entidad): solicitud > `source_mappings.options.ingestion_mode` > regla (la primera sincronización de la fuente que trajo datos es `backfill`; las siguientes, `incremental`; una completada con 0 filas no cuenta) |
-| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, stats, error_message, started_at, finished_at}`. `watermark` = mínimo entre el máximo `source_recorded_at` LEGIBLE extraído y el inicio de la sincronización: una fecha futura o ilegible no la adelanta y se cuenta en `stats.future_recorded_at` (con `stats.recorded_at_unreadable` como parte ilegible). En ventas, `stats.ingestion_mode` e `ingestion_mode_basis` (`declared\|first_sync\|subsequent_sync`). Una marca guardada en el futuro se acota también al leerla |
+| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, bronze_object_id, stats, error_message, started_at, finished_at}` (`bronze_object_id` = la extracción CRUDA guardada en Bronze antes de normalizar; `stats` incluye `transformations` y `schema`). `watermark` = mínimo entre el máximo `source_recorded_at` LEGIBLE extraído y el inicio de la sincronización: una fecha futura o ilegible no la adelanta y se cuenta en `stats.future_recorded_at` (con `stats.recorded_at_unreadable` como parte ilegible). En ventas, `stats.ingestion_mode` e `ingestion_mode_basis` (`declared\|first_sync\|subsequent_sync`). Una marca guardada en el futuro se acota también al leerla |
 | GET | `/data-coverage` [T] | `{data:[{id, entity, data_source_id, branch_id, complete_from, complete_through, basis: declared|inferred, last_ingested_at, notes}], effective:{entidad:{complete_from, complete_through, rule: declared_by_user|min_over_sources|none, basis}}}` |
 | PUT | `/data-coverage` [T] `imports.manage` | `{entity, complete_from?, complete_through*, data_source_id?, branch_id?, notes?}`; `complete_through` no puede ser futura |
 | GET | `/data-coverage/gaps` [T] `data.view` | huecos INTERNOS de cobertura (ADR-V25-23): query `entity, data_source_id, branch_id, basis, from, to` (huecos que se solapan con el rango), `per_page` → `{data:[{id, entity, data_source_id, branch_id, gap_from, gap_to, days, reason, basis, notes, created_by, created_at}], meta}`. Sus días son `missing_source`, nunca ceros; pueden solaparse (el consumidor toma la unión) |
 | POST | `/data-coverage/gaps` [T] `imports.manage` | `{entity*, gap_from*, gap_to*, data_source_id?, branch_id?, reason?, notes?}` → 201. `entity` ∈ `sales, inventory, purchases, costs, promotions, customers, commitments`; `gap_to` ≥ `gap_from` (ambos incluidos, máx. 3660 días); `data_source_id` y `branch_id` de la MISMA empresa y no dados de baja (422); `reason` ∈ `integration_outage, source_missing, migration, unknown` (defecto `unknown`); `basis` siempre `declared` (enviar `inferred` es 422). Auditoría `data_coverage.gap_declared` |
 | DELETE | `/data-coverage/gaps/{id}` [T] `imports.manage` | 204; un hueco de otra empresa responde 404. Auditoría `data_coverage.gap_deleted` |
 | GET | `/data-quality/extended` [T] | reporte ampliado: `temporal_coverage, sales_days, customer_identity, product_code_changes, price_history, units`; `?persist=1` lo guarda (`data_quality_reports`, scope `data_core`) |
+| GET | `/data-quality/quarantine`, `/data-quality/quarantine/{id}` [T] `data.view` | cuarentena de ingestión (ADR-V25-24): documentos retenidos con hallazgos REVIEW_REQUIRED / QUARANTINED; query `entity, status (pending\|released\|discarded\|superseded), import_job_id, source_sync_id, per_page` → `{data:[{id, entity, record_key, status, issue_codes, rows, import_job_id, source_sync_id, bronze_object_id, resolution, created_at, resolved_by, resolved_at}], meta}`; el detalle agrega `payload` (mínimo, sin nombres de clientes) y `findings`. Otra empresa: 404 |
+| POST | `/data-quality/quarantine/{id}/release` [T] `imports.manage` | `{value_maps?, force?}` revalida con los mapeos de valores vigentes y, si es válido, escribe con `SalesDocumentWriter` en modo `incremental` enlazado a Bronze → 200 `{data:{…, write:{state, documents, states, value_maps_added}}}`; si no, **422 `quarantine_still_invalid`** con `findings:[{source_row, code, dq_class, field, message}]`; 409 `invalid_state` si ya se resolvió o fue **superado** (`status = superseded`: una carga posterior dejó el documento bien); **409 `newer_version_exists`** (`context.current_versions`) si el documento ya está en Silver con otro contenido, escrito DESPUÉS de la cuarentena y sin orden de fuente: se descarta o se libera con `force=true` (auditado, `write.forced`) |
+| POST | `/data-quality/quarantine/{id}/discard` [T] `imports.manage` | `{reason*}` (3–500 caracteres) → 200; no escribe en Silver; auditoría `quarantine.discarded` |
 | GET | `/calendar-events` [T] | query `from, to, scope, category, status, include_public, as_of, limit`; con `as_of` solo revisiones con `known_at` ≤ corte (las de `known_at` desconocido no se devuelven) |
 | POST/PATCH/DELETE | `/calendar-events[/{id}]` [T] `catalog.manage` | alta/edición (nueva **revisión**) / cancelación; solo eventos propios (el calendario público es de solo lectura). Pasan por el importador |
 | GET | `/commitments`, `/commitments/{id}` [T] | filtros `type, status, customer_id, product_id, from, to`; `as_of` reconstruye el estado conocido al corte (`status_at_cutoff`, `pending_total`, `flags`, `known_at` efectivo = `COALESCE(known_at, ingestión)`, `known_basis: declared|ingestion`, `ingested_at`). **`as_of` de solo fecha (AAAA-MM-DD) = fin de ese día en la zona horaria de la empresa** (igual que el motor), no las 00:00 UTC: lo importado hoy sin `known_at` aparece con `as_of` = hoy (fecha local) y no con ayer; con hora explícita manda ese instante (sin zona, la de la empresa). `meta` informa `as_of` (instante efectivo), `timezone` y `as_of_basis` (`end_of_day_company_timezone`\|`instant`) |
@@ -475,19 +487,40 @@ Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calend
 | IMPLEMENTADO / VERIFICADO | Marca de agua acotada (futura, ilegible, marca previa envenenada) | `SqlSyncTemporalContractTest::test_a_future_recorded_at_does_not_advance_the_watermark_and_is_reported`, `::test_unreadable_recorded_at_is_an_anomaly_and_falls_back_to_the_sync_start`, `::test_a_poisoned_previous_watermark_is_bounded_when_it_is_read` |
 | IMPLEMENTADO / VERIFICADO | Huecos de cobertura: CRUD, lista blanca, rango, fuente/sucursal de la misma empresa, habilidades y aislamiento | `CoverageGapsApiTest` (8 pruebas) |
 | IMPLEMENTADO / VERIFICADO | OpenAPI al día con las rutas reales | `OpenApiRoutesTest`; `python infra/scripts/merge_openapi.py --check --strict` |
-| DISEÑADO / NO IMPLEMENTADO | Alerta tras N sincronizaciones consecutivas con 0 filas; mapeo `value_maps` de tipo/estado en archivos; cuarentena `quarantine_records` | ADR-V25-24 / paquete S01 (Data Quality Engine) |
+| IMPLEMENTADO / VERIFICADO | `value_maps` de tipo y estado en archivos y en la sincronización SQL; cuarentena `quarantine_records` (retener, listar, liberar, descartar) | `ValueMapsTest`, `QuarantineFlowTest`, `SqlIngestionQualityTest` (ver §3.14.2) |
+| DISEÑADO / NO IMPLEMENTADO | Alerta tras N sincronizaciones consecutivas con 0 filas | ADR-V25-24 / paquete S01 (Data Quality Engine) |
 | BLOQUEADO | Sincronización de MySQL y SQL Server con el contrato temporal | No hay servidor de pruebas en el entorno: solo PostgreSQL (`tested_with_test_database`); la lógica es independiente del conector |
 | NO APLICA | `ingestion_mode` en productos, inventario y demás entidades | Solo las ventas son documentos versionados; enviarlo para otra entidad es 422 |
 
+#### 3.14.2 Calidad de ingestión, Bronze, linaje y cuarentena (V2.5 · W2-A, ADR-V25-05 y ADR-V25-24) — resumen para integradores
+
+- **Bronze antes de normalizar**: el archivo subido (`file_upload`), la extracción SQL (NDJSON comprimido, `sql_extract`, solo las columnas del mapeo aprobado) y el
+  cuerpo de `POST /sales/batch` (`api_batch`) se guardan íntegros en `bronze_objects` antes de normalizar. Si el almacén falla la carga se detiene
+  (hallazgo BLOCKER `bronze_capture_failed`): importación `failed`, sincronización `failed`, lote 409 `bronze_unavailable`.
+- **Linaje Silver**: `sales.bronze_object_id`, `sales.source_row` (primera fila del documento en el origen; en lotes, posición del documento) y
+  `sales.schema_version` (`CanonicalContracts::version('sales')`); lo mismo en `sales_document_revisions` (cada revisión conserva el linaje de SU
+  versión) e `inventory_snapshots`.
+- **Informe de calidad ampliado** (importación, sincronización y lote): `data_quality_reports.{dataset, issue_counts, rules_version, metrics}` más un hallazgo por fila en
+  `data_quality_issues` (tope configurable por informe, 2000 por defecto, con la marca `truncated`); `summary` e `issues` no cambian.
+- **Cuarentena**: con `skip_invalid_rows=true` un documento de ventas con hallazgos REVIEW_REQUIRED o QUARANTINED se retiene (no se descarta) y se libera tras agregar un
+  mapeo de valores; sin `skip_invalid_rows` la confirmación se bloquea (`has_errors`). Un BLOCKER bloquea siempre (`blocked_by_quality`).
+- **Deriva de esquema**: la huella de encabezados (en SQL, con tipos) por fuente y entidad cambia ⇒ sube `schema_version` y el informe registra el WARNING `schema_drift`
+  con las columnas agregadas y quitadas (sin valores). `data_sources.schema_fingerprint` / `schema_version` reflejan la huella combinada y la versión de la fuente.
+- **Reconciliación por carga**: al confirmar una importación o terminar una sincronización se crea un `reconciliation_reports` (`scope import|sync`) con las capas
+  fuente → Bronze → Silver y las discrepancias explicadas (`docs/data/LINEAGE_AND_RECONCILIATION.md` §13).
+- **Reprocesamiento**: `php artisan predictily:bronze-reprocess {id} [--force]` re-ejecuta de forma determinista un objeto Bronze de ventas; idempotente (la segunda vez, `unchanged`).
+  Si el original es viejo, no trae `source_recorded_at` y revertiría documentos escritos después de él, se detiene con un aviso (409 `reprocess_would_overwrite_newer` en el
+  servicio) y `--force` lo confirma. Su informe de calidad lleva `dataset = «<entidad>_reprocess»` para que los gates no cuenten dos veces las mismas filas.
+
 ### 3.15 Customer Core · comportamiento de compra (etapa 2 · P2) — detalle en `docs/architecture/v2/P2-comportamiento.md`
-Todas bajo `/api/v1/customer`, [T], `auth:sanctum`. Lectura `forecast.view`; entrenar/predecir `forecast.run`. Horizontes: plan ∩ {7, 30, 90} (un horizonte fuera del plan: **402**
+Todas bajo `/api/v1/customer`, [T], `auth:sanctum`. Lectura `forecast.view`; entrenar/predecir `forecast.run`. Horizontes: plan ∩ {7, 14, 15, 30, 90} (subconjunto de Customer del catálogo único; sin 60; un plan sin `features.customer` —Starter— responde **402** `features.customer` en todo el módulo; un horizonte fuera del plan: **402**
 `plan_limit_exceeded`). Toda respuesta de resultados lleva `envelope` (ADR-V2-03): `{tenant_id, run_id, core:'customer', run_version, status, as_of, horizon_start, horizon_end,
 target_definition, entity_keys, unit:'product_unit', currency, result_type, model_version, data_snapshot_id, config_version, assumptions[], limitations[], quality_status:
 ok|degraded|insufficient_data, uncertainty_source:'empirical_holdout'}`. Sin corrida completada: 200 con `data` vacío y `envelope.quality_status = insufficient_data` (abstención explícita).
 
 | Método | Ruta | Detalle |
 |---|---|---|
-| POST | `/customer/runs` `forecast.run` | `{operation: train|predict, horizons?: [7,30,90], as_of?: AAAA-MM-DD}` → **202** `CustomerRun`. `train`: entrena y evalúa (`as_of` = corte retroactivo anterior a hoy ⇒ `run_type = historical`, no se promueve). `predict`: recalcula variables a la fecha con los modelos en producción (`as_of` por defecto hoy; anterior a hoy ⇒ `historical`). **Solo una corrida `production` puede ser vigente (`is_current`) por operación; una `historical` nunca cambia `is_current` de otra ni se vuelve vigente, y las lecturas sin `run_id` (`/customer/predictions`, `/customer/evaluation`, perfil, conciliación) nunca sirven una retroactiva** (solo con `run_id` explícito). La misma regla vale para plan de abastecimiento, pronóstico de costos y demanda. Crea `core_runs` (core `customer`) + `training_jobs` (`job_type = customer_train|customer_predict`) y despacha `RunCustomerTraining`/`RunCustomerPrediction` a la cola `forecasting`. 409 `customer_run_in_progress` (una activa por operación); 402 plan; 422 validación; 429 |
+| POST | `/customer/runs` `forecast.run` | `{operation: train|predict, horizons?: [7,14,15,30,90], as_of?: AAAA-MM-DD}` → **202** `CustomerRun`. `train`: entrena y evalúa (`as_of` = corte retroactivo anterior a hoy ⇒ `run_type = historical`, no se promueve). `predict`: recalcula variables a la fecha con los modelos en producción (`as_of` por defecto hoy; anterior a hoy ⇒ `historical`). **Solo una corrida `production` puede ser vigente (`is_current`) por operación; una `historical` nunca cambia `is_current` de otra ni se vuelve vigente, y las lecturas sin `run_id` (`/customer/predictions`, `/customer/evaluation`, perfil, conciliación) nunca sirven una retroactiva** (solo con `run_id` explícito). La misma regla vale para plan de abastecimiento, pronóstico de costos y demanda. Crea `core_runs` (core `customer`) + `training_jobs` (`job_type = customer_train|customer_predict`) y despacha `RunCustomerTraining`/`RunCustomerPrediction` a la cola `forecasting`. 409 `customer_run_in_progress` (una activa por operación); 402 plan; 422 validación; 429 |
 | GET | `/customer/runs?operation&status`, `/customer/runs/{id}` | `CustomerRun = {id, operation, version, run_type: production|historical, status: queued|running|completed|failed, quality_status, result_type, triggered_by, as_of, horizons, is_current, config_version, data_snapshot_id, model_versions, summary, assumptions[], limitations[], error_message, started_at, completed_at, created_at, envelope, training_job}`. Pagina; otra empresa ⇒ 404 |
 | GET | `/customer/predictions?horizon&customer_id&product_id&min_probability&order_by=probability|expected_quantity|expected_amount|quantity_if_purchase&direction&run_id&per_page&page` | corrida de predicción vigente (o `run_id`). Fila: `{customer:{id,code}, product:{id,sku,name,unit}, horizon_days, as_of, purchase_probability, calibration_status: calibrated|degraded|uncalibrated, probability_coherence_adjusted, quantity_if_purchase, quantity_interval:{lo,hi,level:0.8,method}, expected_quantity, committed_quantity, incremental_quantity, total_view_quantity, expected_amount:{value,currency,assumed_unit_price,basis}, median_interval_days, days_since_last_purchase, n_purchases, model:{family,role: primary|fallback}, quality_flags[]}` + `envelope` + `ranking_source` (fuente del ranking del horizonte) + `definitions`. 422 `horizon_not_available` (la corrida se abstuvo de ese horizonte); `customer_id`/`product_id` de otra empresa ⇒ 422 |
 | GET | `/customer/customers/{id}/profile?horizon` | `{customer, status: predicted|no_individual_prediction|no_candidate_relations|no_prediction_run, fallback, as_of, activity:{last_purchase_date, days_since_last_purchase, n_purchase_days, purchase_frequency_per_30d, median_interval_days, mean_interval_days, inactivity:{status: active|at_risk|inactive_by_pattern|insufficient_history, risk, interval_p75_days, interval_p90_days, n_intervals, definition}, behavior_change:{status: increase|decrease|stable|insufficient_history, frequency_ratio, p_value, spend_ratio}}, rankings:{"7":[{rank, ranking_source, ranking_score, product, purchase_probability, expected_quantity, expected_amount}], …}, ranking_sources:{"7":"popularity", …}, ranking_source_note}`. `ranking_source` ∈ `model|popularity|recency`: fuente decidida en el holdout (regla `cust-ranking-v1`, ADR-P2-01; popularidad por defecto). Genérico o sin historial ⇒ `no_individual_prediction` + `fallback` (residual de la reconciliación). 404 si no es de la empresa |
@@ -536,13 +569,13 @@ solo en las tablas que le pertenecen (ver migración `2026_01_01_000700`). Larav
 | POST | `/v1/forecast-runs/{run_id}/execute` | ejecuta el pipeline completo (síncrono; el Job de Laravel espera con timeout `ENGINE_TIMEOUT`) |
 | POST | `/v1/tenants/{tenant_id}/readiness` | perfila series y calidad para pronóstico (rápido) |
 | POST | `/v1/tenants/{tenant_id}/evaluate-actuals` | compara pronósticos pasados con ventas reales, detecta drift |
-| GET | `/v1/capabilities` | modelos disponibles, versión del feature set, horizontes (7/14/30/60/90), cuantiles (P10=`lo_80`, P90=`hi_80`, P50 solo si se evaluó), métricas y estados de modelo |
+| GET | `/v1/capabilities` | modelos disponibles, versión del feature set, horizontes (catálogo 7/14/15/30/60/90; `horizon_catalog`), cuantiles (P10=`lo_80`, P90=`hi_80`, P50 solo si se evaluó), métricas y estados de modelo |
 
 ### 4.1 `POST /v1/forecast-runs/{run_id}/execute`
 Petición:
 ```json
 {"tenant_id": 3, "training_job_id": 41,
- "horizons": [7, 14, 30, 60, 90],
+ "horizons": [7, 14, 15, 30, 60, 90],
  "cutoff_date": null,
  "options": {"force_models": null, "max_backtest_windows": 3, "seed": 42}}
 ```
@@ -559,7 +592,7 @@ Comportamiento:
 6. Entrena el modelo final (si falla el ganador sirve el respaldo y todo lo demás se calcula para el
    modelo servido), pronostica `max(horizons)` días, calcula intervalos 80/95, reconcilia (bottom-up) y
    escribe `forecast_values` para niveles `series, product, category, branch, branch_category, total` en
-   granularidad `day` (y `week`/`month` para niveles agregados) y `horizon` (totales de 7/14/30/60/90 días
+   granularidad `day` (y `week`/`month` para niveles agregados) y `horizon` (totales de 7/14/15/30/60/90 días
    solicitados). Cada fila lleva `quality_status` (respaldo del horizonte) y, en series, `case_label` y
    `p50` (solo si se publicó). Horizontes sin respaldo: filas sin intervalo y `insufficient_data`.
 7. Escribe `model_registry`, `model_evaluations`, `recommendations` y `alerts`
@@ -573,7 +606,7 @@ Comportamiento:
    `result`. Escribe además `config_version`, `effective_config`, `data_snapshot_id` (tabla `data_snapshots`)
    y `evaluation_manifest`.
 
-Etapa 2 · P1 (resumen; detalle en `docs/architecture/v2/P1-demanda.md`): `horizons` ⊂ {7,14,30,60,90}
+Etapa 2 · P1 (resumen; detalle en `docs/architecture/v2/P1-demanda.md`): `horizons` ⊂ {7,14,15,30,60,90}
 (otro valor ⇒ 422 de validación); antes de cargar, el motor resuelve la configuración efectiva
 (`demand`: core → perfil sectorial → `tenants.settings.cores.demand`; clave desconocida ⇒ 422
 `invalid_configuration`, run `failed`) y la cobertura de ventas (`data_coverage`): el corte no supera el
@@ -589,7 +622,7 @@ Respuesta 200:
  "metrics": {"selected_wape": 0.23, "baseline_wape": 0.31},
  "warnings": ["12 series con historia escasa o menos de 28 días usan respaldo etiquetado"],
  "duration_ms": 48211, "quality_status": "ok",
- "horizon_support": {"7": "ok", "14": "ok", "30": "ok", "60": "ok", "90": "ok"}}
+ "horizon_support": {"7": "ok", "14": "ok", "15": "ok", "30": "ok", "60": "ok", "90": "ok"}}
 ```
 Errores: 404 run/tenant no coinciden · 409 run en ejecución por otro proceso · 422 configuración
 inválida (`{"code":"invalid_configuration"}`) · 422 datos insuficientes (`{"code":"insufficient_data", "message": "...", "details": {...}}`; el motor

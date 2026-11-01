@@ -42,10 +42,12 @@ from predictily_engine.customer.train import HorizonResult, evaluate_coherence, 
 from predictily_engine.db.customer_repository import CustomerRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import ProgressReporter, jdump, none_if_nan
-from predictily_engine.pipeline.errors import ConflictError, NotFoundError
+from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
 from predictily_engine.platform.artifacts import SavedArtifact, deserialize, save_signed_artifact, tenant_of_stored_path, verify_stored_artifact
 from predictily_engine.platform.config import resolve_config
 from predictily_engine.platform.snapshot import DataSnapshot, persist_snapshot
+from predictily_engine.quality.persistence import insert_run_quality_report
+from predictily_engine.quality.service import customer_gate, resolve_policy
 
 log = logging.getLogger(__name__)
 LIBRARIES = ["scikit-learn", "lightgbm", "numpy", "pandas", "scipy", "joblib"]
@@ -142,6 +144,7 @@ def execute_customer_run(run_id: int, req: CustomerExecuteRequest) -> dict[str, 
             run = repo.core_run(run_id)
             tenant = repo.tenant()
         cfg, cfg_version, provenance = resolve_config("customer", tenant["settings"], tenant.get("sector"))
+        resolve_policy(tenant)      # W2-C: una configuración `quality_gates` inválida se rechaza (422) antes de cargar datos
         op = run["operation"]
         if op == "train":
             result = _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0)
@@ -150,6 +153,9 @@ def execute_customer_run(run_id: int, req: CustomerExecuteRequest) -> dict[str, 
         else:
             raise ValueError(f"Operación no soportada por el Customer Core: {op}")
         return result
+    except InvalidConfigurationError as exc:
+        mark_run_failed(engine, tenant_id, run_id, job_id, str(exc), int((time.perf_counter() - t0) * 1000))
+        raise
     except Exception as exc:
         log.exception("Fallo del Customer Core run=%s tenant=%s", run_id, tenant_id)
         mark_run_failed(engine, tenant_id, run_id, job_id, f"Error interno del motor ({type(exc).__name__}): {exc}",
@@ -292,7 +298,7 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     tenant_id, run_id = int(tenant["id"]), int(run["id"])
     horizons = sorted({int(h) for h in (run.get("horizons") or cfg["horizons"]) if int(h) in SUPPORTED_HORIZONS and int(h) in cfg["horizons"]})
     if not horizons:
-        raise ValueError("Ninguno de los horizontes solicitados es válido para el Customer Core (7, 30, 90).")
+        raise ValueError("Ninguno de los horizontes solicitados es válido para el Customer Core (" + ", ".join(str(h) for h in SUPPORTED_HORIZONS) + ").")
     seed = int((run.get("options") or {}).get("seed", cfg["seed"]))
     as_of_req = _as_date(run.get("as_of"))
     progress("loading_data", 3)
@@ -301,6 +307,8 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
         repo.base.analytic_reads()
         # Sin fecha histórica pedida la ejecución es vigente aunque la cobertura limite el corte (None = inferir de la fecha pedida).
         data = load_customer_data(repo, cfg, through=as_of_req, cap_to_complete=True, live=True if as_of_req is None else None)
+        # Gate de calidad (W2-C · ADR-V25-05) ANTES de entrenar: BLOCK o DEGRADE a agregado ⇒ no se entrena a nivel comprador.
+        qa = customer_gate(conn, tenant, cfg, data)
     load_s = time.perf_counter() - t0
     last_complete = data.last_complete_day()
     results: dict[int, HorizonResult] = {}
@@ -309,8 +317,11 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     coherence: dict[str, Any] = {"evaluated": False}
     if data.purchases is None or len(data.purchases) == 0 or last_complete is None:
         for h in horizons:
-            results[h] = HorizonResult(horizon=h, status="abstained",
+            results[h] = HorizonResult(horizon=h, status="abstained", reason_code="no_identified_buyers",
                                        reason="La empresa no tiene compras válidas de compradores identificados.")
+    elif qa.stops_individual_customer:
+        for h in horizons:
+            results[h] = HorizonResult(horizon=h, status="abstained", reason_code=qa.individual_stop_code, reason=qa.individual_stop_message())
     else:
         fb = FeatureBuilder(data, cfg, max_horizon=max(horizons), last_day=int(to_day(last_complete)))
         progress("building_dataset", 5)
@@ -339,7 +350,10 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     manifest = _manifest(results, bundle, data, cfg, coherence, last_complete)
     duration_ms = int((time.perf_counter() - t0) * 1000)
     quality = _train_quality(results, horizons)
+    if qa.degraded and qa.stops_individual_customer:
+        quality = "degraded"      # W2-C: DEGRADE a agregado (sin recomendaciones individuales); BLOCK sigue siendo insufficient_data
     limitations = list(BASE_LIMITATIONS)
+    limitations.extend(qa.limitation_strings())
     for h, r in results.items():
         if r.status == "abstained":
             limitations.append(f"H={h}: abstención — {r.reason}")
@@ -359,6 +373,9 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
         model_versions, promoted = _persist_models(conn, tenant, run, job_id, results, cfg, snapshot_id, seed, last_complete, data)
         _persist_evaluations(conn, tenant_id, run_id, results, coherence, activity_eval, model_versions)
         summary = _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_s, promoted)
+        gate_report_id = insert_run_quality_report(conn, tenant_id, qa, core_run_id=run_id)   # W2-C: métricas y gate de la ejecución
+        summary["quality_gate"] = qa.manifest_block(gate_report_id)
+        manifest["data_quality_gate"] = qa.manifest_block(gate_report_id)
         # Solo una corrida `production` puede ser vigente (y releva a la anterior); una `historical` no toca `is_current`.
         production_run = run.get("run_type", "production") == "production"
         if production_run:
@@ -389,6 +406,32 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     return _response(final, duration_ms)
 
 
+def _predict_horizon_support(requested: list[int], out: PredictionOutput | None, abstained: dict[int, dict[str, str]],
+                             stale: bool) -> dict[str, Any]:
+    """Estado por horizonte pedido (misma forma que el respaldo de demanda): `ok` | `degraded` | `insufficient_data` con sus
+    motivos. Un horizonte sin modelo utilizable (o sin compras identificadas) NO tiene filas: se abstiene, nunca se inventa."""
+    served = set(out.horizons) if out is not None else set()
+    support: dict[str, Any] = {}
+    for h in requested:
+        if h in served:
+            reasons: list[dict[str, str]] = []
+            if out.served[h]["role"] == "fallback":
+                reasons.append({"code": "fallback_reference", "reason_code": "fallback_reference",
+                                "message": f"Se sirve la referencia frecuencia/recencia a {h} días (el modelo complejo no superó la regla de promoción)."})
+            if out.served[h]["calibration_status"] != "calibrated":
+                reasons.append({"code": "calibration_not_calibrated", "reason_code": "calibration_not_calibrated",
+                                "message": f"Calibración en estado «{out.served[h]['calibration_status']}» en el holdout."})
+            if stale:
+                reasons.append({"code": "stale_data", "reason_code": "stale_data", "message": "Los datos de ventas no están completos hasta la fecha pedida."})
+            support[str(h)] = {"horizon": h, "status": "degraded" if reasons else "ok", "reasons": reasons}
+        else:
+            why = abstained.get(h) or {"reason_code": "no_identified_buyers",
+                                       "message": "La empresa no tiene compras válidas de compradores identificados: abstención."}
+            support[str(h)] = {"horizon": h, "status": "insufficient_data",
+                               "reasons": [{"code": why["reason_code"], "reason_code": why["reason_code"], "message": why["message"]}]}
+    return support
+
+
 def _train_quality(results: dict[int, HorizonResult], horizons: list[int]) -> str:
     ok = [r for r in results.values() if r.status in ("trained", "reference_only")]
     if not ok:
@@ -411,7 +454,8 @@ def _manifest(results: dict[int, HorizonResult], bundle, data: CustomerData, cfg
         "cutoff_step_days_effective": bundle.effective_step if bundle else None,
         "cutoffs": bundle.meta if bundle else None,
         "dataset_label_counts": {str(h): r.manifest.get("label_counts") for h, r in results.items()},
-        "horizons": {str(h): {"status": r.status, "reason": r.reason, **{k: v for k, v in r.manifest.items() if k != "label_counts"}}
+        "horizons": {str(h): {"status": r.status, "reason": r.reason, "reason_code": r.reason_code,
+                              **{k: v for k, v in r.manifest.items() if k != "label_counts"}}
                      for h, r in results.items()},
         "coherence": coherence,
         "promotion_rule_version": cfg["promotion_rule_version"],
@@ -423,7 +467,7 @@ def _manifest(results: dict[int, HorizonResult], bundle, data: CustomerData, cfg
 def _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_s, promoted) -> dict[str, Any]:
     horizons: dict[str, Any] = {}
     for h, r in results.items():
-        item: dict[str, Any] = {"status": r.status, "reason": r.reason, "tier": r.manifest.get("tier"),
+        item: dict[str, Any] = {"status": r.status, "reason": r.reason, "reason_code": r.reason_code, "tier": r.manifest.get("tier"),
                                 "duration_s": round(r.duration_s, 1)}
         if r.prob:
             sv, ref = r.prob["served"], r.prob["reference"]
@@ -662,6 +706,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         references.setdefault(hp_.get("slot", ""), row)
     model_versions: dict[str, Any] = {}
     rejected: list[str] = []
+    abstained: dict[int, dict[str, str]] = {}       # horizonte → {reason_code, message}: estado insufficient_data (ADR-V25-02)
     slots: dict[str, dict[str, Any]] = {}
     for row in prod.to_dict("records"):
         hp = row["hyperparameters"]
@@ -671,6 +716,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         rp, rq = slots.get(_slot(h, "probability")), slots.get(_slot(h, "quantity"))
         if rp is None or rq is None:
             rejected.append(f"H={h}: no hay modelo en producción (ejecute el entrenamiento); abstención.")
+            abstained[h] = {"reason_code": "no_model", "message": f"No hay modelo en producción para {h} días: entrene primero."}
             continue
         ap, why_p = load_artifact(rp, tenant_id)
         aq, why_q = load_artifact(rq, tenant_id)
@@ -688,6 +734,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
                 rejected.append(f"H={h}: el artefacto de cantidad en producción falló ({why_q}); se sirve la referencia validada (respaldo).")
         if ap is None or aq is None:
             rejected.append(f"H={h}: artefacto no utilizable ({why_p or why_q}); abstención.")
+            abstained[h] = {"reason_code": "model_unusable", "message": f"El artefacto del modelo de {h} días no es utilizable ({why_p or why_q})."}
             continue
         artifacts[h] = {"prob": ap, "qty": aq}
         model_versions[str(h)] = {"probability": rp["version"], "quantity": rq["version"], "probability_id": int(rp["id"]),
@@ -698,6 +745,13 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         repo = CustomerRepository(conn, tenant_id)
         repo.base.analytic_reads()
         data = load_customer_data(repo, cfg, through=as_of_req, live=True if run.get("as_of") is None else None)
+        # Gate de calidad (W2-C · ADR-V25-05) ANTES de inferir: BLOCK o DEGRADE a agregado ⇒ no se predice a nivel comprador.
+        qa = customer_gate(conn, tenant, cfg, data)
+        if qa.stops_individual_customer:
+            artifacts.clear()
+            model_versions.clear()
+            for h in requested:
+                abstained[h] = {"reason_code": qa.individual_stop_code, "message": qa.individual_stop_message()}
         coverage_declared = data.coverage is not None and len(data.coverage) > 0
         complete = data.last_complete_day() if coverage_declared else None
         commit_rev = repo.commitment_revisions() if artifacts else pd.DataFrame()
@@ -767,6 +821,9 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
             quality = "insufficient_data"
     elif artifacts:
         limitations.append("La empresa no tiene compras válidas de compradores identificados: abstención.")
+    limitations.extend(qa.limitation_strings())
+    if qa.degraded and qa.stops_individual_customer:
+        quality = "degraded"      # W2-C: DEGRADE a agregado (sin recomendaciones individuales); BLOCK sigue siendo insufficient_data
     duration_ms_pre = int((time.perf_counter() - t0) * 1000)
     progress("persisting", 90)
     snap = _snapshot(data, cfg, cfg_version, as_of, {"models": {h: v.get("probability_id") for h, v in model_versions.items()},
@@ -774,7 +831,8 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
                                                     "commitments_revisions": int(len(commit_rev)), "as_of_requested": as_of_req.isoformat()})
     horizons_out = sorted(out.horizons) if out is not None else []
     summary: dict[str, Any] = {"horizons": horizons_out, "as_of_requested": as_of_req.isoformat(), "as_of_effective": as_of.isoformat(), "stale_data": stale,
-                               "excluded_from_individual_prediction": data.excluded, "duration_ms": duration_ms_pre}
+                               "excluded_from_individual_prediction": data.excluded, "duration_ms": duration_ms_pre,
+                               "horizon_support": _predict_horizon_support(requested, out, abstained, stale)}
     if out is not None:
         summary |= {"rows": out.summary.get("rows"), "candidates": out.summary.get("candidates"), "coherence": out.summary.get("coherence"),
                     "quantity_coherence": out.summary.get("quantity_coherence"), "served": out.served,
@@ -784,6 +842,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
             summary["reconciliation"] = {str(h): reconciliation_summary(rec_df[rec_df["horizon_days"] == h]) for h in horizons_out}
     with engine.begin() as conn:
         snapshot_id = persist_snapshot(conn, tenant_id, snap)
+        summary["quality_gate"] = qa.manifest_block(insert_run_quality_report(conn, tenant_id, qa, core_run_id=run_id))   # W2-C
         # reemplazo total de lo escrito por un intento anterior (idempotencia ante reintentos)
         for table in ("customer_predictions", "customer_product_rankings", "customer_activity", "customer_reconciliations"):
             conn.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t AND core_run_id = :r"), {"t": tenant_id, "r": run_id})

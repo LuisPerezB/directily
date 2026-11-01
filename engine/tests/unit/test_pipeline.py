@@ -18,8 +18,8 @@ def test_outputs_and_levels(pipeline_result):
     assert (day["lo_80"] <= day["yhat"] + 1e-6).all() and (day["yhat"] <= day["hi_80"] + 1e-6).all()
     assert not fv.duplicated(["node_key", "granularity", "target_date"]).any()
     hz = fv[fv["granularity"] == "horizon"]
-    assert set(hz["period_days"]) == {7, 14, 30, 60, 90} and hz["lo_80"].notna().all()
-    assert (hz["quality_status"] == "ok").all(), "historia de ~575 días: los cinco horizontes están respaldados"
+    assert set(hz["period_days"]) == {7, 14, 15, 30, 60, 90} and hz["lo_80"].notna().all()
+    assert (hz["quality_status"] == "ok").all(), "historia de ~575 días: los seis horizontes del catálogo están respaldados"
     assert {"week", "month"} <= set(fv["granularity"])
 
 
@@ -236,14 +236,14 @@ def test_short_history_abstains_explicitly_instead_of_failing(days):
 
     # Estado global y por horizonte: ninguno se presenta como respaldado y cada uno trae su motivo.
     assert res.quality_status == "insufficient_data"
-    assert set(res.horizon_support) == {7, 14, 30}
+    assert set(res.horizon_support) == {7, 14, 15, 30}
     for h, info in res.horizon_support.items():
         assert info["status"] == "insufficient_data" and info["reasons"], h
         assert info["history_days"] == days
         assert any(r["code"] == "no_backtest" for r in info["reasons"]), "sin ventana de backtest no se mide el error"
     # La regla 2×H del contrato: 30 días de historia no alcanzan para H=30, y 60 sí (solo falta el backtest).
     assert any(r["code"] == "history_lt_2h" for r in res.horizon_support[30]["reasons"]) == (days < 60)
-    assert {f"horizon_{h}_insufficient_data" for h in (7, 14, 30)} <= {x["code"] for x in res.limitations}
+    assert {f"horizon_{h}_insufficient_data" for h in (7, 14, 15, 30)} <= {x["code"] for x in res.limitations}
 
     # Sin intervalos inventados: el pronóstico puntual existe, pero todo límite y la mediana quedan nulos y TODA
     # fila (y el total por horizonte) se marca como sin respaldo.
@@ -251,7 +251,7 @@ def test_short_history_abstains_explicitly_instead_of_failing(days):
     assert not fv.empty and (fv["yhat"] >= 0).all() and fv["yhat"].sum() > 0
     assert fv[["lo_80", "hi_80", "lo_95", "hi_95", "p50"]].isna().all().all()
     assert (fv["quality_status"] == "insufficient_data").all()
-    assert set(fv.loc[fv["granularity"] == "horizon", "period_days"]) == {7, 14, 30}
+    assert set(fv.loc[fv["granularity"] == "horizon", "period_days"]) == {7, 14, 15, 30}
 
     # Respaldo identificado: promedio de la historia disponible, declarado en el resumen y en la selección.
     assert set(fv.loc[fv["level"] == "series", "model_family"]) == {"window_average"}

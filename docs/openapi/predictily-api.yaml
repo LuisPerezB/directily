@@ -39,6 +39,8 @@ tags:
 - name: Comportamiento de compra
 - name: Abastecimiento
 - name: Asistente
+- name: Linaje e identidades
+- name: Factor Intelligence
 paths:
   /accuracy/comparison:
     get:
@@ -116,11 +118,112 @@ paths:
                     $ref: '#/components/schemas/AccuracySummary'
         '404':
           $ref: '#/components/responses/NotFound'
+  /admin/intelligence/factors:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Catálogo público de factores (propietario de la plataforma)
+      description: 'Lista las definiciones públicas (tenant_id NULL).
+
+
+        Solo el superadministrador de la plataforma (sin empresa activa).'
+      responses:
+        '200':
+          description: Definiciones públicas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceFactor'
+                  meta:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: superadmin
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Crear una definición pública de factor (propietario de la plataforma)
+      description: 'Nace inactiva salvo que se indique. No se puede declarar activa una familia externa sin `source_key`
+        (no se inventan fuentes) ni la de proyecciones compartidas con la bandera apagada.
+
+
+        Solo el superadministrador de la plataforma (sin empresa activa).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceFactorAdminInput'
+      responses:
+        '201':
+          description: Definición creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceFactor'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: superadmin
+  /admin/intelligence/factors/{key}:
+    patch:
+      tags:
+      - Factor Intelligence
+      summary: Modificar una definición pública de factor (propietario de la plataforma)
+      description: 'Las empresas nunca escriben el catálogo público: el modelo lo impide además de la ruta (403
+        `public_catalog_read_only`).
+
+
+        Solo el superadministrador de la plataforma (sin empresa activa).'
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9_.]+$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceFactorAdminUpdate'
+      responses:
+        '200':
+          description: Definición actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceFactor'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: superadmin
   /admin/plans:
     get:
       tags:
       - Plataforma
-      summary: Planes
+      summary: Planes (límites, precio de referencia y metadatos informativos; un precio nunca es un límite)
       responses:
         '200':
           description: OK
@@ -128,7 +231,7 @@ paths:
     get:
       tags:
       - Plataforma
-      summary: Empresas (superadmin; sin datos de negocio)
+      summary: 'Empresas (superadmin; sin datos de negocio; el listado NO mide series activas: usage.series es null)'
       responses:
         '200':
           description: OK
@@ -159,13 +262,104 @@ paths:
                   - basico
                   - profesional
                   - empresarial
+                  - starter
+                  - growth
+                  - enterprise
                 status:
                   type: string
                   enum:
                   - active
                   - suspended
                 plan_overrides:
-                  type: object
+                  type:
+                  - object
+                  - 'null'
+                  description: 'Límites por contrato (ADR-V25-18): reemplazan los del plan (las listas se reemplazan;
+                    los mapas se combinan). Un precio no es una clave válida (422). `null` en un tope = sin tope.'
+                  additionalProperties: false
+                  properties:
+                    max_branches:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 0
+                    max_series:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 0
+                      description: 'Series activas: pares sucursal × producto con ventas válidas en los últimos
+                        90 días; se exige al solicitar un pronóstico'
+                    max_active_products:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 0
+                    max_import_rows_per_month:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 0
+                    max_forecast_runs_per_day:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 0
+                    max_users:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 0
+                    horizons:
+                      type: array
+                      items:
+                        type: integer
+                        enum:
+                        - 7
+                        - 14
+                        - 15
+                        - 30
+                        - 60
+                        - 90
+                      description: Subconjunto del catálogo único de horizontes que la empresa puede usar
+                    features:
+                      type: object
+                      additionalProperties:
+                        type: boolean
+                      description: 'Capacidades: scenarios, api_access, external_indicators, custom_models, customer,
+                        roles, assistant...'
+                    modules:
+                      type: array
+                      items:
+                        type: string
+                      description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'
+                    frequencies:
+                      type: array
+                      items:
+                        type: string
+                      description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'
+                    connectors:
+                      type: array
+                      items:
+                        type: string
+                      description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'
+                    retention_months:
+                      type:
+                      - integer
+                      - 'null'
+                      minimum: 1
+                      maximum: 240
+                      description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'
+                    compute_budget:
+                      type:
+                      - object
+                      - 'null'
+                      description: DECLARADO
+                    llm_budget:
+                      type:
+                      - object
+                      - 'null'
+                      description: DECLARADO
       responses:
         '200':
           description: OK
@@ -733,6 +927,385 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
       x-ability: catalog.manage
+  /catalog/customers/{id}/aliases:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Alias de un cliente
+      description: 'Alias (códigos de origen que apuntan a esta identidad canónica) de un cliente, con su vigencia.
+        Un alias redirige un código a la identidad: NO reescribe filas históricas.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Alias ordenados por id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IdentityAlias'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
+    post:
+      tags:
+      - Linaje e identidades
+      summary: Crear un alias de un cliente
+      description: 'Crea un alias vigente. Resolución del catálogo: PRIMERO el alias de la fuente (`data_source_id`),
+        luego el general, y solo dentro de su vigencia (`valid_from`/`valid_to`, ambos incluidos); después el código
+        propio. Rechaza (422 con `code` estable) el propio código (`alias_is_own_code`), un código que ya identifica
+        a otra entidad (`alias_code_in_use`), vigencias que se solapan para el mismo código y fuente (`alias_overlap`),
+        los tipos `merge` y `split` (`alias_kind_designed`: DISEÑADOS, no implementados) y `code_change` (`alias_kind_use_code_change`:
+        solo nace del cambio de código). El código se MINIMIZA antes de guardarse (una cédula o un RUC nunca se
+        almacenan ni se devuelven en claro) y el consumidor final no admite alias (`alias_generic_customer`).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - source_code
+              properties:
+                source_code:
+                  type: string
+                  maxLength: 100
+                data_source_id:
+                  type:
+                  - integer
+                  - 'null'
+                  description: null = cualquier fuente; si se envía debe ser de la misma empresa
+                kind:
+                  type: string
+                  enum:
+                  - alias
+                  default: alias
+                valid_from:
+                  type:
+                  - string
+                  - 'null'
+                  format: date
+                valid_to:
+                  type:
+                  - string
+                  - 'null'
+                  format: date
+                notes:
+                  type:
+                  - string
+                  - 'null'
+                  maxLength: 1000
+      responses:
+        '201':
+          description: Alias creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IdentityAlias'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+  /catalog/customers/{id}/aliases/{alias}:
+    delete:
+      tags:
+      - Linaje e identidades
+      summary: Eliminar un alias de un cliente
+      description: 'El código deja de resolver a esta identidad. Queda en auditoría. Un alias de otra empresa responde
+        404.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - name: alias
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: Alias eliminado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: catalog.manage
+  /catalog/customers/{id}/code-change:
+    post:
+      tags:
+      - Linaje e identidades
+      summary: Cambiar el código de un cliente
+      description: 'El código visible pasa a ser `new_code` y `old_code` sigue resolviendo a la MISMA identidad
+        mediante un alias `code_change`; no se reescribe ninguna fila histórica. `old_code` debe ser el código actual
+        (`old_code_mismatch`), `new_code` no puede estar en uso (`alias_code_in_use`) ni ser igual al anterior (`code_change_same`)
+        y `effective_from` no puede ser futura (`code_change_future`). La fecha queda en la nota del alias y en
+        la auditoría.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - old_code
+              - new_code
+              - effective_from
+              properties:
+                old_code:
+                  type: string
+                  maxLength: 100
+                new_code:
+                  type: string
+                  maxLength: 100
+                effective_from:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Código cambiado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      customer_id:
+                        type: integer
+                      external_code:
+                        type: string
+                      effective_from:
+                        type: string
+                        format: date
+                      alias:
+                        $ref: '#/components/schemas/IdentityAlias'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+  /catalog/products/{id}/aliases:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Alias de un producto
+      description: 'Alias (códigos de origen que apuntan a esta identidad canónica) de un producto, con su vigencia.
+        Un alias redirige un código a la identidad: NO reescribe filas históricas.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Alias ordenados por id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IdentityAlias'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
+    post:
+      tags:
+      - Linaje e identidades
+      summary: Crear un alias de un producto
+      description: 'Crea un alias vigente. Resolución del catálogo: PRIMERO el alias de la fuente (`data_source_id`),
+        luego el general, y solo dentro de su vigencia (`valid_from`/`valid_to`, ambos incluidos); después el código
+        propio. Rechaza (422 con `code` estable) el propio código (`alias_is_own_code`), un código que ya identifica
+        a otra entidad (`alias_code_in_use`), vigencias que se solapan para el mismo código y fuente (`alias_overlap`),
+        los tipos `merge` y `split` (`alias_kind_designed`: DISEÑADOS, no implementados) y `code_change` (`alias_kind_use_code_change`:
+        solo nace del cambio de código).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - source_code
+              properties:
+                source_code:
+                  type: string
+                  maxLength: 100
+                data_source_id:
+                  type:
+                  - integer
+                  - 'null'
+                  description: null = cualquier fuente; si se envía debe ser de la misma empresa
+                kind:
+                  type: string
+                  enum:
+                  - alias
+                  default: alias
+                valid_from:
+                  type:
+                  - string
+                  - 'null'
+                  format: date
+                valid_to:
+                  type:
+                  - string
+                  - 'null'
+                  format: date
+                notes:
+                  type:
+                  - string
+                  - 'null'
+                  maxLength: 1000
+      responses:
+        '201':
+          description: Alias creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IdentityAlias'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+  /catalog/products/{id}/aliases/{alias}:
+    delete:
+      tags:
+      - Linaje e identidades
+      summary: Eliminar un alias de un producto
+      description: 'El código deja de resolver a esta identidad. Queda en auditoría. Un alias de otra empresa responde
+        404.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - name: alias
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: Alias eliminado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: catalog.manage
+  /catalog/products/{id}/code-change:
+    post:
+      tags:
+      - Linaje e identidades
+      summary: Cambiar el código de un producto
+      description: 'El código visible pasa a ser `new_code` y `old_code` sigue resolviendo a la MISMA identidad
+        mediante un alias `code_change`; no se reescribe ninguna fila histórica. `old_code` debe ser el código actual
+        (`old_code_mismatch`), `new_code` no puede estar en uso (`alias_code_in_use`) ni ser igual al anterior (`code_change_same`)
+        y `effective_from` no puede ser futura (`code_change_future`). La fecha queda en la nota del alias y en
+        la auditoría.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - old_code
+              - new_code
+              - effective_from
+              properties:
+                old_code:
+                  type: string
+                  maxLength: 100
+                new_code:
+                  type: string
+                  maxLength: 100
+                effective_from:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Código cambiado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      product_id:
+                        type: integer
+                      sku:
+                        type: string
+                      effective_from:
+                        type: string
+                        format: date
+                      alias:
+                        $ref: '#/components/schemas/IdentityAlias'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
   /commitments:
     get:
       tags:
@@ -1044,7 +1617,10 @@ paths:
       - Comportamiento de compra
       summary: Predicciones de compra por comprador × producto
       description: 'Los montos esperados son supuestos (esperanza × último precio neto), no ventas confirmadas.
-        422 `horizon_not_available` si la corrida se abstuvo de ese horizonte.
+        422 `horizon_not_available` si la corrida se abstuvo de ese horizonte: la respuesta trae `quality_status
+        = insufficient_data`, el motivo en `reason_code` (no_model, coverage_insufficient, insufficient_horizon,
+        no_identified_buyers...), `reasons` y `available_horizons`; nunca una cifra inventada. 402 `features.customer`
+        si el plan no incluye el comportamiento de compra (Starter).
 
 
         Habilidad requerida: `forecast.view`.'
@@ -1207,11 +1783,13 @@ paths:
                 horizons:
                   type: array
                   minItems: 1
-                  maxItems: 3
+                  maxItems: 5
                   items:
                     type: integer
                     enum:
                     - 7
+                    - 14
+                    - 15
                     - 30
                     - 90
                 as_of:
@@ -1647,6 +2225,228 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
       x-ability: data.view
+  /data-quality/quarantine:
+    get:
+      tags:
+      - Core de Datos
+      summary: Cuarentena de ingestión
+      description: 'Documentos de ventas retenidos FUERA de Silver porque tienen hallazgos REVIEW_REQUIRED o QUARANTINED
+        y la carga omitió filas inválidas (`skip_invalid_rows`) (ADR-V25-24). Aislada por empresa.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: entity
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - pending
+          - released
+          - discarded
+          - superseded
+      - name: import_job_id
+        in: query
+        schema:
+          type: integer
+      - name: source_sync_id
+        in: query
+        schema:
+          type: integer
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: Registros de cuarentena, del más reciente al más antiguo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QuarantineRecord'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+  /data-quality/quarantine/{id}:
+    get:
+      tags:
+      - Core de Datos
+      summary: Detalle de un registro de cuarentena
+      description: 'Incluye el `payload` normalizado y minimizado (sin nombres de clientes; el código de cliente
+        como se guarda en `customers`) y los hallazgos del registro. Un registro de otra empresa responde 404.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Registro con payload y hallazgos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/QuarantineRecord'
+                    - type: object
+                      properties:
+                        payload:
+                          type: object
+                          additionalProperties: true
+                        findings:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: true
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
+  /data-quality/quarantine/{id}/discard:
+    post:
+      tags:
+      - Core de Datos
+      summary: Descartar un registro de cuarentena
+      description: 'El motivo es obligatorio; no escribe en Silver. Queda en auditoría (`quarantine.discarded`)
+        y en la resolución del registro.
+
+
+        Habilidad requerida: `imports.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+              required:
+              - reason
+      responses:
+        '200':
+          description: Registro descartado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/QuarantineRecord'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El registro ya fue resuelto (`invalid_state`)
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: imports.manage
+  /data-quality/quarantine/{id}/release:
+    post:
+      tags:
+      - Core de Datos
+      summary: Liberar un registro de cuarentena
+      description: 'Revalida con los mapeos de valores VIGENTES (la versión aprobada del mapeo SQL de la fuente,
+        los de la importación y los `value_maps` que se envíen, que se validan contra el vocabulario canónico y,
+        si la liberación tiene éxito, se guardan en la importación). Si el documento es válido lo escribe con `SalesDocumentWriter`
+        en modo `incremental` (conocido desde la liberación) enlazado a su objeto Bronze; si no, 422 `quarantine_still_invalid`
+        con los hallazgos que quedan. 409 `invalid_state` si ya fue liberado, descartado o superado. 409 `newer_version_exists`
+        (con `context.current_versions`, la versión vigente) si el documento ya está en Silver con otro contenido,
+        se escribió DESPUÉS de la cuarentena y no hay orden de fuente que decida: se descarta o se libera con `force=true`,
+        que sobrescribe y queda auditado.
+
+
+        Habilidad requerida: `imports.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value_maps:
+                  type: object
+                  description: '`{document_type: {"<crudo>": "<canónico>"}, status: {...}}`'
+                  additionalProperties: true
+                force:
+                  type: boolean
+                  default: false
+                  description: Confirma explícitamente sobrescribir una versión vigente MÁS NUEVA del mismo documento
+                    (409 `newer_version_exists`); queda auditado
+      responses:
+        '200':
+          description: Registro liberado y resultado de la escritura
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/QuarantineRecord'
+                    - type: object
+                      properties:
+                        write:
+                          type: object
+                          properties:
+                            state:
+                              type: string
+                              enum:
+                              - new
+                              - updated
+                              - unchanged
+                              - stale_skipped
+                            documents:
+                              type: integer
+                            value_maps_added:
+                              type: boolean
+                            forced:
+                              type: boolean
+                              description: Se sobrescribió una versión más nueva con force=true
+                            states:
+                              type: object
+                              additionalProperties:
+                                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El registro ya fue resuelto o superado (`invalid_state`), o sobrescribiría una versión más
+            nueva (`newer_version_exists`, con `context.current_versions`)
+        '422':
+          description: Sigue sin ser válido (`quarantine_still_invalid`, con `findings`) o un mapeo de valores fuera
+            del vocabulario canónico
+      x-ability: imports.manage
   /data-sources:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -2144,7 +2944,20 @@ paths:
       tags:
       - Pronósticos
       summary: Solicitar una ejecución de pronóstico (asíncrona)
-      description: Requiere la habilidad `forecast.run` (propietario, administrador, analista).
+      description: 'Requiere la habilidad `forecast.run` (propietario, administrador, analista).
+
+
+        **402 `plan_limit_exceeded`** (`limit` indica cuál): `horizons` si el plan no incluye el horizonte pedido;
+        `max_forecast_runs_per_day`; y
+
+        `max_series` (Starter/Growth/Enterprise) si las series activas de la empresa —pares sucursal × producto
+        con ventas válidas en los últimos 90 días—
+
+        superan el tope del plan (`current` y `max` en la respuesta). El conteo se cachea por empresa y día (10
+        min; una importación de ventas lo invalida) y
+
+        corre con tiempo acotado: si no se puede medir a tiempo, el tope no se exige en esa petición (se registra
+        un aviso).'
       parameters:
       - $ref: '#/components/parameters/TenantHeader'
       requestBody:
@@ -2158,6 +2971,7 @@ paths:
                   enum:
                   - 7
                   - 14
+                  - 15
                   - 30
                   - 60
                   - 90
@@ -2486,7 +3300,8 @@ paths:
     post:
       tags:
       - Importaciones
-      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows)
+      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows; 409 blocked_by_quality
+        si el informe tiene un hallazgo BLOCKER)
       responses:
         '202':
           $ref: '#/components/responses/ImportJobResponse'
@@ -2573,6 +3388,1449 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/ImportJobResponse'
+  /intelligence/events:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Eventos externos de la empresa (sin alertas informativas)
+      description: 'Eventos manuales con procedencia, propios y públicos (estos últimos solo lectura). Las alertas
+        informativas se listan aparte en `/intelligence/events/informative-alerts`.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - PROPOSED
+          - VERIFIED
+          - REJECTED
+          - EXPIRED
+        description: Estado efectivo (un evento vencido cuenta como EXPIRED aunque el proceso aún no lo haya marcado)
+      - name: family
+        in: query
+        schema:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+      - name: event_type
+        in: query
+        schema:
+          type: string
+      - name: published_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: published_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Eventos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceEvent'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Proponer un evento externo manual
+      description: 'Nace `PROPOSED` y a nombre de la empresa (estado, proponente y `extracted_by=manual` no se pueden
+        forzar). Requiere URL o referencia de la fuente; la URL solo se guarda (http/https), nunca se descarga.
+        Sin integraciones externas ni LLM.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceEventInput'
+      responses:
+        '201':
+          description: Evento propuesto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceEvent'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+  /intelligence/events/informative-alerts:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Alertas informativas (oficiales/regulatorias/sanitarias)
+      description: 'Se muestran aunque no mejoren el error numérico y nunca son features predictivas (`usable_for_prediction=false`).
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - PROPOSED
+          - VERIFIED
+          - REJECTED
+          - EXPIRED
+        description: Estado efectivo (un evento vencido cuenta como EXPIRED aunque el proceso aún no lo haya marcado)
+      - name: family
+        in: query
+        schema:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+      - name: event_type
+        in: query
+        schema:
+          type: string
+      - name: published_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: published_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Alertas informativas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceEvent'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+  /intelligence/events/{id}:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Detalle de un evento
+      description: 'Evento de la empresa o público.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Evento
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceEvent'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
+    patch:
+      tags:
+      - Factor Intelligence
+      summary: Editar un evento propuesto
+      description: 'Solo en estado `PROPOSED` y solo por quien lo propuso (403 `only_proposer_can_change`: así la
+        segregación proponer/verificar no se puede burlar editando); uno resuelto es inmutable (409 `invalid_event_state`).
+        Los eventos públicos son de solo lectura (403).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceEventUpdate'
+      responses:
+        '200':
+          description: Evento
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceEvent'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+    delete:
+      tags:
+      - Factor Intelligence
+      summary: Borrar un evento propuesto o rechazado
+      description: 'Uno propuesto solo lo retira su proponente (403); uno verificado o vencido se conserva como
+        evidencia (409).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Borrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+      x-ability: catalog.manage
+  /intelligence/events/{id}/reject:
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Rechazar un evento propuesto
+      description: 'Motivo obligatorio, usuario distinto de quien lo propuso (403 `segregation_of_duties`) y la
+        versión revisada (`review_token` o If-Match; 422 `review_token_required`, 409 `event_changed_since_review`).
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              - review_token
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 2000
+                review_token:
+                  type: string
+      responses:
+        '200':
+          description: Evento rechazado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceEvent'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/events/{id}/verify:
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Verificar un evento propuesto
+      description: 'SEGREGACIÓN: lo verifica un usuario distinto de quien lo propuso (403 `segregation_of_duties`).
+        **Versión revisada:** el cuerpo (o el encabezado `If-Match`) debe traer el `review_token` del evento que
+        el revisor leyó; sin él 422 `review_token_required`, y si el contenido cambió después de su lectura 409
+        `event_changed_since_review` (la comparación se hace con la fila bloqueada). Sin `published_at` no puede
+        verificarse para uso predictivo (422 `published_at_required`); la procedencia debe estar completa (URL,
+        autoridad, jurisdicción: 422 `provenance_incomplete`); uno vencido no se verifica (422 `event_expired`).
+        Al verificar se fija `available_at` = el mayor entre ahora y `published_at`: el evento no existía para un
+        backtest anterior.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - review_token
+              properties:
+                review_token:
+                  type: string
+                  description: 'Versión revisada (campo `review_token` del evento); alternativa: encabezado If-Match'
+                note:
+                  type: string
+                  maxLength: 2000
+                corroboration:
+                  type: string
+                  enum:
+                  - single_source
+                  - corroborated
+                  - official
+      responses:
+        '200':
+          description: Evento verificado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceEvent'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/factors:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Catálogo de factores (17 familias) con su estado y dónde vive el dato
+      description: 'Definiciones públicas del catálogo (lectura para toda empresa) más las propias de la empresa.
+        Ninguna familia nace activa y hoy no hay integraciones externas: `data_location.status` distingue dato nativo,
+        serie sin fuente, eventos manuales y contrato desactivado. `state` combina el catálogo (`catalog_is_active`)
+        y la elección de la empresa (`company_activation`). La activación NO cambia nada del motor si el pipeline
+        de factores de la empresa está apagado.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: family
+        in: query
+        schema:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+      - name: availability_class
+        in: query
+        schema:
+          type: string
+          enum:
+          - OBSERVED_HISTORICAL
+          - STATIC
+          - KNOWN_IN_ADVANCE
+          - THIRD_PARTY_FORECAST
+          - USER_SCENARIO
+          - UNAVAILABLE_FOR_HORIZON
+      - name: state
+        in: query
+        schema:
+          type: string
+          enum:
+          - inactive
+          - activated_by_company
+          - active
+      - name: is_informative_alert
+        in: query
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Definiciones con su estado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceFactor'
+                  meta:
+                    $ref: '#/components/schemas/IntelligenceFactorListMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+  /intelligence/factors/{key}/activation:
+    put:
+      tags:
+      - Factor Intelligence
+      summary: Activar o desactivar un factor para la empresa
+      description: 'Guarda la elección en `tenants.settings.factor_activation`; no modifica la definición del catálogo.
+        Restringido a propietario o administrador. Auditado. Es una intención registrada: el motor solo la aplica
+        si el pipeline de factores de la empresa está habilitado (apagado por defecto).
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9_.]+$
+        description: Clave del factor, p. ej. `weather.observed`
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceFactorActivationInput'
+      responses:
+        '200':
+          description: Factor con su estado actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceFactor'
+                  meta:
+                    type: object
+                    properties:
+                      pipeline_note:
+                        type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/received-forecast-grants:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Concesiones recibidas por la empresa
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. No incluye borradores ni los identificadores internos del emisor.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Concesiones recibidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceSharedGrantRecipient'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /intelligence/received-forecast-grants/{grantId}/forecast:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Leer el pronóstico concedido (solo el alcance concedido)
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. Solo el receptor: un tercero o el emisor reciben el mismo 404 que una concesión
+        inexistente y el intento queda registrado (`denied_scope`). Emisor suspendido o en eliminación: 403 `issuer_unavailable`.
+        Vencida: 403 `grant_expired` (`denied_expired`); revocada: 403 `grant_revoked` (`denied_revoked`); fuera
+        de lo concedido (producto, periodo, granularidad o contenido): 403 `outside_grant_scope` (`denied_scope`).
+        NUNCA devuelve ventas, clientes, precios ni ingresos del emisor. Un pronóstico compartido NO es un pedido
+        confirmado (`meta.is_confirmed_order=false`).
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: subject_id
+        in: query
+        schema:
+          type: integer
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: granularity
+        in: query
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+      - name: include
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+            enum:
+            - point_forecast
+            - interval_80
+            - interval_95
+        style: form
+        explode: true
+      responses:
+        '200':
+          description: Pronóstico concedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntelligenceSharedForecast'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /intelligence/sector-profiles:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Perfiles de relevancia sectorial de la empresa
+      description: 'Una empresa puede tener varios, con prioridad (menor = mayor) y alcance.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Perfiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceSectorProfile'
+                  meta:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: data.view
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Agregar un perfil de relevancia
+      description: '`profile_key` es el código del perfil registrado en el motor (solo se valida el formato; contrastarlo
+        con el registro del motor es DISEÑADO). Alcance `branch|category|product` exige `scope_ref` con el id de
+        un elemento propio.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceSectorProfileInput'
+      responses:
+        '201':
+          description: Perfil creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceSectorProfile'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/sector-profiles/{profile}:
+    patch:
+      tags:
+      - Factor Intelligence
+      summary: Cambiar la prioridad o el estado de un perfil
+      description: 'La clave y el alcance no cambian: se crea otro perfil.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: profile
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                priority:
+                  type: integer
+                  minimum: 0
+                  maximum: 65535
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceSectorProfile'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+    delete:
+      tags:
+      - Factor Intelligence
+      summary: Quitar un perfil
+      description: '
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: profile
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Borrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: settings.manage
+  /intelligence/shared-forecast-grants:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Concesiones emitidas por la empresa
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. Contrato V2.1 §10: emisor ≠ receptor, periodo, granularidad, contenido permitido,
+        vencimiento, revocación y bitácora.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Concesiones emitidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceSharedGrantIssuer'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Crear una concesión (borrador)
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. Solo se conceden productos o categorías propios; contenido concedible: `point_forecast`,
+        `interval_80`, `interval_95` (nunca ventas ni clientes). La versión del pronóstico se fija a una ejecución
+        completada del emisor.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceSharedGrantInput'
+      responses:
+        '201':
+          description: Concesión en borrador
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceSharedGrantIssuer'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/shared-forecast-grants/{grantId}:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Detalle de una concesión emitida
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. Para el receptor o un tercero responde 404.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Concesión
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceSharedGrantIssuer'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: settings.manage
+  /intelligence/shared-forecast-grants/{grantId}/accesses:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Bitácora de accesos de una concesión emitida
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. Lecturas y rechazos (`read`, `denied_expired`, `denied_revoked`, `denied_scope`);
+        identifica al actor solo como `recipient`, `issuer` u `other_company`, sin usuarios ni identificadores de
+        terceros.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: integer
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Accesos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceSharedGrantAccess'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/shared-forecast-grants/{grantId}/activate:
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Activar una concesión
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. Desde aquí el receptor puede leer, dentro del alcance y hasta el vencimiento.
+        Exige un pronóstico completado del emisor (422 `no_forecast_to_share`).
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Concesión activa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceSharedGrantIssuer'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /intelligence/shared-forecast-grants/{grantId}/revoke:
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Revocar una concesión
+      description: 'DESACTIVADO por bandera de configuración (`intelligence.shared_forecast_grants.enabled`, por
+        defecto false): con la bandera apagada la ruta responde 404 (`Ruta no encontrada.`) incluso sin sesión,
+        igual que una ruta inexistente. La revocación es inmediata: cada lectura posterior del receptor se rechaza
+        y se registra como `denied_revoked`.
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Concesión revocada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceSharedGrantIssuer'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+      x-ability: settings.manage
+  /intelligence/taxonomy/assignments:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Asignaciones producto → nodo
+      description: 'Con procedencia `manual | llm_proposed | verified`. Una propuesta `llm_proposed` está pendiente
+        de revisión (`pending_review=true`, `usable=false`) y nunca cuenta como verdad hasta verificarse.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: taxonomy_node_id
+        in: query
+        schema:
+          type: integer
+      - name: provenance
+        in: query
+        schema:
+          type: string
+          enum:
+          - manual
+          - llm_proposed
+          - verified
+      - name: pending_review
+        in: query
+        schema:
+          type: boolean
+      - name: usable
+        in: query
+        schema:
+          type: boolean
+      - name: as_of
+        in: query
+        schema:
+          type: string
+          format: date
+        description: Solo asignaciones vigentes en esa fecha
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Asignaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceTaxonomyAssignment'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Asignar un producto a un nodo (manual)
+      description: 'Procedencia `manual`: la hace un usuario y es usable. Una asignación primaria nueva cierra la
+        abierta anterior el día previo; un solapamiento no cerrable se rechaza (409 `overlapping_primary_assignment`).
+        Las propuestas de un LLM no entran por esta ruta (este paquete no llama a ningún LLM).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceTaxonomyAssignmentInput'
+      responses:
+        '201':
+          description: Asignación creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyAssignment'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+  /intelligence/taxonomy/assignments/{assignment}:
+    patch:
+      tags:
+      - Factor Intelligence
+      summary: Cerrar o ajustar la vigencia de una asignación
+      description: 'El historial se conserva por vigencia.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: assignment
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceTaxonomyAssignmentUpdate'
+      responses:
+        '200':
+          description: Asignación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyAssignment'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+    delete:
+      tags:
+      - Factor Intelligence
+      summary: Descartar una propuesta pendiente de revisión
+      description: 'Solo una propuesta `llm_proposed`; una asignación vigente se cierra con `valid_to` (409).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: assignment
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Descartada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+      x-ability: catalog.manage
+  /intelligence/taxonomy/assignments/{assignment}/verify:
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Verificar una propuesta de clasificación
+      description: 'La propuesta `llm_proposed` pasa a `verified` (quién y cuándo) y desde entonces cuenta como
+        verdad.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: assignment
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Asignación verificada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyAssignment'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+      x-ability: catalog.manage
+  /intelligence/taxonomy/nodes:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Nodos de la taxonomía (empresa + pública)
+      description: 'Jerarquía sector → industria → categoría → subcategoría. Los nodos públicos son de solo lectura.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: level
+        in: query
+        schema:
+          type: string
+          enum:
+          - sector
+          - industry
+          - category
+          - subcategory
+      - name: parent_id
+        in: query
+        schema:
+          type: integer
+      - name: code
+        in: query
+        schema:
+          type: string
+      - name: scope
+        in: query
+        schema:
+          type: string
+          enum:
+          - tenant
+          - public
+      - name: current_only
+        in: query
+        schema:
+          type: boolean
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Nodos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IntelligenceTaxonomyNode'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Crear un nodo de taxonomía
+      description: 'El padre debe ser del nivel inmediatamente superior (422 `taxonomy_invalid_hierarchy`); un sector
+        no lleva padre. Código único por empresa (409 `taxonomy_code_taken`). `erp_category_id` vincula con `product_categories`
+        de la empresa. El SKU canónico no se sustituye.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceTaxonomyNodeInput'
+      responses:
+        '201':
+          description: Nodo creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyNode'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+  /intelligence/taxonomy/nodes/{node}:
+    get:
+      tags:
+      - Factor Intelligence
+      summary: Detalle de un nodo
+      description: 'Nodo de la empresa o público.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: node
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Nodo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyNode'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
+    patch:
+      tags:
+      - Factor Intelligence
+      summary: Editar un nodo propio
+      description: 'Nombre, vigencia, vínculo con el ERP y atributos; el nivel, el código y el padre no cambian
+        (cree una versión nueva). Los nodos públicos: 403.
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: node
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceTaxonomyNodeUpdate'
+      responses:
+        '200':
+          description: Nodo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyNode'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
+    delete:
+      tags:
+      - Factor Intelligence
+      summary: Borrar un nodo propio
+      description: 'Solo sin nodos hijos ni productos asignados (409).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: node
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Borrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+      x-ability: catalog.manage
+  /intelligence/taxonomy/nodes/{node}/versions:
+    post:
+      tags:
+      - Factor Intelligence
+      summary: Crear una nueva versión de un nodo
+      description: 'Mismo código, versión + 1; la anterior queda cerrada el día previo a `valid_from` y no se modifica.
+        Las asignaciones siguen apuntando a la versión que referencian (historial intacto). Solo se versiona la
+        más reciente (409).
+
+
+        Habilidad requerida: `catalog.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: node
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceTaxonomyNodeVersionInput'
+      responses:
+        '201':
+          description: Nueva versión
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/IntelligenceTaxonomyNode'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: catalog.manage
   /inventory/recommendations:
     get:
       tags:
@@ -2799,6 +5057,255 @@ paths:
       responses:
         '204':
           description: Eliminado
+  /lineage/bronze:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Objetos Bronze de la empresa (metadatos)
+      description: 'Metadatos de los objetos originales inmutables guardados antes de normalizar (SHA-256, tamaño,
+        procedencia, versión de esquema, retención, estado). NUNCA incluye la clave del almacén ni el contenido.
+        Solo la empresa activa.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: entity
+        in: query
+        schema:
+          type: string
+          pattern: ^[a-z_]{2,30}$
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - file_upload
+          - sql_extract
+          - api_batch
+          - bridge_batch
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - stored
+          - processed
+          - quarantined
+          - purged
+      - name: data_source_id
+        in: query
+        schema:
+          type: integer
+      - name: sha256
+        in: query
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      - name: received_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: received_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      responses:
+        '200':
+          description: Objetos más recientes primero
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BronzeObject'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+  /lineage/bronze/{id}:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Metadatos de un objeto Bronze
+      description: 'Un objeto de otra empresa responde 404.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Objeto Bronze
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BronzeObject'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
+  /lineage/bronze/{id}/content:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Descargar el contenido original de un objeto Bronze
+      description: 'Solo propietario/administrador. Verifica el SHA-256 al leer y entrega SIEMPRE un adjunto binario
+        (`application/octet-stream`, `nosniff`, nombre generado por el servidor). Cada descarga queda en la bitácora
+        (`bronze.downloaded`). 410 `bronze_purged` si el contenido fue purgado por retención; 409 `bronze_integrity`
+        si no coincide con su SHA-256 o falta en el almacén (queda `bronze.integrity_failed`).
+
+
+        Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Contenido original íntegro
+          headers:
+            X-Content-SHA256:
+              schema:
+                type: string
+              description: SHA-256 del contenido verificado
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '409':
+          description: Integridad no verificable (code bronze_integrity)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: Contenido purgado por retención (code bronze_purged)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: datasources.manage
+  /lineage/reconciliation:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Informes de reconciliación fuente → Bronze → Silver → Gold
+      description: 'Informes por carga (`import`, `sync`) y por ventana (`window`, comando `predictily:reconcile`).
+        Una capa sin datos o no comparable se reporta con su razón en `unavailable_layers` y en una discrepancia
+        `layer_not_compared`: nunca se inventan cifras y nunca hay `balanced` sin comparar. `from`/`to` devuelven
+        los informes cuya ventana se solapa con ese rango.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: scope
+        in: query
+        schema:
+          type: string
+          enum:
+          - import
+          - sync
+          - window
+      - name: entity
+        in: query
+        schema:
+          type: string
+          pattern: ^[a-z_]{2,30}$
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - balanced
+          - explained
+          - unexplained
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      responses:
+        '200':
+          description: Informes más recientes primero
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReconciliationReport'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: data.view
+  /lineage/reconciliation/{id}:
+    get:
+      tags:
+      - Linaje e identidades
+      summary: Un informe de reconciliación
+      description: 'Un informe de otra empresa responde 404.
+
+
+        Habilidad requerida: `data.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Informe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReconciliationReport'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: data.view
   /model-evaluations:
     get:
       tags:
@@ -3467,8 +5974,9 @@ paths:
         '200':
           description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order,
             unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type,
-            rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message,
-            dq_class?}], warnings}'
+            rejected, ingestion_mode, ingestion_mode_basis, bronze_object_id (el cuerpo del lote se guarda íntegro
+            en Bronze antes de normalizar), errors:[{index, item?, field, code, severity, message, dq_class?}],
+            warnings}. 409 bronze_unavailable si Bronze no está disponible: no se procesa nada'
         '422':
           description: Ningún documento válido ni descartado por versión anterior, o error estructural
   /sales/summary:
@@ -5406,6 +7914,7 @@ paths:
           - supply
           - cost
           - scenario
+          - quality_gates
         required: true
       responses:
         '200':
@@ -5506,6 +8015,9 @@ paths:
       tags:
       - Empresas
       summary: Consumo del período y límites del plan
+      description: '`metrics.series` (series activas) solo se mide si el plan define `max_series`; es un conteo
+        cacheado por empresa y día (aproximación: puede tardar hasta 10 min en reflejar una serie nueva) y es null
+        si no hay tope o no se pudo medir a tiempo.'
       responses:
         '200':
           description: OK
@@ -5899,6 +8411,7 @@ components:
         enum:
         - 7
         - 14
+        - 15
         - 30
         - 60
         - 90
@@ -5929,6 +8442,7 @@ components:
         - supply
         - cost
         - scenario
+        - quality_gates
     ExportId:
       name: export
       in: path
@@ -5944,6 +8458,8 @@ components:
         type: integer
         enum:
         - 7
+        - 14
+        - 15
         - 30
         - 90
   responses:
@@ -6136,6 +8652,7 @@ components:
           enum:
           - 7
           - 14
+          - 15
           - 30
           - 60
           - 90
@@ -6425,7 +8942,9 @@ components:
         skip_invalid_rows:
           type: boolean
           default: false
-          description: Los documentos con alguna fila inválida se omiten completos
+          description: Los documentos con alguna fila inválida se omiten completos; los de ventas con hallazgos
+            REVIEW_REQUIRED o QUARANTINED se RETIENEN en la cuarentena (GET /data-quality/quarantine) en lugar de
+            descartarse (ADR-V25-24)
         ingestion_mode:
           type:
           - string
@@ -6437,6 +8956,15 @@ components:
           description: 'Solo ventas (ADR-V25-23). Vacío = automático: backfill si la empresa aún no tiene ventas
             al iniciar la escritura (primera carga histórica); si no, incremental. Al confirmar se guarda aquí el
             valor resuelto.'
+        value_maps:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: 'Solo ventas (ADR-V25-24). `{document_type: {"<crudo>": "<canónico>"}, status: {...}}`: se
+            aplican ANTES del reconocimiento de vocabulario (exacto y, si no, por clave sin tildes ni mayúsculas);
+            el destino debe ser un valor del vocabulario canónico (422 `options.value_maps.<campo>`). Quedan en
+            `metrics.transformations` y en `rules_version` del informe de calidad.'
     ImportJob:
       type: object
       properties:
@@ -6507,7 +9035,8 @@ components:
             (documentos sin cambios cuyo modo almacenado difiere del declarado), future_recorded_at y recorded_at_unreadable
             (filas con source_recorded_at posterior a ahora + tolerancia o ilegible: la marca se descarta), document_number_shared_with_unknown_type
             (documentos reconocidos que comparten número con filas de tipo desconocido: se escriben, con aviso),
-            ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load). En la validación las
+            ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load); calidad (ADR-V25-24):
+            documents_quarantined (documentos retenidos en cuarentena con skip_invalid_rows). En la validación las
             cifras de versiones son una proyección de lo que hará la confirmación.'
         quality_report:
           type:
@@ -6635,14 +9164,21 @@ components:
           - 'null'
     HorizonSupport:
       type: object
-      description: Respaldo de un horizonte. `insufficient_data` = historia < 2×H o backtest sin ventanas de H días
-        (no presentar como completo).
+      description: 'Respaldo de un horizonte. `insufficient_data` (ESTADO) = historia < 2×H o backtest sin ventanas
+        de H días (no presentar como completo). El motivo
+
+        es un CÓDIGO: `reason_code` = `coverage_insufficient` (historia/backtest insuficiente) o `insufficient_horizon`
+        (sin ventanas completas de H días); `code`
+
+        conserva el código histórico (`history_lt_2h`, `no_backtest`, `backtest_horizon_lt_h`, `no_evaluated_observations`,
+        `no_independent_holdout`).'
       properties:
         horizon:
           type: integer
           enum:
           - 7
           - 14
+          - 15
           - 30
           - 60
           - 90
@@ -6660,6 +9196,8 @@ components:
             type: object
             properties:
               code:
+                type: string
+              reason_code:
                 type: string
               message:
                 type: string
@@ -7275,6 +9813,7 @@ components:
           enum:
           - 7
           - 14
+          - 15
           - 30
           - 60
           - 90
@@ -7391,6 +9930,225 @@ components:
           type: object
         base_run:
           $ref: '#/components/schemas/RunRef'
+    BronzeObject:
+      type: object
+      description: Metadatos de un objeto Bronze (sin clave del almacén ni contenido).
+      properties:
+        id:
+          type: integer
+        data_source_id:
+          type:
+          - integer
+          - 'null'
+        kind:
+          type: string
+          enum:
+          - file_upload
+          - sql_extract
+          - api_batch
+          - bridge_batch
+        entity:
+          type: string
+        storage_driver:
+          type: string
+          description: local o s3
+        sha256:
+          type: string
+        size_bytes:
+          type: integer
+        content_type:
+          type:
+          - string
+          - 'null'
+        schema_fingerprint:
+          type:
+          - string
+          - 'null'
+        schema_version:
+          type:
+          - integer
+          - 'null'
+        row_count:
+          type:
+          - integer
+          - 'null'
+        original_name:
+          type:
+          - string
+          - 'null'
+          description: Nombre declarado por el cliente (dato descriptivo; no forma parte de ninguna ruta)
+        received_by_user_id:
+          type:
+          - integer
+          - 'null'
+        received_from_device:
+          type:
+          - string
+          - 'null'
+        received_at:
+          type: string
+          format: date-time
+        retention_until:
+          type:
+          - string
+          - 'null'
+          format: date
+        status:
+          type: string
+          enum:
+          - stored
+          - processed
+          - quarantined
+          - purged
+        content_available:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    ReconciliationReport:
+      type: object
+      description: 'Conteos y totales por capa (source, bronze, silver, gold), discrepancias y estado. Cada capa
+        trae `available`; si es false, `reason` explica por qué (sin cifras inventadas). Una capa no comparable
+        (`comparable`/`compared` = false) agrega una discrepancia `layer_not_compared`: nunca balanced sin comparar.'
+      properties:
+        id:
+          type: integer
+        scope:
+          type: string
+          enum:
+          - import
+          - sync
+          - window
+        entity:
+          type: string
+        data_source_id:
+          type:
+          - integer
+          - 'null'
+        bronze_object_id:
+          type:
+          - integer
+          - 'null'
+        import_job_id:
+          type:
+          - integer
+          - 'null'
+        source_sync_id:
+          type:
+          - integer
+          - 'null'
+        window_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        window_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        status:
+          type: string
+          enum:
+          - balanced
+          - explained
+          - unexplained
+        layers:
+          type: object
+          additionalProperties: true
+        discrepancies:
+          type: array
+          items:
+            type: object
+            properties:
+              from:
+                type: string
+              to:
+                type: string
+              metric:
+                type: string
+              expected:
+                type:
+                - number
+                - 'null'
+              observed:
+                type:
+                - number
+                - 'null'
+              explained:
+                type: boolean
+              explanation:
+                type: string
+        unavailable_layers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Capas no disponibles o disponibles pero no comparables, con su razón
+        compared_layers:
+          type: array
+          items:
+            type: string
+            enum:
+            - source
+            - bronze
+            - silver
+            - gold
+          description: Capas efectivamente comparadas; solo con las cuatro y sin diferencias el estado es balanced
+        created_at:
+          type: string
+          format: date-time
+    IdentityAlias:
+      type: object
+      description: Código de origen → identidad canónica con vigencia. `product_id` o `customer_id` según la entidad.
+        Para clientes `source_code` es el código minimizado.
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+        customer_id:
+          type: integer
+        data_source_id:
+          type:
+          - integer
+          - 'null'
+          description: null = cualquier fuente
+        source_code:
+          type: string
+        kind:
+          type: string
+          enum:
+          - alias
+          - code_change
+          - merge
+          - split
+          description: 'merge y split están DISEÑADOS: la API no los crea ni el catálogo los aplica'
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        notes:
+          type:
+          - string
+          - 'null'
+        created_by:
+          type:
+          - integer
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
     PageMeta:
       type: object
       properties:
@@ -7665,6 +10423,8 @@ components:
             type: integer
             enum:
             - 7
+            - 14
+            - 15
             - 30
             - 90
         model_versions:
@@ -7903,6 +10663,64 @@ components:
         created_at:
           type: string
           format: date-time
+    QuarantineRecord:
+      type: object
+      description: Documento retenido fuera de Silver con hallazgos REVIEW_REQUIRED o QUARANTINED (ADR-V25-24).
+      properties:
+        id:
+          type: integer
+        entity:
+          type: string
+          example: sales
+        record_key:
+          type: string
+          description: Clave del documento sin PII (tipo|número); `unknown|…` si el tipo no se reconoció
+        status:
+          type: string
+          enum:
+          - pending
+          - released
+          - discarded
+          - superseded
+          description: '`superseded`: una carga posterior dejó el documento bien en Silver (o se liberó otro registro
+            del mismo documento); ya no se puede liberar'
+        issue_codes:
+          type: array
+          items:
+            type: string
+        rows:
+          type: integer
+          description: Filas retenidas en el payload
+        import_job_id:
+          type:
+          - integer
+          - 'null'
+        source_sync_id:
+          type:
+          - integer
+          - 'null'
+        bronze_object_id:
+          type:
+          - integer
+          - 'null'
+        resolution:
+          type:
+          - object
+          - 'null'
+          description: 'Cómo se resolvió: `{action: released|discarded, by, at, reason?, write_state?}`'
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        resolved_by:
+          type:
+          - integer
+          - 'null'
+        resolved_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     SourceSync:
       type: object
       properties:
@@ -7952,10 +10770,17 @@ components:
           type:
           - integer
           - 'null'
+        bronze_object_id:
+          type:
+          - integer
+          - 'null'
+          description: Extracción CRUDA guardada en Bronze (NDJSON comprimido) antes de normalizar (ADR-V25-24);
+            null si no devolvió filas
         stats:
           type: object
           additionalProperties: true
-          description: 'mode, rows_extracted, pages, import (estadísticas del import), note; ventas (ADR-V25-23):
+          description: 'mode, rows_extracted, pages, import (estadísticas del import), note; transformations (aplicaciones
+            de mapeos de valores), schema (huella, versión y deriva de esquema), bronze_object_id; ventas (ADR-V25-23):
             ingestion_mode, ingestion_mode_basis (declared | first_sync | subsequent_sync); con `source_recorded_at`
             mapeado: future_recorded_at (fechas de registro posteriores al inicio de la sincronización + tolerancia
             de 5 minutos, o ilegibles, que NUNCA adelantan la marca de agua), recorded_at_unreadable, watermark_note.
@@ -8446,6 +11271,7 @@ components:
           - supply
           - cost
           - scenario
+          - quality_gates
         config_version:
           type:
           - string
@@ -8508,6 +11334,8 @@ components:
           type: integer
           enum:
           - 7
+          - 14
+          - 15
           - 30
           - 90
         as_of:
@@ -10118,3 +12946,1307 @@ components:
           - string
           - 'null'
           format: date-time
+    IntelligenceDataLocation:
+      type: object
+      description: Dónde vive el dato de una familia (sin segundo almacén de features).
+      properties:
+        kind:
+          type: string
+          enum:
+          - native
+          - external_series
+          - external_events
+          - contract
+        table:
+          type: string
+        status:
+          type: string
+          description: native | no_source | manual_events_only | contract_disabled
+        note:
+          type: string
+    IntelligenceFactor:
+      type: object
+      description: Definición del catálogo de factores (V2.1 §24.4) con la elección de la empresa.
+      properties:
+        key:
+          type: string
+        family:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+        name:
+          type: string
+        scope:
+          type: string
+          enum:
+          - public
+          - tenant
+        availability_class:
+          type: string
+          enum:
+          - OBSERVED_HISTORICAL
+          - STATIC
+          - KNOWN_IN_ADVANCE
+          - THIRD_PARTY_FORECAST
+          - USER_SCENARIO
+          - UNAVAILABLE_FOR_HORIZON
+        storage:
+          type: string
+          enum:
+          - sales
+          - product_price_history
+          - promotions
+          - calendar_events
+          - commercial_commitments
+          - inventory_snapshots
+          - location_capacities
+          - external_indicator_observations
+          - external_events
+          - shared_forecast_grants
+        data_location:
+          $ref: '#/components/schemas/IntelligenceDataLocation'
+        external_indicator_id:
+          type:
+          - integer
+          - 'null'
+        unit:
+          type:
+          - string
+          - 'null'
+        frequency:
+          type:
+          - string
+          - 'null'
+        geo_scope:
+          type:
+          - string
+          - 'null'
+        source_key:
+          type:
+          - string
+          - 'null'
+        license:
+          type:
+          - string
+          - 'null'
+        missing_strategy:
+          type: string
+          enum:
+          - disable_feature
+          - last_valid_with_age
+          - unavailable
+        max_staleness_days:
+          type:
+          - integer
+          - 'null'
+        retention_days:
+          type:
+          - integer
+          - 'null'
+        sector_justification:
+          type:
+          - string
+          - 'null'
+        schema:
+          type: object
+          additionalProperties: true
+        is_informative_alert:
+          type: boolean
+        catalog_is_active:
+          type: boolean
+          description: Disponibilidad que otorga la plataforma; las 17 familias base nacen en false
+        company_activation:
+          type: boolean
+          description: Elección de la empresa (tenants.settings.factor_activation)
+        state:
+          type: string
+          enum:
+          - inactive
+          - activated_by_company
+          - active
+        activation_updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        engine_effect:
+          type: string
+          enum:
+          - none_until_pipeline_enabled
+          description: La activación no cambia nada del motor mientras el pipeline de factores de la empresa esté
+            apagado
+    IntelligenceFactorListMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+        families:
+          type: integer
+        catalog_active:
+          type: integer
+        company_activated:
+          type: integer
+        pipeline_note:
+          type: string
+        external_integrations:
+          type: string
+    IntelligenceFactorActivationInput:
+      type: object
+      required:
+      - active
+      properties:
+        active:
+          type: boolean
+    IntelligenceFactorAdminInput:
+      type: object
+      required:
+      - family
+      - key
+      - name
+      - availability_class
+      - storage
+      properties:
+        family:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+        key:
+          type: string
+          pattern: ^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$
+          maxLength: 100
+        name:
+          type: string
+          maxLength: 200
+        availability_class:
+          type: string
+          enum:
+          - OBSERVED_HISTORICAL
+          - STATIC
+          - KNOWN_IN_ADVANCE
+          - THIRD_PARTY_FORECAST
+          - USER_SCENARIO
+          - UNAVAILABLE_FOR_HORIZON
+        storage:
+          type: string
+          enum:
+          - sales
+          - product_price_history
+          - promotions
+          - calendar_events
+          - commercial_commitments
+          - inventory_snapshots
+          - location_capacities
+          - external_indicator_observations
+          - external_events
+          - shared_forecast_grants
+        external_indicator_id:
+          type:
+          - integer
+          - 'null'
+          description: Solo un indicador público (tenant_id NULL) y con almacenamiento external_indicator_observations
+        unit:
+          type:
+          - string
+          - 'null'
+        frequency:
+          type:
+          - string
+          - 'null'
+          maxLength: 15
+        geo_scope:
+          type:
+          - string
+          - 'null'
+          enum:
+          - country
+          - region
+          - province
+          - branch
+          - product
+          - null
+        source_key:
+          type:
+          - string
+          - 'null'
+        license:
+          type:
+          - string
+          - 'null'
+        missing_strategy:
+          type: string
+          enum:
+          - disable_feature
+          - last_valid_with_age
+          - unavailable
+        max_staleness_days:
+          type:
+          - integer
+          - 'null'
+        retention_days:
+          type:
+          - integer
+          - 'null'
+        sector_justification:
+          type:
+          - string
+          - 'null'
+        schema:
+          type: object
+        is_active:
+          type: boolean
+        is_informative_alert:
+          type: boolean
+    IntelligenceFactorAdminUpdate:
+      type: object
+      description: Los mismos campos de la creación, todos opcionales; `key` y `family` no cambian.
+      properties:
+        name:
+          type: string
+        availability_class:
+          type: string
+          enum:
+          - OBSERVED_HISTORICAL
+          - STATIC
+          - KNOWN_IN_ADVANCE
+          - THIRD_PARTY_FORECAST
+          - USER_SCENARIO
+          - UNAVAILABLE_FOR_HORIZON
+        storage:
+          type: string
+          enum:
+          - sales
+          - product_price_history
+          - promotions
+          - calendar_events
+          - commercial_commitments
+          - inventory_snapshots
+          - location_capacities
+          - external_indicator_observations
+          - external_events
+          - shared_forecast_grants
+        external_indicator_id:
+          type:
+          - integer
+          - 'null'
+        unit:
+          type:
+          - string
+          - 'null'
+        frequency:
+          type:
+          - string
+          - 'null'
+        geo_scope:
+          type:
+          - string
+          - 'null'
+        source_key:
+          type:
+          - string
+          - 'null'
+        license:
+          type:
+          - string
+          - 'null'
+        missing_strategy:
+          type: string
+          enum:
+          - disable_feature
+          - last_valid_with_age
+          - unavailable
+        max_staleness_days:
+          type:
+          - integer
+          - 'null'
+        retention_days:
+          type:
+          - integer
+          - 'null'
+        sector_justification:
+          type:
+          - string
+          - 'null'
+        schema:
+          type: object
+        is_active:
+          type: boolean
+        is_informative_alert:
+          type: boolean
+    IntelligenceEvent:
+      type: object
+      description: Evento externo con procedencia (V2.1 §24.6). `effective_status` es el estado real (EXPIRED si
+        la vigencia terminó).
+      properties:
+        id:
+          type: integer
+        scope:
+          type: string
+          enum:
+          - public
+          - tenant
+        family:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+        event_type:
+          type: string
+        title:
+          type: string
+        summary:
+          type:
+          - string
+          - 'null'
+        source_url:
+          type:
+          - string
+          - 'null'
+        source_ref:
+          type:
+          - string
+          - 'null'
+        authority:
+          type:
+          - string
+          - 'null'
+        published_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        available_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 'NULL hasta la verificación: el evento no existe para el sistema antes'
+        effective_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        effective_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        jurisdiction:
+          type:
+          - string
+          - 'null'
+        corroboration:
+          type: string
+          enum:
+          - single_source
+          - corroborated
+          - official
+        status:
+          type: string
+          enum:
+          - PROPOSED
+          - VERIFIED
+          - REJECTED
+          - EXPIRED
+        effective_status:
+          type: string
+          enum:
+          - PROPOSED
+          - VERIFIED
+          - REJECTED
+          - EXPIRED
+        extracted_by:
+          type: string
+          enum:
+          - manual
+          - connector
+          - llm
+        affects:
+          type: object
+          additionalProperties: true
+        is_informative_alert:
+          type: boolean
+        usable_for_prediction:
+          type: boolean
+          description: Verificado, con fecha de publicación, vigente y no informativo
+        review_token:
+          type: string
+          description: Huella (40 hex) del contenido revisable y del estado; se devuelve en verify/reject para demostrar
+            qué versión se revisó
+        validity_state:
+          type: string
+          enum:
+          - INVALID
+          - AVAILABLE
+          - NOT_USABLE
+          description: INVALID = sin published_at
+        proposed_by:
+          type:
+          - integer
+          - 'null'
+        reviewed_by:
+          type:
+          - integer
+          - 'null'
+        reviewed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        review_note:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    IntelligenceEventInput:
+      type: object
+      required:
+      - family
+      - event_type
+      - title
+      description: Requiere `source_url` o `source_ref`. Cualquier otro campo (status, proposed_by, extracted_by,
+        tenant_id…) se ignora.
+      properties:
+        family:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+        event_type:
+          type: string
+          maxLength: 60
+        title:
+          type: string
+          minLength: 3
+          maxLength: 300
+        summary:
+          type:
+          - string
+          - 'null'
+          maxLength: 5000
+        source_url:
+          type:
+          - string
+          - 'null'
+          format: uri
+          maxLength: 500
+          description: Solo http/https y sin usuario ni clave incrustados; se guarda, nunca se descarga
+        source_ref:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+        authority:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+        published_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: No puede estar en el futuro; sin ella el evento no puede verificarse
+        effective_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        effective_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        jurisdiction:
+          type:
+          - string
+          - 'null'
+          maxLength: 80
+        corroboration:
+          type: string
+          enum:
+          - single_source
+          - corroborated
+          - official
+        affects:
+          type:
+          - object
+          - 'null'
+          properties:
+            products:
+              type: array
+              items:
+                type: integer
+            categories:
+              type: array
+              items:
+                type: integer
+            regions:
+              type: array
+              items:
+                type: string
+            taxonomy_nodes:
+              type: array
+              items:
+                type: integer
+        is_informative_alert:
+          type: boolean
+    IntelligenceEventUpdate:
+      type: object
+      description: Los mismos campos de la propuesta, todos opcionales.
+      properties:
+        family:
+          type: string
+          enum:
+          - sales_history
+          - prices_discounts
+          - competition
+          - search_trends
+          - consumer_preferences
+          - weather
+          - epidemiology
+          - animal_plant_health
+          - food_safety_alerts
+          - trade_regulatory
+          - export_statistics
+          - orders_contracts
+          - shared_projections
+          - production_estimates
+          - reviews_satisfaction
+          - capacity_inventory
+          - calendar_events
+        event_type:
+          type: string
+        title:
+          type: string
+        summary:
+          type:
+          - string
+          - 'null'
+        source_url:
+          type:
+          - string
+          - 'null'
+        source_ref:
+          type:
+          - string
+          - 'null'
+        authority:
+          type:
+          - string
+          - 'null'
+        published_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        effective_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        effective_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        jurisdiction:
+          type:
+          - string
+          - 'null'
+        corroboration:
+          type: string
+          enum:
+          - single_source
+          - corroborated
+          - official
+        affects:
+          type:
+          - object
+          - 'null'
+        is_informative_alert:
+          type: boolean
+    IntelligenceTaxonomyNode:
+      type: object
+      properties:
+        id:
+          type: integer
+        scope:
+          type: string
+          enum:
+          - public
+          - tenant
+        parent_id:
+          type:
+          - integer
+          - 'null'
+        level:
+          type: string
+          enum:
+          - sector
+          - industry
+          - category
+          - subcategory
+        code:
+          type: string
+        name:
+          type: string
+        version:
+          type: integer
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        erp_category_id:
+          type:
+          - integer
+          - 'null'
+        attributes:
+          type: object
+          additionalProperties: true
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    IntelligenceTaxonomyNodeInput:
+      type: object
+      required:
+      - level
+      - code
+      - name
+      properties:
+        level:
+          type: string
+          enum:
+          - sector
+          - industry
+          - category
+          - subcategory
+        parent_id:
+          type:
+          - integer
+          - 'null'
+          description: Nodo del nivel inmediatamente superior; null solo para `sector`
+        code:
+          type: string
+          maxLength: 80
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.\-]*$
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        erp_category_id:
+          type:
+          - integer
+          - 'null'
+          description: Categoría de la empresa (product_categories)
+        attributes:
+          type:
+          - object
+          - 'null'
+    IntelligenceTaxonomyNodeUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        erp_category_id:
+          type:
+          - integer
+          - 'null'
+        attributes:
+          type: object
+    IntelligenceTaxonomyNodeVersionInput:
+      type: object
+      properties:
+        name:
+          type: string
+        valid_from:
+          type: string
+          format: date
+        parent_id:
+          type:
+          - integer
+          - 'null'
+        erp_category_id:
+          type:
+          - integer
+          - 'null'
+        attributes:
+          type: object
+    IntelligenceTaxonomyAssignment:
+      type: object
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+        taxonomy_node_id:
+          type: integer
+        node:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            level:
+              type: string
+            code:
+              type: string
+            name:
+              type: string
+            version:
+              type: integer
+        provenance:
+          type: string
+          enum:
+          - manual
+          - llm_proposed
+          - verified
+        usable:
+          type: boolean
+          description: manual y verified; una propuesta llm_proposed nunca
+        pending_review:
+          type: boolean
+        confidence:
+          type:
+          - number
+          - 'null'
+          description: Heurística o declarada; no es una probabilidad calibrada
+        is_primary:
+          type: boolean
+        proposed_by:
+          type:
+          - integer
+          - 'null'
+        verified_by:
+          type:
+          - integer
+          - 'null'
+        verified_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    IntelligenceTaxonomyAssignmentInput:
+      type: object
+      required:
+      - product_id
+      - taxonomy_node_id
+      properties:
+        product_id:
+          type: integer
+        taxonomy_node_id:
+          type: integer
+        confidence:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          maximum: 1
+        is_primary:
+          type: boolean
+          default: true
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+    IntelligenceTaxonomyAssignmentUpdate:
+      type: object
+      properties:
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        confidence:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          maximum: 1
+    IntelligenceSectorProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        profile_key:
+          type: string
+        priority:
+          type: integer
+        scope:
+          type: string
+          enum:
+          - tenant
+          - branch
+          - category
+          - product
+        scope_ref:
+          type:
+          - string
+          - 'null'
+        is_active:
+          type: boolean
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    IntelligenceSectorProfileInput:
+      type: object
+      required:
+      - profile_key
+      properties:
+        profile_key:
+          type: string
+          pattern: ^[a-z][a-z0-9_]*$
+          maxLength: 80
+        priority:
+          type: integer
+          default: 100
+          minimum: 0
+          maximum: 65535
+        scope:
+          type: string
+          enum:
+          - tenant
+          - branch
+          - category
+          - product
+          default: tenant
+        scope_ref:
+          type:
+          - string
+          - 'null'
+          description: Id numérico del elemento propio; no aplica al alcance `tenant`
+        is_active:
+          type: boolean
+    IntelligenceSharedGrantInput:
+      type: object
+      required:
+      - recipient_tenant_uuid
+      - scope
+      - subjects
+      - period_from
+      - period_to
+      - granularity
+      - allowed_content
+      - expires_at
+      - purpose
+      properties:
+        recipient_tenant_uuid:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum:
+          - product
+          - category
+        subjects:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+          description: Ids de productos o categorías del emisor
+        period_from:
+          type: string
+          format: date
+        period_to:
+          type: string
+          format: date
+        granularity:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+        allowed_content:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+            - point_forecast
+            - interval_80
+            - interval_95
+          description: Ventas, clientes, precios o ingresos nunca son concedibles (422 content_not_allowed)
+        forecast_version:
+          type:
+          - integer
+          - 'null'
+          description: Versión de una ejecución completada del emisor; por defecto la vigente
+        expires_at:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+          minLength: 5
+          maxLength: 300
+    IntelligenceSharedGrantIssuer:
+      type: object
+      description: Vista del emisor.
+      properties:
+        id:
+          type: integer
+        recipient:
+          type: object
+          properties:
+            uuid:
+              type:
+              - string
+              - 'null'
+        scope:
+          type: string
+          enum:
+          - product
+          - category
+        subjects:
+          type: array
+          items:
+            type: integer
+        period_from:
+          type: string
+          format: date
+        period_to:
+          type: string
+          format: date
+        granularity:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+        allowed_content:
+          type: array
+          items:
+            type: string
+        forecast_version:
+          type:
+          - string
+          - 'null'
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - revoked
+          - expired
+        effective_status:
+          type: string
+          enum:
+          - draft
+          - active
+          - revoked
+          - expired
+        revoked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        accesses:
+          type: object
+          properties:
+            read:
+              type: integer
+            denied:
+              type: integer
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    IntelligenceSharedGrantRecipient:
+      type: object
+      description: 'Vista del receptor: sin los identificadores internos del emisor.'
+      properties:
+        id:
+          type: integer
+        issuer:
+          type:
+          - object
+          - 'null'
+          properties:
+            uuid:
+              type: string
+              format: uuid
+            name:
+              type: string
+        scope:
+          type: string
+        subjects_count:
+          type: integer
+        period_from:
+          type: string
+          format: date
+        period_to:
+          type: string
+          format: date
+        granularity:
+          type: string
+        allowed_content:
+          type: array
+          items:
+            type: string
+        forecast_version:
+          type:
+          - string
+          - 'null'
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - revoked
+          - expired
+        revoked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    IntelligenceSharedGrantAccess:
+      type: object
+      properties:
+        id:
+          type: integer
+        action:
+          type: string
+          enum:
+          - read
+          - denied_expired
+          - denied_revoked
+          - denied_scope
+        accessed_at:
+          type: string
+          format: date-time
+        actor:
+          type: string
+          enum:
+          - recipient
+          - issuer
+          - other_company
+    IntelligenceSharedForecast:
+      type: object
+      properties:
+        grant:
+          $ref: '#/components/schemas/IntelligenceSharedGrantRecipient'
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                - shared_projection
+              subject:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  id:
+                    type: integer
+                  sku:
+                    type: string
+                  name:
+                    type: string
+              period_start:
+                type: string
+                format: date
+              period_days:
+                type: integer
+              point_forecast:
+                type: number
+              interval_80:
+                type: object
+                properties:
+                  lo:
+                    type:
+                    - number
+                    - 'null'
+                  hi:
+                    type:
+                    - number
+                    - 'null'
+              interval_95:
+                type: object
+                properties:
+                  lo:
+                    type:
+                    - number
+                    - 'null'
+                  hi:
+                    type:
+                    - number
+                    - 'null'
+        meta:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - shared_projection
+            is_confirmed_order:
+              type: boolean
+              enum:
+              - false
+            counts_as_committed_demand:
+              type: boolean
+              enum:
+              - false
+            notice:
+              type: string
+            period_rule:
+              type: string
+              description: Solo se sirven periodos (día, semana, mes) totalmente contenidos en lo concedido y en
+                lo pedido
+            granularity:
+              type: string
+            period_from:
+              type: string
+              format: date
+            period_to:
+              type: string
+              format: date
+            forecast_version:
+              type:
+              - string
+              - 'null'
+            content:
+              type: array
+              items:
+                type: string
+            forecast_available:
+              type: boolean

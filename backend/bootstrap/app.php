@@ -4,8 +4,11 @@ use App\Http\Middleware\EnsureSuperadmin;
 use App\Http\Middleware\EnsureTenantAbility;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SecurityHeaders;
+use App\Services\Intelligence\SharedGrants\EnsureSharedForecastGrantsEnabled;
+use App\Services\Intelligence\SharedGrants\SharedForecastGrantService;
 use App\Support\Tenancy\Exceptions\TenantNotResolvedException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -37,6 +41,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToPriorityList(
             before: SubstituteBindings::class,
             prepend: ResolveTenant::class,
+        );
+        // V2.5 · W2-F: con la bandera de concesiones apagada las rutas «no existen» (404) incluso sin sesión: el interruptor corre ANTES que Authenticate.
+        $middleware->prependToPriorityList(
+            before: AuthenticatesRequests::class,
+            prepend: EnsureSharedForecastGrantsEnabled::class,
         );
         $middleware->trustProxies(at: env('TRUSTED_PROXIES', '127.0.0.1,172.16.0.0/12,10.0.0.0/8'));
     })
@@ -63,6 +72,16 @@ return Application::configure(basePath: dirname(__DIR__))
                     : 'Ruta no encontrada.';
 
                 return response()->json(['message' => $message, 'code' => 'not_found'], 404);
+            }
+
+            return null;
+        });
+
+        // V2.5 · W2-F: con la bandera de concesiones apagada, un verbo no registrado sobre sus URI (PUT/PATCH/DELETE…) tampoco debe delatar la ruta con un 405
+        // y su cabecera Allow: responde el mismo 404 que una ruta inexistente.
+        $exceptions->render(function (MethodNotAllowedHttpException $e, Request $request) {
+            if (! SharedForecastGrantService::isEnabled() && $request->is('api/v1/intelligence/shared-forecast-grants', 'api/v1/intelligence/shared-forecast-grants/*', 'api/v1/intelligence/received-forecast-grants', 'api/v1/intelligence/received-forecast-grants/*')) {
+                return response()->json(['message' => 'Ruta no encontrada.', 'code' => 'not_found'], 404);
             }
 
             return null;

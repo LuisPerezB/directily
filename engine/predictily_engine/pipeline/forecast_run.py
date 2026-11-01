@@ -44,6 +44,9 @@ from predictily_engine.pipeline.schemas import ExecuteRequest
 from predictily_engine.platform.artifacts import SavedArtifact, save_signed_artifact
 from predictily_engine.platform.config import effective_config_record
 from predictily_engine.platform.snapshot import persist_snapshot
+from predictily_engine.quality.persistence import insert_run_quality_report, record_blocked_forecast_run
+from predictily_engine.quality.service import resolve_policy
+from predictily_engine.quality.signals import collect_signals
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +152,8 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             except ValueError as exc:
                 raise InvalidConfigurationError(f"Configuración de demanda inválida: {exc}") from exc
             core_config = config_record["effective_config"]
+            # Umbrales de los gates de calidad (W2-C): core → perfil → empresa; una configuración inválida se rechaza, no se aplica.
+            quality_policy = resolve_policy(tenant)
             # Cobertura declarada de la fuente de ventas: el corte no la supera y lo posterior es dato ausente.
             branches = repo.branches()
             active_branches = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
@@ -157,6 +162,9 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             cutoff = coverage.limit_cutoff(cutoff)
             data = coverage.apply(load_tenant_data(repo, cutoff, live=live_run))
             data.coverage_limitations = coverage.limitations()
+            # Señales de calidad que viven en la base (informes de ingestión, alias, desfase), con el MISMO corte y conocimiento que los datos.
+            quality_signals = collect_signals(conn, tenant_id, cutoff, tenant.get("timezone"), quality_policy.config,
+                                              knowledge=data.promotions_known_on)
         load_s = time.perf_counter() - t0
         log.info("run=%s tenant=%s datos cargados en %.1fs", run_id, tenant_id, load_s)
         seed = req.options.seed if req.options.seed is not None else settings.random_seed
@@ -171,6 +179,7 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             min_improvement=min_improvement, max_windows=max_windows,
             max_series_lgbm=settings.max_series_lgbm, progress=progress,
             force_families=req.options.force_models, horizons=tuple(req.horizons), config_record=config_record,
+            quality_signals=quality_signals,
         )
         progress("persisting", 92)
         result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)
@@ -185,6 +194,8 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
         return _response(final, duration_ms)
     except (InsufficientDataError, InvalidConfigurationError) as exc:
         mark_failed(engine, tenant_id, run_id, job_id, str(exc), int((time.perf_counter() - t0) * 1000))
+        # W2-C: un gate BLOCK deja constancia (informe de calidad de la ejecución con sus motivos); no oculta el error original.
+        record_blocked_forecast_run(engine, tenant_id, run_id, getattr(exc, "assessment", None))
         raise
     except Exception as exc:
         log.exception("Fallo del pipeline run=%s tenant=%s", run_id, tenant_id)
@@ -335,6 +346,8 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
 
     # ── Calidad de datos ──
     dq_id = insert_quality_report(conn, tenant_id, result.readiness, run_id)
+    # W2-C: métricas de dataset y resultado de los gates de la ejecución (scope `run`), junto al informe de preparación.
+    gate_report_id = insert_run_quality_report(conn, tenant_id, result.quality, forecast_run_id=run_id) if result.quality is not None else None
 
     # ── Alertas (solo ejecuciones de producción) ──
     if production:
@@ -344,6 +357,10 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
     summary = dict(result.summary)
     summary["duration_ms"] = duration_ms
     summary["data_quality_report_id"] = dq_id
+    if gate_report_id is not None:
+        summary["run_quality_report_id"] = gate_report_id
+        summary["quality_gate"] = {**summary.get("quality_gate", {}), "report_id": gate_report_id}
+        result.manifest["data_quality_gate"] = {**result.manifest.get("data_quality_gate", {}), "report_id": gate_report_id}
     summary["library_versions"] = versions
     summary["training_data_hash"] = result.training_data_hash
     snapshot_id = persist_snapshot(conn, tenant_id, result.snapshot) if result.snapshot is not None else None

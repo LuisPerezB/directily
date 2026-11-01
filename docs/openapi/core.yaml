@@ -223,6 +223,7 @@ paths:
     get:
       tags: [Empresas]
       summary: Consumo del período y límites del plan
+      description: '`metrics.series` (series activas) solo se mide si el plan define `max_series`; es un conteo cacheado por empresa y día (aproximación: puede tardar hasta 10 min en reflejar una serie nueva) y es null si no hay tope o no se pudo medir a tiempo.'
       responses:
         '200': {description: OK}
   /tenant/demo-data:
@@ -534,7 +535,7 @@ paths:
                             unit_cost: {type: number}
                             line_number: {type: integer}
       responses:
-        '200': {description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}'}
+        '200': {description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, bronze_object_id (el cuerpo del lote se guarda íntegro en Bronze antes de normalizar), errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}. 409 bronze_unavailable si Bronze no está disponible: no se procesa nada'}
         '422': {description: 'Ningún documento válido ni descartado por versión anterior, o error estructural'}
   /imports:
     parameters: [{$ref: '#/components/parameters/TenantId'}]
@@ -588,7 +589,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/TenantId'}, {$ref: '#/components/parameters/ImportId'}]
     post:
       tags: [Importaciones]
-      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows)
+      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows; 409 blocked_by_quality si el informe tiene un hallazgo BLOCKER)
       responses:
         '202': {$ref: '#/components/responses/ImportJobResponse'}
         '402': {$ref: '#/components/responses/Error'}
@@ -652,7 +653,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/TenantId'}]
     get: {tags: [Privacidad], summary: Bitácora de auditoría (audit.view), responses: {'200': {description: OK}}}
   /admin/tenants:
-    get: {tags: [Plataforma], summary: Empresas (superadmin; sin datos de negocio), responses: {'200': {description: OK}, '403': {$ref: '#/components/responses/Error'}}}
+    get: {tags: [Plataforma], summary: 'Empresas (superadmin; sin datos de negocio; el listado NO mide series activas: usage.series es null)', responses: {'200': {description: OK}, '403': {$ref: '#/components/responses/Error'}}}
   /admin/tenants/{uuid}:
     parameters: [{name: uuid, in: path, required: true, schema: {type: string, format: uuid}}]
     patch:
@@ -664,12 +665,30 @@ paths:
             schema:
               type: object
               properties:
-                plan_code: {type: string, enum: [trial, basico, profesional, empresarial]}
+                plan_code: {type: string, enum: [trial, basico, profesional, empresarial, starter, growth, enterprise]}
                 status: {type: string, enum: [active, suspended]}
-                plan_overrides: {type: object}
+                plan_overrides:
+                  type: [object, 'null']
+                  description: 'Límites por contrato (ADR-V25-18): reemplazan los del plan (las listas se reemplazan; los mapas se combinan). Un precio no es una clave válida (422). `null` en un tope = sin tope.'
+                  additionalProperties: false
+                  properties:
+                    max_branches: {type: [integer, 'null'], minimum: 0}
+                    max_series: {type: [integer, 'null'], minimum: 0, description: 'Series activas: pares sucursal × producto con ventas válidas en los últimos 90 días; se exige al solicitar un pronóstico'}
+                    max_active_products: {type: [integer, 'null'], minimum: 0}
+                    max_import_rows_per_month: {type: [integer, 'null'], minimum: 0}
+                    max_forecast_runs_per_day: {type: [integer, 'null'], minimum: 0}
+                    max_users: {type: [integer, 'null'], minimum: 0}
+                    horizons: {type: array, items: {type: integer, enum: [7, 14, 15, 30, 60, 90]}, description: 'Subconjunto del catálogo único de horizontes que la empresa puede usar'}
+                    features: {type: object, additionalProperties: {type: boolean}, description: 'Capacidades: scenarios, api_access, external_indicators, custom_models, customer, roles, assistant...'}
+                    modules: {type: array, items: {type: string}, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    frequencies: {type: array, items: {type: string}, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    connectors: {type: array, items: {type: string}, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    retention_months: {type: [integer, 'null'], minimum: 1, maximum: 240, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    compute_budget: {type: [object, 'null'], description: 'DECLARADO'}
+                    llm_budget: {type: [object, 'null'], description: 'DECLARADO'}
       responses: {'200': {description: OK}}
   /admin/plans:
-    get: {tags: [Plataforma], summary: Planes, responses: {'200': {description: OK}}}
+    get: {tags: [Plataforma], summary: 'Planes (límites, precio de referencia y metadatos informativos; un precio nunca es un límite)', responses: {'200': {description: OK}}}
   /admin/usage:
     get: {tags: [Plataforma], summary: Consumo mensual por empresa, responses: {'200': {description: OK}}}
 components:
@@ -743,7 +762,7 @@ components:
     TenantSettings:
       type: object
       properties:
-        default_horizon_days: {type: integer, enum: [7, 14, 30, 60, 90]}
+        default_horizon_days: {type: integer, enum: [7, 14, 15, 30, 60, 90]}
         service_level: {type: number, minimum: 0.5, maximum: 0.999}
         review_period_days: {type: integer}
         default_lead_time_days: {type: integer}
@@ -845,11 +864,15 @@ components:
         create_missing_products: {type: boolean, default: true}
         create_missing_branches: {type: boolean, default: false}
         create_missing_categories: {type: boolean, default: true}
-        skip_invalid_rows: {type: boolean, default: false, description: Los documentos con alguna fila inválida se omiten completos}
+        skip_invalid_rows: {type: boolean, default: false, description: 'Los documentos con alguna fila inválida se omiten completos; los de ventas con hallazgos REVIEW_REQUIRED o QUARANTINED se RETIENEN en la cuarentena (GET /data-quality/quarantine) en lugar de descartarse (ADR-V25-24)'}
         ingestion_mode:
           type: [string, 'null']
           enum: [backfill, incremental, null]
           description: 'Solo ventas (ADR-V25-23). Vacío = automático: backfill si la empresa aún no tiene ventas al iniciar la escritura (primera carga histórica); si no, incremental. Al confirmar se guarda aquí el valor resuelto.'
+        value_maps:
+          type: [object, 'null']
+          additionalProperties: true
+          description: 'Solo ventas (ADR-V25-24). `{document_type: {"<crudo>": "<canónico>"}, status: {...}}`: se aplican ANTES del reconocimiento de vocabulario (exacto y, si no, por clave sin tildes ni mayúsculas); el destino debe ser un valor del vocabulario canónico (422 `options.value_maps.<campo>`). Quedan en `metrics.transformations` y en `rules_version` del informe de calidad.'
     ImportJob:
       type: object
       properties:
@@ -869,7 +892,7 @@ components:
         normalized_preview: {type: array, items: {type: object}}
         stats:
           type: object
-          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid, documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes, return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch (documentos sin cambios cuyo modo almacenado difiere del declarado), future_recorded_at y recorded_at_unreadable (filas con source_recorded_at posterior a ahora + tolerancia o ilegible: la marca se descarta), document_number_shared_with_unknown_type (documentos reconocidos que comparten número con filas de tipo desconocido: se escriben, con aviso), ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load). En la validación las cifras de versiones son una proyección de lo que hará la confirmación.'
+          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid, documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes, return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch (documentos sin cambios cuyo modo almacenado difiere del declarado), future_recorded_at y recorded_at_unreadable (filas con source_recorded_at posterior a ahora + tolerancia o ilegible: la marca se descarta), document_number_shared_with_unknown_type (documentos reconocidos que comparten número con filas de tipo desconocido: se escriben, con aviso), ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load); calidad (ADR-V25-24): documents_quarantined (documentos retenidos en cuarentena con skip_invalid_rows). En la validación las cifras de versiones son una proyección de lo que hará la confirmación.'
         quality_report: {type: [object, 'null'], properties: {score: {type: number}, issues: {type: array, items: {type: object}}, summary: {type: object}}}
         error_message: {type: [string, 'null']}
         created_at: {type: string, format: date-time}

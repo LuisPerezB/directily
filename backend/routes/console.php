@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Schedule;
 
 // ── backend-core: retención, eliminación diferida de empresas, limpieza de archivos ──
 Schedule::command('predictily:purge')->dailyAt('03:30')->timezone('America/Guayaquil')->withoutOverlapping()->onOneServer();
+// V2.5 · W2-B: retención de Bronze por empresa (ADR-V25-24); purga auditada de los objetos vencidos.
+Schedule::command('predictily:bronze-purge')->dailyAt('03:45')->timezone('America/Guayaquil')->withoutOverlapping()->onOneServer();
 
 // ── backend-analytics: evaluación vs reales, pronósticos programados ──
 // El entrenamiento NO se dispara por cada factura: solo por programación, por el usuario
@@ -33,4 +35,9 @@ Schedule::command('predictily:customer-train')
     ->withoutOverlapping()->onOneServer();
 Schedule::command('predictily:customer-predict')
     ->dailyAt('04:20')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();
+
+// ── Factor Intelligence (V2.5 · W2-F): vencimiento de eventos externos y de concesiones de pronóstico compartido (idempotente) ──
+Schedule::command('predictily:intelligence-expire')
+    ->dailyAt('01:30')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();

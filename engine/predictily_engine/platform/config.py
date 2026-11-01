@@ -13,10 +13,25 @@ from typing import Any
 
 from predictily_engine.platform.extensions import get_profile
 
+# ── W2-E · horizons · catálogo ÚNICO de horizontes (ADR-V25-02) ────────────────────────────────────────────
+# Fuente única en el motor; el backend lo declara en `predictily.horizons.catalog` (backend/config/predictily.php) y una
+# prueba verifica que ambos coinciden (engine/tests/unit/test_horizon_catalog.py y Tests\Unit\Horizons\HorizonCatalogTest).
+# El plan comercial decide qué subconjunto puede usar cada empresa; el motor calcula lo que se le pide dentro del catálogo.
+#  - demand:   todo el catálogo.
+#  - customer: 7/14/15/30/90. 60 queda fuera: ninguna fuente lo pide para compra (V2.2: recompra 7/14/30/90; V2.3: 7/15/30) y
+#              cada horizonte añade un modelo por objetivo. Para habilitarlo basta agregarlo aquí y en el backend (misma prueba).
+#  - cost:     30/90 (frecuencia mensual del costo; no forma parte del catálogo de demanda/compra).
+HORIZONS: dict[str, tuple[int, ...]] = {
+    "catalog": (7, 14, 15, 30, 60, 90),
+    "demand": (7, 14, 15, 30, 60, 90),
+    "customer": (7, 14, 15, 30, 90),
+    "cost": (30, 90),
+}
+
 # Valores del core. Cada paquete amplía SOLO su sección.
 CORE_DEFAULTS: dict[str, dict[str, Any]] = {
     "demand": {
-        "horizons": [7, 14, 30, 60, 90],
+        "horizons": list(HORIZONS["demand"]),
         "service_level": 0.95,
         "review_period_days": 7,
         "default_lead_time_days": 7,
@@ -33,7 +48,7 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "day_status_infer_lookback_days": 28,
     },
     "customer": {
-        "horizons": [7, 30, 90],
+        "horizons": list(HORIZONS["customer"]),
         "exclude_generic_buyers": True,
         "generic_buyer_codes": ["9999999999999", "9999999999"],
         "min_history_days": 90,
@@ -109,7 +124,7 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "historical_review_days": 7,
     },
     "cost": {
-        "horizons": [30, 90],
+        "horizons": list(HORIZONS["cost"]),
         "period_days": 30,                   # frecuencia de agregación de costos (el costo no cambia a diario)
         "min_observations": 6,               # períodos con costo observado para pronosticar
         "holdout_periods": 3,                # últimos períodos reservados para evaluar métodos
@@ -120,12 +135,74 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "interval_level": 0.8,
         "max_series": 2000,
     },
+    # ── W2-D · factors · pipeline de factores externos (ADR-V25-06 y ADR-V25-25) ────────────────────────────────────────────────
+    # `enabled` es el INTERRUPTOR GLOBAL del pipeline, APAGADO por defecto y por empresa: con enabled=false no entra ningún factor externo
+    # al modelo ni se consulta ninguna tabla de factores (availability/pipeline.py). Se resuelve con la MISMA precedencia que el resto
+    # (core → perfil → `settings.cores.factors`). QUÉ factores activa la empresa NO está aquí: la fuente de verdad es
+    # `tenants.settings.factor_activation.<clave>.active` (backend, PUT /intelligence/factors/{clave}/activation); un factor cuenta solo
+    # con enabled=true Y su active=true. Las antigüedades máximas (STALE) son valores INICIALES de diseño, «a aprobar en el piloto»: un
+    # múltiplo del período de la fuente más su rezago habitual de publicación, para que un valor no se propague indefinidamente; la
+    # definición del factor (max_staleness_days) tiene prioridad. `*_precedence`: {código de indicador | código de evento de calendario |
+    # clave de factor: "tenant" | "public"} para desambiguar uno público y uno privado con el mismo código; sin declararla la ambigüedad
+    # falla (nunca se combinan en una serie).
+    "factors": {
+        "enabled": False,
+        "default_max_staleness_days": 90,    # sin antigüedad en la definición ni frecuencia conocida
+        "staleness_days_by_frequency": {"daily": 7, "weekly": 21, "monthly": 75, "quarterly": 150, "yearly": 400},
+        "indicator_precedence": {},
+        "calendar_precedence": {},
+        "definition_precedence": {},
+    },
     "scenario": {
         "horizon_days": 90,
         "period_days": 7,                    # paso de la dinámica de inventario del evaluador
         "max_strategies": 8,
         "price_window_days": 28,             # ventana del precio neto observado
         "default_unit_cost_unknown": None,   # costo desconocido ⇒ margen desconocido (no se rellena)
+    },
+    # ── W2-C · quality_gates · umbrales de los gates por módulo (ADR-V25-05 y ADR-V25-24) ───────────────────────────────────────
+    # Se resuelven con la MISMA precedencia que el resto (core → perfil sectorial → `settings.cores.quality_gates` de la empresa).
+    # TODOS son valores INICIALES de diseño, «a aprobar en el piloto» con datos reales; ninguno es universal. Su justificación,
+    # la regla que gobierna cada uno y el efecto (BLOCK | DEGRADE | WARN) están en `quality/thresholds.py` y en
+    # docs/data/DATA_QUALITY_ENGINE.md §6. Los valores por defecto no deben bloquear fixtures, demo ni E2E (prueba de aceptación).
+    "quality_gates": {
+        # ventanas de lectura de las señales que salen de la base (días hacia atrás desde el corte)
+        "invalid_lookback_days": 180,        # informes de ingestión considerados para el % inválido
+        "lag_lookback_days": 90,             # documentos incrementales considerados para el desfase evento→ingestión
+        "id_lookback_days": 90,              # ventana de «alias o códigos nuevos recientes»
+        "identity_window_days": 180,         # ventana de la proporción de compradores identificados/genéricos
+        # demand
+        "demand_min_history_days": 28,       # BLOCK: historia de la empresa (primera venta → corte) menor
+        "demand_min_source_coverage_pct": 0.5,   # BLOCK: fracción de sucursal-días con cobertura de fuente menor
+        "demand_warn_source_coverage_pct": 0.9,  # WARN: cobertura menor
+        "demand_block_invalid_pct": 0.5,     # BLOCK: fracción de filas inválidas (informes de ingestión) mayor
+        "demand_warn_invalid_pct": 0.05,     # WARN: fracción de filas inválidas mayor
+        "demand_warn_key_issue_pct": 0.02,   # WARN: fracción de líneas con producto/sucursal inexistente o dado de baja mayor
+        "demand_min_price_coverage": 0.8,    # DEGRADE: fracción de unidades con precio neto positivo menor ⇒ se deshabilita price_ratio
+        "demand_warn_min_cost_coverage": 0.5,    # WARN: fracción de líneas con costo menor
+        "demand_warn_min_inventory_coverage": 0.5,  # WARN: fracción de series activas con inventario menor
+        "demand_warn_max_stockout_pct": 0.2,     # WARN: fracción de series-día con quiebre mayor
+        "demand_warn_max_closed_pct": 0.3,       # WARN: fracción de series-día cerradas mayor
+        "demand_warn_max_stale_days": 14,        # WARN: días desde la última venta conocida mayor
+        "demand_warn_max_lag_p90_days": 7,       # WARN: p90 del desfase evento→ingestión mayor
+        "demand_warn_max_short_series_pct": 0.5,  # WARN: fracción de series activas con < 28 días de historia mayor
+        # customer
+        "customer_min_history_days": 28,     # BLOCK: historia de compras identificadas menor
+        "customer_min_buyers": 5,            # BLOCK: compradores identificados con compras menor
+        "customer_min_identified_share": 0.2,    # DEGRADE a agregado: fracción de unidades de compradores identificados menor
+        "customer_max_id_change_share": 0.2,     # DEGRADE a agregado: fracción de productos o clientes con alias de cambio mayor
+        "customer_max_new_product_code_share": 0.5,  # DEGRADE a agregado: fracción de productos con código nuevo reciente mayor
+        "customer_warn_max_new_customer_share": 0.5,  # WARN: fracción de compradores nuevos en la ventana mayor
+        "customer_warn_min_repeat_buyers_pct": 0.3,   # WARN: fracción de compradores con ≥ 2 días de compra menor
+        "customer_warn_min_availability_pct": 0.5,    # WARN: fracción de productos comprados con inventario conocido menor
+        "customer_warn_max_stale_days": 14,      # WARN: días desde la última venta conocida mayor
+        "customer_warn_invalid_pct": 0.05,       # WARN: fracción de filas inválidas mayor
+        # supply
+        "supply_min_inventory_coverage": 0.0,    # BLOCK: fracción de series pronosticadas con inventario menor (0 = desactivado; ver WARN)
+        "supply_warn_min_inventory_coverage": 0.5,   # WARN: fracción de series pronosticadas con inventario menor
+        "supply_inventory_max_age_days": 30,     # WARN: mediana de antigüedad del último inventario mayor
+        "supply_min_lead_time_coverage": 0.5,    # DEGRADE: fracción de series con plazo explícito (producto u oferta) menor
+        "supply_warn_min_cost_coverage": 0.5,    # WARN: fracción de productos con costo conocido menor
     },
 }
 
@@ -135,6 +212,7 @@ TENANT_SETTING_KEYS: dict[str, tuple[str, ...]] = {
     "supply": ("service_level", "review_period_days", "default_lead_time_days"),
     "customer": (),
     "cost": (),
+    "factors": (),
     "scenario": (),
 }
 
@@ -154,12 +232,26 @@ CONFIG_CONSTRAINTS: dict[tuple[str, str], dict[str, Any]] = {
     ("supply", "review_period_days"): {"min": 1, "max": 90},
     ("demand", "default_lead_time_days"): {"min": 1, "max": 365},
     ("supply", "default_lead_time_days"): {"min": 1, "max": 365},
-    ("demand", "horizons"): {"subset_of": [7, 14, 30, 60, 90], "non_empty": True},
+    ("demand", "horizons"): {"subset_of": list(HORIZONS["demand"]), "non_empty": True},
     ("demand", "day_status_infer_min_median_lines"): {"min": 1, "max": 100000},
     ("demand", "day_status_infer_lookback_days"): {"min": 7, "max": 90},
-    ("customer", "horizons"): {"subset_of": [7, 30, 90], "non_empty": True},
-    ("cost", "horizons"): {"subset_of": [30, 90], "non_empty": True},
+    ("customer", "horizons"): {"subset_of": list(HORIZONS["customer"]), "non_empty": True},
+    ("cost", "horizons"): {"subset_of": list(HORIZONS["cost"]), "non_empty": True},
 }
+
+
+# ── W2-C · quality_gates: rangos de los umbrales (fracciones en [0, 1]; días y conteos enteros no negativos) ──────────────────
+for _key, _value in CORE_DEFAULTS["quality_gates"].items():
+    if _key.endswith(("_pct", "_share", "_coverage")):
+        CONFIG_CONSTRAINTS[("quality_gates", _key)] = {"min": 0.0, "max": 1.0}
+    elif _key.endswith("_days"):
+        CONFIG_CONSTRAINTS[("quality_gates", _key)] = {"min": 0, "max": 3650}
+CONFIG_CONSTRAINTS[("quality_gates", "customer_min_buyers")] = {"min": 0, "max": 1_000_000}
+del _key, _value
+
+
+# ── W2-D · factors: rangos (los mapas anidados se validan en availability/pipeline.py, enganchado en `validate_overrides`) ──
+CONFIG_CONSTRAINTS[("factors", "default_max_staleness_days")] = {"min": 1, "max": 3650}
 
 
 class ConfigValidationError(ValueError):
@@ -215,6 +307,11 @@ def validate_overrides(core: str, overrides: dict[str, Any] | None, origin: str 
             outside = [v for v in value if v not in rule["subset_of"]]
             if outside or (rule.get("non_empty") and not value):
                 errors.append({"key": key, "code": "invalid_choice", "message": f"los valores permitidos son {rule['subset_of']}"})
+    if core == "factors":        # W2-D: mapas de precedencia y de antigüedad (el tipo «objeto» no basta)
+        from predictily_engine.availability.pipeline import factor_config_errors
+
+        reported = {e["key"] for e in errors}
+        errors.extend(factor_config_errors({k: v for k, v in (overrides or {}).items() if k in defaults and k not in reported}))
     return errors
 
 
