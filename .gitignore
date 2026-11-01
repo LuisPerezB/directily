@@ -24,3 +24,7 @@ engine/*.egg-info/
 # Variantes locales de entorno (contienen claves): nunca se versionan.
 .env.*
 !.env.example
+# Datos y resultados del piloto con datos REALES de clientes (repositorio público): nunca se versionan
+# sin autorización expresa del propietario (docs/operations/PILOT_RUNBOOK.md §0).
+reports/private/
+data/private/
