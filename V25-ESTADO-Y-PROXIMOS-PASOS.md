@@ -1,19 +1,17 @@
 # Predictily V2.5 · Estado actual, pendientes y próximos pasos
 
-**Corte de este informe:** 1-nov-2026, 07:45 UTC (actualizado; cierre de W1 a las 05:45 UTC) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main`
+**Corte de este informe:** 1-nov-2026, 14:30 UTC (cierre de W1 a las 05:45 UTC y de W2 a las 14:15 UTC) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main`
 @ `6c679d8`) · **PR:** se abre al terminar la sesión de trabajo (una rama, commits por paquete).
 **Especificación en la que se basa el trabajo:**
 [`docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md`](docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md)
 (V2.5, en adelante «la especificación»). Plan detallado:
 [`docs/roadmap/V25_IMPLEMENTATION_PLAN.md`](docs/roadmap/V25_IMPLEMENTATION_PLAN.md).
 
-> **En una línea:** **W1 está cerrado**: los tres paquetes pasaron revisión adversarial y corrección, y las suites
-> completas y los E2E están en verde (32/32 y 256/256). La demo no tiene regresión: con la regla de huecos inferidos
-> apagada, el resultado es idéntico al del código previo a W1. **W2 está implementado en sus seis paquetes y revisado**: B, E y F ya
-> pasaron corrección; A, C y D tienen la corrección a medias y se reanuda a las 10:30 UTC (pausa de los agentes por
-> límite de la API). Los contratos de W3 a W6 están escritos y probados. El piloto con datos reales tiene acceso por
-> VPN y espera a que el propietario registre la fuente SQL en la app local. Ningún gate está en GO.
-
+> **En una línea:** **W1 y W2 están cerrados**: cada paquete pasó revisión adversarial y corrección, las suites
+> completas están en verde (backend 1082 + 8 omitidas, motor 780, frontend 329) y los E2E dan 32/32 y 256/256. La demo
+> no tiene regresión y sus gates de calidad dan PASS. **W3 (Calidad ML) está en curso**: contrato activado y paquetes A, B
+> y C en implementación. Los contratos de W4 a W6 están listos. El piloto con datos reales tiene acceso por VPN y espera
+> a que el propietario registre la fuente SQL en la app local. Ningún gate está en GO.
 ---
 
 ## 1. Dónde se quedó el trabajo (instancia exacta)
@@ -25,7 +23,7 @@
 | 1 | Inventario de requisitos por versión y matriz de fuentes no recuperadas | ✅ Hecho |
 | 2 | Auditar, ejecutar pruebas, fotografiar métricas de línea base (incluida la política heredada) y clasificar defectos | ✅ Hecho |
 | 3 | Priorizar datos / as-of / fugas / idempotencia / aislamiento antes que tableros o LLM | ✅ **W1 cerrado** (1-nov-2026): 7 de los 13 defectos HIGH corregidos y 6 corregidos parcialmente; lo pendiente de cada uno está en `docs/roadmap/audit/progress/2026-11-01-w1.json` |
-| 4 | Implementar por paquetes verticales con migración aditiva, pruebas y registros | 🔄 **W2 en curso**: implementado y revisado; correcciones en curso (ver §4, paso 1). W3–W6: contratos listos (`docs/roadmap/contracts/w3..w6/`) |
+| 4 | Implementar por paquetes verticales con migración aditiva, pruebas y registros | ✅ W2 cerrado (1-nov-2026) · 🔄 **W3 en curso** (contrato activado en `4eb34f4`) · W4–W6: contratos listos (`docs/roadmap/contracts/w4..w6/`) |
 | 5 | E2E en staging autorizado con 2 tenants, fuente SQL y CSV, entrenamiento validado, Registry/S3, inferencia AWS, Radar/Decisión/Outcome | ⏳ Pendiente; staging AWS **BLOQUEADO** |
 | 6 | Métricas reales sobre holdout y evaluación prospectiva | 🟡 **Acceso disponible** (SQL Server de Soyoda/Resgasa por VPN); falta que el propietario registre la fuente en la app local |
 | 7 | `V25_RELEASE_GATES.md` con GO / GO CONDICIONAL / NO-GO y changelog de lo hecho y lo pendiente | 🟡 Actualizado con el cierre de W1 (todo NO-GO); este documento es el changelog vigente |
@@ -176,25 +174,36 @@ Detalle: [`docs/roadmap/V25_RELEASE_GATES.md`](docs/roadmap/V25_RELEASE_GATES.md
 
 ## 4. Próximo a realizar (en este orden)
 
-### Paso 1 · Oleada W2 · Data Core P0 (en ejecución)
+### Paso 1 · Oleada W2 · Data Core P0 (✅ cerrada el 1-nov-2026)
 
-Estado por paquete (sin confirmar todavía; los cambios están en el árbol de trabajo de la rama):
+Estado final por paquete (commits `e484c43` F, `43a0873` B, `8ed0faa` A, `8a69363` D, `df6531e` C, `d7d468c` E, `fbb1739` integración, `8e1679c` cierre):
 
 | Paquete | Implementación | Revisión adversarial | Corrección |
 |---|---|---|---|
-| W2-A · calidad de ingestión, cuarentena, Bronze, deriva, reconciliación por carga | ✅ 62 pruebas nuevas | 1 HIGH (liberar de cuarentena pisaba una versión más nueva), 3 MEDIUM (reproceso no idempotente en cuarentena, AUTO_FIX decimal incorrecto, PII en hallazgos) | ⏸ a medias, se reanuda |
+| W2-A · calidad de ingestión, cuarentena, Bronze, deriva, reconciliación por carga | ✅ 62 pruebas nuevas | 1 HIGH (liberar de cuarentena pisaba una versión más nueva), 3 MEDIUM (reproceso no idempotente en cuarentena, AUTO_FIX decimal incorrecto, PII en hallazgos) | ✅ corregido |
 | W2-B · Bronze, S3 contra emulador, contratos canónicos, alias, reconciliación por ventana | ✅ 89 pruebas | 1 HIGH (objeto Bronze «fantasma» si la escritura falla en silencio), 3 MEDIUM | ✅ 109 pruebas; backend 1062/8 omitidas |
-| W2-C · métricas de dataset y gates PASS/WARN/DEGRADE/BLOCK | ✅ 104 pruebas | 2 MEDIUM (% inválido contaba importaciones fallidas → BLOCK falso; PASS sin aviso si una señal falla) | ⏸ a medias, se reanuda |
-| W2-D · validador de disponibilidad, contratos de features, T11 | ✅ 85 pruebas | 3 MEDIUM (calendario público/privado mezclado, EXPIRED sin verificar usable, validador vigente en ventanas del backtest) | ⏸ a medias, se reanuda |
+| W2-C · métricas de dataset y gates PASS/WARN/DEGRADE/BLOCK | ✅ 104 pruebas | 2 MEDIUM (% inválido contaba importaciones fallidas → BLOCK falso; PASS sin aviso si una señal falla) | ✅ corregido |
+| W2-D · validador de disponibilidad, contratos de features, T11 | ✅ 85 pruebas | 3 MEDIUM (calendario público/privado mezclado, EXPIRED sin verificar usable, validador vigente en ventanas del backtest) | ✅ corregido |
 | W2-E · catálogo 7/14/15/30/60/90 y planes | ✅ H15 de punta a punta | 1 MEDIUM (conteo de series sin cota en rutas síncronas) | ✅ backend 994/8 omitidas |
 | W2-F · Factor Intelligence P0, taxonomía, SharedForecastGrant | ✅ 78 pruebas | 3 MEDIUM (operaciones masivas sobre el catálogo público, periodos fuera del alcance, verificación sin versión) | ✅ 126 pruebas; backend 1062/8 omitidas |
 
 Decisión del arquitecto (contrato entre W2-D y W2-F): un factor está activo en el motor solo si `factors.enabled` es
 true y `tenants.settings.factor_activation.<clave>.active` (escrito por la API de W2-F) es true.
 
-Después de las correcciones: suites completas y E2E, demo contra la línea base, commits por paquete y progreso de W2 en
-`docs/roadmap/audit/progress/`. El stack local del piloto corre desde un *worktree* fijo (`d900ebb` + corrección de
-costo unitario) para que los cambios en curso no lo afecten.
+Integración: backend 1090 pruebas (1082 aprobadas, 8 omitidas: emulador S3 y servidores MySQL/SQL Server), motor 780,
+frontend 329, E2E 32/32 y 256/256. El E2E de la etapa 2 se ajustó para leer el catálogo de horizontes del contrato
+compartido (fijaba el catálogo anterior). Demo con gate PASS (Ferretería WAPE 0,4905 vs Seasonal Naive 0,6604; cob. 80 %
+0,852). Auditoría: 25 requisitos pasan a IMPLEMENTADO y 18 de PENDIENTE a PARCIAL
+(`docs/roadmap/audit/progress/2026-11-01-w2.json`). El stack local del piloto corre desde un *worktree* fijo en
+`fbb1739` (W2 integrado), para que los cambios en curso de W3 no lo afecten: el piloto ya usa Bronze, calidad,
+cuarentena y reconciliación.
+
+### Paso 1b · Oleada W3 · Calidad ML P0 (en curso)
+
+Contrato activado (`4eb34f4`): `customer_predictions` con nº de pedidos, cantidad por pedido, unidades y ventana;
+`model_promotion_decisions`; `shadow_forecast_values`. Paquetes según `docs/roadmap/contracts/w3/workflow/v25-w3.js`:
+W3-A métricas por horizonte y segmento, W3-B política heredada y V2.5, champion/challenger, shadow y Optuna acotado,
+y W3-C Customer S05 (en implementación), más W3-D API y UI (después de A, B y C).
 
 Guion: [`docs/roadmap/contracts/w2/workflow/v25-w2.js`](docs/roadmap/contracts/w2/workflow/v25-w2.js). Seis
 paquetes, cada uno con implementación, revisión adversarial y corrección:
