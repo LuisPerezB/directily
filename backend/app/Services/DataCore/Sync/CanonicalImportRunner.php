@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\DataCore\Sync;
 
 use App\Exceptions\DomainStateException;
+use App\Models\BronzeObject;
 use App\Models\ImportJob;
 use App\Models\Tenant;
 use App\Models\User;
@@ -32,6 +33,7 @@ final class CanonicalImportRunner
      */
     public function runRows(Tenant $tenant, ?User $user, ImportEntity $entity, array $headers, iterable $rows, ?int $dataSourceId = null, array $options = [], bool $requireClean = true): ImportJob
     {
+        // Filas canónicas que llegan por API: el CSV generado es el original autorizado (Bronze `api_batch`).
         $dir = sys_get_temp_dir().'/predictily-rows-'.Str::uuid();
         File::ensureDirectoryExists($dir, 0700);
         try {
@@ -55,12 +57,29 @@ final class CanonicalImportRunner
      *
      * @param  list<string>  $headers
      * @param  array<string, mixed>  $options
+     * @param  ?string  $bronzeKind  tipo del objeto Bronze del CSV (`api_batch`); null = quien llama ya guardó el original
      *
      * @throws DomainStateException
      */
-    public function runFile(Tenant $tenant, ?User $user, ImportEntity $entity, string $csvPath, array $headers, ?int $dataSourceId, array $options = [], bool $requireClean = true): ImportJob
+    public function runFile(Tenant $tenant, ?User $user, ImportEntity $entity, string $csvPath, array $headers, ?int $dataSourceId, array $options = [], bool $requireClean = true, ?string $bronzeKind = 'api_batch', ?BronzeObject $bronze = null, ?callable $afterValidation = null): ImportJob
     {
-        $job = $this->imports->upload($tenant, $user, $csvPath, $entity, $dataSourceId);
+        $job = $this->prepareFile($tenant, $user, $entity, $csvPath, $headers, $dataSourceId, $options, $bronzeKind, $bronze);
+
+        return $this->runPrepared($tenant, $job, $options, $requireClean, $afterValidation);
+    }
+
+    /**
+     * Sube el CSV canónico y lo deja listo para validar (estado VALIDATING). La sincronización SQL enlaza aquí su contexto (la extracción
+     * cruda en Bronze) con la importación ANTES de ejecutarla.
+     *
+     * @param  list<string>  $headers
+     * @param  array<string, mixed>  $options
+     *
+     * @throws DomainStateException
+     */
+    public function prepareFile(Tenant $tenant, ?User $user, ImportEntity $entity, string $csvPath, array $headers, ?int $dataSourceId, array $options = [], ?string $bronzeKind = 'api_batch', ?BronzeObject $bronze = null): ImportJob
+    {
+        $job = $this->imports->upload($tenant, $user, $csvPath, $entity, $dataSourceId, $bronzeKind);
         if ($job->status === ImportStatus::FAILED) {
             throw new DomainStateException($job->error_message ?: 'No se pudo preparar la importación.', 'import_failed');
         }
@@ -74,7 +93,21 @@ final class CanonicalImportRunner
             'options' => $importOptions,
             'status' => ImportStatus::VALIDATING,
             'progress' => 0,
+            'bronze_object_id' => $bronze?->id ?? $job->bronze_object_id,
         ])->save();
+
+        return $job;
+    }
+
+    /**
+     * Valida un trabajo preparado y, si cumple la política, lo confirma.
+     *
+     * @param  array<string, mixed>  $options
+     * @param  ?callable(ImportJob): void  $afterValidation  se ejecuta con la importación ya validada y ANTES de escribir; si lanza, la importación se descarta
+     */
+    public function runPrepared(Tenant $tenant, ImportJob $job, array $options, bool $requireClean, ?callable $afterValidation = null): ImportJob
+    {
+        $importOptions = (array) $job->options;
         $this->imports->runValidation($job->refresh());
         $job->refresh();
         if ($job->status !== ImportStatus::VALIDATED) {
@@ -83,6 +116,14 @@ final class CanonicalImportRunner
         $stats = (array) ($job->stats ?? []);
         if (($stats['rows_error'] ?? 0) > 0 && ($requireClean || ! ($importOptions['skip_invalid_rows'] ?? false))) {
             return $job; // queda VALIDATED para revisión
+        }
+        if ($afterValidation !== null) {
+            try {
+                $afterValidation($job);
+            } catch (\Throwable $e) {
+                $this->discard($job);
+                throw $e;
+            }
         }
         if (($stats['rows_valid'] ?? 0) === 0) {
             throw new DomainStateException('Ninguna fila superó la validación.', 'nothing_to_import');

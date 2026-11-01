@@ -21,5 +21,11 @@ final class StagingResult
         public ?string $maxEventDate = null,
         public int $futureRecordedAt = 0,
         public int $unreadableRecordedAt = 0,
+        /** @var array<string, ?string> columna de la consulta => tipo observado (null = solo NULL en la extracción): huella de esquema */
+        public array $columns = [],
+        /** @var array<string, list<array{from: string, to: mixed, count: int}>> aplicaciones de mapeos de valores (transformaciones) */
+        public array $valueMapHits = [],
+        /** ¿Se capturó la extracción cruda (NDJSON comprimido) para Bronze? Ruta del archivo temporal. */
+        public ?string $rawPath = null,
     ) {}
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Imports\Support;
 
+use App\Services\DataCore\Quality\FindingCollector;
 use App\Support\Privacy\PiiMasker;
 use DateTimeInterface;
 use Illuminate\Support\Facades\DB;
@@ -29,10 +30,16 @@ final class IssueCollector
         private readonly ?int $tenantId = null,
         private readonly ?int $importJobId = null,
         private readonly int $maxStored = 10_000,
+        private readonly ?FindingCollector $findings = null,
     ) {}
 
-    public function add(int $rowNumber, Issue $issue): void
+    /**
+     * `$recordRef` es la referencia del registro SIN PII (tipo|número de documento) con que el hallazgo se persiste en
+     * `data_quality_issues` (ADR-V25-24); `import_errors` no la usa.
+     */
+    public function add(int $rowNumber, Issue $issue, ?string $recordRef = null): void
     {
+        $this->findings?->observe($rowNumber, $issue, $recordRef);
         $key = $issue->severity.':'.$issue->code;
         if (! isset($this->counts[$key])) {
             $this->counts[$key] = ['code' => $issue->code, 'severity' => $issue->severity, 'count' => 0, 'message' => $issue->message];
@@ -64,10 +71,10 @@ final class IssueCollector
     }
 
     /** @param iterable<Issue> $issues */
-    public function addMany(int $rowNumber, iterable $issues): void
+    public function addMany(int $rowNumber, iterable $issues, ?string $recordRef = null): void
     {
         foreach ($issues as $issue) {
-            $this->add($rowNumber, $issue);
+            $this->add($rowNumber, $issue, $recordRef);
         }
     }
 

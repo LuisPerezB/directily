@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Sales;
 
 use App\Services\Imports\Support\Issue;
+use App\Support\Privacy\CustomerIdentity;
 
 /**
  * Agrupa líneas normalizadas en documentos. Detecta:
@@ -39,6 +40,8 @@ final class SalesDocumentAssembler
             $doc['header'] = array_intersect_key($line, array_flip([
                 'doc_key', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'branch_code',
                 'customer_code', 'customer_segment', 'customer_province', 'channel', 'currency', 'source_recorded_at',
+                // Linaje (ADR-V25-24): primera fila del documento en el origen (fila del archivo/extracción o posición del documento en el lote).
+                'source_row',
             ]));
         } elseif ($doc['signature'] !== $signature) {
             $issues[] = Issue::error('document_conflict', 'El documento aparece con datos de cabecera distintos (fecha, sucursal, estado o cliente).', 'document_number', $line['document_number']);
@@ -161,9 +164,15 @@ final class SalesDocumentAssembler
         $header['total'] = round($subtotal + $tax, 4);
         $header['lines'] = $lines;
 
+        // El comprador entra a la huella en la forma en que `customers` lo guarda (HMAC para cédula/RUC): el mismo documento da la misma
+        // huella llegue el código crudo (archivo, SQL, lote) o ya en esa forma (liberado de la cuarentena, reprocesado desde Bronze). Si la
+        // forma difiere del código crudo, `legacy_source_hash` conserva la huella con el código CRUDO, que es la que tienen guardada los
+        // documentos escritos antes de este cambio (SalesDocumentWriter::classify acepta ambas: no hay revisión fantasma al reenviar).
+        $customer = $header['customer_code'];
+        $customerForm = $customer === null ? null : CustomerIdentity::fromCode((string) $customer)['external_code'];
         $canonical = [
             $header['document_type'], $header['document_number'], $header['status'], $header['issued_at'], $header['branch_code'],
-            $header['customer_code'], $header['customer_segment'], $header['channel'], $header['currency'],
+            $customerForm, $header['customer_segment'], $header['channel'], $header['currency'],
             array_map(fn ($l) => [
                 $l['line_number'], $l['product_sku'], sprintf('%.4f', $l['quantity']), sprintf('%.4f', $l['unit_price']),
                 sprintf('%.4f', $l['discount']), sprintf('%.4f', $l['tax']), sprintf('%.4f', $l['net_amount']),
@@ -171,6 +180,10 @@ final class SalesDocumentAssembler
             ], $lines),
         ];
         $header['source_hash'] = hash('sha256', json_encode($canonical, JSON_UNESCAPED_UNICODE) ?: '');
+        if ($customerForm !== $customer) {
+            $canonical[5] = $customer;
+            $header['legacy_source_hash'] = hash('sha256', json_encode($canonical, JSON_UNESCAPED_UNICODE) ?: '');
+        }
 
         return $header;
     }

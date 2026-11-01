@@ -3,8 +3,8 @@
 > **Alcance y estado.** Este documento describe el linaje TEMPORAL de las ventas (qué se sabía y cuándo) que escribe el backend:
 > versiones de documento, orden de escritura, modos de ingestión, marca de agua de las sincronizaciones, huecos de cobertura y tipos/estados
 > desconocidos. Implementa el ADR-V25-23 (`docs/architecture/adr/V25-ADRS.md`) sobre la migración
-> `2026_03_01_000100_add_sales_knowledge_time_and_revisions`. El **reporte de reconciliación fuente → Bronze → Silver → Gold** (ADR-V25-24)
-> está **DISEÑADO / NO IMPLEMENTADO** y pertenece a otro paquete (§11).
+> `2026_03_01_000100_add_sales_knowledge_time_and_revisions`. La **reconciliación por ventana fuente → Bronze → Silver → Gold** (ADR-V25-24) está
+> **IMPLEMENTADO / VERIFICADO** (W2-B; sección «Reconciliación por ventana» al final); la reconciliación por carga, el linaje Silver y la captura Bronze son de W2-A (§13).
 >
 > Cada afirmación lleva una de estas marcas: **IMPLEMENTADO / VERIFICADO** (con la prueba que lo demuestra), **DISEÑADO / NO IMPLEMENTADO**,
 > **BLOQUEADO** o **NO APLICA**. Las pruebas están en `backend/tests/Feature/` y se ejecutan con
@@ -29,10 +29,10 @@ La auditoría del 31-oct-2026 (`docs/roadmap/audit/2026-10-31/`) halló defectos
 | Capa (ADR-V25-04) | Qué existe hoy | Estado |
 |---|---|---|
 | Fuente | ERP/SQL, archivo CSV/XLSX, API REST (`POST /sales/batch`), demo | Existe; el backend solo conoce lo que recibe |
-| Bronze (objeto original inmutable) | El archivo importado queda en `tenants/{id}/imports/` con SHA-256 (`import_jobs.file_hash`); los lotes REST y las extracciones SQL no se conservan | DISEÑADO / NO IMPLEMENTADO: `bronze_objects` y `ObjectStore` (ADR-V25-24, paquete S01) |
-| Silver (tablas canónicas) | `sales`/`sale_items` (versión vigente) + `sales_document_revisions`/`sale_item_revisions` (versiones reemplazadas) + vista `sales_line_versions`; procedencia por `import_job_id`, `superseded_by_import_job_id` y `data_source_id` | IMPLEMENTADO / VERIFICADO (§3–§4) |
+| Bronze (objeto original inmutable) | `bronze_objects` (W2-A, §13): el archivo importado, la extracción SQL (NDJSON comprimido) y el cuerpo de `POST /sales/batch` se guardan íntegros ANTES de normalizar, con SHA-256, huella de esquema y procedencia; `import_jobs.stored_path` se conserva por compatibilidad | IMPLEMENTADO / VERIFICADO (`BronzeLineageTest`, `SqlIngestionQualityTest`) |
+| Silver (tablas canónicas) | `sales`/`sale_items` (versión vigente) + `sales_document_revisions`/`sale_item_revisions` (versiones reemplazadas) + vista `sales_line_versions`; procedencia por `import_job_id`, `superseded_by_import_job_id` y `data_source_id`; linaje `bronze_object_id`, `source_row` y `schema_version` (W2-A) | IMPLEMENTADO / VERIFICADO (§3–§4) |
 | Gold (datasets del motor) | Lectura as-of desde `sales_line_versions` y huella de ventas as-of | DISEÑADO / NO IMPLEMENTADO en este paquete: lo implementa W1-A2 (motor) |
-| Reporte fuente → Bronze → Silver → Gold por ventana | — | DISEÑADO / NO IMPLEMENTADO (`reconciliation_reports`, ADR-V25-24) |
+| Reporte fuente → Bronze → Silver por carga | `reconciliation_reports` con `scope import` o `sync` (W2-A, §13); el reporte por ventana con Gold es de W2-B | IMPLEMENTADO / VERIFICADO (`LoadReconciliationTest`) |
 
 ## 3. Versiones de un documento de venta
 
@@ -86,7 +86,7 @@ bloqueo de aviso (advisory lock) por empresa.
 | Situación del documento entrante | Resultado | Estadística |
 |---|---|---|
 | No existe | INSERT: `first_seen_at` = ahora, `current_revision` = 0, `ingestion_mode` = el de la escritura, `version_known_from` = NULL (backfill) o ahora (incremental) | `new` |
-| Existe, mismo `source_hash` | Sin cambios (no se escribe, no cambia el modo almacenado). Si el `ingestion_mode` almacenado difiere del declarado en esta escritura, además se cuenta la discrepancia | `unchanged` (+ `unchanged_mode_mismatch`) |
+| Existe, mismo `source_hash` (o su `legacy_source_hash` con el código de cliente crudo: `docs/data/DATA_QUALITY_ENGINE.md` §4.2) | Sin cambios (no se escribe, no cambia el modo almacenado). Si el `ingestion_mode` almacenado difiere del declarado en esta escritura, además se cuenta la discrepancia | `unchanged` (+ `unchanged_mode_mismatch`) |
 | Existe, hash distinto, ambas con `source_recorded_at` y la entrante es **anterior** | Se descarta; no se escribe nada (tampoco productos, sucursales ni clientes nuevos) | `stale_skipped` |
 | Existe, hash distinto, marcas iguales o entrante posterior | Se archiva la versión vigente y se reemplaza | `updated`, `revisions_archived` |
 | Existe, hash distinto, falta alguna marca | Gana la última ingestión: se archiva y se reemplaza; la marca almacenada **no se borra** (`COALESCE(entrante, almacenada)`) | `updated`, `revisions_archived`, `updated_without_source_order` |
@@ -199,6 +199,9 @@ vigente de `skip_invalid_rows`). Vacío = `invoice` / `completed` (convención d
   complemento de las banderas de anulación (`no`, `n`, `0`, `false`, `falso`). **anulada**: los sinónimos existentes (incluidas las banderas `sí`, `1`, `true`).
   **pendiente**: `pendiente`, `pending`, `borrador`, `draft`. Lista completa en `ValueParser::COMPLETED_STATUSES`. La lista de «completada» no
   existía como tal (todo lo no reconocido caía en `completed`); se hizo explícita para poder distinguir lo desconocido.
+- **Cuarentena y mapeos de valores (W2-A).** Con `skip_invalid_rows` el documento con tipo o estado desconocido ya NO se descarta: se retiene en `quarantine_records` y se
+  libera tras agregar un `value_maps` (`import_jobs.options.value_maps` o `source_mappings.options.value_maps`); ver `docs/data/DATA_QUALITY_ENGINE.md` §3 y §4.3
+  (IMPLEMENTADO / VERIFICADO: `QuarantineFlowTest`, `ValueMapsTest`).
 - `dq_class` no es una columna de `import_errors`: se deriva del código (`Issue::DQ_CLASS_BY_CODE`) y se entrega en `GET /imports/{id}/errors`,
   `errors.csv` (`clase_calidad`) y el detalle de errores de `POST /sales/batch`.
 - Una fila con tipo desconocido no comparte clave con un documento `other` válido del mismo número (marcador `unknown` en la clave): nunca se
@@ -264,6 +267,7 @@ Verificado por (IMPLEMENTADO / VERIFICADO): `CoverageGapsApiTest`. La **clasific
 | `ingestion_mode`, `ingestion_mode_basis` | `import_jobs.stats`, `/sales/batch`, `source_syncs.stats` | Modo con el que se escribió y cómo se decidió |
 | `unchanged_mode_mismatch` | `import_jobs.stats` (y su reporte de calidad), respuesta de `/sales/batch`, `source_syncs.stats.import` | Documentos SIN cambios (mismo `source_hash`) cuyo `ingestion_mode` almacenado difiere del declarado en esta carga: no se reescriben |
 | `future_recorded_at`, `recorded_at_unreadable` | `source_syncs.stats` (preparación), `import_jobs.stats` (y su reporte de calidad), respuesta de `/sales/batch`, `source_syncs.stats.import` | Filas (líneas) con `source_recorded_at` posterior a ahora + tolerancia, o ilegible (`recorded_at_unreadable` es la parte ilegible): la marca se descarta (queda NULL, no ordena versiones; la fila se escribe) y no adelanta la marca de agua |
+| `documents_quarantined` | `import_jobs.stats` (y su reporte de calidad) | Documentos con hallazgos REVIEW_REQUIRED o QUARANTINED retenidos en `quarantine_records` con `skip_invalid_rows` (W2-A; en la validación es una proyección). Ver `docs/data/DATA_QUALITY_ENGINE.md` §3 |
 
 En la **validación** de una importación `revisions_archived`, `stale_skipped`, `updated_without_source_order` y `unchanged_mode_mismatch` son una proyección de lo que hará la confirmación.
 
@@ -287,7 +291,8 @@ En la **validación** de una importación `revisions_archived`, `stale_skipped`,
 |---|---|
 | IMPLEMENTADO / VERIFICADO | Modos de ingestión por camino; versiones de documento archivadas con ventanas **disjuntas** (invariante 0 o 1 versión visible por corte, 336 secuencias en dos zonas horarias); `stale_skipped`; estadísticas aditivas (`unchanged_mode_mismatch`, `future_recorded_at` en los tres caminos); cota única de `source_recorded_at`; tipos/estados desconocidos como `REVIEW_REQUIRED` (el documento reconocido con número compartido se escribe con el aviso `document_number_shared_with_unknown_type`); marca de agua acotada; huecos de cobertura (API); demo con backfill explícito; OpenAPI al día |
 | DISEÑADO / NO IMPLEMENTADO | Resolver la «primera carga» automática bajo el bloqueo de aviso (§10.9) |
-| DISEÑADO / NO IMPLEMENTADO | Reporte de reconciliación fuente → Bronze → Silver → Gold por ventana (`reconciliation_reports`); `bronze_objects` para lotes REST y extracciones SQL; linaje Silver (`bronze_object_id`, `source_row`, `schema_version`); cuarentena revisable (`quarantine_records`); `value_maps` de tipo y estado en importación de archivos; alerta tras N sincronizaciones con cero filas; huecos `inferred` por regla — paquetes S01 / ADR-V25-24 |
+| IMPLEMENTADO / VERIFICADO (W2-A) | `bronze_objects` para archivos, lotes REST y extracciones SQL; linaje Silver (`bronze_object_id`, `source_row`, `schema_version`); cuarentena revisable (`quarantine_records`); `value_maps` de tipo y estado en importación de archivos; reconciliación por carga — ver §13 y `docs/data/DATA_QUALITY_ENGINE.md` |
+| DISEÑADO / NO IMPLEMENTADO | Alerta tras N sincronizaciones con cero filas; huecos `inferred` por regla |
 | DISEÑADO / NO IMPLEMENTADO (otro paquete) | Lectura as-of de Demand y Customer desde `sales_line_versions`; clasificación de días `zero_confirmed / missing_source / stockout_censored / closed`; huella as-of — W1-A2 (motor) |
 | BLOQUEADO | Estado histórico real de una carga backfill (la fuente no lo entrega); sincronización de MySQL/SQL Server con este contrato (sin servidor de pruebas; la lógica no depende del conector) |
 | NO APLICA | Modo de ingestión en productos, inventario, compromisos y demás entidades (solo las ventas son documentos versionados) |
@@ -318,3 +323,137 @@ dice (1) que la causa es la ausencia de la base y por qué falló la conexión, 
 comando `createdb` y las variables para crearla (`ErpSourceDatabase::skipMessage`). El mensaje no incluye credenciales. PHPUnit lo muestra con
 `--display-skipped`, y `--log-events-text <archivo>` lo deja siempre en el archivo («Test Skipped … OMITIDA SIN VERIFICAR …»). Una suite con estas
 omisiones NO demuestra el contrato temporal de la sincronización SQL: el informe de la suite debe declararlo como «no verificado», no como verde.
+
+## 13. Reconciliación por carga fuente → Bronze → Silver (W2-A)
+
+> Paquete W2-A · ADR-V25-24. Marcas: **IMPLEMENTADO / VERIFICADO** con la prueba que lo demuestra (`backend/tests/Feature/DataQuality/`),
+> **DISEÑADO / NO IMPLEMENTADO**, **BLOQUEADO**, **NO APLICA**. La reconciliación **por ventana** (`scope window`) es de W2-B y se documenta en la sección siguiente.
+
+**IMPLEMENTADO / VERIFICADO.** Al **confirmar** cada importación crea un `reconciliation_reports` con `scope = import`, y cada sincronización SQL uno con `scope = sync`
+(la importación que corre dentro de la sincronización no crea el suyo: un solo informe por carga). La validación no concilia, porque no cargó nada.
+El informe lleva `window_from` / `window_to` (rango de fechas de venta de la carga, que W2-B usa para sumar cargas dentro de una ventana), `layers` y `discrepancies`.
+
+| Capa | Contenido (ventas) |
+|---|---|
+| `source` | lo **leído del origen**, también lo inválido: `rows`, `documents`, `lines`, `units` (valor absoluto de la cantidad de las líneas que no son devolución), `net_amount` (firmado: las devoluciones y notas de crédito restan), `voided`, `credit_notes`, `duplicates`; en sincronización, además `rows_extracted` |
+| `bronze` | `object_id`, `kind`, `sha256`, `size_bytes`, `rows` (filas del original) y `schema_version` |
+| `silver` | lo **escrito o ya vigente según las versiones vigentes**: `documents`, `lines`, `units`, `net_amount` de las **ventas efectivas** (documentos `completed`), `new` / `updated` / `unchanged` / `stale_skipped` / `quarantined`, `voided`, `credit_notes`, `voided_units`, `voided_net_amount` |
+| `gold` | `null`: la capa Gold se concilia por ventana (W2-B), no por carga |
+
+`documents` y `lines` comparan lo presente en Silver en cualquier estado; `units` e `net_amount` comparan las **ventas efectivas**. Cada fila del origen termina en
+exactamente un destino: Silver o una categoría **conocida** de discrepancia:
+
+| Categoría | Qué explica |
+|---|---|
+| `quarantine` | documentos retenidos en cuarentena (con hallazgos de revisión) |
+| `rejected_rows` | filas inválidas no retenidas (p. ej. entidades sin cuarentena) |
+| `stale` | documentos descartados por traer una versión anterior a la almacenada |
+| `duplicates_in_file` | filas idénticas repetidas dentro del documento, omitidas |
+| `zero_quantity` | líneas de cantidad cero, omitidas |
+| `voided` / `pending` | documentos que SÍ están en Silver (trazabilidad) pero no cuentan como venta |
+
+Cada discrepancia es `{from, to, metric, expected, observed, difference, categories, unexplained, explained, explanation}`. **Estado**: `balanced` (sin
+diferencias), `explained` (todas explicadas por categorías conocidas; es el caso normal con anuladas, duplicados, versiones anteriores o cuarentena) o
+`unexplained` (queda una diferencia sin categoría, o el objeto Bronze no contiene las mismas filas que se leyeron). Las demás entidades concilian por filas
+(`source.rows` frente a `silver.rows`, con `rejected_rows` explicado).
+
+Verificado por (IMPLEMENTADO / VERIFICADO): `LoadReconciliationTest` (`balanced` con las tres capas y su rango de fechas; `explained` por duplicado, anulado, versión anterior y
+cuarentena; `unexplained` por Bronze con otras filas y por una diferencia sin categoría; entidades que no son ventas) y
+`SqlIngestionQualityTest::test_the_import_report_is_linked_to_the_sync_with_transformations_and_the_sync_reconciles_all_layers` (sincronización: origen → Bronze → Silver).
+
+**Linaje que se escribe** (IMPLEMENTADO / VERIFICADO, `BronzeLineageTest`, `SqlIngestionQualityTest`): `bronze_object_id`, `source_row` (primera fila del documento en el origen; en
+lotes, posición del documento) y `schema_version` = `CanonicalContracts::version('sales')` en `sales`; las **revisiones archivadas conservan el linaje de su versión**; el inventario lleva el
+mismo linaje. Captura Bronze antes de normalizar en los tres caminos (archivo, extracción SQL en NDJSON comprimido, cuerpo del lote). Detalle en `docs/data/DATA_QUALITY_ENGINE.md` §4.2.
+
+**Estado resumido de esta sección.**
+
+| Estado | Elemento |
+|---|---|
+| IMPLEMENTADO / VERIFICADO | reconciliación por carga (archivo y sincronización) con capas, categorías y estados; linaje en ventas, revisiones e inventario; Bronze de archivo, extracción SQL y lote; `predictily:bronze-reprocess` |
+| DISEÑADO / NO IMPLEMENTADO | reconciliación de `POST /sales/batch` (el lote deja Bronze, linaje e informe de calidad, pero no `reconciliation_reports`); capa Gold por carga; bloqueo automático del Gate A por una diferencia `unexplained` (es de la evaluación de gates) |
+| IMPLEMENTADO / VERIFICADO | el reprocesamiento desde Bronze no es una carga nueva: su informe de reconciliación va sin `window_from`/`window_to` (la reconciliación por ventana de W2-B no lo suma) y con `layers.reprocess_of_bronze_object_id`; la huella `source_hash` es invariante a la forma del código de cliente (`IngestionHardeningTest`) |
+| LIMITACIÓN | en una sincronización la capa `source` se cuenta sobre el CSV de preparación (1:1 con las filas extraídas, ya con mapeos de valores, tipos y zona horaria aplicados) y se contrasta con `rows_extracted`; el original crudo (Bronze) se compara por número de filas, no valor a valor |
+
+<!-- W2-B: reconciliación por ventana -->
+
+## Reconciliación por ventana fuente → Bronze → Silver → Gold (W2-B)
+
+> Paquete W2-B · ADR-V25-04 y ADR-V25-24. La reconciliación **por carga** (`scope import|sync`) es de W2-A y se documenta en su propia sección;
+> esta describe la **por ventana** (`scope window`). Marcas: **IMPLEMENTADO/VERIFICADO** con la prueba que lo demuestra (todas en
+> `backend/tests/Feature/Lineage/WindowReconciliationTest.php` salvo que se indique), **DISEÑADO/NO IMPLEMENTADO**, **BLOQUEADO**, **NO APLICA**.
+
+### Qué hace — IMPLEMENTADO/VERIFICADO
+
+```
+cd backend && php artisan predictily:reconcile <tenant_uuid> --entity=sales --from=AAAA-MM-DD --to=AAAA-MM-DD
+```
+
+Compara, para una ventana de **fechas de negocio** de las ventas de UNA empresa (máximo `bronze.reconcile_max_window_days` = 366 días, ambos
+extremos incluidos), cuatro capas y guarda un informe `reconciliation_reports` con `scope = window`, las capas, las discrepancias y el estado.
+Salida del comando: la tabla de capas y una línea por discrepancia. **Códigos de salida:** 0 = `balanced` o `explained`; 1 = argumentos
+inválidos (empresa inexistente, fechas, ventana demasiado larga, entidad no soportada); 2 = diferencias **sin explicar** (para programarlo y
+alertar). Cada informe queda en la bitácora (`reconciliation.window`). Consulta: `GET /api/v1/lineage/reconciliation` (filtros `scope`, `entity`,
+`status`, `from`, `to`) y `GET /api/v1/lineage/reconciliation/{id}`, ambos con `data.view`; un informe de otra empresa responde 404
+(`::test_the_api_lists_and_shows_reports_of_the_active_company_only`). Solo la entidad `sales` está implementada; las demás responden «DISEÑADAS»
+(`::test_it_validates_entity_dates_and_window_length`). Los informes son historial de solo inserción (`::test_reconciliation_reports_are_append_only_history`).
+
+### Las cuatro capas
+
+| Capa | De dónde sale | Métricas | Cuando no hay datos |
+|---|---|---|---|
+| **source** | `layers.source` de los informes **por carga** (`import`/`sync`, entidad `sales`) cuyo rango `window_from..window_to` queda **por completo dentro** de la ventana; de cada carga cuenta solo su informe más reciente, y de varias cargas del **mismo original** (mismo `bronze_object_id`: el mismo archivo enviado dos veces) solo la más reciente (`duplicate_loads_ignored`) | `rows`, `documents`, `lines`, `units`, `net_amount`, `voided`, `credit_notes` (más `duplicates` y `quarantined` si la carga los declaró) | `available = false` y la razón; **la capa no trae ni una cifra** (`::test_silver_counts_the_current_versions_and_an_absent_source_layer_is_reported_without_inventing_figures`) |
+| **bronze** | objetos Bronze referenciados por los documentos de la ventana (`sales.bronze_object_id` y revisiones) o por las cargas seleccionadas | `objects`, `bytes`, `rows` (suma de las filas de los objetos: `row_count` o `metadata.rows_read`; **`null` si algún objeto no las declara**, nunca una suma parcial), `loads_rows` (filas de los originales de las cargas seleccionadas, `null` si no están todas), `objects_without_row_count`, `purged`, `object_ids` (hasta 100) | `available = false` y la razón (ningún documento ni carga de la ventana referencia un objeto) |
+| **silver** | **versiones vigentes** de `sales_line_versions` (una por documento: invariante de W1, no se reimplementa) y los documentos de `sales` con `sale_date` en la ventana | `documents`, `voided`, `credit_notes`, `lines`, `units` y `net_amount` de las **ventas efectivas** (documentos `completed`; `units` suma las líneas que no son devolución y `net_amount` es el importe neto **firmado**: las devoluciones y notas de crédito restan; los anulados y pendientes no cuentan — la misma base que la reconciliación por carga de W2-A) más `sales_net_amount` y `returns_net_amount`, y `documents_without_bronze`, `documents_without_bronze_after_capture` | siempre disponible (ventana vacía = ceros) |
+| **gold** | `data_snapshots.row_counts.sales` de la **última ejecución de demanda completada** (`forecast_runs.status = completed` con huella) cuyo rango de datos llega al fin de la ventana | `rows` (celdas sucursal × producto × día de ventas válidas, de TODA la historia hasta el corte de esa ejecución), `silver_cells_known_at_cutoff`, `silver_cells_known_at_run` | `available = false` y la razón (sin ejecución que cubra la ventana, o sin `row_counts` de ventas) |
+
+Silver cuenta solo la versión vigente: una corrección posterior archiva la anterior y la ventana no suma líneas dos veces; los documentos de otra
+empresa o fuera de la ventana no cuentan (`::test_silver_uses_only_the_current_version_of_a_corrected_document_and_only_the_window`).
+
+### Comparaciones y estado
+
+Solo se comparan las capas disponibles. Cada diferencia es una entrada `{from, to, metric, expected, observed, explained, explanation}`.
+
+1. **source → silver** (`documents`, `lines`, `voided`, `credit_notes`, `units`, `net_amount`; importes con tolerancia de 0,01 más medio centavo por carga, porque cada carga redondea a centavos).
+   Lo que `source` cuenta de TODO lo leído (también los anulados, las filas en cuarentena o rechazadas) se compara con las ventas efectivas de Silver, así que la diferencia normal
+   (p. ej. un documento anulado) la explican los informes por carga: la parte explicada de una entrada `source → silver` de un informe de W2-A es `difference − unexplained`
+   (la suma de sus categorías). Una entrada sin esos campos solo cuenta si el informe está `explained` y trae una explicación. La parte que las cargas no cubren queda «sin explicar» y
+   el mensaje dice cuánto (`::test_a_voided_document_is_explained_by_the_load_report_in_the_w2a_format`, `::test_partially_explained_differences_report_how_much_remains_unexplained`).
+   Un informe de carga `unexplained` sin banderas por entrada nunca explica nada (`::test_a_load_report_marked_unexplained_never_counts_as_explanation`).
+   **No se compara** (y se informa la razón en `layers.source.reason`, con `comparable = false`) si alguna carga cruza el límite de la ventana (no se puede
+   prorratear) o si los rangos de las cargas se solapan (los totales declarados no son aditivos) (`::test_loads_crossing_the_window_or_overlapping_are_reported_but_not_compared_and_never_balanced`).
+   Se ignoran los informes fuera de la ventana, sin rango, sin totales declarados y los de otra empresa (`::test_only_the_latest_report_of_each_load_counts_and_unusable_reports_are_ignored`).
+2. **bronze → silver (linaje):** cada documento de la ventana debe rastrearse a su objeto. Los que no tienen `bronze_object_id` y se ingirieron **antes** de la primera
+   captura Bronze de la empresa (o la empresa no tiene objetos) son una brecha **explicada**; los ingeridos **después** de empezar la captura son **sin explicar**
+   (una ruta de escritura que no captura el original) (`::test_bronze_layer_counts_the_objects_referenced_by_the_window_and_flags_lineage_gaps`).
+3. **silver → gold:** las celdas de Gold se comparan con las de Silver reconstruidas con la regla as-of (`known_from`/`known_until` de la vista, igual que
+   `engine/predictily_engine/data/asof.py`) al **corte** de la ejecución; si no coinciden se prueba el **día de la ejecución** (una ejecución vigente conoce lo recibido
+   hasta hoy), y entonces la diferencia queda **explicada**; si no coincide con ninguna, es sin explicar (`::test_gold_cells_are_compared_with_silver_at_the_cutoff_of_the_covering_run`,
+   `::test_a_live_run_that_knew_late_documents_is_explained_not_a_discrepancy_of_silver`). Gold se compara **por ejecución completa**, no por ventana: la ventana solo elige
+   qué ejecución la cubre.
+
+**Estado:** `balanced` (se compararon fuente → Silver, el linaje Bronze → Silver y Silver → Gold, y no hay ninguna diferencia), `explained` (todas las diferencias están
+explicadas, **o alguna capa no se pudo comparar**) o `unexplained` (alguna sin explicar). **Nunca `balanced` sin comparar:** una capa no disponible o disponible pero no comparable
+(cargas solapadas, ventana que corta una carga, sin ejecución de demanda que cubra la ventana) agrega una discrepancia visible
+`{metric: layer_not_compared, from, to, explained: true, explanation: «Capa … NO comparada: <razón>»}`, lleva `compared = false` y la API la devuelve en `unavailable_layers` (con la
+razón) y fuera de `compared_layers`; el comando la muestra como `NO COMPARADA`. Pruebas: `::test_a_report_is_never_balanced_when_a_layer_was_not_compared`,
+`::test_loads_crossing_the_window_or_overlapping_are_reported_but_not_compared_and_never_balanced`, `::test_the_same_file_loaded_twice_counts_once_and_a_tampered_silver_is_unexplained`.
+Fuente → Bronze (`rows`): con todas las cargas seleccionadas con objeto y filas conocidas, `source.rows` debe igualar `bronze.loads_rows`; si no, discrepancia sin explicar
+(`::test_source_rows_are_compared_with_the_bronze_objects_of_the_loads_and_partial_sums_are_never_shown`).
+
+### Contrato que esta reconciliación espera de los informes por carga (W2-A) — IMPLEMENTADO/VERIFICADO
+
+Para que la capa source exista, cada informe por carga debe: tener `scope` `import` o `sync`, `entity = sales`, `import_job_id`/`source_sync_id` (identifican la carga),
+`window_from`/`window_to` = rango de **fechas de documento** que leyó la carga, `layers.source` con los totales de TODO lo leído del origen (`documents`, `lines`, `voided`,
+`credit_notes`, `units` de las líneas que no son devolución y `net_amount` firmado), un `status` honesto y, para lo que explica, discrepancias
+`{from: source, to: silver, metric, expected, observed, difference, unexplained, explained, explanation}`. Verificado de punta a punta con la captura REAL de W2-A (`IngestionQuality::persistReconciliation`, `SalesLoadTally`): `WindowReconciliationLoadsTest` importa archivos CSV por la API y
+reconcilia la ventana sin preparar a mano ningún informe: la capa source existe y se compara, las filas de los originales coinciden con las declaradas, el documento anulado queda
+explicado por el informe de su carga (`units`, `net_amount`), un Silver alterado fuera de las cargas queda SIN EXPLICAR, el mismo archivo cargado dos veces cuenta una vez y las
+exportaciones diarias solapadas quedan visiblemente sin comparar. Las demás pruebas de `WindowReconciliationTest` preparan los informes por carga a mano para controlar cada caso.
+
+### Limitaciones — DISEÑADO/NO IMPLEMENTADO
+
+- Sin ruta `POST` para pedir una reconciliación: solo el comando (programarlo es decisión de operación).
+- Una diferencia `unexplained` de importe neto **no bloquea todavía el Gate A** de forma automática (ADR-V25-24): el informe es la evidencia; el bloqueo automático es de la evaluación de gates.
+- Solo ventas. Inventario, compromisos y demás entidades: DISEÑADOS.
+- Los objetos Bronze que no produjeron ningún documento de la ventana ni tienen informe por carga no son descubribles por ventana (haría falta registrar el rango de fechas en el objeto).
+- Gold solo cuenta ventas válidas del motor de demanda; los demás cores (Customer, Supply) no se reconcilian por celdas.

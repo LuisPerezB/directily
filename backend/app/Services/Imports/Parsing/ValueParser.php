@@ -41,6 +41,12 @@ final class ValueParser
     /** @param array<string, mixed> $options */
     public function __construct(private readonly string $timezone = 'America/Guayaquil', private readonly array $options = []) {}
 
+    /** Opción de lectura con la que se creó el parser (p. ej. `decimal_separator`, `date_format`); null si no se declaró. */
+    public function option(string $key): mixed
+    {
+        return $this->options[$key] ?? null;
+    }
+
     public static function isBlank(mixed $value): bool
     {
         return $value === null || (is_string($value) && trim($value) === '');

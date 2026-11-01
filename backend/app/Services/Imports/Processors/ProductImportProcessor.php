@@ -31,6 +31,14 @@ final class ProductImportProcessor implements ImportProcessor
             if ($sku === null) {
                 $issues[] = Issue::error('required', 'Falta el código (SKU).', 'sku');
             }
+            // Cambio de código (ADR-V25-24): un SKU que es alias vigente de otro producto actualiza ESE producto; no crea un duplicado.
+            if ($sku !== null && ($aliased = $catalog->productIdByAlias($sku)) !== null) {
+                $canonical = $catalog->canonicalSku($aliased);
+                if ($canonical !== null && CatalogResolver::norm($canonical) !== CatalogResolver::norm($sku)) {
+                    $issues[] = Issue::warning('alias_resolved', "El código '{$sku}' es un alias del producto '{$canonical}': se actualiza ese producto en lugar de crear uno nuevo.", 'sku', $sku);
+                    $sku = $canonical;
+                }
+            }
             if ($name === null) {
                 $issues[] = Issue::error('required', 'Falta el nombre del producto.', 'name');
             }

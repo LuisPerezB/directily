@@ -6,6 +6,7 @@ namespace App\Services\Sales;
 
 use App\Models\Tenant;
 use App\Services\Catalog\CatalogResolver;
+use App\Support\Canonical\CanonicalContracts;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,10 @@ use RuntimeException;
  *        son los de ESTA escritura. `first_seen_at` NO se actualiza nunca. `source_recorded_at` solo se reemplaza si la entrante
  *        trae marca (una actualización sin marca conserva la almacenada; se sigue contando `updated_without_source_order`).
  * - Todo por lotes, dentro de una transacción por lote y del bloqueo de aviso (advisory lock) por empresa.
+ * - LINAJE (ADR-V25-24): cada versión escrita guarda `bronze_object_id` (objeto Bronze del original; `$context['bronze_object_id']`),
+ *   `source_row` (primera fila del documento en el origen; `$doc['source_row']`) y `schema_version` (versión del contrato canónico de
+ *   ventas con que se escribió). Al archivar, la revisión CONSERVA el linaje de SU versión (el de la fila vigente que se reemplaza); la
+ *   versión nueva trae el suyo. Un documento sin cambios o descartado por versión anterior no se escribe, así que no cambia su linaje.
  *
  * Ventanas de conocimiento (INVARIANTE: en todo corte, a lo sumo UNA versión visible por documento; con la última escritura ya
  * pasada, exactamente la vigente). Una versión es visible al corte C si `known_from < medianoche local de C+1` y
@@ -82,7 +87,7 @@ final class SalesDocumentWriter
                     ->where('tenant_id', $tenant->id)
                     ->where('document_type', $type)
                     ->whereIn('document_number', $chunk)
-                    ->get(['id', 'document_number', 'source_hash', 'source_recorded_at', 'ingestion_mode', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency']);
+                    ->get(['id', 'document_number', 'source_hash', 'source_recorded_at', 'ingestion_mode', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency', 'updated_at']);
                 foreach ($rows as $row) {
                     $existing[$type.'|'.mb_strtoupper($row->document_number)] = $row;
                 }
@@ -94,7 +99,9 @@ final class SalesDocumentWriter
             $found = $existing[$doc['doc_key']] ?? null;
             if ($found === null) {
                 $result[$doc['doc_key']] = ['state' => self::STATE_NEW, 'id' => null, 'without_order' => false, 'stored' => null, 'mode_mismatch' => false];
-            } elseif ($found->source_hash === $doc['source_hash']) {
+            } elseif ($found->source_hash === $doc['source_hash'] || (isset($doc['legacy_source_hash']) && $found->source_hash === $doc['legacy_source_hash'])) {
+                // `legacy_source_hash`: la huella con el código de cliente CRUDO, como la calculaban las versiones anteriores a la forma única
+                // del cliente (SalesDocumentAssembler::withTotals): un documento ya guardado con ella no cambió.
                 $result[$doc['doc_key']] = [
                     'state' => self::STATE_UNCHANGED, 'id' => (int) $found->id, 'without_order' => false, 'stored' => null,
                     'mode_mismatch' => $mode !== null && (string) $found->ingestion_mode !== $mode,
@@ -121,8 +128,9 @@ final class SalesDocumentWriter
      * `now` (instante de la escritura).
      *
      * @param  list<array<string, mixed>>  $documents
-     * @param  array{ingestion_mode?: ?string, import_job_id?: ?int, data_source_id?: ?int, now?: CarbonInterface}  $context
-     * @return array{new: int, updated: int, unchanged: int, stale_skipped: int, revisions_archived: int, updated_without_source_order: int, unchanged_mode_mismatch: int, products_created: int, branches_created: int, lines_written: int}
+     * @param  array{ingestion_mode?: ?string, import_job_id?: ?int, data_source_id?: ?int, bronze_object_id?: ?int, now?: CarbonInterface}  $context
+     * @return array{new: int, updated: int, unchanged: int, stale_skipped: int, revisions_archived: int, updated_without_source_order: int, unchanged_mode_mismatch: int, products_created: int, branches_created: int, lines_written: int, states: array<string, string>}
+     *                                                                                                                                                                                                                                                                      `states`: doc_key => estado (new | updated | unchanged | stale_skipped) de cada documento recibido
      *
      * @throws InvalidArgumentException si falta el modo de ingestión o no es válido
      */
@@ -131,7 +139,7 @@ final class SalesDocumentWriter
         $mode = IngestionModeResolver::normalize($context['ingestion_mode'] ?? null)
             ?? throw new InvalidArgumentException('Todo camino de escritura de ventas debe fijar el modo de ingestión (backfill | incremental).');
         $counts = ['new' => 0, 'updated' => 0, 'unchanged' => 0, 'stale_skipped' => 0, 'revisions_archived' => 0, 'updated_without_source_order' => 0,
-            'unchanged_mode_mismatch' => 0, 'products_created' => 0, 'branches_created' => 0, 'lines_written' => 0];
+            'unchanged_mode_mismatch' => 0, 'products_created' => 0, 'branches_created' => 0, 'lines_written' => 0, 'states' => []];
         if ($documents === []) {
             return $counts;
         }
@@ -144,6 +152,7 @@ final class SalesDocumentWriter
             foreach ($documents as $doc) {
                 $class = $states[$doc['doc_key']];
                 $counts[$class['state']]++;
+                $counts['states'][$doc['doc_key']] = $class['state'];
                 if ($class['without_order']) {
                     $counts['updated_without_source_order']++;
                 }
@@ -165,9 +174,16 @@ final class SalesDocumentWriter
             foreach ($toWrite as $doc) {
                 foreach ($doc['lines'] as $line) {
                     $products[$line['product_sku']] ??= ['name' => $line['product_name'], 'category' => $line['category']];
+                    if ($catalog->hasAliasFor($line['product_sku'])) {
+                        // La vigencia del alias se evalúa con la fecha de CADA documento (ADR-V25-24), no con la de hoy.
+                        $products[$line['product_sku']]['dates'][$doc['sale_date']] = true;
+                    }
                 }
                 if ($doc['customer_code'] !== null) {
                     $customers[$doc['customer_code']] ??= ['segment' => $doc['customer_segment'], 'province' => $doc['customer_province']];
+                    if ($catalog->hasCustomerAliases()) {
+                        $customers[$doc['customer_code']]['dates'][$doc['sale_date']] = true;
+                    }
                 }
             }
             $counts['products_created'] = $catalog->ensureProducts($products);
@@ -185,7 +201,10 @@ final class SalesDocumentWriter
             // 3) Cabeceras (upsert con RETURNING para obtener ids)
             $columns = ['tenant_id', 'branch_id', 'data_source_id', 'import_job_id', 'document_type', 'document_number', 'status', 'issued_at',
                 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'source_hash', 'source_recorded_at',
-                'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at', 'created_at', 'updated_at'];
+                'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at', 'created_at', 'updated_at',
+                'bronze_object_id', 'source_row', 'schema_version'];
+            $schemaVersion = CanonicalContracts::version('sales');
+            $bronzeObjectId = $context['bronze_object_id'] ?? null;
             $versionKnownFrom = $mode === IngestionModeResolver::BACKFILL ? null : $nowText;
             $ids = [];
             foreach (array_chunk($toWrite, 500) as $chunk) {
@@ -196,10 +215,11 @@ final class SalesDocumentWriter
                     array_push($bindings,
                         $tenant->id, $branchId, $context['data_source_id'] ?? null, $context['import_job_id'] ?? null,
                         $doc['document_type'], $doc['document_number'], $doc['status'], $doc['issued_at'], $doc['sale_date'],
-                        $doc['customer_code'] !== null ? ($customerIds[$doc['customer_code']] ?? null) : null,
+                        $doc['customer_code'] !== null ? $catalog->customerIdFor($doc['customer_code'], $doc['sale_date'], $customerIds) : null,
                         $doc['channel'], $doc['currency'], $doc['subtotal'], $doc['discount_total'], $doc['tax_total'], $doc['total'],
                         $doc['source_hash'], $doc['source_recorded_at'] ?? null,
                         $mode, $versionKnownFrom, 0, $nowText, $nowText, $nowText,
+                        $bronzeObjectId, $doc['source_row'] ?? null, $schemaVersion,
                     );
                     $placeholders[] = '('.implode(',', array_fill(0, count($columns), '?')).')';
                 }
@@ -210,6 +230,7 @@ final class SalesDocumentWriter
                     'branch_id', 'import_job_id', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency',
                     'subtotal', 'discount_total', 'tax_total', 'total', 'source_hash',
                     'ingestion_mode', 'version_known_from', 'updated_at',
+                    'bronze_object_id', 'source_row', 'schema_version',
                 ]));
                 $sql = 'INSERT INTO sales ('.implode(',', $columns).') VALUES '.implode(',', $placeholders)
                     .' ON CONFLICT (tenant_id, document_type, document_number) DO UPDATE SET '.$update
@@ -237,7 +258,7 @@ final class SalesDocumentWriter
                         'tenant_id' => $tenant->id,
                         'sale_id' => $saleId,
                         'line_number' => $line['line_number'],
-                        'product_id' => $catalog->productId($line['product_sku']),
+                        'product_id' => $catalog->productId($line['product_sku'], $doc['sale_date']),
                         'branch_id' => $branchId,
                         'sale_date' => $doc['sale_date'],
                         'quantity' => $line['quantity'],
@@ -309,13 +330,13 @@ final class SalesDocumentWriter
             $newLines = [];
             foreach ($doc['lines'] as $line) {
                 $newLines[(int) $line['line_number']] = self::lineSignature(
-                    (int) $catalog->productId($line['product_sku']), $line['quantity'], $line['unit_price'], $line['discount'], $line['net_amount'], $line['tax'], $line['unit_cost'], (bool) $line['is_return'],
+                    (int) $catalog->productId($line['product_sku'], $doc['sale_date']), $line['quantity'], $line['unit_price'], $line['discount'], $line['net_amount'], $line['tax'], $line['unit_cost'], (bool) $line['is_return'],
                 );
             }
             $oldLines = $storedLines[$saleId] ?? [];
             ksort($oldLines);
             ksort($newLines);
-            $customerId = $doc['customer_code'] !== null ? ($customerIds[$doc['customer_code']] ?? null) : null;
+            $customerId = $doc['customer_code'] !== null ? $catalog->customerIdFor($doc['customer_code'], $doc['sale_date'], $customerIds) : null;
 
             $status = $stored->status !== $doc['status'];
             $lines = $oldLines !== $newLines;
@@ -369,10 +390,10 @@ final class SalesDocumentWriter
             $inserted = DB::affectingStatement(
                 'INSERT INTO sales_document_revisions (tenant_id, sale_id, revision, document_type, status, issued_at, sale_date, branch_id, customer_id, channel, currency,'
                 .' subtotal, discount_total, tax_total, total, source_hash, source_recorded_at, ingestion_mode, known_from, known_until,'
-                .' import_job_id, superseded_by_import_job_id, data_source_id, change_kind)'
+                .' import_job_id, superseded_by_import_job_id, data_source_id, change_kind, bronze_object_id, source_row, schema_version)'
                 .' SELECT s.tenant_id, s.id, s.current_revision, s.document_type, s.status, s.issued_at, s.sale_date, s.branch_id, s.customer_id, s.channel, s.currency,'
                 ." s.subtotal, s.discount_total, s.tax_total, s.total, s.source_hash, s.source_recorded_at, s.ingestion_mode, s.version_known_from, {$until},"
-                .' s.import_job_id, ?::bigint, s.data_source_id, v.change_kind'
+                .' s.import_job_id, ?::bigint, s.data_source_id, v.change_kind, s.bronze_object_id, s.source_row, s.schema_version'
                 .' FROM sales s JOIN tenants t ON t.id = s.tenant_id'
                 .' JOIN (VALUES '.implode(',', $values).') AS v(sale_id, change_kind) ON v.sale_id = s.id'
                 .' WHERE s.tenant_id = ?',

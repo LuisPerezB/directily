@@ -63,7 +63,7 @@ final class SourceSyncController extends Controller
             'id' => $s->id, 'data_source_id' => $s->data_source_id, 'entity' => $s->entity, 'mapping_version' => $s->mapping_version,
             'mode' => $s->mode, 'status' => $s->status, 'triggered_by' => $s->triggered_by,
             'since' => $s->since?->toIso8601String(), 'watermark' => $s->watermark?->toIso8601String(),
-            'rows_extracted' => $s->rows_extracted, 'pages' => $s->pages, 'import_job_id' => $s->import_job_id,
+            'rows_extracted' => $s->rows_extracted, 'pages' => $s->pages, 'import_job_id' => $s->import_job_id, 'bronze_object_id' => $s->bronze_object_id,
             'stats' => JsonMap::orEmpty($s->stats), 'error_message' => $s->error_message,
             'started_at' => $s->started_at?->toIso8601String(), 'finished_at' => $s->finished_at?->toIso8601String(),
             'created_at' => $s->created_at?->toIso8601String(),
