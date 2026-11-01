@@ -16,7 +16,7 @@ use Throwable;
  * Predicción diaria del Customer Core. La recencia cambia cada día aunque no haya ventas nuevas, por eso NO se omite por falta
  * de ventas; se omite si la empresa no tiene modelos en producción, su plan no incluye horizontes, ya hay una corrida activa,
  * ya existe la predicción de hoy o la programación es manual (settings.customer_schedule = manual).
- * Solo predice (no entrena): usa los horizontes del plan ∩ {7, 30, 90}.
+ * Solo predice (no entrena): usa los horizontes del plan ∩ el subconjunto de Customer del catálogo (7, 14, 15, 30, 90).
  */
 class ScheduleCustomerPredictionsCommand extends Command
 {

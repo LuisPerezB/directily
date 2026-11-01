@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Forecasting\ModelArtifactVerifier;
 use App\Services\Forecasting\Support\CoreServices;
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +49,7 @@ final class CustomerRollbackService
                 throw new DomainStateException('Solo se puede restaurar una versión validada o retirada.', 'rollback_target_not_restorable', ['status' => $target->status]);
             }
             $slot = (string) ($target->hyperparameters['slot'] ?? '');
-            if (! preg_match('/^h(7|30|90):(probability|quantity)$/', $slot, $m)) {
+            if (! preg_match('/^h('.implode('|', HorizonCatalog::customer()).'):(probability|quantity)$/', $slot, $m)) {
                 throw new DomainStateException('El modelo no declara un horizonte y objetivo (slot) válidos.', 'rollback_target_without_slot', ['slot' => $slot ?: null]);
             }
             CoreServices::assertHorizon($tenant, (int) $m[1]);                       // 402 si el plan no incluye ese horizonte

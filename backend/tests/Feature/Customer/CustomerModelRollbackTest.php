@@ -176,6 +176,23 @@ class CustomerModelRollbackTest extends TestCase
         $this->assertDatabaseHas('model_registry', ['id' => $h90, 'status' => 'retired']);
     }
 
+    public function test_models_of_the_new_customer_horizons_14_and_15_are_restorable_and_60_is_not_a_customer_slot(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Owner, ['plan_overrides' => ['horizons' => [7, 14, 15, 30, 60, 90]]]);
+        $api = $this->actingAsTenantUser($user, $tenant);
+        foreach (['h14:probability' => 'v-14', 'h15:quantity' => 'v-15'] as $slot => $version) {
+            $id = $this->model($tenant, $slot, 'retired', $version);
+            $api->postJson('/api/v1/models/customer/rollback', ['model_registry_id' => $id])->assertOk();
+            $this->assertDatabaseHas('model_registry', ['id' => $id, 'status' => 'production']);
+        }
+        $h60 = $this->model($tenant, 'h60:probability', 'retired', 'v-60');
+        $api->postJson('/api/v1/models/customer/rollback', ['model_registry_id' => $h60])->assertStatus(409)->assertJsonPath('code', 'rollback_target_without_slot');
+        // Un plan sin 15 (Growth lo tiene; Básico no) rechaza la reversión de un modelo de 15 con 402, no con «sin slot».
+        [$basic, $bu] = $this->createTenantWithUser(TenantRole::Owner, ['plan_id' => $this->basicPlanId()]);
+        $h15 = $this->model($basic, 'h15:probability', 'retired', 'v-15b');
+        $this->actingAsTenantUser($bu, $basic)->postJson('/api/v1/models/customer/rollback', ['model_registry_id' => $h15])->assertStatus(402);
+    }
+
     public function test_permissions_and_company_isolation(): void
     {
         [$a, $ua] = $this->createTenantWithUser();

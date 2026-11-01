@@ -370,7 +370,7 @@
     "features": {
       "demand": {
         "title": "Pronóstico de demanda",
-        "text": "Unidades esperadas por producto, categoría, sucursal y empresa a 7, 30 y 90 días, con rangos de incertidumbre."
+        "text": "Unidades esperadas por producto, categoría, sucursal y empresa a los horizontes de su plan (7, 14, 15, 30, 60 o 90 días), con rangos de incertidumbre."
       },
       "inventory": {
         "title": "Inventario y abastecimiento",
@@ -752,7 +752,7 @@
     },
     "bandLabel": "Días {from} a {to}",
     "horizonTotalTitle": "Error del total de cada horizonte",
-    "horizonTotalText": "Al comprar importa el total de los próximos 7, 14, 30, 60 o 90 días, no el error día a día. Aquí se mide ese total frente al método simple.",
+    "horizonTotalText": "Al comprar importa el total de los próximos 7, 14, 15, 30, 60 o 90 días, no el error día a día. Aquí se mide ese total frente al método simple.",
     "totalError": "Error del total",
     "totalErrorMoney": "Error en dinero"
   },
@@ -1166,6 +1166,7 @@
     "horizons": "Horizontes disponibles",
     "metrics": {
       "branches": "Sucursales",
+      "series": "Series activas (sucursal × producto, últimos 90 días)",
       "active_products": "Productos activos",
       "users": "Usuarios",
       "import_rows": "Filas importadas este mes",
@@ -1175,7 +1176,10 @@
       "scenarios": "Simulador",
       "api_access": "Acceso por API",
       "external_indicators": "Indicadores externos",
-      "custom_models": "Modelos personalizados"
+      "custom_models": "Modelos personalizados",
+      "customer": "Comportamiento de compra",
+      "roles": "Roles de usuario",
+      "assistant": "Asistente"
     }
   },
   "audit": {
@@ -1280,6 +1284,18 @@
     "unknown": {
       "title": "Respaldo del horizonte de {n} días desconocido",
       "text": "La ejecución es anterior a la verificación de horizontes: no se sabe si la historia respalda este horizonte."
+    },
+    "reasonCode": {
+      "coverage_insufficient": "Cobertura insuficiente",
+      "insufficient_horizon": "Sin ventanas de evaluación de ese largo",
+      "no_independent_holdout": "Sin período final independiente",
+      "no_model": "Sin modelo en producción",
+      "unknown_legacy_run": "Motivo no registrado (corrida anterior)",
+      "model_unusable": "Modelo no utilizable",
+      "no_identified_buyers": "Sin compradores identificados",
+      "fallback_reference": "Se sirve la referencia",
+      "calibration_not_calibrated": "Calibración no verificada",
+      "stale_data": "Datos desactualizados"
     },
     "runHint": "Generar un pronóstico",
     "noneInPlan": "Su plan no incluye horizontes de pronóstico.",
@@ -1527,10 +1543,11 @@
   },
   "customers": {
     "title": "Compradores",
-    "subtitle": "Qué compradores comprarán qué productos en los próximos 7, 30 o 90 días, y cuánto.",
+    "subtitle": "Qué compradores comprarán qué productos en los próximos 7, 14, 15, 30 o 90 días, y cuánto.",
     "privacyTitle": "Solo compradores identificados",
     "privacy": "Las ventas sin comprador y las de consumidor final no se convierten en una persona recurrente: no tienen predicción individual y su demanda queda en el residual de la conciliación. Los documentos de identidad no se muestran.",
     "noHorizonsInPlan": "Su plan no incluye horizontes de comportamiento de compra.",
+    "notInPlan": "Su plan no incluye el comportamiento de compra de compradores. Pida a su administrador cambiar de plan para verlo.",
     "tabs": {
       "predicciones": "Predicciones",
       "evaluacion": "Evaluación",

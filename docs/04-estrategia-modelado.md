@@ -99,9 +99,10 @@ Se prefiere el mayor horizonte que admita un holdout independiente. Con 300–38
 usa h = 60 con holdout en vez de h = 90 sin holdout. Los pasos de producción que exceden el
 horizonte evaluado **ya no se presentan como completos** (ver «Horizontes y abstención» abajo).
 
-**Horizontes 7/14/30/60/90 y abstención explícita (etapa 2 · P1, E2-21).** El motor pronostica
-los cinco horizontes del dominio (Laravel pide solo los que el plan autoriza: básico 7/14/30; resto
-todos). Un horizonte H está **respaldado** únicamente si (1) la historia cubre ≥ 2×H días y (2) el
+**Catálogo de horizontes 7/14/15/30/60/90 y abstención explícita (etapa 2 · P1, E2-21; W2-E · ADR-V25-02).** El
+motor pronostica los seis horizontes del catálogo único (Laravel pide solo los que el plan autoriza: Básico 7/14/30,
+Starter 7/30, Growth y Enterprise 7/15/30 por defecto; catálogo completo habilitable por contrato; ver
+`docs/product/RETAIL_STARTER_GROWTH.md`). Un horizonte H está **respaldado** únicamente si (1) la historia cubre ≥ 2×H días y (2) el
 backtesting tiene ventanas de ≥ H días y observaciones evaluadas. Si no, queda `insufficient_data` con
 sus motivos (`history_lt_2h`, `backtest_horizon_lt_h`, `no_backtest`, `no_evaluated_observations`): el
 número se calcula —la jerarquía y las recomendaciones lo necesitan— pero se marca en cada fila
@@ -109,8 +110,37 @@ número se calcula —la jerarquía y las recomendaciones lo necesitan— pero s
 las filas `granularity='horizon'` de ese H salen **sin intervalo** (no se extrapola). Sin período final
 independiente, los horizontes respaldados quedan `degraded` (métricas optimistas). Por serie, una serie con
 menos de 2×H días de historia queda `insufficient_data` en los pasos de ese horizonte. Ejemplo
-(`tests/unit/test_horizons.py`): 118 días de historia ⇒ backtest de 14 días con holdout ⇒ 7 y 14 `ok`; 30, 60 y
-90 `insufficient_data`. Con 574 días (datos de prueba) o 730 (demo) los cinco horizontes son `ok`.
+(`tests/unit/test_horizons.py`): 118 días de historia ⇒ backtest de 14 días con holdout ⇒ 7 y 14 `ok`; 15, 30, 60 y
+90 `insufficient_data`. Con 574 días (datos de prueba) o 730 (demo) los seis horizontes son `ok`.
+
+*Nombres de la abstención (unificados).* `insufficient_data` es siempre el **estado**; el motivo es un **código**
+(`reasons[].reason_code`): `coverage_insufficient` (la historia no cubre 2×H o no alcanza para un backtest: `history_lt_2h`,
+`no_backtest`) o `insufficient_horizon` (el backtest no tiene ventanas completas de H días: `backtest_horizon_lt_h`,
+`no_evaluated_observations`). Cada motivo conserva su `code` histórico y la API agrega `reason_code` también a las ejecuciones
+anteriores, de modo que las respuestas existentes siguen siendo compatibles (prueba:
+`test_horizon_catalog.py::test_reason_codes_are_unified_while_legacy_codes_stay_for_existing_consumers` y
+`DemandV2ApiTest::test_forecast_run_detail_carries_the_common_envelope_and_the_protocol_manifest`).
+
+*Customer: estado por etapa.* En el **entrenamiento** el estado de un horizonte sin evidencia sigue siendo `abstained` (con `reason_code`
+`coverage_insufficient`, `insufficient_horizon` o `no_identified_buyers`) por compatibilidad con el manifiesto, las pruebas y los consumidores
+existentes (`tier`/`status` del manifiesto). En la **predicción y la API** el mismo horizonte sin modelo utilizable es `insufficient_data` con su
+`reason_code` (`no_model`, `model_unusable`, `no_identified_buyers`) en `summary.horizon_support` y en el 422 `horizon_not_available`. Una corrida
+anterior a W2-E no guardó el motivo: la API informa `unknown_legacy_run` en vez de suponer «sin modelo».
+
+*Horizonte de 15 días.* **IMPLEMENTADO/VERIFICADO.** Pasa por el mismo camino que los demás: el backtest as-of por ventana y el
+período final independiente de W1 (ADR-V25-23). Se evalúa como el error del **total** de 15 días (`model_evaluations.level =
+'horizon_total'`, `level_key = 'H15'`, `evaluation_type = 'backtest'`, `extra.independent_holdout = true`) y se publica en
+`forecast_values` con `granularity = 'horizon'`, `period_days = 15`, intervalo conformal del total y su estado. Pruebas:
+`tests/integration/test_horizon_15_integration.py` (publicación con estado e intervalos; evaluación sobre el período final
+independiente; una anulación y un documento tardío conocidos después del origen del período final **no** cambian ningún número
+evaluado de H15 aunque sí cambian el pronóstico de producción) y `test_horizons.py` (paso 15 ⇒ horizonte 15). Requisitos: historia
+≥ 30 días y backtest con ventanas ≥ 15 días, es decir, en la práctica el escalón de 30 días de la tabla (≥ 150 días de historia, con
+período final independiente). Con 84–149 días el backtest es de 14 días y **H15 queda `insufficient_data`
+(`insufficient_horizon`) aunque H14 esté `ok`**: es la abstención honesta, no un número. *Pendiente (decisión del arquitecto)*: un
+escalón de backtest de 15 días reduciría esa brecha, pero cambia las métricas y salvaguardas de las empresas existentes; no se hizo.
+Los tramos de evaluación diaria (`h1-7`, `h8-14`, `h15-30`, `h31-60`, `h61-90`) son **tramos de pasos** y no cambian: «h15-30» no es el
+horizonte 15 (renombrarlo rompería las claves persistidas, la deriva de `evaluate-actuals` y los consumidores de `by_horizon`).
+El paso 15 de una serie pertenece al horizonte 15 (`horizon_for_step`): hereda su estado, no el del de 30.
 
 **Manifiesto del protocolo (E2-06).** Cada ejecución guarda en `forecast_runs.evaluation_manifest` los
 períodos que usó cada fase, construidos de las filas reales del backtest: orígenes y rangos objetivo de
@@ -227,7 +257,7 @@ escala de cada serie (media de 28 días). Nivel serie: cuantiles asimétricos po
 de horizonte (conteos sesgados). Niveles agregados: simétricos (|error|), más robustos cuando
 las ventanas comparten un sesgo estacional. Más allá del horizonte evaluado los pasos diarios se
 ensanchan con √(paso/paso máximo), **pero quedan marcados `insufficient_data`** (§4) y los totales de
-horizonte de ese H salen sin intervalo. Semanal/mensual y totales del horizonte (7/14/30/60/90) se
+horizonte de ese H salen sin intervalo. Semanal/mensual y totales del horizonte (7/14/15/30/60/90) se
 calibran con sumas de errores del backtest (`granularity = 'week' | 'month' | 'horizon'`).
 
 - **Producción:** residuos del modelo elegido y **servido** en todas las ventanas (incluido el holdout),
@@ -446,7 +476,7 @@ Detalle, definiciones y limitaciones en `docs/architecture/v2/P2-comportamiento.
 agregada: la unidad es comprador × producto, y la demanda agregada y la de compradores son dos vistas de la misma demanda que
 nunca se suman (§14.6).
 
-**14.1 Objetivos (7, 30 y 90 días, con modelos propios por horizonte).** `purchase_probability` = P(≥ 1 compra válida del producto en
+**14.1 Objetivos (7, 14, 15, 30 y 90 días, con modelos propios por horizonte; 60 no aplica a Customer).** `purchase_probability` = P(≥ 1 compra válida del producto en
 `(corte, corte+H]`, todas las sucursales, sin anuladas ni notas de crédito); `quantity_if_purchase` = suma de **todas** las compras
 de la ventana dado ≥ 1; `expected_quantity` = P × cantidad; `expected_amount` = esperanza × último precio neto de la relación
 (supuesto). La etiqueta madura solo si `corte+H ≤` último día completo (cobertura o última venta); la ventana con disponibilidad
@@ -469,7 +499,7 @@ con ventanas 90/180/365.
 
 **14.4b Fuente del ranking (`cust-ranking-v1`, ADR-P2-01).** El ranking servido de productos probables usa, por horizonte, la fuente elegida en el holdout entre probabilidad del modelo servido, popularidad y recencia por precision@5, con popularidad por defecto y margen relativo mínimo de 5 %; la fuente queda en `ranking_source` (modelos, resumen, cada fila del ranking y la API).
 
-**14.5 Coherencia.** Máximo acumulado P7 ≤ P30 ≤ P90 (sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
+**14.5 Coherencia.** Máximo acumulado entre los horizontes servidos (p. ej. P7 ≤ P15 ≤ P30 ≤ P90; sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
 
 **14.6 Reconciliación y compromisos.** agregado = Σ max(esperanza, comprometido) + comprometido fuera del modelo + residual; `inconsistent` si compradores > agregado
 (sin alterar probabilidades). Comprometido = pedidos/contratos confirmados, conocidos al corte, no cancelados, con entrega en el horizonte (pendiente = cantidad − cumplida).

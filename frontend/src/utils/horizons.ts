@@ -1,4 +1,4 @@
-import type { PlanLimits } from '@/api/types'
+import type { HorizonSupport, PlanLimits } from '@/api/types'
 
 /**
  * Horizontes que la empresa puede usar: los del dominio ∩ los de su plan (`plan.limits.horizons`).
@@ -24,4 +24,19 @@ export function pickHorizon<H extends number>(allowed: readonly H[], preferred: 
     if (below.length) return below[below.length - 1]!
   }
   return sorted[0] ?? null
+}
+
+/**
+ * Respaldo por horizonte de una ejecución (`summary.horizon_support`: mapa horizonte → respaldo). Un resumen ausente o de una ejecución
+ * anterior a la etapa 2 devuelve un mapa vacío: no se inventa información de respaldo.
+ */
+export function horizonSupportMap(summary: Record<string, unknown> | null | undefined): Record<number, HorizonSupport> {
+  const raw = summary?.horizon_support
+  const out: Record<number, HorizonSupport> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [key, value] of Object.entries(raw as Record<string, HorizonSupport>)) {
+    const h = Number(key)
+    if (Number.isFinite(h) && value && typeof value === 'object' && typeof value.status === 'string') out[h] = value
+  }
+  return out
 }

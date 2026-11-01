@@ -9,6 +9,7 @@ use App\Services\Analytics\DemandEnvelope;
 use App\Services\Analytics\HorizonSupport;
 use App\Services\Analytics\ProductForecastQuery;
 use App\Services\Analytics\RunResolver;
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Validation\Rule;
 
@@ -40,7 +41,7 @@ final class ProductForecastTool extends ReadTool
             'properties' => [
                 'product' => ['type' => 'string', 'maxLength' => 80, 'description' => 'SKU o parte del nombre del producto.'],
                 'product_id' => ['type' => 'integer', 'description' => 'Identificador del producto (opcional).'],
-                'horizon' => $this->horizonSchema(array_map('intval', (array) config('engine.horizons'))),
+                'horizon' => $this->horizonSchema(HorizonCatalog::demand()),
                 'branch_id' => ['type' => 'integer', 'description' => 'Identificador de sucursal (opcional).'],
                 'limit' => $this->limitSchema(),
             ],
@@ -53,7 +54,7 @@ final class ProductForecastTool extends ReadTool
         return [
             'product' => ['sometimes', 'string', 'min:1', 'max:80'],
             'product_id' => ['sometimes', 'integer', TenantRule::exists('products')],
-            'horizon' => ['sometimes', 'integer', Rule::in(array_map('intval', (array) config('engine.horizons')))],
+            'horizon' => ['sometimes', 'integer', Rule::in(HorizonCatalog::demand())],
             'branch_id' => ['sometimes', 'integer', TenantRule::exists('branches')],
             'limit' => ['sometimes', 'integer', 'min:1', 'max:'.(int) config('conversation.limits.max_rows_per_tool', 10)],
         ];
@@ -61,7 +62,7 @@ final class ProductForecastTool extends ReadTool
 
     public function execute(array $arguments, ToolContext $context): ToolResult
     {
-        $horizon = $this->horizon($arguments, $context->tenant, array_map('intval', (array) config('engine.horizons')));
+        $horizon = $this->horizon($arguments, $context->tenant, HorizonCatalog::demand());
         $branchId = isset($arguments['branch_id']) ? (int) $arguments['branch_id'] : null;
         $run = $this->runs->resolveCompleted(null);
         if ($run === null) {

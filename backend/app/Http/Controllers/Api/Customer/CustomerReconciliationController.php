@@ -37,7 +37,7 @@ class CustomerReconciliationController extends CustomerController
         $base = CustomerReconciliation::query()->where('core_run_id', $run->id)->where('horizon_days', $horizon)
             ->when($request->filled('product_id'), fn ($q) => $q->where('product_id', (int) $request->integer('product_id')))
             ->when($request->filled('status'), fn ($q) => $q->where('status', (string) $request->query('status')));
-        $summary = (clone $base)->reorder()->selectRaw('status, count(*) as n')->groupBy('status')->pluck('n', 'status')->map(fn ($n) => (int) $n)->all();
+        $summary = (clone $base)->reorder()->selectRaw('status, count(*) as n')->groupBy('status')->orderBy('status')->pluck('n', 'status')->map(fn ($n) => (int) $n)->all();
         $page = (clone $base)->with('product:id,sku,name,unit')->orderByRaw("case status when 'inconsistent' then 0 else 1 end")
             ->orderBy('product_id')->paginate($this->perPage($request));
         $rows = collect($page->items())->map(fn (CustomerReconciliation $r) => [

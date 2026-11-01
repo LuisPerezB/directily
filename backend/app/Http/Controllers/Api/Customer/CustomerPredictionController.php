@@ -31,10 +31,19 @@ class CustomerPredictionController extends CustomerController
             return $this->empty($tenant, 'Aún no hay una predicción de comportamiento de compra completada. Entrene y prediga desde POST /customer/runs.');
         }
         if (! in_array($horizon, array_map('intval', (array) $run->horizons), true)) {
+            // Abstención explícita (ADR-V25-02): estado `insufficient_data` + motivo en `reason_code`; nunca un número fabricado.
+            // El motivo sale de `summary.horizon_support` (corridas posteriores a W2-E). Una corrida anterior no lo guardó: no se adivina la causa
+            // (no se asume «sin modelo»); se informa `unknown_legacy_run`.
+            $reasons = (array) ($run->summary['horizon_support'][(string) $horizon]['reasons'] ?? []);
+
             return response()->json([
                 'message' => "La corrida {$run->id} no tiene predicciones a {$horizon} días (abstención por datos insuficientes o modelo ausente).",
                 'code' => 'horizon_not_available',
                 'available_horizons' => $run->horizons,
+                'quality_status' => 'insufficient_data',
+                'horizon' => $horizon,
+                'reason_code' => $reasons[0]['reason_code'] ?? 'unknown_legacy_run',
+                'reasons' => array_values($reasons),
             ], 422);
         }
         $column = self::ORDER[$request->query('order_by', 'probability')] ?? 'purchase_probability';

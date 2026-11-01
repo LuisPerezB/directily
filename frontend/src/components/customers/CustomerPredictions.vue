@@ -39,6 +39,12 @@ const result = useAsync(
 )
 
 const unavailable = computed(() => horizonNotAvailable(result.error.value))
+// Motivo de la abstención: texto por código unificado (o el mensaje del servidor si el código no tiene texto).
+const unavailableReason = computed(() => {
+  const u = unavailable.value
+  if (!u) return null
+  return u.reasonCode && te(`horizonSupport.reasonCode.${u.reasonCode}`) ? t(`horizonSupport.reasonCode.${u.reasonCode}`) : u.message
+})
 const failure = computed(() => (unavailable.value ? null : result.error.value))
 const envelope = computed(() => result.data.value?.envelope ?? null)
 const rows = computed(() => result.data.value?.data ?? [])
@@ -95,7 +101,8 @@ const columns = computed<Column<CustomerPrediction>[]>(() => [
 
     <ErrorState v-if="failure" :error="failure" @retry="result.execute" />
 
-    <EmptyState v-else-if="unavailable" icon="users" :title="t('customers.horizonUnavailableTitle', { n: horizon })" :description="t('customers.horizonUnavailableText')" data-test="horizon-not-available">
+    <EmptyState v-else-if="unavailable" icon="users" :title="t('customers.horizonUnavailableTitle', { n: horizon })" :description="t('customers.horizonUnavailableText')" data-test="horizon-not-available" :data-reason-code="unavailable.reasonCode ?? undefined">
+      <p v-if="unavailableReason" class="text-sm m-0" data-test="horizon-not-available-reason">{{ unavailableReason }}</p>
       <button v-for="h in unavailable.availableHorizons" :key="h" type="button" class="btn btn-secondary btn-sm" @click="emit('update:horizon', h as CustomerHorizon)">{{ t('customers.viewHorizon', { n: h }) }}</button>
     </EmptyState>
 

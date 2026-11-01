@@ -93,6 +93,8 @@ def _cmd_verify_artifact(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from predictily_engine.demand.horizons import SUPPORTED_HORIZONS  # catálogo único (ADR-V25-02)
+
     parser = argparse.ArgumentParser(prog="predictily_engine", description="Motor predictivo de Predictily")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -105,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--run-id", type=int, required=True)
     r.add_argument("--tenant-id", type=int, required=True)
     r.add_argument("--training-job-id", type=int, default=None)
-    r.add_argument("--horizons", type=int, nargs="+", default=[7, 14, 30, 60, 90])
+    r.add_argument("--horizons", type=int, nargs="+", default=list(SUPPORTED_HORIZONS))
     r.add_argument("--cutoff-date", default=None)
     r.set_defaults(func=_cmd_run)
 

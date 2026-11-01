@@ -337,6 +337,19 @@ class AssistantApiTest extends TestCase
         $api->postJson('/api/v1/assistant/messages', ['message' => 'a 30 días'])->assertOk()->assertJsonPath('data.figures.0.status', 'ok');
     }
 
+    public function test_a_plan_without_customer_behavior_reveals_no_customer_prediction_through_the_assistant(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Owner, ['plan_overrides' => ['features' => ['customer' => false]]]);
+        $this->seedCatalog($tenant);
+        $this->seedPredictionRun($tenant, $this->seedCustomerCatalogFor($tenant));
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        $this->fakeProvider([Fake::tool('customer_predictions', ['horizon' => 30]), Fake::text('Sin acceso.')]);
+        $res = $api->postJson('/api/v1/assistant/messages', ['message' => 'qué compradores comprarán'])->assertOk();
+        $this->assertSame(['plan_limit'], array_column($res->json('data.figures'), 'status'));
+        $this->assertNull($res->json('data.figures.0.data'));
+    }
+
     // ── aislamiento entre empresas ──
     public function test_a_company_never_sees_another_companys_results(): void
     {

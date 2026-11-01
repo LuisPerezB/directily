@@ -33,14 +33,22 @@ describe('predicciones de compra', () => {
 
   it('422 horizon_not_available informa los horizontes que sí tienen predicción', () => {
     const e = new ApiError(422, { message: 'sin predicciones', code: 'horizon_not_available', available_horizons: [7, 30] } as never, 'x')
-    expect(horizonNotAvailable(e)).toEqual({ availableHorizons: [7, 30] })
+    expect(horizonNotAvailable(e)).toEqual({ availableHorizons: [7, 30], reasonCode: null, message: null })
+  })
+
+  it('422 horizon_not_available trae el motivo unificado de la abstención (estado insufficient_data)', () => {
+    const e = new ApiError(422, {
+      message: 'sin predicciones a 15 días', code: 'horizon_not_available', available_horizons: [7, 30], quality_status: 'insufficient_data', reason_code: 'no_model',
+      reasons: [{ code: 'no_model', reason_code: 'no_model', message: 'No hay modelo en producción para 15 días: entrene primero.' }],
+    } as never, 'x')
+    expect(horizonNotAvailable(e)).toEqual({ availableHorizons: [7, 30], reasonCode: 'no_model', message: 'No hay modelo en producción para 15 días: entrene primero.' })
   })
 
   it('otros errores no se tratan como horizonte no disponible', () => {
     expect(horizonNotAvailable(new ApiError(422, { message: 'x', code: 'otro' }, 'x'))).toBeNull()
     expect(horizonNotAvailable(new ApiError(402, { message: 'plan', code: 'plan_limit_exceeded' }, 'x'))).toBeNull()
     expect(horizonNotAvailable(new Error('x'))).toBeNull()
-    expect(horizonNotAvailable(new ApiError(422, { message: 'x', code: 'horizon_not_available' }, 'x'))).toEqual({ availableHorizons: [] })
+    expect(horizonNotAvailable(new ApiError(422, { message: 'x', code: 'horizon_not_available' }, 'x'))).toEqual({ availableHorizons: [], reasonCode: null, message: null })
   })
 
   it('claves de métricas por horizonte y valores de precisión/cobertura en k', () => {

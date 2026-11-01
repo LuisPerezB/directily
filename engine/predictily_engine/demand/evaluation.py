@@ -326,7 +326,7 @@ def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, c
         # Nivel total (agregado): el error del total es mucho menor que el de cada producto.
         tot = daily_total(sel_test).assign(fam="selection")
         rows.append(metric_row("selection", "total", "total", summarize(tot, ["fam"]).iloc[0], ctx, is_selected=True))
-        # Total de H días (7/14/30/60/90) por serie y ventana: el error que importa para planear compras.
+        # Total de H días (7/14/15/30/60/90) por serie y ventana: el error que importa para planear compras.
         rows += horizon_total_rows("selection", sel_test, ctx, is_selected=True)
     base = test[test["family"] == BASELINE_FAMILY]
     if not base.empty:

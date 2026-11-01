@@ -1,7 +1,10 @@
 <script setup lang="ts" generic="V extends string | number">
-/** Control segmentado accesible (radiogroup) para opciones cortas: horizonte, granularidad. */
+/**
+ * Control segmentado accesible (radiogroup) para opciones cortas: horizonte, granularidad.
+ * Una opción puede llevar `status` (distinto de `ok`) y `hint`: queda marcada (punto de advertencia) y explicada en su título.
+ */
 const model = defineModel<V>({ required: true })
-defineProps<{ options: { value: V; label: string }[]; label: string; size?: 'sm' | 'md' }>()
+defineProps<{ options: { value: V; label: string; status?: string; hint?: string }[]; label: string; size?: 'sm' | 'md' }>()
 
 function onKey(event: KeyboardEvent, options: { value: V }[], index: number): void {
   const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
@@ -23,11 +26,15 @@ function onKey(event: KeyboardEvent, options: { value: V }[], index: number): vo
       type="button"
       role="radio"
       :aria-checked="model === option.value"
+      :aria-description="option.hint"
+      :title="option.hint"
+      :data-status="option.status"
       :tabindex="model === option.value ? 0 : -1"
       class="rounded-lg font-semibold transition-colors"
       :class="[
         size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-sm',
         model === option.value ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg',
+        option.status && option.status !== 'ok' ? 'after:content-[\'•\'] after:ml-1 after:text-warning' : '',
       ]"
       @click="model = option.value"
       @keydown="onKey($event, options, index)"

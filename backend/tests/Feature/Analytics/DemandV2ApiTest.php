@@ -16,7 +16,7 @@ use Tests\Feature\Analytics\Support\AnalyticsFixtures;
 use Tests\TestCase;
 
 /**
- * Etapa 2 · P1 Demanda en la API: horizontes 7/14/30/60/90 y planes, envoltura común, manifiesto del protocolo,
+ * Etapa 2 · P1 Demanda en la API: catálogo de horizontes 7/14/15/30/60/90 y planes, envoltura común, manifiesto del protocolo,
  * métricas nuevas y respaldo de cada horizonte (E2-21), estados del registro de modelos y reversión (E2-24).
  */
 class DemandV2ApiTest extends TestCase
@@ -52,9 +52,11 @@ class DemandV2ApiTest extends TestCase
 
     // ───────────────────────── horizontes y planes ─────────────────────────
 
-    public function test_the_domain_and_plans_declare_the_five_horizons(): void
+    public function test_the_domain_declares_the_single_catalog_and_the_plans_keep_their_subsets(): void
     {
-        $this->assertSame([7, 14, 30, 60, 90], config('engine.horizons'));
+        $this->assertSame([7, 14, 15, 30, 60, 90], config('predictily.horizons.catalog'));
+        $this->assertNull(config('engine.horizons'), 'el catálogo ya no se declara en config/engine.php: es único (ADR-V25-02)');
+        // Los planes heredados conservan los suyos (ADR-V25-02); habilitar 15 en ellos es un dato (plan_overrides), no un cambio de código.
         foreach (['trial', 'profesional', 'empresarial'] as $plan) {
             $this->assertSame([7, 14, 30, 60, 90], config("predictily.plans.{$plan}.limits.horizons"), $plan);
         }
@@ -156,8 +158,12 @@ class DemandV2ApiTest extends TestCase
         $this->assertSame(['P50 no se publica: no se evaluó.'], $env['limitations']);
         $this->assertSame(['p50_not_published'], $env['limitation_codes']);
         $this->assertSame(['branch_id', 'product_id'], $env['entity_keys']);
-        $this->assertSame([7, 14, 30, 60, 90], array_keys($env['horizon_support']));
+        $this->assertSame([7, 14, 15, 30, 60, 90], array_keys($env['horizon_support']));
         $this->assertSame('insufficient_data', $env['horizon_support']['60']['status']);
+        $this->assertSame('unknown', $env['horizon_support']['15']['status'], 'una ejecución sin dato del horizonte 15 no lo presenta como respaldado');
+        $this->assertSame('insufficient_horizon', $env['horizon_support']['60']['reasons'][0]['reason_code'], 'motivo con código unificado');
+        $this->assertSame('backtest_horizon_lt_h', $env['horizon_support']['60']['reasons'][0]['code'], 'el código histórico se conserva');
+        $this->assertSame('coverage_insufficient', $env['horizon_support']['90']['reasons'][0]['reason_code']);
         $this->assertSame('completed', $env['status']);
         $this->assertSame('product_unit', $env['unit']);
         // Aditivo: el contrato de la etapa 1 sigue ahí.

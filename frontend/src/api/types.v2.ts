@@ -44,7 +44,10 @@ export interface ResultEnvelope {
 export type HorizonSupportStatus = 'ok' | 'degraded' | 'insufficient_data' | 'not_computed' | 'unknown'
 
 export interface HorizonSupportReason {
+  /** Código histórico del motivo (history_lt_2h, backtest_horizon_lt_h...). */
   code: string
+  /** Código UNIFICADO de la abstención (ADR-V25-02): coverage_insufficient | insufficient_horizon | no_model... El estado es `insufficient_data`. */
+  reason_code?: string
   message: string
 }
 

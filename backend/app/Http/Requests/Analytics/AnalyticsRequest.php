@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Analytics;
 
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -34,7 +35,7 @@ abstract class AnalyticsRequest extends FormRequest
     /** @return list<int> */
     protected function horizons(): array
     {
-        return array_map('intval', (array) config('engine.horizons', [7, 14, 30, 60, 90]));
+        return HorizonCatalog::demand();
     }
 
     public function intOrNull(string $key): ?int

@@ -37,6 +37,10 @@ class CustomerProfileController extends CustomerController
                 'fallback' => 'Todavía no hay una predicción de comportamiento de compra.',
             ], 'envelope' => CustomerEnvelope::missing($tenant, 'forecast', 'Aún no hay una predicción de comportamiento de compra completada.')]);
         }
+        if (! $request->filled('horizon')) {
+            // Solo los horizontes que la corrida sí sirve: un horizonte del plan sin modelo no aparece como un ranking vacío.
+            $horizons = array_values(array_intersect($horizons, array_map('intval', (array) $run->horizons)));
+        }
         $activity = CustomerActivity::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)->first();
         $hasPredictions = CustomerPrediction::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)->exists();
         $rankings = [];
@@ -87,7 +91,7 @@ class CustomerProfileController extends CustomerController
                     'spend_ratio' => $activity->spend_ratio,
                 ],
             ] : null,
-            // Mapas horizonte → valor: objeto JSON (las claves son los horizontes 7/30/90).
+            // Mapas horizonte → valor: objeto JSON (las claves son los horizontes servidos por la corrida: 7, 14, 15, 30, 90).
             'rankings' => (object) $rankings,
             'ranking_sources' => (object) $rankingSources,
             'ranking_source_note' => CustomerEnvelope::DEFINITIONS['ranking_source'],

@@ -13,7 +13,7 @@ backend `app/Services/Analytics/{HorizonSupport,DemandEnvelope}.php`,
 
 | # | Requisito | Resultado |
 |---|---|---|
-| 1 | Horizontes 7/14/30/60/90 | Dominio, esquemas, filas `granularity='horizon'`, planes (básico 7/14/30; resto todos), validaciones, `ForecastRunService`, programador. **Abstención**: un horizonte H solo es «respaldado» si la historia ≥ 2×H **y** el backtest tiene ventanas ≥ H; si no, `insufficient_data` con motivos y sin intervalo |
+| 1 | Horizontes 7/14/15/30/60/90 (15 agregado por W2-E, ADR-V25-02) | Dominio, esquemas, filas `granularity='horizon'`, planes (básico 7/14/30; resto todos), validaciones, `ForecastRunService`, programador. **Abstención**: un horizonte H solo es «respaldado» si la historia ≥ 2×H **y** el backtest tiene ventanas ≥ H; si no, `insufficient_data` con motivos y sin intervalo |
 | 2 | Manifiesto del protocolo | `forecast_runs.evaluation_manifest` construido de las **filas reales** del backtest; verificable; expuesto en `/accuracy/summary` y `/forecast-runs/{id}` |
 | 3 | Métricas | MASE/RMSSE (escala = naive estacional 7 con datos previos a cada origen), pinball P10/P50/P90, amplitud 80/95, tamaños de muestra y exclusiones, **dinero separado de unidades**, error del total de H días; todo en `model_evaluations.metrics` |
 | 3b | P50 | Conformal de mediana evaluado con pinball en el holdout; **se publica solo si mejora a «la media como mediana»**. En la demo no mejora ⇒ `null` (honesto) |
@@ -29,7 +29,7 @@ backend `app/Services/Analytics/{HorizonSupport,DemandEnvelope}.php`,
 
 ### 2.1 Horizontes y abstención (E2-21)
 
-- Dominio: `SUPPORTED_HORIZONS = (7, 14, 30, 60, 90)` (`demand/horizons.py`). `ExecuteRequest.horizons` rechaza otros valores. Laravel
+- Dominio: `SUPPORTED_HORIZONS = (7, 14, 15, 30, 60, 90)` (`demand/horizons.py`, derivado de `platform.config.HORIZONS`; W2-E agregó 15). `ExecuteRequest.horizons` rechaza otros valores. Laravel
   autoriza por plan (`config/predictily.php`); **el dominio puede soportar un horizonte que el plan no autoriza** y Laravel solo pide los autorizados.
 - `summary.horizon_support[H] = {status, reasons[], history_days, required_history_days, backtest_horizon_days, independent_holdout, evaluated_obs}`:
 
@@ -192,7 +192,7 @@ Ver `docs/04-estrategia-modelado.md` §11 («Recalculado en la etapa 2») y `doc
 
 ## 8. Qué necesita la UI (otro paquete)
 
-1. **Selector de horizonte** con 7/14/30/60/90, filtrado por `plan.limits.horizons` (`GET /tenant`); `settings.default_horizon_days` acepta 14 y 60.
+1. **Selector de horizonte** con 7/14/15/30/60/90, filtrado por `plan.limits.horizons` (`GET /tenant`); `settings.default_horizon_days` acepta 14 y 60.
 2. **Respaldo por horizonte**: leer `meta.horizon_support` (series), `horizon_support` (productos, categorías), `data.horizon_support` (dashboard). `insufficient_data` ⇒ aviso con `reasons[].message` y **no** presentar la cifra como completa (p. ej. estilo punteado, sin banda de intervalo);
    `degraded` ⇒ «métricas optimistas»; `not_computed` ⇒ pedir una ejecución con ese horizonte; `unknown` ⇒ ejecución antigua.
 3. **Series**: cada punto trae `quality_status`, `case_label` (insignias: producto nuevo, descontinuado, sucursal cerrada/abierta, evento extraordinario) y `p50` (dibujar la línea solo si no es null). Las series en **abstención** no tienen filas: listar `summary.special_cases.no_recent_sales` / `discontinued.abstained`.

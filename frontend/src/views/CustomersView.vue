@@ -11,12 +11,16 @@ import CustomerReconciliation from '@/components/customers/CustomerReconciliatio
 import CustomerModels from '@/components/customers/CustomerModels.vue'
 import CustomerRuns from '@/components/customers/CustomerRuns.vue'
 import { useHorizonSelection } from '@/composables/useHorizons'
+import { useTenantStore } from '@/stores/tenant'
 import { CUSTOMER_HORIZONS } from '@/utils/constants'
 import type { CustomerHorizon } from '@/api/types'
 
 const props = defineProps<{ tab?: string }>()
 const { t } = useI18n()
 const router = useRouter()
+const tenant = useTenantStore()
+// Starter desactiva el comportamiento de compra (`features.customer = false`); ausente = incluido (planes heredados).
+const included = computed(() => tenant.tenant?.plan?.limits?.features?.customer !== false)
 const { horizon, options, hasHorizons } = useHorizonSelection<CustomerHorizon>(CUSTOMER_HORIZONS, 30)
 
 const TABS = ['predicciones', 'evaluacion', 'conciliacion', 'modelos', 'ejecuciones'] as const
@@ -36,14 +40,15 @@ const usesHorizon = computed(() => ['predicciones', 'evaluacion', 'conciliacion'
         <h1 class="page-title">{{ t('customers.title') }}</h1>
         <p class="text-fg-muted mt-1">{{ t('customers.subtitle') }}</p>
       </div>
-      <SegmentedControl v-if="usesHorizon && hasHorizons" v-model="horizon" :options="options" :label="t('common.horizon')" />
+      <SegmentedControl v-if="included && usesHorizon && hasHorizons" v-model="horizon" :options="options" :label="t('common.horizon')" />
     </header>
 
     <InlineNotice kind="info" :title="t('customers.privacyTitle')">{{ t('customers.privacy') }}</InlineNotice>
-    <InlineNotice v-if="!hasHorizons" kind="warning">{{ t('customers.noHorizonsInPlan') }}</InlineNotice>
+    <InlineNotice v-if="!included" kind="warning" data-test="customer-not-in-plan">{{ t('customers.notInPlan') }}</InlineNotice>
+    <InlineNotice v-else-if="!hasHorizons" kind="warning">{{ t('customers.noHorizonsInPlan') }}</InlineNotice>
 
-    <TabsNav v-model="active" :tabs="tabs" :label="t('customers.title')" id-prefix="cust" />
-    <section id="cust-panel" role="tabpanel" :aria-labelledby="`cust-${active}`" class="card p-4 sm:p-6">
+    <TabsNav v-if="included" v-model="active" :tabs="tabs" :label="t('customers.title')" id-prefix="cust" />
+    <section v-if="included" id="cust-panel" role="tabpanel" :aria-labelledby="`cust-${active}`" class="card p-4 sm:p-6">
       <CustomerPredictions v-if="active === 'predicciones'" :horizon="horizon" @update:horizon="(h) => (horizon = h)" />
       <CustomerEvaluation v-else-if="active === 'evaluacion'" :horizon="horizon" />
       <CustomerReconciliation v-else-if="active === 'conciliacion'" :horizon="horizon" />

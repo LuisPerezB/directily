@@ -12,6 +12,7 @@ use App\Models\TrainingJob;
 use App\Models\User;
 use App\Services\Forecasting\Exceptions\ForecastRunConflictException;
 use App\Services\Forecasting\Support\CoreServices;
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -44,6 +45,7 @@ class ForecastRunService
         $this->validateHorizon($tenant, $horizonDays);
         $cutoff = $this->validateCutoff($tenant, $cutoffDate);
         CoreServices::assertPlanLimit($tenant, 'max_forecast_runs_per_day');
+        CoreServices::assertPlanLimit($tenant, 'max_series', 0);   // series activas ≤ tope del plan (0 = no suma una nueva; sin tope no consulta)
 
         $run = $this->context->runAs($tenant, fn () => DB::transaction(function () use ($tenant, $user, $horizonDays, $cutoff, $triggeredBy, $dispatch) {
             // Serializa solicitudes concurrentes de la misma empresa.
@@ -122,7 +124,7 @@ class ForecastRunService
     /** Mayor horizonte soportado por el motor e incluido en el plan; null si el plan no incluye ninguno. */
     public function maxAllowedHorizon(Tenant $tenant): ?int
     {
-        $supported = array_map('intval', (array) config('engine.horizons', [7, 14, 30, 60, 90]));
+        $supported = HorizonCatalog::demand();
         $allowed = array_values(array_intersect($supported, CoreServices::allowedHorizons($tenant)));
 
         return $allowed === [] ? null : max($allowed);
@@ -130,7 +132,7 @@ class ForecastRunService
 
     private function validateHorizon(Tenant $tenant, int $horizonDays): void
     {
-        $supported = array_map('intval', (array) config('engine.horizons', [7, 14, 30, 60, 90]));
+        $supported = HorizonCatalog::demand();
         if (! in_array($horizonDays, $supported, true)) {
             throw ValidationException::withMessages([
                 'horizon_days' => 'El horizonte debe ser uno de: '.implode(', ', $supported).' días.',

@@ -34,7 +34,13 @@ paths:
     post:
       tags: [Pronósticos]
       summary: Solicitar una ejecución de pronóstico (asíncrona)
-      description: Requiere la habilidad `forecast.run` (propietario, administrador, analista).
+      description: |-
+        Requiere la habilidad `forecast.run` (propietario, administrador, analista).
+
+        **402 `plan_limit_exceeded`** (`limit` indica cuál): `horizons` si el plan no incluye el horizonte pedido; `max_forecast_runs_per_day`; y
+        `max_series` (Starter/Growth/Enterprise) si las series activas de la empresa —pares sucursal × producto con ventas válidas en los últimos 90 días—
+        superan el tope del plan (`current` y `max` en la respuesta). El conteo se cachea por empresa y día (10 min; una importación de ventas lo invalida) y
+        corre con tiempo acotado: si no se puede medir a tiempo, el tope no se exige en esa petición (se registra un aviso).
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }]
       requestBody:
         content:
@@ -42,7 +48,7 @@ paths:
             schema:
               type: object
               properties:
-                horizon_days: { type: integer, enum: [7, 14, 30, 60, 90], description: 'Por defecto el mayor horizonte que permita el plan' }
+                horizon_days: { type: integer, enum: [7, 14, 15, 30, 60, 90], description: 'Por defecto el mayor horizonte que permita el plan' }
                 cutoff_date:
                   type: string
                   format: date
@@ -492,7 +498,7 @@ components:
     CategoryId: { name: category_id, in: query, schema: { type: integer } }
     ProductId: { name: product_id, in: query, schema: { type: integer } }
     Granularity: { name: granularity, in: query, schema: { type: string, enum: [day, week, month] } }
-    Horizon: { name: horizon, in: query, description: 'Por defecto settings.default_horizon_days de la empresa', schema: { type: integer, enum: [7, 14, 30, 60, 90] } }
+    Horizon: { name: horizon, in: query, description: 'Por defecto settings.default_horizon_days de la empresa', schema: { type: integer, enum: [7, 14, 15, 30, 60, 90] } }
     Delimiter: { name: delimiter, in: query, schema: { type: string, enum: [',', ';'], default: ',' } }
     Page: { name: page, in: query, schema: { type: integer, minimum: 1 } }
     PerPage: { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
@@ -549,11 +555,14 @@ components:
         forecast_run_id: { type: [integer, 'null'] }
     HorizonSupport:
       type: object
-      description: Respaldo de un horizonte. `insufficient_data` = historia < 2×H o backtest sin ventanas de H días (no presentar como completo).
+      description: |-
+        Respaldo de un horizonte. `insufficient_data` (ESTADO) = historia < 2×H o backtest sin ventanas de H días (no presentar como completo). El motivo
+        es un CÓDIGO: `reason_code` = `coverage_insufficient` (historia/backtest insuficiente) o `insufficient_horizon` (sin ventanas completas de H días); `code`
+        conserva el código histórico (`history_lt_2h`, `no_backtest`, `backtest_horizon_lt_h`, `no_evaluated_observations`, `no_independent_holdout`).
       properties:
-        horizon: { type: integer, enum: [7, 14, 30, 60, 90] }
+        horizon: { type: integer, enum: [7, 14, 15, 30, 60, 90] }
         status: { type: string, enum: [ok, degraded, insufficient_data, not_computed, unknown] }
-        reasons: { type: array, items: { type: object, properties: { code: { type: string }, message: { type: string } } } }
+        reasons: { type: array, items: { type: object, properties: { code: { type: string }, reason_code: { type: string }, message: { type: string } } } }
         history_days: { type: [integer, 'null'] }
         required_history_days: { type: [integer, 'null'] }
         backtest_horizon_days: { type: [integer, 'null'] }
@@ -756,7 +765,7 @@ components:
       required: [horizon_days]
       properties:
         run_id: { type: integer }
-        horizon_days: { type: integer, enum: [7, 14, 30, 60, 90] }
+        horizon_days: { type: integer, enum: [7, 14, 15, 30, 60, 90] }
         filters: { type: object, properties: { branch_id: { type: integer }, category_id: { type: integer }, product_id: { type: integer } } }
         assumptions:
           type: object

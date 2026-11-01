@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Customer;
 
+use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Validation\Rule;
 
 class CustomerPredictionsRequest extends CustomerRequest
@@ -12,7 +13,7 @@ class CustomerPredictionsRequest extends CustomerRequest
     public function rules(): array
     {
         return [
-            'horizon' => ['nullable', 'integer', Rule::in([7, 30, 90])],
+            'horizon' => ['nullable', 'integer', Rule::in(HorizonCatalog::customer())],
             'run_id' => ['nullable', 'integer', 'min:1'],
             'customer_id' => ['nullable', 'integer', $this->existsInTenant('customers')],
             'product_id' => ['nullable', 'integer', $this->existsInTenant('products')],

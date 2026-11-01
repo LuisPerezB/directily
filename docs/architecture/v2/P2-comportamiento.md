@@ -11,7 +11,7 @@ Etapa 2 · paquete P2. Especificación: `instrucctions.md` §6.E. Código: `engi
 
 ## 1. Qué responde
 
-Para cada comprador identificado y cada producto que ya compró, a 7, 30 y 90 días: ¿comprará?, ¿cuánto (total de la
+Para cada comprador identificado y cada producto que ya compró, a 7, 14, 15, 30 y 90 días (catálogo de Customer, ADR-V25-02; 60 no aplica): ¿comprará?, ¿cuánto (total de la
 ventana) si compra?, ¿cuánto se espera?, ¿con qué monto supuesto?, ¿con qué frecuencia compra?, ¿qué productos son más
 probables?, ¿se está alejando de su patrón? Entrenar (`train`) y predecir (`predict`) son operaciones distintas (ADR-V2-08).
 
@@ -38,7 +38,7 @@ probables?, ¿se está alejando de su patrón? Entrenar (`train`) y predecir (`p
 
 ## 3. Objetivos y etiquetas
 
-Para cada H ∈ {7, 30, 90} (modelos y evaluación propios):
+Para cada H ∈ {7, 14, 15, 30, 90} (modelos y evaluación propios; antes {7, 30, 90}):
 
 | Salida | Definición |
 |---|---|
@@ -238,7 +238,7 @@ Backend `/api/v1/customer/*` y `POST /api/v1/models/customer/rollback` (abilitie
 Tablas (migraciones `2026_02_03_000100` y `_000200`): `customer_predictions`, `customer_product_rankings` (con `ranking_source` y `ranking_score`), `customer_activity`, `customer_reconciliations` (+ `core_runs`, `model_registry`,
 `model_evaluations`, `data_snapshots` de la plataforma). Envoltura ADR-V2-03 en toda respuesta: `result_type` `forecast` (predicciones, reconciliación) o
 `evaluation` (entrenamiento); `uncertainty_source = empirical_holdout`; `quality_status` `ok | degraded | insufficient_data`.
-Horizontes: plan ∩ {7, 30, 90}; un horizonte fuera del plan responde 402 y la corrida que se abstuvo de un horizonte responde 422 `horizon_not_available`.
+Horizontes: plan ∩ {7, 14, 15, 30, 90}; un horizonte fuera del plan responde 402 y la corrida que se abstuvo de un horizonte responde 422 `horizon_not_available` con `quality_status = insufficient_data` y `reason_code` (W2-E).
 
 ## 12. Pruebas (E2-xx)
 
@@ -317,7 +317,7 @@ Compradores genéricos: 14.202 líneas (45 % de las unidades de los últimos 180
 
 ## 15. Qué necesita la UI (P5)
 
-Selector de horizonte (7/30/90 según el plan) y de comprador/producto; tabla de `GET /customer/predictions` ordenable por probabilidad
+Selector de horizonte (7/14/15/30/90 según el plan) y de comprador/producto; tabla de `GET /customer/predictions` ordenable por probabilidad
 con `expected_amount` etiquetado «supuesto», `quality_flags` y el estado de calibración; estados vacíos para `insufficient_data` (sin corrida,
 horizonte sin modelo → 422 `horizon_not_available`, comprador genérico o sin historial → `fallback`); ficha del comprador
 (`/customers/{id}/profile`): frecuencia, ranking, inactividad con su definición «no es abandono», cambio de comportamiento;

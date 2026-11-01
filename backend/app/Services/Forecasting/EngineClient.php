@@ -11,6 +11,7 @@ use App\Services\Forecasting\Exceptions\EngineNotFoundException;
 use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
+use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -63,7 +64,7 @@ class EngineClient
     /**
      * Ejecuta el pipeline completo de una ejecución (síncrono, timeout largo).
      *
-     * @param  list<int>  $horizons
+     * @param  list<int>|null  $horizons  null = todo el catálogo (predictily.horizons.catalog)
      * @param  array<string, mixed>  $options
      * @return array<string, mixed>
      */
@@ -71,10 +72,12 @@ class EngineClient
         int $runId,
         int $tenantId,
         int $trainingJobId,
-        array $horizons = [7, 14, 30, 60, 90],
+        ?array $horizons = null,
         ?string $cutoffDate = null,
         array $options = [],
     ): array {
+        $horizons ??= HorizonCatalog::demand();
+
         return $this->send('post', "/v1/forecast-runs/{$runId}/execute", [
             'tenant_id' => $tenantId,
             'training_job_id' => $trainingJobId,

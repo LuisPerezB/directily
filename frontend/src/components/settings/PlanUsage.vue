@@ -9,7 +9,7 @@ import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
 import { formatInteger } from '@/utils/format'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const tenant = useTenantStore()
 const usage = useAsync(() => tenantApi.usage())
 
@@ -19,6 +19,8 @@ const rows = computed(() => {
   const l = u.limits ?? {}
   return [
     { key: 'branches', used: u.metrics.branches, max: l.max_branches ?? null },
+    // Series activas: solo si el plan define un tope (el motor del plan no calcula el uso en los demás).
+    ...(l.max_series != null ? [{ key: 'series', used: u.metrics.series ?? 0, max: l.max_series }] : []),
     { key: 'active_products', used: u.metrics.active_products, max: l.max_active_products ?? null },
     { key: 'users', used: u.metrics.users, max: l.max_users ?? null },
     { key: 'import_rows', used: u.metrics.import_rows, max: l.max_import_rows_per_month ?? null },
@@ -54,7 +56,7 @@ const features = computed(() => Object.entries(usage.data.value?.limits?.feature
         <span class="font-medium">{{ t('plan.horizons') }}:</span> {{ usage.data.value.limits.horizons.map((h) => t('common.days', { n: h })).join(', ') }}
       </div>
       <div v-if="features.length" class="flex flex-wrap gap-2">
-        <span v-for="[k, enabled] in features" :key="k" class="badge" :class="enabled ? 'badge-success' : ''">{{ t(`plan.features.${k}`) }}: {{ enabled ? t('common.yes') : t('common.no') }}</span>
+        <span v-for="[k, enabled] in features" :key="k" class="badge" :class="enabled ? 'badge-success' : ''">{{ te(`plan.features.${k}`) ? t(`plan.features.${k}`) : k }}: {{ enabled ? t('common.yes') : t('common.no') }}</span>
       </div>
     </template>
   </div>

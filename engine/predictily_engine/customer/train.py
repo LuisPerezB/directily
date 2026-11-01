@@ -1,6 +1,6 @@
 """Entrenamiento y evaluación por horizonte del Customer Core (funciones puras; el servicio persiste).
 
-Para cada H ∈ {7, 30, 90}:
+Para cada H del catálogo de Customer (platform.config.HORIZONS["customer"]: 7, 14, 15, 30, 90):
   1. cortes maduros → bloques cronológicos entrenamiento | calibración | selección | holdout (separados H días);
   2. candidatos de probabilidad (referencia, logística, LGBMClassifier) ajustados con el bloque de entrenamiento,
      calibrados (isotónica/Platt) con el bloque de calibración y comparados con Brier en el bloque de selección;
@@ -51,6 +51,7 @@ class HorizonResult:
     horizon: int
     status: str                       # trained | reference_only | abstained
     reason: str | None = None
+    reason_code: str | None = None    # código de motivo de la abstención (coverage_insufficient | insufficient_horizon); estado = insufficient_data
     manifest: dict[str, Any] = field(default_factory=dict)
     prob: dict[str, Any] = field(default_factory=dict)
     qty: dict[str, Any] = field(default_factory=dict)
@@ -86,6 +87,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
                                   "treatment": "La fila censurada se excluye por completo (ni negativo ni positivo)."}}
     if fr.empty:
         res.reason = "Datos insuficientes: no hay etiquetas maduras y no censuradas para este horizonte."
+        res.reason_code = "coverage_insufficient"
         return res
     fractions = cfg["block_fractions"]
     min_cut, min_rows = int(cfg["min_block_cutoffs"]), int(cfg["min_block_rows"])
@@ -119,6 +121,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
     if tier is None:
         res.reason = ("Datos insuficientes para este horizonte: no hay suficientes cortes maduros, filas o positivos para "
                       "calibrar y evaluar ni siquiera la referencia con separación temporal.")
+        res.reason_code = "insufficient_horizon"
         res.manifest["blocks"] = None
         return res
 

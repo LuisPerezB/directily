@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Tenant;
 use App\Services\Customer\CustomerRunService;
 use App\Services\Forecasting\Support\CoreServices;
+use App\Services\Plans\PlanLimitService;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -15,9 +16,13 @@ use Illuminate\Validation\ValidationException;
 /** Base de los controladores del Customer Core (empresa activa, paginación acotada, horizonte autorizado). */
 abstract class CustomerController extends Controller
 {
+    /** Empresa activa. Todo el Customer Core exige que el plan incluya el comportamiento de compra (402 `features.customer`; Starter no lo incluye). */
     protected function tenant(): Tenant
     {
-        return app(TenantContext::class)->require();
+        $tenant = app(TenantContext::class)->require();
+        app(PlanLimitService::class)->assertCustomer($tenant);
+
+        return $tenant;
     }
 
     protected function perPage(Request $request, int $default = 25): int
@@ -26,7 +31,7 @@ abstract class CustomerController extends Controller
     }
 
     /**
-     * Horizonte pedido (o el mayor permitido por el plan ∩ {7, 30, 90} cuando no se indica). Un horizonte fuera del plan
+     * Horizonte pedido (o el mayor permitido por el plan ∩ el subconjunto de Customer del catálogo cuando no se indica). Un horizonte fuera del plan
      * responde 402: no se revela un resultado comercial no autorizado.
      */
     protected function horizon(Request $request, ?int $preferred = 30): int

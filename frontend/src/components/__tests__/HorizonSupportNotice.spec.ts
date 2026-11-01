@@ -34,4 +34,20 @@ describe('HorizonSupportNotice', () => {
     expect(mountNotice(support('ok')).find('[data-test="horizon-support-notice"]').exists()).toBe(false)
     expect(mountNotice(null).find('[data-test="horizon-support-notice"]').exists()).toBe(false)
   })
+
+  it('el motivo se muestra con su código unificado (cobertura insuficiente / sin ventanas de ese largo), también en ejecuciones anteriores sin reason_code', () => {
+    const w = mountNotice(support('insufficient_data', [
+      { code: 'history_lt_2h', reason_code: 'coverage_insufficient', message: 'La historia (20 días) es menor que 2 × 15 = 30 días.' },
+      { code: 'backtest_horizon_lt_h', message: 'El backtesting solo evalúa ventanas de 14 días.' },
+    ]))
+    const items = w.findAll('li')
+    expect(items.map((i) => i.attributes('data-reason-code'))).toEqual(['coverage_insufficient', 'insufficient_horizon'])
+    expect(items[0]!.text()).toBe('Cobertura insuficiente: La historia (20 días) es menor que 2 × 15 = 30 días.')
+    expect(items[1]!.text()).toBe('Sin ventanas de evaluación de ese largo: El backtesting solo evalúa ventanas de 14 días.')
+  })
+
+  it('un código sin texto propio muestra solo el mensaje del motor', () => {
+    const w = mountNotice(support('insufficient_data', [{ code: 'algo', message: 'Motivo sin traducción.' }]))
+    expect(w.get('li').text()).toBe('Motivo sin traducción.')
+  })
 })

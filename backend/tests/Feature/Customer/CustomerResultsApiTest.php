@@ -252,6 +252,26 @@ class CustomerResultsApiTest extends TestCase
         $api->getJson('/api/v1/customer/reconciliation?horizon=30&status=nada')->assertStatus(422);
     }
 
+    public function test_reconciliation_status_counts_come_out_in_a_deterministic_order(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser();
+        $cat = $this->seedCustomerCatalog($tenant);
+        $runId = $this->seedPredictionRun($tenant, $cat);
+        // Cuatro estados distintos, insertados en orden inverso al alfabético: el GROUP BY sin ORDER BY devolvía el orden de la agregación hash.
+        foreach (['aggregate_unavailable', 'aggregate_incomplete'] as $i => $status) {
+            $product = (int) DB::table('products')->insertGetId([
+                'tenant_id' => $tenant->id, 'sku' => "EXTRA-{$i}", 'name' => "Extra {$i}", 'unit' => 'unidad', 'is_active' => true, 'current_price' => 8, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            DB::table('customer_reconciliations')->insert([
+                'tenant_id' => $tenant->id, 'core_run_id' => $runId, 'product_id' => $product, 'horizon_days' => 30, 'aggregate_quantity' => null, 'aggregate_days' => null,
+                'buyers_total_quantity' => 5, 'buyers_committed_quantity' => 0, 'buyers_incremental_quantity' => 5, 'buyers_expected_quantity' => 5, 'n_buyers' => 1,
+                'committed_outside_model' => 0, 'residual_quantity' => null, 'excess_quantity' => null, 'excess_ratio' => null, 'residual_share' => null, 'status' => $status, 'severity' => null,
+            ]);
+        }
+        $res = $this->actingAsTenantUser($user, $tenant)->getJson('/api/v1/customer/reconciliation?horizon=30')->assertOk();
+        $this->assertSame(['aggregate_incomplete', 'aggregate_unavailable', 'inconsistent', 'ok'], array_keys($res->json('summary.status_counts')));
+    }
+
     public function test_reconciliation_is_isolated_and_requires_view_ability(): void
     {
         [$a, $ua] = $this->createTenantWithUser();

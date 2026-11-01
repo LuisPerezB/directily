@@ -96,6 +96,27 @@ export function envelopeView(env: ResultEnvelope | null | undefined): EnvelopeVi
 
 // ─── Respaldo por horizonte ────────────────────────────────────────────────
 
+/**
+ * Código histórico del motivo → código unificado de abstención (ADR-V25-02). El motor y la API ya envían `reason_code`; esta tabla traduce las
+ * ejecuciones anteriores (cuyo resumen guarda solo `code`) para que la interfaz muestre un único vocabulario.
+ */
+export const LEGACY_REASON_CODES: Record<string, string> = {
+  history_lt_2h: 'coverage_insufficient',
+  no_backtest: 'coverage_insufficient',
+  backtest_horizon_lt_h: 'insufficient_horizon',
+  no_evaluated_observations: 'insufficient_horizon',
+}
+
+export interface HorizonReasonItem {
+  /** Código unificado (coverage_insufficient, insufficient_horizon, no_model...); null si el motivo llegó como texto suelto. */
+  code: string | null
+  message: string
+}
+
+export function unifiedReasonCode(reason: { code?: string; reason_code?: string }): string | null {
+  return reason.reason_code ?? (reason.code ? (LEGACY_REASON_CODES[reason.code] ?? reason.code) : null)
+}
+
 export interface HorizonSupportView {
   status: HorizonSupportStatus
   tone: Tone
@@ -106,24 +127,29 @@ export interface HorizonSupportView {
   /** Hay que pedir una ejecución con ese horizonte. */
   needsNewRun: boolean
   reasons: string[]
+  /** Los mismos motivos con su código unificado (para mostrar «cobertura insuficiente: …» y no solo el texto del motor). */
+  reasonItems: HorizonReasonItem[]
   /** Clave i18n del texto principal del aviso; null cuando no hay nada que advertir. */
   noticeKey: string | null
 }
 
 export function horizonSupportView(support: HorizonSupport | null | undefined): HorizonSupportView | null {
   if (!support) return null
-  const reasons = (support.reasons ?? []).map((r) => (typeof r === 'string' ? r : r.message)).filter((r): r is string => !!r)
+  const reasonItems: HorizonReasonItem[] = (support.reasons ?? [])
+    .map((r): HorizonReasonItem => (typeof r === 'string' ? { code: null, message: r } : { code: unifiedReasonCode(r), message: r.message }))
+    .filter((r) => !!r.message)
+  const reasons = reasonItems.map((r) => r.message)
   switch (support.status) {
     case 'ok':
-      return { status: 'ok', tone: 'success', showAsComplete: true, hideIntervals: false, needsNewRun: false, reasons: [], noticeKey: null }
+      return { status: 'ok', tone: 'success', showAsComplete: true, hideIntervals: false, needsNewRun: false, reasons: [], reasonItems: [], noticeKey: null }
     case 'degraded':
-      return { status: 'degraded', tone: 'warning', showAsComplete: true, hideIntervals: false, needsNewRun: false, reasons, noticeKey: 'horizonSupport.degraded' }
+      return { status: 'degraded', tone: 'warning', showAsComplete: true, hideIntervals: false, needsNewRun: false, reasons, reasonItems, noticeKey: 'horizonSupport.degraded' }
     case 'insufficient_data':
-      return { status: 'insufficient_data', tone: 'warning', showAsComplete: false, hideIntervals: true, needsNewRun: false, reasons, noticeKey: 'horizonSupport.insufficient_data' }
+      return { status: 'insufficient_data', tone: 'warning', showAsComplete: false, hideIntervals: true, needsNewRun: false, reasons, reasonItems, noticeKey: 'horizonSupport.insufficient_data' }
     case 'not_computed':
-      return { status: 'not_computed', tone: 'info', showAsComplete: false, hideIntervals: true, needsNewRun: true, reasons, noticeKey: 'horizonSupport.not_computed' }
+      return { status: 'not_computed', tone: 'info', showAsComplete: false, hideIntervals: true, needsNewRun: true, reasons, reasonItems, noticeKey: 'horizonSupport.not_computed' }
     default:
-      return { status: 'unknown', tone: 'neutral', showAsComplete: false, hideIntervals: false, needsNewRun: false, reasons, noticeKey: 'horizonSupport.unknown' }
+      return { status: 'unknown', tone: 'neutral', showAsComplete: false, hideIntervals: false, needsNewRun: false, reasons, reasonItems, noticeKey: 'horizonSupport.unknown' }
   }
 }
 

@@ -6,7 +6,7 @@
 2. Laravel crea `forecast_runs` + `training_jobs` en `queued` y encola `RunForecastPipeline`
    (cola `forecasting`). La petición HTTP del usuario responde 202 de inmediato.
 3. El worker llama al motor: `POST {ENGINE_URL}/v1/forecast-runs/{run_id}/execute` con
-   `Authorization: Bearer {ENGINE_API_TOKEN}` y `{"tenant_id", "training_job_id", "horizons":[7,14,30,60,90]}` (solo los que autoriza el plan).
+   `Authorization: Bearer {ENGINE_API_TOKEN}` y `{"tenant_id", "training_job_id", "horizons":[7,14,15,30,60,90]}` (solo los que autoriza el plan).
 4. El motor actualiza `training_jobs.stage/progress` (loading_data → profiling →
    building_features → backtesting → selecting → training → predicting → reconciling →
    recommending → persisting) y escribe todos los resultados en **una sola transacción**.
@@ -115,7 +115,7 @@ Medición en memoria del 29-oct-2026 (`engine/scripts/benchmark_demand_v2.py`; F
 | Pinball P10 · P90 · amplitud 80/95 % (u. por serie-día) | no medidos | 0,371 · 0,635 · 8,42 / 14,06 |
 | P50 | no existía | no publicada (pinball 1,042 vs 1,032 de la media): `null` |
 | Dinero: WAPE · sesgo (seleccionado) | no medido | 0,662 · −6,0 % |
-| WAPE del total de 7 · 14 · 30 · 60 · 90 días | no medido | 0,218 · 0,156 · 0,105 · 0,090 · 0,076 |
+| WAPE del total de 7 · 14 · 30 · 60 · 90 días (medido antes de agregar 15; el de 15 días se publica igual que los demás en `horizon_total` / `H15`) | no medido | 0,218 · 0,156 · 0,105 · 0,090 · 0,076 |
 | Pipeline (s) | 64,7 | 66,7 (+3 %) |
 
 Tablas completas y lectura en `docs/04-estrategia-modelado.md` §11. No certifican exactitud comercial.

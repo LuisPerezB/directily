@@ -37,7 +37,7 @@ def test_manifest_dates_come_from_the_backtest_rows_and_respect_the_protocol(pip
     assert m["decisions"]["evaluation_windows_that_also_took_decisions"] == []
     assert set(m["decisions"]["model_selection_for_evaluation"]["windows"]).isdisjoint({plan.holdout_window})
     assert plan.holdout_window in m["decisions"]["production_selection_and_calibration"]["windows"]
-    assert set(m["horizon_support"]) == {"7", "14", "30", "60", "90"}
+    assert set(m["horizon_support"]) == {"7", "14", "15", "30", "60", "90"}
     assert m["p50"]["published"] in (True, False)
     assert m["served"]["fallback_used"] is False
 

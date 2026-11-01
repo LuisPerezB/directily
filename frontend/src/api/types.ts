@@ -42,9 +42,9 @@ export interface ApiErrorBody {
 }
 
 export type Granularity = 'day' | 'week' | 'month'
-export type Horizon = 7 | 14 | 30 | 60 | 90
-/** Horizontes del Customer Core (compra): 7, 30 y 90 días. */
-export type CustomerHorizon = 7 | 30 | 90
+export type Horizon = 7 | 14 | 15 | 30 | 60 | 90
+/** Horizontes del Customer Core (compra): 7, 14, 15, 30 y 90 días (subconjunto del catálogo; 60 no aplica). */
+export type CustomerHorizon = 7 | 14 | 15 | 30 | 90
 
 // ─── Autenticación y cuenta ─────────────────────────────────────────────────
 
@@ -113,6 +113,8 @@ export interface TenantSettings {
 
 export interface PlanLimits {
   max_branches?: number | null
+  /** Series activas (sucursal × producto con ventas en los últimos 90 días). Ausente = sin tope en el plan. */
+  max_series?: number | null
   max_active_products?: number | null
   max_import_rows_per_month?: number | null
   max_forecast_runs_per_day?: number | null
@@ -123,6 +125,11 @@ export interface PlanLimits {
     api_access?: boolean
     external_indicators?: boolean
     custom_models?: boolean
+    /** Comportamiento de compra (Customer). Ausente = incluido; Starter lo desactiva. */
+    customer?: boolean
+    roles?: boolean
+    /** Capacidades por contrato (Enterprise): asistente, procesamiento privado... Las claves nuevas no rompen la interfaz. */
+    [capability: string]: boolean | undefined
   }
 }
 
@@ -190,6 +197,8 @@ export interface TenantUsage {
     active_products: number
     branches: number
     users: number
+    /** Solo si el plan define `max_series`; si no, null. */
+    series?: number | null
   }
   limits: PlanLimits
 }
@@ -1022,7 +1031,10 @@ export interface AdminPlan {
   code: string
   name: string
   limits: PlanLimits
+  /** Precio de referencia: informativo, nunca un límite (ADR-V25-18). */
   monthly_price_usd: number | null
+  /** Metadatos informativos (precios de referencia, origen, hipótesis); null en los planes heredados. */
+  metadata?: Record<string, unknown> | null
   is_active: boolean
 }
 

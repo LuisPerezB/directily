@@ -8,6 +8,8 @@ use App\Http\Resources\Customer\CustomerPredictionResource;
 use App\Models\CustomerPrediction;
 use App\Services\Customer\CustomerEnvelope;
 use App\Services\Customer\CustomerRunService;
+use App\Services\Plans\PlanLimitService;
+use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -31,7 +33,7 @@ final class CustomerPredictionsTool extends ReadTool
 
     public function description(): string
     {
-        return 'Predicciones de compra ya calculadas por comprador y producto: probabilidad de comprar en 7, 30 o 90 días, cantidad total si compra, '
+        return 'Predicciones de compra ya calculadas por comprador y producto: probabilidad de comprar en los horizontes del plan ('.implode(', ', HorizonCatalog::customer()).' días), cantidad total si compra, '
             .'cantidad esperada y monto esperado (supuesto; no es una venta confirmada). Busque por código del comprador y/o producto.';
     }
 
@@ -42,7 +44,7 @@ final class CustomerPredictionsTool extends ReadTool
             'properties' => [
                 'customer_code' => ['type' => 'string', 'maxLength' => 50, 'description' => 'Código externo del comprador tal como figura en la empresa.'],
                 'product' => ['type' => 'string', 'maxLength' => 80, 'description' => 'SKU o parte del nombre del producto (opcional).'],
-                'horizon' => $this->horizonSchema(CustomerRunService::HORIZONS),
+                'horizon' => $this->horizonSchema(HorizonCatalog::customer()),
                 'min_probability' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1, 'description' => 'Probabilidad mínima (0 a 1).'],
                 'limit' => $this->limitSchema(),
             ],
@@ -55,7 +57,7 @@ final class CustomerPredictionsTool extends ReadTool
         return [
             'customer_code' => ['sometimes', 'string', 'min:1', 'max:50'],
             'product' => ['sometimes', 'string', 'min:1', 'max:80'],
-            'horizon' => ['sometimes', 'integer', Rule::in(CustomerRunService::HORIZONS)],
+            'horizon' => ['sometimes', 'integer', Rule::in(HorizonCatalog::customer())],
             'min_probability' => ['sometimes', 'numeric', 'between:0,1'],
             'limit' => ['sometimes', 'integer', 'min:1', 'max:'.(int) config('conversation.limits.max_rows_per_tool', 10)],
         ];
@@ -64,7 +66,8 @@ final class CustomerPredictionsTool extends ReadTool
     public function execute(array $arguments, ToolContext $context): ToolResult
     {
         $tenant = $context->tenant;
-        $horizon = $this->horizon($arguments, $tenant, CustomerRunService::HORIZONS);
+        app(PlanLimitService::class)->assertCustomer($tenant);   // un plan sin comportamiento de compra (Starter) no lo consulta por el asistente
+        $horizon = $this->horizon($arguments, $tenant, HorizonCatalog::customer());
         $run = $this->runs->latestPrediction();
         if ($run === null) {
             return ToolResult::noData(

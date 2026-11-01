@@ -13,12 +13,21 @@ export function predictionAbstains(p: Pick<CustomerPrediction, 'purchase_probabi
   return p.purchase_probability == null
 }
 
-/** 422 `horizon_not_available`: la corrida se abstuvo de ese horizonte. Devuelve los horizontes sí disponibles. */
-export function horizonNotAvailable(error: unknown): { availableHorizons: number[] } | null {
+/**
+ * 422 `horizon_not_available`: la corrida se abstuvo de ese horizonte (estado `insufficient_data`). Devuelve los horizontes sí disponibles y
+ * el motivo unificado (`reason_code`: no_model, coverage_insufficient, insufficient_horizon...) cuando el servidor lo informa.
+ */
+export function horizonNotAvailable(error: unknown): { availableHorizons: number[]; reasonCode: string | null; message: string | null } | null {
   if (!isApiError(error) || error.status !== 422 || error.code !== 'horizon_not_available') return null
-  const raw = (error.body as { available_horizons?: unknown } | null)?.available_horizons
+  const body = error.body as { available_horizons?: unknown; reason_code?: unknown; reasons?: unknown } | null
+  const raw = body?.available_horizons
   const list = Array.isArray(raw) ? raw.map(Number).filter((n) => Number.isFinite(n)) : []
-  return { availableHorizons: list }
+  const first = Array.isArray(body?.reasons) ? (body.reasons[0] as { message?: unknown } | undefined) : undefined
+  return {
+    availableHorizons: list,
+    reasonCode: typeof body?.reason_code === 'string' ? body.reason_code : null,
+    message: typeof first?.message === 'string' ? first.message : null,
+  }
 }
 
 const SEVERITY_ORDER: Record<string, number> = { major: 0, minor: 1 }

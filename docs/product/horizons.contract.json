@@ -1,0 +1,10 @@
+{
+  "contract": "predictily-horizons",
+  "version": 1,
+  "decision": "ADR-V25-02",
+  "note": "Fuente compartida del catalogo de horizontes. Backend (predictily.horizons) y motor (platform.config.HORIZONS) deben coincidir con este archivo; una prueba de cada lado lo verifica sin depender del otro runtime, y otra compara ambos runtimes entre si cuando los dos existen. Para cambiar el catalogo: editar este archivo, backend/config/predictily.php y engine/predictily_engine/platform/config.py.",
+  "catalog": [7, 14, 15, 30, 60, 90],
+  "demand": [7, 14, 15, 30, 60, 90],
+  "customer": [7, 14, 15, 30, 90],
+  "cost": [30, 90]
+}

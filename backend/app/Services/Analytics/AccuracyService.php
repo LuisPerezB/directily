@@ -138,7 +138,7 @@ class AccuracyService
             'evaluation_scope' => $this->scope($selected ?? $baseline),
             'cutoffs' => $this->jsonList($selected?->cutoffs ?? $baseline?->cutoffs ?? null),
             'by_horizon' => $byHorizon,
-            // Etapa 2: error del TOTAL de H días (7/14/30/60/90) por serie y ventana, junto al del naive estacional.
+            // Etapa 2: error del TOTAL de H días (7/14/15/30/60/90) por serie y ventana, junto al del naive estacional.
             'by_horizon_total' => $this->horizonTotals($rows),
             'by_demand_class' => $byClass,
             'by_branch' => $byBranch,

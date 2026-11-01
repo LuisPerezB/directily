@@ -9,6 +9,7 @@ use App\Models\Plan;
 use App\Models\Tenant;
 use App\Services\Audit\AuditLogger;
 use App\Services\Plans\PlanLimitService;
+use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,7 +44,7 @@ final class AdminController extends Controller
         $data = $request->validate([
             'plan_code' => ['sometimes', Rule::exists('plans', 'code')],
             'status' => ['sometimes', Rule::in(['active', 'suspended'])],
-            'plan_overrides' => ['sometimes', 'nullable', 'array'],
+            ...$this->overrideRules(),
         ]);
         if (isset($data['plan_code'])) {
             $tenant->plan_id = Plan::query()->where('code', $data['plan_code'])->value('id');
@@ -57,15 +58,49 @@ final class AdminController extends Controller
         $tenant->save();
         $this->audit->log('admin.tenant_updated', $tenant, array_keys($data) === [] ? [] : ['fields' => array_keys($data)], $tenant->id);
 
-        return response()->json(['data' => $this->present($tenant->load('plan:id,code,name')->loadCount('users'))]);
+        return response()->json(['data' => $this->present($tenant->load('plan:id,code,name')->loadCount('users'), withSeries: true)]);
     }
 
     public function plans(): JsonResponse
     {
         return response()->json(['data' => Plan::query()->orderBy('id')->get()->map(fn (Plan $p) => [
             'code' => $p->code, 'name' => $p->name, 'description' => $p->description, 'limits' => $p->limits,
-            'monthly_price_usd' => $p->monthly_price_usd, 'is_active' => $p->is_active,
+            'monthly_price_usd' => $p->monthly_price_usd, 'metadata' => $p->metadata, 'is_active' => $p->is_active,
         ])]);
+    }
+
+    /**
+     * Reglas de `plan_overrides` (límites por contrato, ADR-V25-18). Solo las claves de `predictily.plan_limit_keys`; los topes numéricos son enteros ≥ 0
+     * (null = sin tope); `horizons` ⊆ catálogo único; `features` = banderas booleanas. Un precio no es una clave válida: nunca es un límite.
+     *
+     * @return array<string, mixed>
+     */
+    private function overrideRules(): array
+    {
+        $keys = array_merge((array) config('predictily.plan_limit_keys.enforced'), (array) config('predictily.plan_limit_keys.declared'));
+        $rules = [
+            'plan_overrides' => ['sometimes', 'nullable', 'array:'.implode(',', $keys)],
+            'plan_overrides.horizons' => ['sometimes', 'array'],
+            'plan_overrides.horizons.*' => ['integer', Rule::in(HorizonCatalog::all())],
+            // Mapa capacidad → booleano. `{}`/`[]` = sin cambios (PlanLimitService::mergeLimits); una lista con elementos no es un mapa.
+            'plan_overrides.features' => ['sometimes', 'array', fn (string $attribute, mixed $value, \Closure $fail) => is_array($value) && $value !== [] && array_is_list($value)
+                ? $fail('Las capacidades deben ser un mapa {capacidad: true|false}.') : null],
+            'plan_overrides.features.*' => ['boolean'],
+            'plan_overrides.modules' => ['sometimes', 'array'],
+            'plan_overrides.modules.*' => ['string', 'max:60'],
+            'plan_overrides.frequencies' => ['sometimes', 'array'],
+            'plan_overrides.frequencies.*' => ['string', 'max:30'],
+            'plan_overrides.connectors' => ['sometimes', 'array'],
+            'plan_overrides.connectors.*' => ['string', 'max:60'],
+            'plan_overrides.retention_months' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:240'],
+            'plan_overrides.compute_budget' => ['sometimes', 'nullable', 'array'],
+            'plan_overrides.llm_budget' => ['sometimes', 'nullable', 'array'],
+        ];
+        foreach (['max_branches', 'max_series', 'max_active_products', 'max_import_rows_per_month', 'max_forecast_runs_per_day', 'max_users'] as $limit) {
+            $rules["plan_overrides.{$limit}"] = ['sometimes', 'nullable', 'integer', 'min:0'];
+        }
+
+        return $rules;
     }
 
     /** Consumo agregado del mes por empresa (métricas de plataforma). */
@@ -87,13 +122,14 @@ final class AdminController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function present(Tenant $t): array
+    private function present(Tenant $t, bool $withSeries = false): array
     {
         return [
             'uuid' => $t->uuid, 'name' => $t->name, 'sector' => $t->sector, 'status' => $t->status,
             'plan' => $t->plan ? ['code' => $t->plan->code, 'name' => $t->plan->name] : null,
             'plan_overrides' => $t->plan_overrides, 'users_count' => (int) ($t->users_count ?? 0),
-            'usage' => $this->plans->snapshot($t),
+            // El listado recorre hasta 100 empresas: no mide series activas (consulta sobre ventas). El detalle (tras editar una empresa) sí, con caché.
+            'usage' => $this->plans->snapshot($t, $withSeries),
             'created_at' => $t->created_at?->toIso8601String(), 'deletion_requested_at' => $t->deletion_requested_at?->toIso8601String(),
         ];
     }
