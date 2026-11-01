@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Database\CompositeForeignKeys;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -98,6 +99,8 @@ return new class extends Migration
             $table->timestampTz('created_at')->useCurrent();
             $table->index(['tenant_id', 'created_at']);
         });
+        // FKs compuestas (tenant_id, x_id) ON DELETE SET NULL: anular solo la referencia, nunca tenant_id (2026_03_12_000400).
+        CompositeForeignKeys::setNullOnlyReferences();
     }
 
     public function down(): void

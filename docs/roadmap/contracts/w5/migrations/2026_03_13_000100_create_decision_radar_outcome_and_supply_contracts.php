@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Database\CompositeForeignKeys;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -163,6 +164,8 @@ return new class extends Migration
             $table->foreign(['tenant_id', 'branch_id'])->references(['tenant_id', 'id'])->on('branches')->cascadeOnDelete();
             $table->foreign(['tenant_id', 'product_id'])->references(['tenant_id', 'id'])->on('products')->cascadeOnDelete();
         });
+        // FKs compuestas (tenant_id, x_id) ON DELETE SET NULL: anular solo la referencia, nunca tenant_id (2026_03_12_000400).
+        CompositeForeignKeys::setNullOnlyReferences();
     }
 
     public function down(): void
