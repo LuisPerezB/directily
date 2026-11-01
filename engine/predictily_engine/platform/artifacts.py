@@ -130,14 +130,15 @@ def save_signed_artifact(obj: Any, path: Path, *, tenant_id: int, core: str, run
 
 
 def verify_stored_artifact(stored: str | Path, *, tenant_id: int, core: str | None, expected_sha256: str | None,
-                           config: SigningConfig | None = None) -> Verification:
+                           config: SigningConfig | None = None, run_id: int | None = None) -> Verification:
     """Verificación completa de un `artifact_path` del registro, SIN deserializar: ruta confinada a la empresa, firma Ed25519 con
-    las claves de confianza, SHA-256 del registro y del manifiesto, tamaño, empresa y core."""
+    las claves de confianza, SHA-256 del registro y del manifiesto, tamaño, empresa y core; y la corrida (`run_id`) cuando el
+    llamador la conoce con certeza (la fila del registro que la guardó)."""
     try:
         path = confine_stored_path(stored, tenant_id)
     except ArtifactPathError:
         return Verification(reason=signing.REASON_PATH_INVALID)
-    return signing.verify_artifact_file(path, tenant_id=tenant_id, core=core, expected_sha256=expected_sha256, config=config)
+    return signing.verify_artifact_file(path, tenant_id=tenant_id, core=core, expected_sha256=expected_sha256, config=config, run_id=run_id)
 
 
 deserialize = signing.deserialize

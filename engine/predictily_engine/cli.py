@@ -85,7 +85,7 @@ def _cmd_verify_artifact(args: argparse.Namespace) -> int:
     """Verifica un artefacto del registro SIN deserializarlo (firma, clave de confianza, SHA-256, tamaño, empresa)."""
     from predictily_engine.platform.artifacts import verify_stored_artifact
 
-    result = verify_stored_artifact(args.path, tenant_id=args.tenant_id, core=args.core, expected_sha256=args.sha256)
+    result = verify_stored_artifact(args.path, tenant_id=args.tenant_id, core=args.core, expected_sha256=args.sha256, run_id=args.run_id)
     status = result.artifact.status if result.artifact else None
     print(json.dumps({"ok": result.ok, "reason": result.reason, "status": status,
                       "key_id": result.artifact.key_id if result.artifact else None}, ensure_ascii=False, indent=2))
@@ -131,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--tenant-id", type=int, required=True)
     v.add_argument("--core", default=None, choices=["demand", "customer"])
     v.add_argument("--sha256", default=None, help="artifact_sha256 del registro")
+    v.add_argument("--run-id", type=int, default=None, help="corrida que registró el modelo (forecast_run_id), si se conoce con certeza")
     v.set_defaults(func=_cmd_verify_artifact)
 
     args = parser.parse_args(argv)

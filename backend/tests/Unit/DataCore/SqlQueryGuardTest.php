@@ -122,22 +122,27 @@ final class SqlQueryGuardTest extends TestCase
         SqlQueryGuard::validate('SELECT 1 FROM t WHERE a > :since', 'pgsql')->render();
     }
 
-    public function test_host_policy_blocks_cloud_metadata_and_optionally_private_networks(): void
+    public function test_host_policy_always_blocks_cloud_metadata(): void
     {
         $this->expectException(SqlSourceException::class);
         SqlHostPolicy::assertAllowed('169.254.169.254');
     }
 
-    public function test_host_policy_can_deny_private_networks_and_enforce_an_allow_list(): void
+    public function test_host_policy_denies_private_networks_by_default_and_enforces_a_closed_allow_list(): void
     {
-        config(['connectors.sql.deny_private_networks' => true]);
         try {
             SqlHostPolicy::assertAllowed('10.0.0.5');
-            $this->fail('Debía rechazar la red privada.');
+            $this->fail('Debía rechazar la red privada por defecto.');
         } catch (SqlSourceException) {
             $this->addToAssertionCount(1);
         }
-        config(['connectors.sql.deny_private_networks' => false, 'connectors.sql.allowed_hosts' => ['erp.cliente.example']]);
+        // Se autoriza con un CIDR explícito (ERP detrás de VPN) o con la IP literal en la lista de destinos.
+        config(['connectors.sql.allowed_cidrs' => ['10.0.0.0/8']]);
+        SqlHostPolicy::assertAllowed('10.0.0.5');
+        config(['connectors.sql.allowed_cidrs' => [], 'connectors.sql.allowed_hosts' => ['10.0.0.5']]);
+        SqlHostPolicy::assertAllowed('10.0.0.5');
+        // Con la lista configurada es un mundo cerrado: cualquier otro destino se rechaza, también uno público.
+        config(['connectors.sql.allowed_hosts' => ['erp.cliente.example']]);
         $this->expectException(SqlSourceException::class);
         SqlHostPolicy::assertAllowed('otro.example');
     }

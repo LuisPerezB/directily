@@ -36,7 +36,7 @@ RUN --mount=type=secret,id=extra_ca,required=false \
     fi; \
     rm -f /etc/apt/apt.conf.d/99extra-ca /tmp/extra-ca.crt /etc/php/8.3/fpm/pool.d/www.conf; \
     apt-get clean; rm -rf /var/lib/apt/lists/*; \
-    for m in pdo_pgsql redis intl zip gd pcntl bcmath mbstring; do php -m | grep -qix "$m"; done
+    for m in pdo_pgsql redis intl zip gd pcntl bcmath mbstring sodium; do php -m | grep -qix "$m"; done
 
 COPY docker/php/php.ini      /etc/php/8.3/fpm/conf.d/90-predictily.ini
 COPY docker/php/php.ini      /etc/php/8.3/cli/conf.d/90-predictily.ini

@@ -33,5 +33,42 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!--
+          Hermeticidad (W1-B): el backend/.env de desarrollo define la lista blanca SQL de 127.0.0.1 y las claves de firma; sin
+          estas líneas cambiaría el resultado de las pruebas de SSRF y de firma. force="true" gana al .env y, con las líneas <server> (Laravel lee
+          $_SERVER además de $_ENV), también a variables exportadas en el entorno del proceso.
+          Las pruebas que necesitan una lista blanca la declaran con config([...]). Los límites de XLSX se fijan a sus valores por
+          defecto (config/upload_safety.php) por la misma razón.
+        -->
+        <env name="PREDICTILY_SQL_ALLOWED_HOSTS" value="" force="true"/>
+        <env name="PREDICTILY_SQL_ALLOWED_CIDRS" value="" force="true"/>
+        <env name="PREDICTILY_SQL_MAX_ROWS" value="2000000" force="true"/>
+        <env name="ENGINE_TRUSTED_PUBLIC_KEYS" value="" force="true"/>
+        <env name="ENGINE_ALLOW_UNSIGNED_ARTIFACTS" value="false" force="true"/>
+        <env name="ENGINE_ARTIFACTS_DIR" value="" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_ENTRIES" value="1000" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_ENTRY_MB" value="512" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_TOTAL_MB" value="1024" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB" value="32" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_RATIO" value="100" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_COLUMNS" value="500" force="true"/>
+        <env name="PREDICTILY_XLSX_ANALYSIS_MAX_SCANNED_ROWS" value="20000" force="true"/>
+        <env name="PREDICTILY_XLSX_ANALYSIS_MAX_SHEET_MB" value="8" force="true"/>
+        <env name="PREDICTILY_XLSX_ANALYSIS_TIMEOUT" value="10" force="true"/>
+        <server name="PREDICTILY_SQL_ALLOWED_HOSTS" value="" force="true"/>
+        <server name="PREDICTILY_SQL_ALLOWED_CIDRS" value="" force="true"/>
+        <server name="PREDICTILY_SQL_MAX_ROWS" value="2000000" force="true"/>
+        <server name="ENGINE_TRUSTED_PUBLIC_KEYS" value="" force="true"/>
+        <server name="ENGINE_ALLOW_UNSIGNED_ARTIFACTS" value="false" force="true"/>
+        <server name="ENGINE_ARTIFACTS_DIR" value="" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_ENTRIES" value="1000" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_ENTRY_MB" value="512" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_TOTAL_MB" value="1024" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB" value="32" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_RATIO" value="100" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_COLUMNS" value="500" force="true"/>
+        <server name="PREDICTILY_XLSX_ANALYSIS_MAX_SCANNED_ROWS" value="20000" force="true"/>
+        <server name="PREDICTILY_XLSX_ANALYSIS_MAX_SHEET_MB" value="8" force="true"/>
+        <server name="PREDICTILY_XLSX_ANALYSIS_TIMEOUT" value="10" force="true"/>
     </php>
 </phpunit>

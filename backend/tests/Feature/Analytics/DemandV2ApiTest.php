@@ -456,7 +456,7 @@ class DemandV2ApiTest extends TestCase
         [$tenant, $user, $runs, $models] = $this->threeRuns();
         $file = tempnam(sys_get_temp_dir(), 'artifact');
         file_put_contents($file, 'modelo-serializado');
-        $this->signArtifactFile($file, $tenant->id, ['core' => 'demand']);
+        $this->signArtifactFile($file, $tenant->id, ['core' => 'demand', 'run_id' => $runs[1]->id]);   // el manifiesto registra la corrida de la fila
         DB::table('model_registry')->where('id', $models[1])->update(['artifact_path' => $file, 'artifact_sha256' => hash('sha256', 'otro-contenido')]);
         $api = $this->actingAsTenantUser($user, $tenant);
 
@@ -484,7 +484,7 @@ class DemandV2ApiTest extends TestCase
         $stored = '7/run-3/lightgbm_global.joblib';
         $good = hash('sha256', 'modelo-serializado');
         [$tenant, $user, $runs, $models] = $this->threeRuns();
-        $this->signArtifactFile($dir.'/'.$stored, $tenant->id, ['core' => 'demand']);
+        $this->signArtifactFile($dir.'/'.$stored, $tenant->id, ['core' => 'demand', 'run_id' => $runs[1]->id]);
         $api = $this->actingAsTenantUser($user, $tenant);
         $verification = fn ($r) => $r->json('data.artifacts_verification');
 
@@ -537,7 +537,7 @@ class DemandV2ApiTest extends TestCase
         file_put_contents($dir.'/7/run-3/lightgbm_global.joblib', 'modelo-serializado');
         config(['engine.artifacts_dir' => $dir]);
         [$tenant, $user, $runs, $models] = $this->threeRuns();
-        $this->signArtifactFile($dir.'/7/run-3/lightgbm_global.joblib', $tenant->id, ['core' => 'demand']);
+        $this->signArtifactFile($dir.'/7/run-3/lightgbm_global.joblib', $tenant->id, ['core' => 'demand', 'run_id' => $runs[1]->id]);
         DB::table('model_registry')->where('id', $models[1])->update(['artifact_path' => 'storage/artifacts/7/run-3/lightgbm_global.joblib', 'artifact_sha256' => hash('sha256', 'modelo-serializado')]);
         $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/models/demand/rollback', ['run_id' => $runs[1]->id])
             ->assertOk()->assertJsonPath('data.artifacts_verified', true)->assertJsonPath('data.artifacts_verification.status', 'verified');

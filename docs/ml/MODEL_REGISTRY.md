@@ -101,7 +101,10 @@ no revierte a ellos. Para un entorno **local** puede activarse `ENGINE_ALLOW_UNS
 ### 2.7 Entorno local, Docker y E2E (qué hay que aprovisionar)
 
 La firma es obligatoria: **sin claves, un entrenamiento deja artefactos `unsigned` y el motor no los carga** (el Customer Core usa la referencia validada o se abstiene, con `artifact_unsigned` en `limitations`). Una pila local o de E2E
-necesita, para conservar el comportamiento anterior, una de estas dos opciones (ambas son variables de entorno del motor y del backend; **no** están aprovisionadas por defecto en `docker-compose.yml`):
+necesita, para conservar el comportamiento anterior, una de estas dos opciones (ambas son variables de entorno del motor y del backend). `docker-compose.yml` ya las **pasa** a los servicios, sin valores secretos y vacías por defecto:
+`ENGINE_SIGNING_KEY_ID`, `ENGINE_TRUSTED_PUBLIC_KEYS` y `ENGINE_ALLOW_UNSIGNED_ARTIFACTS` al motor, `ENGINE_TRUSTED_PUBLIC_KEYS` y `ENGINE_ALLOW_UNSIGNED_ARTIFACTS` al backend (que nunca recibe la clave privada) y la clave PRIVADA solo al
+motor, como secreto de Compose montado en `/run/secrets/engine_signing_key` desde el archivo que indique `ENGINE_SIGNING_PRIVATE_KEY_FILE` (`ENGINE_SIGNING_PRIVATE_KEY=file:/run/secrets/engine_signing_key`; sin ese archivo el motor no firma). Sin claves, la pila arranca igual
+y los modelos nuevos quedan sin firma, que es lo que hay que aprovisionar:
 
 | Opción | Qué definir | Cuándo |
 |---|---|---|
@@ -115,6 +118,7 @@ Los modelos entrenados antes de este cambio son legado sin firma: con la opción
 | Comportamiento | Prueba |
 |---|---|
 | Artefacto válido carga; el manifiesto liga empresa, core, corrida y datos | `engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_loads_and_its_manifest_binds_tenant_core_run_and_data`, `…::test_the_manifest_carries_data_fingerprint_and_versions_when_given` |
+| La corrida del manifiesto se compara con la de la fila del registro cuando el llamador la conoce (motor: `verify_stored_artifact(..., run_id=)` y `verify-artifact --run-id`; backend: demanda, con `forecast_run_id`) | `engine/tests/unit/test_artifact_signing.py::test_the_run_of_the_registry_row_is_compared_with_the_manifest_when_the_caller_knows_it`, `backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_the_manifest_run_is_compared_with_the_one_the_caller_knows`, `…::test_a_demand_registry_row_must_point_to_the_artifact_of_its_own_run` |
 | Bytes alterados → rechazado antes de deserializar | `…::test_altered_bytes_are_rejected_before_deserializing`, `…::test_a_truncated_or_extended_file_is_rejected_by_size…` |
 | Pickle malicioso con SHA-256 coherente, sin firma / firma inválida / clave desconocida → rechazado **sin que el payload se ejecute** | `…::test_malicious_pickle_with_coherent_sha_and_no_signature…`, `…::test_malicious_pickle_with_invalid_signature…`, `…::test_an_unknown_signing_key…` |
 | Manifiesto corrupto nunca equivale a «sin firma» | `…::test_a_corrupt_manifest_is_never_treated_as_an_unsigned_artifact` |
@@ -137,8 +141,11 @@ Las pruebas del motor generan un par de claves **efímero** por sesión (`engine
 - Un atacante con escritura en el volumen **y** que borre el manifiesto convierte un artefacto firmado en «sin firma»: se rechaza salvo `ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true`, por eso el indicador es solo para entornos locales.
 - No hay *replay* de versiones por firma: un artefacto antiguo con firma válida y SHA-256 coherente en su fila sigue siendo válido (es lo que hace la reversión). El control de qué versión sirve es el estado del registro (§5).
 - La verificación del backend exige que el archivo sea visible; si no, delega en el motor.
-- El backend requiere la extensión `sodium` de PHP (presente en este entorno; declararla en `composer.json` y en la verificación de extensiones del `Dockerfile` queda pendiente del arquitecto). Sin ella no se confía en nada
+- El backend requiere la extensión `sodium` de PHP: declarada como `ext-sodium` en `backend/composer.json` (con el hash de `composer.lock` actualizado) y comprobada en el `Dockerfile` del backend junto a las demás extensiones. Sin ella no se confía en nada
   (`signature_verifier_unavailable`).
+- La corrida del manifiesto (`run_id`) se compara con la de la fila del registro **solo donde la fila la guarda con certeza**: la demanda en el backend (`forecast_run_id`; el motor ofrece `run_id=` en `verify_stored_artifact` para quien la conozca). El Customer
+  Core NO se compara: su `INSERT … ON CONFLICT (tenant_id, version) DO UPDATE` no actualiza `core_run_id`, así que tras reentrenar una versión la fila conserva la corrida anterior mientras el artefacto y el manifiesto son de la nueva
+  (daría un falso rechazo). Pendiente (`customer/service.py`, fuera de este paquete): actualizar `core_run_id` en el upsert y pasar `run_id` en `load_artifact`.
 
 ## 4. Matriz de estado de este documento
 
@@ -147,10 +154,12 @@ Las pruebas del motor generan un par de claves **efímero** por sesión (`engine
 | Manifiesto canónico + firma Ed25519 al guardar (demanda y Customer Core) | **IMPLEMENTADO / VERIFICADO** |
 | Verificación antes de `joblib.load` (firma, SHA-256, tamaño, empresa, core, ruta confinada, sin TOCTOU) en el motor | **IMPLEMENTADO / VERIFICADO** |
 | Verificación de firma en la reversión del backend | **IMPLEMENTADO / VERIFICADO** |
+| Comparación de la corrida del manifiesto con la de la fila del registro | **IMPLEMENTADO / VERIFICADO** (demanda en el backend; motor: parámetro opcional) · Customer Core **DISEÑADO / NO IMPLEMENTADO** (ver §3) |
 | CLI `keygen` y `verify-artifact` | **IMPLEMENTADO / VERIFICADO** |
 | Marca `unsigned` en `artifact_compat.signature` | **IMPLEMENTADO / VERIFICADO** |
 | Servicio de demanda cargando artefactos | **NO APLICA** (no se cargan: estadísticos reajustados; LightGBM se reentrena en cada corrida) |
-| Aprovisionar claves en la pila Docker/E2E | **BLOQUEADO** (decisión del propietario sobre dónde vive la clave privada) |
+| Pasar las variables de firma en `docker-compose.yml` (sin valores secretos; clave privada como secreto de Compose solo para el motor) | **IMPLEMENTADO** (`docker compose config` válido; no ejecutado con un motor real) |
+| Aprovisionar las claves reales en la pila Docker/E2E | **BLOQUEADO** (decisión del propietario sobre dónde vive la clave privada) |
 | Verificación contra un backend con `sodium` ausente | **BLOQUEADO** (no reproducible aquí; el código falla cerrado) |
 
 ## 5. Gestión del registro — DISEÑADO / NO IMPLEMENTADO

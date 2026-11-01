@@ -26,9 +26,10 @@ final class StoreImportRequest extends FormRequest
     }
 
     /**
-     * Endurecimiento de cargas (ADR-V25-15): un XLSX es un ZIP y se inspecciona su directorio ANTES de guardarlo y de analizarlo
-     * (nº de entradas, tamaño descomprimido, razón de compresión, archivos anidados). Cuesta milisegundos; un libro que no cumple
-     * se rechaza con 413 (tamaño descomprimido/razón) o 422 y un código estable `xlsx_*`, sin crear importación ni guardar el archivo.
+     * Endurecimiento de cargas (ADR-V25-15): un XLSX es un ZIP y se inspecciona ANTES de guardarlo y de analizarlo (nº de entradas,
+     * tamaño descomprimido, razón de compresión, archivos anidados y, sin fiarse del directorio central, los bytes REALMENTE
+     * descomprimidos de cada parte). Los metadatos cuestan milisegundos y el recuento real ≈ 0,1 s para el histórico real; un libro que
+     * no cumple se rechaza con 413 (tamaño descomprimido/razón) o 422 y un código estable `xlsx_*`, sin crear importación ni guardar el archivo.
      *
      * @throws UnsafeSpreadsheetException
      */

@@ -7,6 +7,8 @@ namespace Tests\Unit\Imports;
 use App\Services\Imports\Reading\UnsafeSpreadsheetException;
 use App\Services\Imports\Reading\XlsxReader;
 use App\Services\Imports\Reading\ZipArchiveInspector;
+use App\Services\Imports\Reading\ZipInspection;
+use App\Services\Imports\Reading\ZipReadGuard;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer;
 use Tests\Support\ZipFixtures;
@@ -15,8 +17,15 @@ use ZipArchive;
 
 /**
  * Endurecimiento de cargas XLSX (V2.5 §15, ADR-V25-15; defecto HIGH «ZIP bomb» de seguridad_ui): la inspección del directorio
- * ZIP rechaza ANTES de abrir el libro las bombas de descompresión, y la lectura de encabezados/vista previa está acotada.
+ * ZIP rechaza ANTES de abrir el libro las bombas de descompresión —también cuando el directorio central MIENTE sobre los tamaños—
+ * y la lectura de encabezados/vista previa está acotada en bytes y en tiempo, apertura del libro incluida.
  * Las bombas se generan en la propia prueba (en streaming: unos KB en disco, cientos de MB descomprimidos).
+ *
+ * Criterio de los tiempos: un rechazo temprano (inspección de metadatos, recuento de bytes que se corta al pasar de lo declarado,
+ * o lectura cortada por la guarda) tarda decenas o centenas de milisegundos; leer de verdad el contenido hostil tardaba de 9 s
+ * a 73 s. Los umbrales de las pruebas (2 s para el rechazo de la inspección, 5 s para el de la guarda con los límites por
+ * defecto) distinguen ambas cosas con un margen de varias veces sobre lo medido, de modo que una máquina cargada no los
+ * confunda con una lectura completa. Cada prueba mide solo la operación bajo prueba, no la generación del libro.
  */
 final class ZipArchiveInspectorTest extends TestCase
 {
@@ -105,10 +114,34 @@ final class ZipArchiveInspectorTest extends TestCase
 
         $started = microtime(true);
         $inspection = (new ZipArchiveInspector)->inspect($path);
-        $this->assertLessThan(0.5, microtime(true) - $started, 'la inspección solo lee el directorio central');
+        $this->assertLessThan(2.0, microtime(true) - $started, 'la inspección descomprime las partes una vez para contar los bytes reales (≈ 0,1 s medidos)');
         $this->assertGreaterThan(50 * 1_048_576, $inspection->uncompressedBytes, 'es un libro grande de verdad');
         $this->assertLessThan(40, $inspection->maxEntryRatio, 'muy por debajo del tope de razón (100:1)');
         $this->assertLessThan(20 * 1_048_576, $inspection->compressedBytes, 'cabe en el tope de subida de 20 MB');
+
+        // Ventana interactiva (encabezados + vista previa dentro de la petición): holgada para el histórico real (medido ≈ 0,05 s).
+        $started = microtime(true);
+        $reader = new XlsxReader($path);
+        $this->assertCount(20, $reader->headers());
+        $preview = 0;
+        foreach ($reader->rows() as $row) {
+            if (++$preview >= 20) {
+                break;
+            }
+        }
+        $this->assertSame(20, $preview);
+        $this->assertLessThan(5.0, microtime(true) - $started);
+
+        // Lectura en cola: sin ventana. (La lectura completa de las 99 334 filas tarda minutos por el ritmo de OpenSpout y se midió aparte.)
+        $queue = new XlsxReader($path, null, false);
+        $queue->headers();
+        $count = 0;
+        foreach ($queue->rows() as $row) {
+            if (++$count >= 500) {
+                break;
+            }
+        }
+        $this->assertSame(500, $count);
     }
 
     // ───────────────────────── bombas y estructuras abusivas ─────────────────────────
@@ -181,6 +214,143 @@ final class ZipArchiveInspectorTest extends TestCase
         $path = ZipFixtures::overlapping($this->tmp('solapado'), 200);
         $this->assertLessThan(700_000, filesize($path));
         $this->assertRejected($path, UnsafeSpreadsheetException::INVALID_ARCHIVE, 422);
+    }
+
+    // ───────────────────── directorio central falsificado: no se confía en lo declarado ─────────────────────
+
+    public function test_a_forged_directory_that_declares_a_tiny_sheet_is_rejected_by_counting_the_real_bytes(): void
+    {
+        // Réplica del hallazgo: una hoja de 200 MB reales que el directorio declara de 2 KB (antes: 73 s de lectura).
+        $path = ZipFixtures::write($this->tmp('hoja-falsa'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ['repeat' => '<x/>', 'bytes' => 200 * 1_048_576, 'declared_size' => 2000]]));
+        $this->assertLessThan(2_000_000, filesize($path), 'el archivo es diminuto frente a los 200 MB que contiene');
+        $this->assertSame(2000, $this->declaredSize($path, 'xl/worksheets/sheet1.xml'));
+        $e = $this->assertRejected($path, UnsafeSpreadsheetException::INCONSISTENT_ENTRY, 422);
+        $this->assertSame(2000, $e->context['declared_bytes']);
+        $this->assertSame('xl/worksheets/sheet1.xml', $e->context['part']);
+    }
+
+    public function test_a_forged_directory_that_declares_tiny_shared_strings_is_rejected_before_the_reader_opens_the_workbook(): void
+    {
+        // 60 MB reales de cadenas compartidas declaradas como 1 KB: el lector tardaba 62 s en cargarlas. Ahora ni se abre.
+        $path = ZipFixtures::write($this->tmp('cadenas-falsas'), ZipFixtures::workbookWithSharedStrings('xl/sharedStrings.xml', ['repeat' => '<si><t>x</t></si>', 'bytes' => 60 * 1_048_576, 'declared_size' => 1000]));
+        $this->assertRejected($path, UnsafeSpreadsheetException::INCONSISTENT_ENTRY, 422);
+        $this->assertReaderRejected($path, UnsafeSpreadsheetException::INCONSISTENT_ENTRY, [], 2.0);
+    }
+
+    public function test_every_part_is_counted_not_only_the_ones_the_reader_opens(): void
+    {
+        $path = ZipFixtures::write($this->tmp('imagen-falsa'), ZipFixtures::workbook(null, ['xl/media/image1.png' => ['random' => 3_000_000, 'declared_size' => 100]]));
+        $this->assertRejected($path, UnsafeSpreadsheetException::INCONSISTENT_ENTRY, 422);
+    }
+
+    public function test_a_directory_that_declares_more_than_the_real_content_is_also_inconsistent(): void
+    {
+        $path = ZipFixtures::write($this->tmp('declara-de-mas'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ['content' => ZipFixtures::sheetXml([1 => ['a']]), 'declared_size' => 50_000]]));
+        $this->assertRejected($path, UnsafeSpreadsheetException::INCONSISTENT_ENTRY, 422);
+    }
+
+    public function test_a_forged_crc_is_rejected_in_every_kind_of_part(): void
+    {
+        // El CRC lo valida libzip al llegar al final de cada parte (la inspección las lee enteras): control, hojas y cadenas compartidas.
+        foreach (['xl/workbook.xml', 'xl/_rels/workbook.xml.rels', 'xl/worksheets/sheet1.xml'] as $part) {
+            $entries = ZipFixtures::workbook();
+            $entries[$part] = ['content' => $entries[$part], 'declared_crc' => 12345];
+            $this->assertRejected(ZipFixtures::write($this->tmp('crc'), $entries), UnsafeSpreadsheetException::INCONSISTENT_ENTRY, 422);
+        }
+        $path = ZipFixtures::write($this->tmp('crc-cadenas'), ZipFixtures::workbookWithSharedStrings('xl/sharedStrings.xml', ['content' => ZipFixtures::sharedStringsOpen().'<si><t>a</t></si></sst>', 'declared_crc' => 99]));
+        $this->assertRejected($path, UnsafeSpreadsheetException::INCONSISTENT_ENTRY, 422);
+    }
+
+    public function test_an_honest_workbook_with_matching_sizes_still_passes_and_reports_the_verified_roles(): void
+    {
+        $path = ZipFixtures::write($this->tmp('honesto'), ZipFixtures::workbookWithSharedStrings('xl/sharedStrings.xml', ZipFixtures::sharedStringsOpen().'<si><t>a</t></si></sst>'));
+        $inspection = (new ZipArchiveInspector)->inspect($path);
+        $this->assertSame(['xl/worksheets/sheet1.xml'], $inspection->sheetParts);
+        $this->assertSame('xl/sharedStrings.xml', $inspection->sharedStringsPart);
+        $this->assertNull($inspection->stylesPart);
+        $this->assertSame(strlen(ZipFixtures::sharedStringsOpen().'<si><t>a</t></si></sst>'), $inspection->entrySizes['xl/sharedStrings.xml']);
+    }
+
+    // ───────────── cadenas compartidas: el tope sigue a la relación, no al nombre literal ─────────────
+
+    public function test_the_shared_strings_cap_applies_to_the_part_named_by_the_relationship_whatever_its_name(): void
+    {
+        $sharedStrings = ['random' => 2_000_000];
+        foreach (['xl/ss.xml', 'xl/data/cadenas.bin'] as $part) {
+            $path = ZipFixtures::write($this->tmp('renombrada'), ZipFixtures::workbookWithSharedStrings($part, $sharedStrings));
+            $e = $this->assertRejected($path, UnsafeSpreadsheetException::UNCOMPRESSED_TOO_LARGE, 413, ['max_shared_strings_bytes' => 1_000_000]);
+            $this->assertStringContainsString('cadenas de texto compartidas', $e->getMessage(), $part);
+            $this->assertSame($part, (new ZipArchiveInspector)->inspect($path)->sharedStringsPart);
+        }
+        // Destino absoluto en la relación («/xl/ss.xml»), como lo escriben otros generadores.
+        $absolute = ZipFixtures::workbookWithSharedStrings('xl/ss.xml', $sharedStrings);
+        $absolute['xl/_rels/workbook.xml.rels'] = str_replace('Target="ss.xml"', 'Target="/xl/ss.xml"', $absolute['xl/_rels/workbook.xml.rels']);
+        $this->assertRejected(ZipFixtures::write($this->tmp('absoluta'), $absolute), UnsafeSpreadsheetException::UNCOMPRESSED_TOO_LARGE, 413, ['max_shared_strings_bytes' => 1_000_000]);
+        // Una parte con ese tamaño que ninguna relación señala como cadenas compartidas no la lee el lector: no se le aplica el tope.
+        $unreferenced = ZipFixtures::write($this->tmp('sin-relacion'), ZipFixtures::workbook(null, ['xl/ss.xml' => $sharedStrings]));
+        (new ZipArchiveInspector(['max_shared_strings_bytes' => 1_000_000]))->inspect($unreferenced);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_the_audit_case_of_a_renamed_40_mb_shared_strings_part_is_rejected_with_the_default_limits(): void
+    {
+        // Réplica del hallazgo: xl/ss.xml de 40 MB con razón ≈ 25:1 (< 100:1) que OpenSpout resuelve por la relación (antes: 16,6 s).
+        $path = ZipFixtures::write($this->tmp('ss-40mb'), ZipFixtures::workbookWithSharedStrings('xl/ss.xml', ['chunks' => ZipFixtures::noise(40_000_000, 'si')]));
+        $this->assertLessThan(5_000_000, filesize($path));
+        $e = $this->assertRejected($path, UnsafeSpreadsheetException::UNCOMPRESSED_TOO_LARGE, 413);
+        $this->assertStringContainsString('cadenas de texto compartidas', $e->getMessage());
+    }
+
+    public function test_styles_have_the_same_cap_because_the_reader_parses_them_entirely(): void
+    {
+        $entries = ZipFixtures::workbook(null, ['xl/estilos.bin' => ['random' => 2_000_000]]);
+        $entries['xl/_rels/workbook.xml.rels'] = str_replace('</Relationships>', '<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="estilos.bin"/></Relationships>', $entries['xl/_rels/workbook.xml.rels']);
+        $e = $this->assertRejected(ZipFixtures::write($this->tmp('estilos'), $entries), UnsafeSpreadsheetException::UNCOMPRESSED_TOO_LARGE, 413, ['max_shared_strings_bytes' => 1_000_000]);
+        $this->assertStringContainsString('estilos', $e->getMessage());
+    }
+
+    // ───────────── la guarda de lectura, aislada del inspector ─────────────
+
+    public function test_the_guard_refuses_to_open_a_large_non_sheet_part_even_if_the_inspector_resolved_roles_differently(): void
+    {
+        $path = ZipFixtures::write($this->tmp('guarda'), ZipFixtures::workbook(null, ['xl/oculta.xml' => ['random' => 2_000_000]]));
+        $inspection = (new ZipArchiveInspector)->inspect($path);
+        $guard = new ZipReadGuard((string) realpath($path), $inspection, (new ZipArchiveInspector(['max_shared_strings_bytes' => 1_000_000]))->limits());
+        try {
+            $guard->run(fn () => file_get_contents('zip://'.realpath($path).'#xl/oculta.xml'));
+            $this->fail('La guarda debió negarse a abrir la parte.');
+        } catch (UnsafeSpreadsheetException $e) {
+            $this->assertSame(UnsafeSpreadsheetException::UNCOMPRESSED_TOO_LARGE, $e->errorCode);
+        }
+        $this->assertNoLeakedReaderState();
+        // Las hojas no están sujetas a ese tope: se leen enteras (dentro de su presupuesto de ventana).
+        $this->assertSame(strlen(ZipFixtures::sheetXml([1 => ['Nro Factura', 'Cantidad'], 2 => ['A-1', 3]])), strlen($guard->run(fn () => file_get_contents('zip://'.realpath($path).'#xl/worksheets/sheet1.xml'))));
+    }
+
+    public function test_the_guard_counts_what_is_really_read_against_what_the_directory_declares(): void
+    {
+        $path = ZipFixtures::write($this->tmp('guarda-real'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ['repeat' => '<x/>', 'bytes' => 5_000_000]]));
+        $real = new ZipInspection(1, 1, 1, 1.0, 0, ['xl/worksheets/sheet1.xml' => 1000], ['xl/worksheets/sheet1.xml']);   // inspección con un tamaño que miente
+        $guard = new ZipReadGuard((string) realpath($path), $real, (new ZipArchiveInspector)->limits());
+        $started = microtime(true);
+        try {
+            $guard->run(fn () => file_get_contents('zip://'.realpath($path).'#xl/worksheets/sheet1.xml'));
+            $this->fail('La guarda debió cortar la lectura al pasar de lo declarado.');
+        } catch (UnsafeSpreadsheetException $e) {
+            $this->assertSame(UnsafeSpreadsheetException::INCONSISTENT_ENTRY, $e->errorCode);
+        }
+        $this->assertLessThan(1.0, microtime(true) - $started);
+        $this->assertNoLeakedReaderState();
+    }
+
+    public function test_the_guard_only_serves_the_workbook_it_was_created_for(): void
+    {
+        $one = ZipFixtures::write($this->tmp('uno'), ZipFixtures::workbook());
+        $two = ZipFixtures::write($this->tmp('dos'), ['secreto.txt' => 'no debe leerse']);
+        $guard = new ZipReadGuard((string) realpath($one), (new ZipArchiveInspector)->inspect($one), (new ZipArchiveInspector)->limits());
+        $this->assertFalse($guard->run(fn () => @file_get_contents('zip://'.realpath($two).'#secreto.txt')));
+        $this->assertFalse($guard->run(fn () => @file_get_contents('zip://'.realpath($one).'#no/existe.xml')));
+        $this->assertNoLeakedReaderState();
     }
 
     public function test_malformed_and_non_workbook_archives_are_rejected(): void
@@ -288,15 +458,113 @@ final class ZipArchiveInspectorTest extends TestCase
         $this->assertSame(['Nro Factura', 'Cantidad'], (new XlsxReader($path))->headers());
     }
 
-    public function test_the_header_and_preview_read_has_a_time_budget(): void
+    // ───────────── ventana interactiva: bytes y tiempo (apertura del libro incluida) ─────────────
+
+    /** Rechazo esperado del lector en la ventana interactiva. @param array<string, int|float> $limits */
+    private function assertReaderRejected(string $path, string $code, array $limits, float $maxSeconds): UnsafeSpreadsheetException
     {
-        $path = ZipFixtures::write($this->tmp('tiempo'), ZipFixtures::workbook());
+        $started = microtime(true);
         try {
-            (new XlsxReader($path, ['analysis_timeout_seconds' => 0.000001]))->headers();
-            $this->fail('Debió agotar el presupuesto de tiempo.');
+            (new XlsxReader($path, $limits))->headers();
         } catch (UnsafeSpreadsheetException $e) {
-            $this->assertSame([UnsafeSpreadsheetException::READ_TIMEOUT, 422], [$e->errorCode, $e->status]);
+            $elapsed = microtime(true) - $started;
+            $this->assertSame($code, $e->errorCode, $e->getMessage());
+            $this->assertLessThan($maxSeconds, $elapsed, "rechazado en {$elapsed} s");
+            $this->assertNoLeakedReaderState();
+
+            return $e;
         }
+        $this->fail('El lector debió rechazar el libro con '.$code);
+    }
+
+    /** La guarda restauró el envoltorio zip:// nativo y el estado de libxml, también tras abortar a mitad de lectura. */
+    private function assertNoLeakedReaderState(): void
+    {
+        $this->assertNull(ZipReadGuard::installed());
+        $this->assertContains('zip', stream_get_wrappers());
+        $this->assertFalse(libxml_use_internal_errors(), 'libxml volvió a su estado inicial');
+        $path = $this->tmp('nativo');
+        ZipFixtures::write($path, ['a.txt' => 'hola']);
+        $this->assertSame('hola', file_get_contents('zip://'.$path.'#a.txt'), 'zip:// nativo restaurado');
+    }
+
+    public function test_nodes_before_the_first_row_are_cut_by_the_interactive_byte_budget(): void
+    {
+        // Libro HONESTO (razón ≈ 25:1, por debajo del tope de 100:1) con 3 MB de nodos antes de la primera fila: nada de lo declarado
+        // delata nada; solo contar lo que el lector consume realmente.
+        $path = ZipFixtures::write($this->tmp('nodos'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ZipFixtures::sheetParts([['noise' => 3_000_000], ['rows' => [1 => ['Nro Factura', 'Cantidad'], 2 => ['A-1', 3]]]])]));
+        (new ZipArchiveInspector)->inspect($path);   // la inspección lo da por bueno: es un libro coherente
+        $e = $this->assertReaderRejected($path, UnsafeSpreadsheetException::HEADER_NOT_FOUND, ['analysis_max_sheet_bytes' => 1_000_000], 2.0);
+        $this->assertSame(1_000_000, $e->context['max_sheet_bytes']);
+        $this->assertStringContainsString('primeros 1 MB', $e->getMessage());
+        // Con presupuesto suficiente el mismo libro se lee.
+        $this->assertSame(['Nro Factura', 'Cantidad'], (new XlsxReader($path, ['analysis_max_sheet_bytes' => 4_000_000]))->headers());
+    }
+
+    public function test_the_audit_case_of_63_mb_of_nodes_before_the_first_row_is_cut_with_the_default_limits(): void
+    {
+        // Réplica del hallazgo: libro honesto de ≈ 1,6 MB con 40 MB de nodos antes de la primera `<row>` (antes: 9,4 s con 63 MB sin
+        // activar ningún límite). Con los valores por defecto la guarda corta a los 8 MB consumidos (≈ 1 s); leer los 40 MB tarda > 6 s.
+        $path = ZipFixtures::write($this->tmp('auditoria'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ZipFixtures::sheetParts([['noise' => 40_000_000], ['rows' => [1 => ['Nro Factura', 'Cantidad']]]])]));
+        $this->assertLessThan(5_000_000, filesize($path), 'el archivo es diminuto');
+        $e = $this->assertReaderRejected($path, UnsafeSpreadsheetException::HEADER_NOT_FOUND, [], 5.0);
+        $this->assertStringContainsString('primeros 8 MB', $e->getMessage());
+    }
+
+    public function test_the_interactive_time_budget_applies_to_the_sheet_scan(): void
+    {
+        // Presupuesto de bytes holgado: manda el reloj. 20 MB de nodos tardan ≈ 3 s; el presupuesto de 0,3 s corta mucho antes.
+        $path = ZipFixtures::write($this->tmp('reloj'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ZipFixtures::sheetParts([['noise' => 20_000_000], ['rows' => [1 => ['Nro Factura']]]])]));
+        $e = $this->assertReaderRejected($path, UnsafeSpreadsheetException::READ_TIMEOUT, ['analysis_max_sheet_bytes' => 64 * 1_048_576, 'analysis_timeout_seconds' => 0.3], 3.0);
+        $this->assertSame(0.3, $e->context['timeout_seconds']);
+    }
+
+    public function test_the_interactive_time_budget_covers_loading_the_shared_strings_when_opening_the_workbook(): void
+    {
+        // Antes el reloj empezaba con el libro ya abierto: las cadenas compartidas (carga no interrumpible) quedaban fuera.
+        // 6 MB de cadenas compartidas ≈ 3 s de carga; el presupuesto de 0,3 s corta durante la apertura.
+        $path = ZipFixtures::write($this->tmp('cadenas'), ZipFixtures::workbookWithSharedStrings('xl/sharedStrings.xml', ['chunks' => ZipFixtures::sharedStringsOfSize(6_000_000)]));
+        $this->assertReaderRejected($path, UnsafeSpreadsheetException::READ_TIMEOUT, ['analysis_timeout_seconds' => 0.3], 3.0);
+    }
+
+    public function test_the_header_of_every_sheet_is_read_inside_the_budget_not_only_the_first_sheets(): void
+    {
+        // OpenSpout recorre el encabezado de TODAS las hojas al abrir el libro: una segunda hoja con nodos antes de <sheetData> también cuenta.
+        $workbook = ZipFixtures::workbook();
+        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        $workbook['xl/workbook.xml'] = $xml.'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Hoja1" sheetId="1" r:id="rId1"/><sheet name="Hoja2" sheetId="2" r:id="rId2"/></sheets></workbook>';
+        $workbook['xl/_rels/workbook.xml.rels'] = $xml.'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>';
+        $workbook['xl/worksheets/sheet2.xml'] = ZipFixtures::sheetParts([['rows' => [1 => ['x']]]], 3_000_000);
+        $path = ZipFixtures::write($this->tmp('segunda-hoja'), $workbook);
+        $this->assertSame(['xl/worksheets/sheet1.xml', 'xl/worksheets/sheet2.xml'], (new ZipArchiveInspector)->inspect($path)->sheetParts);
+        $this->assertReaderRejected($path, UnsafeSpreadsheetException::HEADER_NOT_FOUND, ['analysis_max_sheet_bytes' => 1_000_000], 2.0);
+    }
+
+    public function test_queue_reads_are_not_subject_to_the_interactive_window(): void
+    {
+        // La importación en cola (xlsx_interactive = false) lee el mismo libro que la ventana interactiva rechaza: 12 MB de nodos antes de las filas.
+        $path = ZipFixtures::write($this->tmp('cola'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ZipFixtures::sheetParts([['noise' => 12_000_000], ['rows' => [1 => ['Nro Factura', 'Cantidad'], 2 => ['A-1', 3], 3 => ['A-2', 4]]]])]));
+        $this->assertReaderRejected($path, UnsafeSpreadsheetException::HEADER_NOT_FOUND, ['analysis_max_sheet_bytes' => 4_000_000], 3.0);
+
+        $queue = new XlsxReader($path, ['analysis_max_sheet_bytes' => 4_000_000, 'analysis_timeout_seconds' => 0.001], false);
+        $this->assertSame(['Nro Factura', 'Cantidad'], $queue->headers());
+        $this->assertSame([1 => ['A-1', 3], 2 => ['A-2', 4]], iterator_to_array($queue->rows()));
+        $this->assertNoLeakedReaderState();
+    }
+
+    public function test_the_window_closes_after_the_preview_rows_and_the_rest_of_the_sheet_is_read_at_its_own_pace(): void
+    {
+        // 30 filas, 12 MB de nodos y una fila 31: la ventana (25 filas) se cierra antes del hueco; el hueco no la agota ni aborta la lectura completa.
+        $rows = [];
+        for ($i = 1; $i <= 30; $i++) {
+            $rows[$i] = $i === 1 ? ['Nro Factura', 'Cantidad'] : ["A-{$i}", $i];
+        }
+        $path = ZipFixtures::write($this->tmp('hueco'), ZipFixtures::workbook(null, ['xl/worksheets/sheet1.xml' => ZipFixtures::sheetParts([['rows' => $rows], ['noise' => 12_000_000], ['rows' => [31 => ['A-31', 31]]]])]));
+        $reader = new XlsxReader($path, ['analysis_max_sheet_bytes' => 4_000_000, 'analysis_timeout_seconds' => 0.5]);
+        $this->assertSame(['Nro Factura', 'Cantidad'], $reader->headers());
+        $all = iterator_to_array($reader->rows());
+        $this->assertCount(30, $all);
+        $this->assertSame(['A-31', 31], $all[30]);
     }
 
     public function test_the_reader_rejects_the_bomb_before_parsing_anything(): void

@@ -65,6 +65,7 @@ REASON_MANIFEST_MISMATCH = "artifact_manifest_mismatch"
 REASON_SIZE_MISMATCH = "artifact_size_mismatch"
 REASON_TENANT_MISMATCH = "artifact_tenant_mismatch"
 REASON_CORE_MISMATCH = "artifact_core_mismatch"
+REASON_RUN_MISMATCH = "artifact_run_mismatch"
 REASON_PATH_INVALID = "artifact_path_invalid"
 
 STATUS_SIGNED = "signed"
@@ -317,11 +318,12 @@ def _read_envelope(sidecar: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def verify_artifact_file(path: Path, *, tenant_id: int, core: str | None = None, expected_sha256: str | None = None,
-                         config: SigningConfig | None = None) -> Verification:
+                         config: SigningConfig | None = None, run_id: int | None = None) -> Verification:
     """Verifica un artefacto ANTES de deserializarlo. Los bytes se leen una sola vez y son los que luego se deserializan.
 
     Orden: lectura única → SHA-256 contra el registro → manifiesto (ausente = sin firma) → clave de confianza → firma sobre los
-    bytes del manifiesto → coherencia del manifiesto firmado (SHA-256, tamaño, nombre, empresa, core).
+    bytes del manifiesto → coherencia del manifiesto firmado (SHA-256, tamaño, nombre, empresa, core y —solo si el llamador conoce la
+    corrida que registró el modelo, `run_id`— la corrida).
     """
     config = config or load_config()
     try:
@@ -378,6 +380,8 @@ def verify_artifact_file(path: Path, *, tenant_id: int, core: str | None = None,
         return _reject(REASON_TENANT_MISMATCH)
     if core is not None and manifest.get("core") != core:
         return _reject(REASON_CORE_MISMATCH)
+    if run_id is not None and (isinstance(manifest.get("run_id"), bool) or manifest.get("run_id") != int(run_id)):
+        return _reject(REASON_RUN_MISMATCH)      # un artefacto firmado de otra corrida no se hace pasar por el de esta fila del registro
     return Verification(None, VerifiedArtifact(data, digest, STATUS_SIGNED, key_id, manifest))
 
 

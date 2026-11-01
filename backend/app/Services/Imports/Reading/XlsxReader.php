@@ -12,11 +12,14 @@ use OpenSpout\Reader\XLSX\Reader;
  * XLSX en streaming (OpenSpout). Usa la primera hoja; la primera fila no vacía es el encabezado.
  *
  * Endurecimiento (V2.5 §15, ADR-V25-15; defecto HIGH «ZIP bomb»):
- * - Antes de abrir el libro se inspecciona su directorio ZIP (ZipArchiveInspector): nº de entradas, tamaño descomprimido,
- *   razón de compresión, cadenas compartidas, archivos anidados. Un libro que no cumple lanza UnsafeSpreadsheetException.
- * - La lectura de encabezados y vista previa —la ventana interactiva: las primeras `analysis_rows` filas, que ocurre dentro
- *   de la petición de subida— está acotada en columnas, en filas recorridas (también las vacías) y en tiempo. Pasada esa
- *   ventana, la lectura completa (validación e importación, en cola) sigue el ritmo del archivo.
+ * - Antes de abrir el libro se inspecciona (ZipArchiveInspector): directorio central, partes de control, tamaños REALES de cada
+ *   parte (no se confía en los declarados) y CRC de las partes que el lector abre siempre. Un libro que no cumple lanza
+ *   UnsafeSpreadsheetException.
+ * - La lectura de encabezados y vista previa —la ventana interactiva: la apertura del libro y las primeras `analysis_rows`
+ *   filas, que ocurre dentro de la petición de subida— está acotada en columnas, en filas recorridas (también las vacías), en
+ *   bytes de hoja consumidos y en tiempo; los dos últimos los hace cumplir ZipReadGuard sobre lo que OpenSpout lee de verdad,
+ *   también cuando la apertura carga cadenas compartidas o recorre nodos que no son filas. Pasada la ventana, y siempre que la
+ *   lectura no sea interactiva (la importación en cola), la lectura completa sigue el ritmo del archivo.
  * - `headers()` y `rows()` comparten la misma apertura del libro: las cadenas compartidas se cargan una sola vez.
  */
 final class XlsxReader implements TabularReader
@@ -29,10 +32,14 @@ final class XlsxReader implements TabularReader
     /** Recorrido abierto por headers() y todavía no entregado a rows(). */
     private ?Generator $primed = null;
 
-    private bool $inspected = false;
+    private ?ZipInspection $inspection = null;
 
-    /** @param array<string, int|float>|null $limits sobrescrituras de config('upload_safety.xlsx') (pruebas) */
-    public function __construct(private readonly string $path, private readonly ?array $limits = null) {}
+    /**
+     * @param  array<string, int|float>|null  $limits  sobrescrituras de config('upload_safety.xlsx') (pruebas)
+     * @param  bool  $interactive  true (por defecto, seguro): la apertura y las primeras filas están sujetas a la ventana interactiva
+     *                             (tiempo y bytes). false para la lectura en cola (validación e importación), que no la tiene.
+     */
+    public function __construct(private readonly string $path, private readonly ?array $limits = null, private readonly bool $interactive = true) {}
 
     public function dialect(): array
     {
@@ -84,50 +91,49 @@ final class XlsxReader implements TabularReader
     private function rawRows(): Generator
     {
         $limits = $this->effectiveLimits();
-        if (! $this->inspected) {
-            (new ZipArchiveInspector($limits))->inspect($this->path);
-            $this->inspected = true;
-        }
+        $this->inspection ??= (new ZipArchiveInspector($limits))->inspect($this->path);
+        $guard = new ZipReadGuard((string) realpath($this->path), $this->inspection, $limits, $this->interactive);
         $scanned = 0;
         $delivered = 0;
         // Se conservan las filas vacías para poder contarlas y acotarlas; el filtro de abajo las descarta como antes.
         $reader = new Reader(new Options(SHOULD_FORMAT_DATES: false, SHOULD_PRESERVE_EMPTY_ROWS: true));
-        $reader->open($this->path);   // OpenSpout carga aquí las cadenas compartidas (no es interrumpible): lo acota el tope de tamaño del inspector
-        // El presupuesto de tiempo cubre el recorrido de filas, que sí puede interrumpirse; empieza con el libro ya abierto.
-        $deadline = microtime(true) + (float) $limits['analysis_timeout_seconds'];
+        // OpenSpout carga aquí las cadenas compartidas y recorre el encabezado de cada hoja: la guarda acota bytes y tiempo.
+        $guard->run(fn () => $reader->open($this->path));
         try {
-            foreach ($reader->getSheetIterator() as $sheet) {
-                $this->sheetName = $sheet->getName();
-                foreach ($sheet->getRowIterator() as $row) {
-                    $interactive = $delivered < (int) $limits['analysis_rows'];
-                    if ($interactive) {
-                        if (++$scanned > (int) $limits['analysis_max_scanned_rows']) {
-                            throw new UnsafeSpreadsheetException(
-                                sprintf('No se encontraron los encabezados y las primeras filas de datos en las primeras %s filas de la hoja. Quite las filas vacías del inicio o use CSV.', number_format((int) $limits['analysis_max_scanned_rows'], 0, ',', '.')),
-                                UnsafeSpreadsheetException::HEADER_NOT_FOUND, 422, ['max_scanned_rows' => (int) $limits['analysis_max_scanned_rows']],
-                            );
-                        }
-                        if (microtime(true) > $deadline) {
-                            throw new UnsafeSpreadsheetException(
-                                sprintf('El análisis del libro superó el tiempo máximo permitido (%s s). Simplifique el libro (menos columnas o textos distintos) o use CSV.', rtrim(rtrim(number_format((float) $limits['analysis_timeout_seconds'], 2, ',', ''), '0'), ',')),
-                                UnsafeSpreadsheetException::READ_TIMEOUT, 422, ['timeout_seconds' => (float) $limits['analysis_timeout_seconds']],
-                            );
-                        }
-                    }
-                    $values = $row->toArray();
-                    if (count(array_filter($values, fn ($v) => $v !== null && $v !== '')) === 0) {
-                        continue;
-                    }
-                    if ($interactive && count($values) > (int) $limits['max_columns']) {
+            $sheets = $reader->getSheetIterator();
+            $sheets->rewind();
+            if (! $sheets->valid()) {
+                return;
+            }
+            $sheet = $sheets->current();   // solo la primera hoja
+            $this->sheetName = $sheet->getName();
+            $rows = $sheet->getRowIterator();
+            $guard->run(fn () => $rows->rewind());   // abre la hoja y lee hasta la primera fila
+            for (; $rows->valid(); $guard->run(fn () => $rows->next())) {
+                $interactive = $delivered < (int) $limits['analysis_rows'];
+                if ($interactive) {
+                    if (++$scanned > (int) $limits['analysis_max_scanned_rows']) {
                         throw new UnsafeSpreadsheetException(
-                            sprintf('La hoja tiene una fila con %s columnas (máximo permitido: %s). Quite las columnas innecesarias o use CSV.', number_format(count($values), 0, ',', '.'), number_format((int) $limits['max_columns'], 0, ',', '.')),
-                            UnsafeSpreadsheetException::TOO_MANY_COLUMNS, 422, ['columns' => count($values), 'max_columns' => (int) $limits['max_columns']],
+                            sprintf('No se encontraron los encabezados y las primeras filas de datos en las primeras %s filas de la hoja. Quite las filas vacías del inicio o use CSV.', number_format((int) $limits['analysis_max_scanned_rows'], 0, ',', '.')),
+                            UnsafeSpreadsheetException::HEADER_NOT_FOUND, 422, ['max_scanned_rows' => (int) $limits['analysis_max_scanned_rows']],
                         );
                     }
-                    $delivered++;
-                    yield $values;
+                    $guard->checkDeadline();
                 }
-                break; // solo la primera hoja
+                $values = $rows->current()->toArray();
+                if (count(array_filter($values, fn ($v) => $v !== null && $v !== '')) === 0) {
+                    continue;
+                }
+                if ($interactive && count($values) > (int) $limits['max_columns']) {
+                    throw new UnsafeSpreadsheetException(
+                        sprintf('La hoja tiene una fila con %s columnas (máximo permitido: %s). Quite las columnas innecesarias o use CSV.', number_format(count($values), 0, ',', '.'), number_format((int) $limits['max_columns'], 0, ',', '.')),
+                        UnsafeSpreadsheetException::TOO_MANY_COLUMNS, 422, ['columns' => count($values), 'max_columns' => (int) $limits['max_columns']],
+                    );
+                }
+                if (++$delivered >= (int) $limits['analysis_rows']) {
+                    $guard->closeWindow();   // entregadas las filas de la ventana interactiva: el resto sigue el ritmo del archivo
+                }
+                yield $values;
             }
         } finally {
             $reader->close();

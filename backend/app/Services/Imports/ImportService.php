@@ -288,7 +288,8 @@ final class ImportService
             }
         }
 
-        $reader = $this->readers->make($this->disk()->path($job->stored_path), $job->file_format, $job->options ?? []);
+        // Lectura en cola (validación e importación): sin la ventana interactiva de la subida (tiempo/bytes de la vista previa).
+        $reader = $this->readers->make($this->disk()->path($job->stored_path), $job->file_format, array_merge($job->options ?? [], ['xlsx_interactive' => false]));
         $ctx = new ImportRunContext($tenant, $job, $reader, $job->column_mapping ?? [], $commit, $ingestion);
         $result = $this->processors->for(ImportEntity::from($job->entity_type))->run($ctx);
 

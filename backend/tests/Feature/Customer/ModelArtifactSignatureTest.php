@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Customer;
 
+use App\Exceptions\DomainStateException;
+use App\Models\ModelRegistry;
 use App\Models\Tenant;
 use App\Services\Forecasting\ModelArtifactVerifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -359,6 +361,37 @@ final class ModelArtifactSignatureTest extends TestCase
         $this->rollback($old, $user, $tenant)->assertStatus(409)->assertJsonPath('code', 'rollback_artifact_signature_invalid')
             ->assertJsonPath('context.reason', 'artifact_core_mismatch');
         $this->assertDatabaseHas('model_registry', ['id' => $old, 'status' => 'retired']);
+    }
+
+    public function test_the_manifest_run_is_compared_with_the_one_the_caller_knows(): void
+    {
+        [$file, $sha] = $this->artifact(7);
+        $this->signArtifactFile($file, 7, ['run_id' => 41]);
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha, 'customer', 41)['ok']);
+        $this->assertSame(ModelArtifactVerifier::REASON_RUN_MISMATCH, $this->verifier()->inspect($file, 7, $sha, 'customer', 42)['reason'], 'otra corrida');
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha, 'customer')['ok'], 'sin corrida conocida no se compara');
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha)['ok']);
+    }
+
+    public function test_a_demand_registry_row_must_point_to_the_artifact_of_its_own_run(): void
+    {
+        [$tenant] = $this->createTenantWithUser();
+        [$file, $sha] = $this->artifact($tenant->id);
+        $this->signArtifactFile($file, $tenant->id, ['core' => 'demand', 'run_id' => 41]);   // firma legítima del modelo de la corrida 41
+        $row = fn (int $run) => (new ModelRegistry)->forceFill([
+            'tenant_id' => $tenant->id, 'version' => "t{$tenant->id}-r{$run}-lightgbm", 'core' => 'demand', 'forecast_run_id' => $run,
+            'artifact_path' => ltrim(substr($file, strlen($this->dir)), '/'), 'artifact_sha256' => $sha,
+        ]);
+
+        $this->assertSame('verified', $this->verifier()->verify([$row(41)])['status']);
+        // Una fila de otra corrida que reutiliza ese artefacto firmado (p. ej. un modelo antiguo legítimo) se rechaza.
+        try {
+            $this->verifier()->verify([$row(42)]);
+            $this->fail('Debió rechazar la fila de otra corrida.');
+        } catch (DomainStateException $e) {
+            $this->assertSame('rollback_artifact_signature_invalid', $e->errorCode);
+            $this->assertSame(ModelArtifactVerifier::REASON_RUN_MISMATCH, $e->context['reason']);
+        }
     }
 
     public function test_the_unsigned_mark_left_by_the_engine_blocks_a_rollback_even_when_the_file_is_not_visible(): void

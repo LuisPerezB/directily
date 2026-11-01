@@ -18,8 +18,10 @@ use Illuminate\Support\Facades\Log;
  * 4. Clase de cada dirección (SqlNetworkClassifier; las IPv4 embebidas en IPv6 se clasifican por su IPv4):
  *    - Bloqueada (metadatos, link-local, 0.0.0.0/8, multicast, broadcast, formas de transición): SIEMPRE denegada.
  *    - Loopback: denegada; solo la autoriza una IP literal o un CIDR explícitos de la lista blanca, y nunca en producción.
- *    - Privada (RFC 1918, 100.64.0.0/10, ULA fc00::/7…): denegada por defecto; la autoriza estar en `allowed_hosts` (el
- *      destino fue aprobado por el operador) o que la IP caiga en `connectors.sql.allowed_cidrs`.
+ *    - Privada (RFC 1918, 100.64.0.0/10, ULA fc00::/7…): denegada por defecto; la autoriza que la IP caiga en
+ *      `connectors.sql.allowed_cidrs` o que el destino sea una IP LITERAL que figure en `allowed_hosts` (el operador la aprobó
+ *      con esa IP). Un NOMBRE en `allowed_hosts` solo decide si el destino es admisible; no autoriza por sí mismo a que resuelva
+ *      a una red privada: eso exige un CIDR (si el DNS del nombre pasara a apuntar a otra red interna, no se conectaría).
  *    - Pública: permitida.
  * 5. La conexión se abre contra la IP FIJADA (SqlResolvedTarget::address), nunca contra el nombre: no hay segunda resolución
  *    (DNS rebinding). PostgreSQL conserva `host` para TLS y usa `hostaddr`; MySQL y SQL Server se conectan al literal IP.
@@ -67,8 +69,8 @@ final class SqlHostPolicy
             $effective = IpAddress::embeddedIPv4($packed) ?? $packed;
             match (SqlNetworkClassifier::classify($packed)) {
                 SqlAddressClass::Public => null,
-                SqlAddressClass::Private => $listed !== null || IpAddress::inAnyCidr($effective, $cidrs)
-                    ? null
+                SqlAddressClass::Private => ($literal !== null && $listed !== null) || IpAddress::inAnyCidr($effective, $cidrs)
+                    ? null   // IP literal aprobada en la lista (ya superó isListed) o dentro de un CIDR autorizado
                     : throw self::denied(SqlHostRejected::PRIVATE, $name, $address),
                 SqlAddressClass::Loopback => ! app()->isProduction() && (self::ipIsListed($effective, $listed ?? []) || IpAddress::inAnyCidr($effective, $cidrs))
                     ? null
