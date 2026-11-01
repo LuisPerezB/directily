@@ -1,0 +1,841 @@
+{
+ "meta": {
+  "wave": "W3",
+  "date": "2026-11-01",
+  "commit": "a656521 · 562f2b0 · 552f6c0",
+  "summary": "Calidad ML P0 de W3 (W3-A métricas de Demand por horizonte y segmento con denominador, estabilidad y escenarios de forma de serie; W3-B política heredada parametrizada con paridad exacta, política de promoción V2.5 en paralelo con champion/challenger, shadow mode con evaluación prospectiva y Optuna acotado; W3-C Customer Core S05 con número de pedidos, cantidad por pedido, unidades, ventana de recompra validada por cobertura, calibración por segmento, lift@K y drift; la exposición en API y UI es de W3-D y no se registra aquí): 21 requisitos pasan a IMPLEMENTADO (14 desde PARCIAL y 7 desde PENDIENTE), 9 pasan de PENDIENTE a PARCIAL, 22 siguen PARCIAL con la brecha acotada y 2 ya IMPLEMENTADOS suman evidencia; 6 defectos registrados (0 corregidos, 4 corregidos parcialmente y 2 mitigados). La política V2.5 corre como sombra de decisión y por defecto gobierna la heredada (ADR-V25-21): sus gates figuran PARCIAL hasta que el piloto apruebe los umbrales; todo se probó con datos sintéticos, sin validación real."
+ },
+ "defects": [
+  {
+   "area": "demanda",
+   "index": 8,
+   "title_prefix": "La promoción del modelo es automática: n",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_both_policies_are_recorded_per_scope_and_exactly_one_governs",
+    "engine/tests/unit/test_promotion_v25.py::test_new_candidate_must_beat_the_current_champion",
+    "engine/tests/unit/test_promotion_v25.py::test_gate_valid_data_follows_the_w2c_quality_gate",
+    "engine/tests/unit/test_promotion_v25.py::test_human_approval_can_block_serving_when_configured",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_decisions_are_stored_per_policy_and_scope_with_the_right_tenant",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_champion_is_the_model_served_by_the_previous_current_run",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/pipeline/forecast_run.py"
+   ],
+   "note": "La política de promoción V2.5 se calcula en paralelo a la heredada y cada decisión (champion, candidato, gates con evidencia de calidad de datos y de mejora, motivo) queda en model_promotion_decisions por alcance. Pendiente: por defecto gobierna la heredada y la promoción sigue siendo automática; la aprobación humana separada y el estado approved son de W4 · S06 (el gate human_approval queda pending y approved_by/approved_at nulos); los umbrales de los gates no están aprobados en el piloto."
+  },
+  {
+   "area": "demanda",
+   "index": 3,
+   "title_prefix": "Un modelo que pierde contra el baseline ",
+   "state": "mitigado",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_if_no_model_beats_the_baseline_the_baseline_is_published",
+    "engine/tests/unit/test_promotion_v25.py::test_without_an_independent_holdout_v25_cannot_certify_a_promotion",
+    "engine/tests/unit/test_promotion_v25.py::test_the_final_holdout_never_decides_or_tunes",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_v25_governance_serves_the_v25_decision_and_keeps_the_holdout_honest",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_v25_policy_governs_when_the_company_asks_for_it",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_default_pipeline_is_governed_by_the_legacy_policy",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "La política V2.5, que decide solo con las ventanas de selección, publica el baseline cuando ningún modelo lo supera y no promueve sin un período final independiente, queda registrada en cada ejecución y gobierna lo servido cuando la empresa la elige. Pendiente: por defecto rige la heredada, que elige el modelo de producción con todas las ventanas (período final incluido) y publica un modelo que pierde contra el baseline en el período final; la V2.5 no es el valor por defecto hasta que el piloto apruebe sus umbrales."
+  },
+  {
+   "area": "demanda",
+   "index": 10,
+   "title_prefix": "El umbral inclusivo del 3 % es sensible ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_improvement_threshold_tolerates_floating_point_noise_at_the_boundary",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_at_the_three_percent_boundary_including_float_noise",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/selection/selector.py"
+   ],
+   "note": "La política V2.5 compara la mejora con tolerancia de 1e-9 (un WAPE de 0,19400000000000003 frente a 0,2 × 0,97 pasa y 2,95 % sigue sin alcanzar el 3 %). Pendiente: la política heredada conserva el límite inclusivo ≤ sin tolerancia bit a bit por la paridad exigida, de modo que la sensibilidad al ruido de punto flotante sigue en la ruta servida por defecto."
+  },
+  {
+   "area": "demanda",
+   "index": 11,
+   "title_prefix": "min_improvement acepta cualquier número ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parameters_are_range_validated_in_the_policy_and_in_the_config",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_an_invalid_promotion_config_is_rejected_not_applied",
+    "engine/predictily_engine/platform/config.py (CONFIG_CONSTRAINTS)"
+   ],
+   "note": "demand.min_improvement queda validado en [0; 0,5] (0,9 se rechaza con out_of_range) y los parámetros del bloque promotion también; una configuración inválida rechaza la ejecución con 422 y no se aplica. Pendiente: demand.max_backtest_windows sigue sin validarse (R-064) y un valor mayor que 3 no tiene efecto."
+  },
+  {
+   "area": "demanda",
+   "index": 18,
+   "title_prefix": "Desempate implícito y decisión agregada ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_a_pooled_family_that_is_not_a_candidate_of_the_class_is_not_assigned_to_it",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_on_synthetic_backtests",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "En la política V2.5 una clase con pocas series hereda la decisión agregada solo si esa familia es candidata de la clase; si no, publica el baseline con el motivo. Pendiente: la heredada conserva su comportamiento por la paridad exacta (sigue asignando la familia agregada aunque no sea candidata de la clase) y no hay un desempate explícito documentado por simplicidad o costo."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 4,
+   "title_prefix": "El reentrenamiento retira al champion vi",
+   "state": "mitigado",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_new_candidate_must_beat_the_current_champion",
+    "engine/tests/unit/test_promotion_v25.py::test_a_champion_worse_than_the_baseline_is_not_kept_when_the_challenger_fails_a_gate",
+    "engine/tests/unit/test_promotion_v25.py::test_hard_gate_failure_keeps_serving_a_healthy_champion_not_the_rejected_candidate",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_champion_is_the_model_served_by_the_previous_current_run",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_a_historical_run_does_not_take_the_current_run_as_champion",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/pipeline/forecast_run.py"
+   ],
+   "note": "Cada ejecución compara al candidato con el champion vigente (la familia que la misma clase sirvió en la ejecución de producción anterior) y registra la decisión; con la política V2.5 gobernando, un candidato que no lo supera deja al champion sirviéndose (keep_champion) y un champion que ya no supera al baseline se sustituye por él. Pendiente: por defecto rige la heredada; el registro de modelos sigue retirando la producción anterior al completar la ejecución y no tiene el estado rejected (W4 · S06); la regla de retiro del Customer Core no se tocó."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "V25-SEL-014",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_every_metric_matches_the_independent_reference_for_every_dimension_horizon_and_family",
+    "engine/tests/unit/test_segment_metrics.py::test_horizons_are_cumulative_and_only_the_ones_the_backtest_reaches_are_emitted",
+    "engine/tests/unit/test_segment_metrics.py::test_roles_baseline_best_statistical_ml_and_selected_are_labeled",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_every_dimension_partitions_the_evaluable_observations_of_the_served_model",
+    "engine/tests/unit/test_segment_metrics_parity.py::test_the_pre_existing_evaluation_rows_are_unchanged_and_come_first",
+    "engine/tests/unit/test_pipeline.py::test_compares_against_baseline",
+    "engine/predictily_engine/demand/segments.py; engine/predictily_engine/demand/evaluation.py"
+   ],
+   "note": "Para el servido, el baseline, el mejor estadístico y LightGBM el motor persiste WAPE, MAE, RMSE, MASE, RMSSE y sesgo por horizonte del catálogo que el backtest alcanza (los primeros H días y el total de H días) y por segmento: clase de demanda, categoría, sucursal, tramo de volumen (top 20 % / resto) y vida de la serie (nueva < 90 días / madura), además de las filas previas por producto y serie. Una prueba recalcula cada métrica sin la maquinaria de agregados para seis segmentos, dos horizontes y tres familias y las iguala, y otra afirma que cada dimensión parte las observaciones evaluables del servido. Límites: datos sintéticos; un segmento con menos de segment_min_series (3) series o segment_min_obs (90 series-día) queda insufficient_data y sin cifras; los umbrales son iniciales y «a aprobar en el piloto»; la exposición por API y UI es de W3-D."
+  },
+  {
+   "id": "V25-DEM-031",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_constant_series_the_served_model_does_not_worsen_the_baseline_and_the_scaled_metrics_are_undefined",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_irregular_series_metrics_are_defined_with_explicit_denominators_and_cover_every_dimension",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_zero_demand_segment_has_no_wape_but_an_explicit_alternative_and_no_invented_number",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_few_sales_make_the_wape_unstable_in_the_selection_windows_and_few_days_make_the_segment_insufficient",
+    "engine/tests/unit/test_segment_metrics.py::test_all_zero_actuals_give_no_wape_but_an_explicit_alternative_and_never_a_zero_division",
+    "engine/tests/unit/test_segment_metrics.py::test_without_a_defined_scale_the_alternative_is_the_aggregate_absolute_error",
+    "engine/tests/unit/_scenario_builders.py; engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "Los escenarios constante, irregular y de ceros corren por el pipeline completo (420 días ficticios, 6 a 8 series generadas en la prueba) y cada uno afirma algo verificable. Constante: el servido no empeora al baseline en ningún horizonte ni alcance, el WAPE es 0 con denominador explícito mayor que cero y MASE/RMSSE quedan indefinidos (escala 0) y contados en exclusions.scale_undefined, nunca como cero. Irregular: WAPE entre 0 y 1,5 con denominador igual a la suma de reales del backtest, MASE/RMSSE definidos, cobertura y anchura de intervalos y las cinco dimensiones de segmento presentes. Ceros: un segmento sin ventas en el período final tiene WAPE y sesgo nulos (wape_status = undefined), métrica alternativa explícita, MAE finito y ninguna cifra no finita en ninguna fila; con pocas ventas el WAPE es inestable y el valor crudo queda aparte. Límites: son datos sintéticos que demuestran propiedades del pipeline, no precisión real."
+  },
+  {
+   "id": "V25-DEM-035",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_a_ten_day_stockout_is_censored_counted_and_kept_out_of_the_wape",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_the_stockout_does_not_contaminate_the_training_of_the_global_model_or_the_forecast_level",
+    "engine/tests/unit/test_segment_metrics.py::test_the_wape_denominator_is_the_sum_of_actuals_and_excluded_days_are_counted_by_class_not_zeroed",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_with_profile_classes_and_stockouts",
+    "engine/predictily_engine/features/builder.py; engine/predictily_engine/selection/selector.py; engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "Un quiebre de 10 días en una de seis series (existencias 0 más el día siguiente, que empieza sin stock: 11 días stockout_censored) se marca en el panel, las métricas lo excluyen y lo cuentan (exclusions.stockout_days = 11 solo en la categoría de la serie; 529 de 540 días evaluables) y el WAPE equivale al calculado sin esos días y sería mayor si contaran como ceros; el peso de entrenamiento de LightGBM es 0 en esos 11 días y 1 en el resto, y el pronóstico de la serie queda a menos de 5 % de su nivel real mientras que tratado como ceros observados bajaría más de 5 %. La exclusión de la selección se comprueba por paridad con la regla anterior sobre un backtest con 5 % de días con quiebre. Límites: sin inventario histórico no hay detección de quiebre (V25-DEM-010); datos sintéticos."
+  },
+  {
+   "id": "V25-DEM-032",
+   "status": "PARCIAL",
+   "gap": "Los escenarios de varios picos y de ruptura estacional existen como pruebas del pipeline, pero la ruptura solo se REPORTA como inestabilidad entre ventanas: no hay detección de cambio de régimen ni degradación automática (quality_status no baja ni se asigna case_label = 'regime_change') y con el umbral por defecto de dispersión entre ventanas (segment_stability_cv_warn = 0,5) la misma ruptura de la prueba no se marca; el umbral es inicial y queda a aprobar en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_series_with_several_spikes_are_erratic_keep_their_spikes_in_the_error_and_widen_the_intervals",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_a_seasonal_break_shows_up_as_instability_between_windows_but_a_stable_series_does_not",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_the_stability_threshold_is_configurable_and_recorded",
+    "engine/predictily_engine/demand/segments.py; engine/tests/unit/_scenario_builders.py"
+   ],
+   "note": "Varios picos: las series se clasifican erratic/lumpy, los picos no se descartan (están en el denominador y en el error, 0 días excluidos) y la anchura del intervalo 95 % es mayor que la de la serie lisa. Ruptura estacional (nivel ×2 y fase semanal +3 días): la ventana cuyo horizonte contiene la ruptura empeora más de 1,4 veces frente a las anteriores y el desvío entre ventanas supera 3 veces el del control sin ruptura; con segment_stability_cv_warn = 0,2 la ruptura se marca unstable_across_windows y el control no. Es un reporte, no un detector."
+  },
+  {
+   "id": "V25-DEM-033",
+   "status": "PARCIAL",
+   "gap": "El escenario mide a Seasonal Naive y LightGBM con una promoción conocida al origen frente a una registrada después, sin fuga, pero no hay una dimensión «día con / sin promoción» en las filas de segmento ni ablación de promo_discount, y los estadísticos siguen sin usar promociones. En los datos sintéticos LightGBM mejora el WAPE total del período final y aun así no supera al baseline en los días de promoción; medir el efecto de una promoción exige promociones reales del cliente.",
+   "evidence": [
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_a_promotion_known_at_the_origin_helps_ml_but_one_registered_later_does_not_and_the_baseline_ignores_both",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_a_promotion_registered_after_the_origin_changes_no_backtest_forecast_at_all",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_the_segment_metrics_separate_baseline_and_ml_in_the_promotion_scenario",
+    "engine/tests/unit/_scenario_builders.py"
+   ],
+   "note": "Seasonal Naive no usa promociones (error idéntico con o sin conocimiento previo); con la promoción conocida al origen el WAPE de LightGBM en los días de promoción baja de 0,67 a 0,54; una promoción registrada después del origen no cambia ninguna predicción del backtest (idéntico a quitarla de la tabla). Datos ficticios."
+  },
+  {
+   "id": "V25-DEM-030",
+   "status": "PARCIAL",
+   "gap": "Baseline y ML se comparan ahora por ventana (WAPE por ventana con su denominador y estabilidad), horizonte y segmento (clase, categoría, sucursal, volumen y vida) con pruebas que afirman cada dimensión; faltan: cobertura e intervalos solo existen para el servido y el baseline (no para LightGBM ni para el mejor estadístico), MAE/MASE/sesgo no se persisten por ventana (solo el WAPE), scripts/benchmark_demand_v2.py no se ejercita en ninguna prueba y la exposición por API y UI es de W3-D.",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_every_metric_matches_the_independent_reference_for_every_dimension_horizon_and_family",
+    "engine/tests/unit/test_segment_metrics.py::test_roles_baseline_best_statistical_ml_and_selected_are_labeled",
+    "engine/tests/unit/test_segment_metrics.py::test_stability_reports_the_wape_of_each_window_and_the_std_of_the_independent_period_is_not_estimable",
+    "engine/tests/unit/test_segment_metrics.py::test_comparison_verdicts_use_the_configurable_tolerance_and_declare_the_metric",
+    "engine/tests/integration/test_segment_metrics_integration.py::test_segment_rows_are_persisted_with_the_contract_of_the_table",
+    "engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "Cada fila de segmento del servido lleva la comparación con el baseline, con el mejor estadístico y con LightGBM (métrica usada, diferencia, mejora relativa y veredicto better / similar / worse / not_comparable), en las ventanas de selección y en el período final, con n de ventanas y la estabilidad del WAPE entre ventanas."
+  },
+  {
+   "id": "V25-SEL-016",
+   "status": "PARCIAL",
+   "gap": "El WAPE por ventana, su media, desvío (ddof = 1) y coeficiente de variación se persisten por segmento y horizonte (solo cuentan las ventanas con denominador suficiente) y el período final, que es un único origen, declara el desvío «no estimable» (single_window); faltan los intervalos de confianza (bootstrap por bloques) de las métricas y de la diferencia seleccionado − baseline y la evaluación en varios orígenes externos; las ventanas de selección se solapan y no son independientes y el umbral de dispersión (0,5) es inicial y queda a aprobar en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_window_stability_is_not_estimable_with_one_window_and_flags_a_dispersed_series",
+    "engine/tests/unit/test_segment_metrics.py::test_stability_reports_the_wape_of_each_window_and_the_std_of_the_independent_period_is_not_estimable",
+    "engine/tests/unit/test_segment_metrics.py::test_stability_leaves_out_the_windows_whose_denominator_is_below_the_wape_minimum",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_a_seasonal_break_shows_up_as_instability_between_windows_but_a_stable_series_does_not",
+    "engine/predictily_engine/backtest/metrics.py; engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "Con una sola ventana la dispersión es «no estimable» y nunca 0; una ventana con denominador menor que wape_min_denominator se lista como no usada y, si ninguna alcanza, la estabilidad es insufficient_denominator."
+  },
+  {
+   "id": "V25-SEL-020",
+   "status": "PARCIAL",
+   "gap": "La comparación seleccionado / mejor estadístico / LightGBM frente al baseline se persiste por segmento (clase, categoría, sucursal, tramo de volumen, vida de la serie) y horizonte con veredicto y métrica usada, pero no por SKU: las filas product y series siguen sin la familia baseline ni delta frente a ella, así que «mejor que el baseline en este SKU» exige recalcular desde el backtest.",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_comparison_verdicts_use_the_configurable_tolerance_and_declare_the_metric",
+    "engine/tests/unit/test_segment_metrics.py::test_a_model_with_different_support_is_not_compared_on_absolute_error",
+    "engine/tests/unit/test_segment_metrics.py::test_roles_baseline_best_statistical_ml_and_selected_are_labeled",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_the_segment_metrics_separate_baseline_and_ml_in_the_promotion_scenario",
+    "engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "Un modelo con soporte distinto (por ejemplo LightGBM sin filas en una ventana) no se compara por error absoluto; si algún WAPE no es confiable la comparación usa el error absoluto agregado sobre las mismas observaciones."
+  },
+  {
+   "id": "V25-HOR-008",
+   "status": "PARCIAL",
+   "gap": "Las filas de segmento comparan baseline y ML (WAPE, MAE, MASE, sesgo; cobertura solo del servido y del baseline) por cada horizonte del catálogo que el backtest alcanza, incluido el 15 cuando hay al menos 15 pasos, con n de ventanas y estabilidad; pero la evaluación de los horizontes cortos descansa en pocos orígenes (2-3 ventanas de selección más el período final, no los ≥ 12 orígenes de la aceptación), no hay selección por horizonte y todos los valores salen de datos sintéticos.",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_horizons_are_cumulative_and_only_the_ones_the_backtest_reaches_are_emitted",
+    "engine/tests/unit/test_forecast_validation_scenarios.py::test_constant_series_the_served_model_does_not_worsen_the_baseline_and_the_scaled_metrics_are_undefined",
+    "engine/tests/unit/test_horizons.py::test_pipeline_evaluates_the_total_of_each_horizon_and_publishes_n_obs",
+    "engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "H significa los primeros H días del horizonte; un H mayor que el backtest no genera fila (summary.segment_metrics.horizons_not_evaluated lo declara) y con pocas series (6 series × H menos de 90 series-día) el período final de H = 7 y 14 es insufficient_data."
+  },
+  {
+   "id": "V25-DEM-021",
+   "status": "PARCIAL",
+   "gap": "Las agrupaciones por volumen (top 20 % / resto de las series por unidades de los últimos 90 días hasta el corte de cada ventana), intermitencia (clase de demanda) y vida de la serie (nueva < 90 días / madura) existen, se calculan as-of y se usan para evaluar y para el gate de segmentos críticos de la política V2.5; no hay segmentación ABC por ingreso ni por comportamiento (cluster), y los grupos no se usan para seleccionar ni calibrar modelos (la selección sigue siendo por clase de demanda).",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_volume_tier_and_series_age_use_only_what_was_known_at_each_cutoff",
+    "engine/tests/unit/test_segment_metrics.py::test_the_top_share_and_the_new_series_threshold_are_configurable",
+    "engine/tests/unit/test_segment_metrics.py::test_the_provider_for_the_promotion_policy_returns_the_same_segments_as_the_metrics",
+    "engine/tests/unit/test_promotion_v25.py::test_gate_segment_regression_blocks_a_material_loss_in_a_critical_segment",
+    "engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "El tramo de volumen y la vida se recalculan con el panel tal como se conocía en cada corte: una explosión de ventas posterior al corte no cambia el tramo de esa ventana. Los umbrales (20 %, 90 días) son iniciales y quedan a aprobar en el piloto."
+  },
+  {
+   "id": "V25-SEL-007",
+   "status": "PARCIAL",
+   "gap": "La evaluación se repite ahora por horizonte (los del catálogo que el backtest alcanza) y por segmento (clase, categoría, sucursal, volumen y vida) y la política V2.5 registra alcances informativos por horizonte; la selección sigue siendo una sola por clase de demanda para todos los horizontes (no por horizonte ni por SKU), la estacionalidad no es un eje y los horizontes cortos se evalúan con pocos orígenes (no los ≥ 12 de la aceptación).",
+   "evidence": [
+    "engine/tests/unit/test_segment_metrics.py::test_every_metric_matches_the_independent_reference_for_every_dimension_horizon_and_family",
+    "engine/tests/unit/test_segment_metrics.py::test_horizons_are_cumulative_and_only_the_ones_the_backtest_reaches_are_emitted",
+    "engine/tests/unit/test_promotion_v25.py::test_both_policies_are_recorded_per_scope_and_exactly_one_governs",
+    "engine/predictily_engine/demand/segments.py; engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "Los alcances horizon:<H> de model_promotion_decisions son informativos y nunca efectivos: la familia servida no varía por horizonte."
+  },
+  {
+   "id": "V25-SEL-036",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_selection_legacy_parity.py::test_default_policy_is_the_legacy_rule",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_needed_windows_equals_ceil_two_thirds_for_every_window_count",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parameters_are_range_validated_in_the_policy_and_in_the_config",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_policy_version_is_a_sha256_of_the_parameters",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_on_synthetic_backtests",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_with_profile_classes_and_stockouts",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_on_the_demo_backtests",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_default_pipeline_is_governed_by_the_legacy_policy",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parity_at_the_three_percent_boundary_including_float_noise",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_with_four_windows_the_legacy_rule_requires_three_not_two_thirds_of_four",
+    "engine/tests/unit/test_promotion_v25.py::test_both_policies_are_recorded_per_scope_and_exactly_one_governs",
+    "engine/tests/unit/test_promotion_v25.py::test_legacy_governs_by_default_and_v25_is_a_decision_shadow",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_summary_and_manifest_cite_both_policies",
+    "engine/predictily_engine/selection/selector.py (LegacyPolicy); engine/tests/unit/legacy_selector_reference.py"
+   ],
+   "note": "La regla heredada (mejora mínima de WAPE del 3 % y ⌈n × 2/3⌉ ventanas ganadas) es una política parametrizada (LegacyPolicy: min_improvement ∈ [0; 0,5] y windows_won_fraction ∈ [0,5; 1], validados en la configuración) y versionada (policy_version = SHA-256 de sus parámetros). Con los valores por defecto su resultado es idéntico al del selector anterior: ganadores, respaldo, razones, clases agregadas y tablas de WAPE coinciden con una copia congelada del commit 4eb34f4 en 28 combinaciones de ventanas y de peso de LightGBM, con y sin columna de clase, con quiebres, en el límite del 3 % (incluido el ruido de punto flotante) y sobre los backtests de la demo; con 4 ventanas exige 3, no «≥ 2/3». Cada ejecución calcula en paralelo la política V2.5, registra ambas por alcance en model_promotion_decisions y las cita en summary.promotion y en el manifiesto. Límites: el límite inclusivo ≤ se conserva bit a bit (el ruido de punto flotante sigue afectando a la heredada; la V2.5 compara con tolerancia); la heredada gobierna por defecto."
+  },
+  {
+   "id": "V25-SEL-035",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_selection_legacy_parity.py::test_parameters_are_range_validated_in_the_policy_and_in_the_config",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_policy_version_is_a_sha256_of_the_parameters",
+    "engine/tests/unit/test_promotion_v25.py::test_policy_version_is_the_sha256_of_the_parameters",
+    "engine/tests/unit/test_promotion_v25.py::test_selection_criterion_text_is_generated_from_the_policy",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_the_promotion_policy_is_part_of_the_run_fingerprint_and_the_criterion_is_generated",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_an_invalid_promotion_config_is_rejected_not_applied",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_run_fingerprint_records_the_promotion_policy",
+    "engine/predictily_engine/platform/config.py (bloque promotion y CONFIG_CONSTRAINTS); engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "La política de promoción es configurable por core → perfil sectorial → empresa (tenants.settings.cores.promotion) con rangos validados (un valor inválido rechaza la ejecución con 422 invalid_configuration y no se aplica), versionada (policy_version = SHA-256 de los parámetros de cada política) y su versión y la huella del bloque entran en la huella de la ejecución (effective_config.promotion y config_version); el criterio del manifiesto se genera de la política y no es una frase fija. Cada umbral de los gates V2.5 tiene su justificación escrita en docs/ml/FORECAST_SELECTION.md. Límites: todos son valores iniciales «a aprobar en el piloto», ninguno validado con datos reales; config_version de las ejecuciones cambió al incluir la política; la configuración desde la API del backend es de W3-D."
+  },
+  {
+   "id": "V25-SEL-027",
+   "status": "PARCIAL",
+   "gap": "El gate no_leakage de la política V2.5 verifica el manifiesto del protocolo (manifest.verify) y las filas realmente recibidas y rechaza al candidato si alguna es del período final, si el manifiesto tiene violaciones, si falta un período final independiente o si el ajuste de hiperparámetros lo tocó, con casos que pasan y que fallan; pero la V2.5 corre como sombra de decisión y por defecto gobierna la política heredada (ADR-V25-21), que no ejecuta esa verificación en la ruta servida: el estado 'production' solo depende del gate si la empresa elige promotion.governing_policy = v25. La política y sus umbrales no están aprobados en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_no_leakage_passes_fails_and_is_not_evaluable",
+    "engine/tests/unit/test_promotion_v25.py::test_without_an_independent_holdout_v25_cannot_certify_a_promotion",
+    "engine/tests/unit/test_promotion_v25.py::test_the_final_holdout_never_decides_or_tunes",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_every_gate_of_the_v25_policy_carries_its_evidence",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_v25_policy_governs_when_the_company_asks_for_it",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "El gate es duro: una fuga rechaza al candidato y sigue sirviéndose el champion sano o el baseline; la evidencia queda en model_promotion_decisions.gates."
+  },
+  {
+   "id": "V25-SEL-028",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_valid_data_follows_the_w2c_quality_gate",
+    "engine/tests/unit/test_quality_gates.py::test_a_block_gate_stops_the_pipeline_with_a_stable_reason_code_before_training",
+    "engine/tests/unit/test_quality_gates.py::test_a_warn_gate_continues_and_records_the_notice_without_changing_the_quality_status",
+    "engine/tests/integration/test_quality_gates_integration.py::test_a_block_gate_stops_the_forecast_with_a_stable_code_and_leaves_its_report",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/quality/rules.py; engine/predictily_engine/pipeline/core.py"
+   ],
+   "note": "El gate de calidad de W2-C (BLOCK / WARN / DEGRADE por módulo y empresa, con umbrales configurables) corre antes de entrenar: BLOCK termina la ejecución con un código estable y deja su informe, así que ningún modelo se promueve; en la política V2.5 el gate valid_data lo recibe (PASS, WARN y DEGRADE pasan; BLOCK o un resultado ausente rechazan al candidato) y su evidencia queda en la decisión. Esto rige también por defecto porque el BLOCK ocurre antes de la selección. Límites: DEGRADE y WARN no impiden la promoción (se declaran y bajan el estado de calidad); los umbrales de calidad son iniciales y «a aprobar en el piloto» (V25-DQE-024)."
+  },
+  {
+   "id": "V25-SEL-029",
+   "status": "PARCIAL",
+   "gap": "El gate temporal_stability exige que el candidato cubra todas las ventanas de selección y no pierda más de v25_max_consecutive_losing_windows (1) ventanas seguidas frente a la referencia (champion o baseline), con casos de pérdidas alternadas, consecutivas, una sola ventana (no evaluable) y candidato ausente en una ventana; pero solo rige lo servido con la política V2.5: por defecto gobierna la heredada, que exige ⌈2n/3⌉ victorias solo a LightGBM frente al mejor estadístico, y los estadísticos compiten por WAPE agregado sin estabilidad. El umbral es inicial y queda a aprobar en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_temporal_stability_consecutive_losses",
+    "engine/tests/unit/test_promotion_v25.py::test_gate_temporal_stability_not_evaluable_with_one_window",
+    "engine/tests/unit/test_promotion_v25.py::test_a_candidate_missing_from_a_bad_window_is_not_promoted",
+    "engine/tests/unit/test_promotion_v25.py::test_champion_that_stops_proving_itself_is_replaced_by_the_baseline",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_with_four_windows_the_legacy_rule_requires_three_not_two_thirds_of_four",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "La ausencia de un candidato en una ventana (LightGBM no entrenable) no se cuenta como ventaja: falla con windows_missing. Las comparaciones usan solo las observaciones que el candidato y la referencia tienen en común."
+  },
+  {
+   "id": "V25-SEL-030",
+   "status": "PARCIAL",
+   "gap": "La política V2.5 define los segmentos críticos (clase de demanda y tramo de volumen por defecto; también categoría, sucursal y vida de la serie con el proveedor de W3-A, calculados as-of en el corte de cada ventana) y rechaza la promoción si un segmento empeora más de v25_segment_max_regression (10 %) frente a la referencia, con segmentos de menos de 30 unidades como insufficient_data; pero no gobierna lo servido por defecto (rige la heredada, que decide por clase y agregado sin segmentos críticos) y los umbrales son iniciales, a aprobar en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_segment_regression_blocks_a_material_loss_in_a_critical_segment",
+    "engine/tests/unit/test_promotion_v25.py::test_segments_with_little_volume_are_insufficient_data_not_a_verdict",
+    "engine/tests/unit/test_promotion_v25.py::test_segment_provider_is_the_integration_point_for_w3a_segments",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_the_segment_gate_uses_the_w3a_provider_by_default",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_without_w3a_metrics_or_with_an_explicit_provider_the_gate_says_which_one_it_used",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/demand/segments.py"
+   ],
+   "note": "Un candidato que mejora el total pero empeora 20 % el tramo top 20 % por volumen queda en shadow y sigue sirviéndose el baseline; una dimensión pedida y no disponible se declara en evidence.dimensions_unavailable, nunca se ignora en silencio."
+  },
+  {
+   "id": "V25-SEL-031",
+   "status": "PARCIAL",
+   "gap": "El gate metrics_documented exige WAPE con denominador y cobertura de intervalos 80/95 medibles y dentro de ±0,10 del nominal (dejando una ventana fuera), con caso que pasa y que falla, y la decisión guarda las métricas en model_promotion_decisions; pero solo rige con la política V2.5: por defecto 'production' se asigna a la familia que sirve alguna serie sin consultar si hay evaluación (con historia corta window_average se promueve sin ninguna). MASE/RMSSE se reportan pero no son condición del gate.",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_metrics_documented_requires_calibrated_intervals",
+    "engine/tests/unit/test_promotion_v25.py::test_gate_temporal_stability_not_evaluable_with_one_window",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_every_gate_of_the_v25_policy_carries_its_evidence",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "Sin período final independiente el gate no puede certificar nada y el candidato no se promueve."
+  },
+  {
+   "id": "V25-SEL-032",
+   "status": "PARCIAL",
+   "gap": "La política V2.5 compara al candidato con el champion vigente (la familia que la misma clase sirvió en la ejecución de producción anterior, o el baseline si no hay) sobre las mismas observaciones y solo lo promueve si mejora el WAPE ≥ 3 % o aporta beneficio operacional en dinero (≥ 5 %) sin empeorar las unidades; un champion que ya no supera al baseline se sustituye por él; pero por defecto cada ejecución de producción sigue promoviendo su resultado (rige la heredada) y el costo del candidato no entra en la decisión (V25-SEL-017).",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_improvement_over_the_reference",
+    "engine/tests/unit/test_promotion_v25.py::test_gate_improvement_operational_benefit_in_money",
+    "engine/tests/unit/test_promotion_v25.py::test_new_candidate_must_beat_the_current_champion",
+    "engine/tests/unit/test_promotion_v25.py::test_champion_that_is_still_the_best_is_kept_when_it_passes_the_gates",
+    "engine/tests/unit/test_promotion_v25.py::test_a_champion_worse_than_the_baseline_is_not_kept_when_the_challenger_fails_a_gate",
+    "engine/tests/unit/test_promotion_v25.py::test_champions_are_read_from_the_previous_served_selection",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_champion_is_the_model_served_by_the_previous_current_run",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_a_historical_run_does_not_take_the_current_run_as_champion",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/pipeline/forecast_run.py"
+   ],
+   "note": "Un candidato 2,8 % mejor que el champion queda en shadow y el champion sigue sirviéndose; una corrida histórica no toma la vigente como champion (sería mirar el futuro)."
+  },
+  {
+   "id": "V25-SEL-039",
+   "status": "PARCIAL",
+   "gap": "La política V2.5 publica el baseline (decisión publish_baseline, con el motivo) cuando ningún modelo lo supera de forma material y estable, incluso con un champion vigente; pero por defecto rige la heredada, en la que un estadístico distinto del baseline gana con cualquier mejora (sin margen ni estabilidad) y el período final no fuerza el baseline; la API y la UI no lo indican todavía (W3-D).",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_if_no_model_beats_the_baseline_the_baseline_is_published",
+    "engine/tests/unit/test_promotion_v25.py::test_a_champion_worse_than_the_baseline_is_not_kept_when_the_challenger_fails_a_gate",
+    "engine/tests/unit/test_promotion_v25.py::test_without_an_independent_holdout_v25_cannot_certify_a_promotion",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "Con candidatos peores que el baseline la decisión es publish_baseline con «Ningún modelo supera al baseline»; sin período final independiente no se promueve nada."
+  },
+  {
+   "id": "V25-SEL-033",
+   "status": "PARCIAL",
+   "gap": "El gate verifiable_artifacts comprueba que haya clave de firma Ed25519 configurada para un candidato LightGBM (el serving rechaza lo no firmado, ADR-V25-20) y trata al candidato estadístico como reajuste determinista sin artefacto, con casos que pasan y que fallan; los modelos estadísticos siguen sin artefacto verificable, el gate no verifica el artefacto concreto (checksum, compatibilidad, procedencia) antes de servirlo o revertirlo y Demand no recarga el artefacto desde el registro.",
+   "evidence": [
+    "engine/tests/unit/test_promotion_v25.py::test_gate_verifiable_artifacts",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "Sin clave de firma el candidato LightGBM se rechaza y se sirve el baseline."
+  },
+  {
+   "id": "V25-SEL-038",
+   "status": "PARCIAL",
+   "gap": "Cada decisión de model_promotion_decisions registra el candidato, el champion (con las referencias al registro de la misma empresa), la política, el alcance, la decisión y el motivo en español con la evidencia de cada gate, y el challenger no servido se guarda en shadow_forecast_values; pero se registra un candidato principal por alcance y política (no el motivo de cada familia evaluada), model_registry no tiene el estado 'rejected' ni el rol challenger ('validated' sigue significando «evaluado y no elegido») y la exposición por API y UI es de W3-D.",
+   "evidence": [
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_decisions_are_stored_per_policy_and_scope_with_the_right_tenant",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_candidate_and_champion_reference_the_registry_of_the_same_tenant",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_decisions_do_not_leak_between_companies_and_the_foreign_keys_are_composite",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_champion_is_the_model_served_by_the_previous_current_run",
+    "engine/tests/unit/test_promotion_v25.py::test_both_policies_are_recorded_per_scope_and_exactly_one_governs",
+    "engine/tests/unit/test_promotion_v25.py::test_a_class_that_only_exists_in_the_final_period_still_has_exactly_one_effective_row_per_scope",
+    "engine/tests/unit/test_promotion_v25.py::test_reconcile_served_records_the_family_really_served_after_a_final_training_fallback",
+    "engine/predictily_engine/selection/promotion.py; engine/predictily_engine/pipeline/forecast_run.py"
+   ],
+   "note": "Una fila por política y alcance (global, class:<clase>, horizon:<H>) con is_effective, y exactamente una efectiva por alcance no informativo (invariante verificado); tras un respaldo del entrenamiento final la decisión registra la familia realmente servida. approved_by y approved_at siguen nulos (aprobación humana: W4 · S06)."
+  },
+  {
+   "id": "V25-SEL-040",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_shadow_and_tuning.py::test_shadow_never_changes_what_is_served",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_shadow_rows_are_unserved_series_level_predictions_of_the_challenger",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_the_challenger_is_the_best_unserved_candidate_by_selection_window_wape",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_the_final_holdout_does_not_pick_the_challenger",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_series_cap_keeps_the_highest_volume_series_per_scope",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_shadow_forecasts_are_persisted_for_the_challenger_and_are_not_served",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_prospective_shadow_evaluation_of_a_historical_run",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_shadow_evaluation_applies_the_same_censorship_as_the_served_evaluation",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_an_undeclared_outage_is_still_a_zero_in_both_evaluations_and_a_declared_one_is_not",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_closures_are_closed_days_for_the_shadow_too",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_a_failing_shadow_persistence_is_isolated_and_the_served_run_still_completes",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_a_failing_prospective_shadow_evaluation_does_not_lose_the_served_evaluation",
+    "engine/predictily_engine/selection/shadow.py; engine/predictily_engine/evaluation/actuals.py (evaluate_shadow_prospective); engine/predictily_engine/pipeline/forecast_run.py"
+   ],
+   "note": "Por clase de demanda, el mejor candidato no servido (menor WAPE en las ventanas de selección; el período final no lo elige) predice el horizonte y se guarda en shadow_forecast_values sin entrar a forecast_values, recomendaciones, alertas ni intervalos servidos; el modo está activo por defecto con tope de series (100, las de mayor volumen) y se ejecuta al final del pipeline, de modo que apagarlo no cambia nada de lo publicado. evaluate-actuals evalúa después del corte esas predicciones contra lo realizado con la misma clasificación y censura de días que la evaluación servida (fuente ausente, cierres y quiebres no son ceros, no entran a WAPE, sesgo ni cobertura y se cuentan por clase) y escribe model_evaluations con evaluation_type = 'shadow_prospective' (WAPE, MAE, RMSE, sesgo, cobertura 80 % y comparación con el WAPE del servido sobre las mismas series y días); la persistencia y la evaluación van aisladas con savepoint. Límites: probado con actuals fabricados y con una corrida histórica sintética, sin ventas reales posteriores al corte de un cliente (BLOQUEADO, V25-APQ-013); el LightGBM del challenger se reentrena solo con las series acotadas y es una aproximación; no hay informe «tras N días»."
+  },
+  {
+   "id": "V25-SEL-041",
+   "status": "PARCIAL",
+   "gap": "Además de la evaluación realizada del servido, ahora el challenger se evalúa de forma prospectiva (WAPE, MAE, RMSE, sesgo y cobertura 80 %, por tramo de horizonte y con la misma censura de días); siguen sin calcularse la cobertura 95 %, el pinball ni el delta frente al baseline del mismo período, el servido se sigue evaluando contra el estado actual de las ventas y no se declara un mínimo de días maduros por horizonte; tampoco hay datos reales posteriores al corte de un cliente.",
+   "evidence": [
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_prospective_shadow_evaluation_of_a_historical_run",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_shadow_evaluation_applies_the_same_censorship_as_the_served_evaluation",
+    "engine/predictily_engine/evaluation/actuals.py (evaluate_shadow_prospective)"
+   ],
+   "note": "La evaluación prospectiva del shadow es idempotente por ejecución y se compara con el WAPE del servido sobre las mismas series y días no censurados."
+  },
+  {
+   "id": "V25-SEL-045",
+   "status": "PARCIAL",
+   "gap": "Solo se registra el tiempo de la etapa shadow de cada ejecución (summary.promotion.shadow.elapsed_seconds, fuera del manifiesto para que sea reproducible); no hay CPU, memoria ni costo estimado por tenant del champion y del challenger, ni latencia por inferencia (el pronóstico es por lotes) ni comparación de costo entre ambos.",
+   "evidence": [
+    "engine/tests/unit/test_shadow_and_tuning.py::test_summary_and_manifest_cite_both_policies_and_the_shadow",
+    "engine/predictily_engine/pipeline/core.py"
+   ],
+   "note": "El shadow de la demo toma unos 2 segundos (medida puntual, no un compromiso de rendimiento)."
+  },
+  {
+   "id": "V25-SEL-025",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_shadow_and_tuning.py::test_holdout_guard_rejects_any_window_that_reaches_the_final_period",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_a_trial_that_reaches_the_holdout_aborts_the_study",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_tuning_only_ever_sees_selection_windows_and_applies_an_improvement",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_pipeline_with_optuna_records_the_experiment_and_never_touches_the_holdout",
+    "engine/tests/unit/test_promotion_v25.py::test_the_final_holdout_never_decides_or_tunes",
+    "engine/tests/unit/test_promotion_v25.py::test_gate_no_leakage_passes_fails_and_is_not_evaluable",
+    "engine/predictily_engine/selection/tuning.py (assert_selection_windows_only)"
+   ],
+   "note": "El ajuste de hiperparámetros con Optuna (apagado por defecto) solo evalúa las ventanas de selección: la guarda exige que cada ventana termine en el origen del período final o antes y aborta el estudio (HoldoutLeakError) si una prueba lo toca; los hiperparámetros salen solo de esas ventanas (el rebacktest con lo ajustado rehace todas las ventanas y el período final solo se evalúa); el registro del experimento (orígenes usados, origen del período final, holdout_used = false) va al manifiesto y holdout_used_for_hyperparameters se deriva de ese registro y no de una constante; el gate no_leakage de la V2.5 falla si el registro dice que lo tocó. Límites: el período final sí entra al entrenamiento final y a la calibración de intervalos de producción de la política heredada (V25-SEL-004); solo se ajusta LightGBM."
+  },
+  {
+   "id": "V25-SEL-022",
+   "status": "PARCIAL",
+   "gap": "Optuna es opcional (se importa de forma perezosa; si no está instalado el modo queda no disponible con mensaje explícito y no es dependencia obligatoria), está apagado por defecto y se acota por n_trials, timeout, parada temprana y tope de CPU (hilos de LightGBM, también en el rebacktest); faltan los topes de memoria y de costo por tenant, el comando predictily-engine tune (el ajuste corre dentro de la ejecución cuando la empresa lo activa), el ajuste de otras familias (TSB, AutoETS) y medir su costo en empresas grandes.",
+   "evidence": [
+    "engine/tests/unit/test_shadow_and_tuning.py::test_optuna_availability_is_explicit",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_unavailable_mode_is_reported_and_leaves_the_run_unchanged",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_tuning_is_bounded_by_n_trials",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_tuning_stops_early_when_it_stalls",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_tuning_stops_at_the_timeout",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_no_completed_trial_keeps_the_default_hyperparameters",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_pipeline_with_optuna_records_the_experiment_and_never_touches_the_holdout",
+    "engine/predictily_engine/selection/tuning.py"
+   ],
+   "note": "La primera prueba es la configuración por defecto; solo se aplica lo ajustado si mejora el WAPE ≥ 1 % relativo; sin pruebas completadas se conservan los hiperparámetros de siempre."
+  },
+  {
+   "id": "V25-SEL-023",
+   "status": "PARCIAL",
+   "gap": "El experimento queda registrado en el manifiesto (versión de Optuna, semilla, sampler, pruebas con parámetros y valores, orígenes usados, parada y CPU) y la semilla fija el TPESampler, pero no hay tabla tuning_trials y ninguna prueba repite el estudio con la misma semilla para afirmar que produce las mismas pruebas; los tiempos se excluyen a propósito del manifiesto.",
+   "evidence": [
+    "engine/tests/unit/test_shadow_and_tuning.py::test_tuning_only_ever_sees_selection_windows_and_applies_an_improvement",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_pipeline_with_optuna_records_the_experiment_and_never_touches_the_holdout",
+    "engine/tests/unit/test_shadow_and_tuning.py::test_summary_and_manifest_cite_both_policies_and_the_shadow",
+    "engine/predictily_engine/selection/tuning.py"
+   ],
+   "note": "Registro del experimento en evaluation_manifest.promotion.tuning y en summary.promotion.tuning."
+  },
+  {
+   "id": "V25-SEL-004",
+   "status": "PARCIAL",
+   "gap": "Con la política V2.5 gobernando, el modelo de producción se elige solo con las ventanas de selección (el período final solo evalúa) y la prueba lo afirma; por defecto gobierna la heredada, que elige el modelo de producción con todas las ventanas, el período final incluido, y los intervalos de producción se calibran con sus residuos; sigue habiendo un solo origen de holdout (sin dispersión) y la evaluación anidada en varios orígenes externos está pendiente.",
+   "evidence": [
+    "engine/tests/unit/test_shadow_and_tuning.py::test_v25_governance_serves_the_v25_decision_and_keeps_the_holdout_honest",
+    "engine/tests/unit/test_promotion_v25.py::test_the_final_holdout_never_decides_or_tunes",
+    "engine/tests/unit/test_promotion_v25.py::test_v25_governs_the_served_selection_when_the_company_asks_for_it",
+    "engine/tests/integration/test_promotion_shadow_integration.py::test_the_v25_policy_governs_when_the_company_asks_for_it",
+    "engine/tests/unit/test_selection_legacy_parity.py::test_default_pipeline_is_governed_by_the_legacy_policy",
+    "engine/predictily_engine/selection/promotion.py"
+   ],
+   "note": "En la prueba, volver catastrófico a LightGBM solo en el período final no cambia ninguna decisión de la V2.5 y sí cambia la de la heredada de producción."
+  },
+  {
+   "id": "V25-CUS-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_s05_works_for_the_catalog_horizons_14_and_15_and_keeps_orders_nested",
+    "engine/tests/integration/test_horizon_15_integration.py::test_customer_trains_h15_with_its_own_slot_manifest_and_evaluation",
+    "engine/tests/integration/test_horizon_15_integration.py::test_customer_predicts_h15_coherently_and_abstains_from_the_untrained_h14",
+    "engine/tests/unit/test_horizon_catalog.py::test_customer_prediction_reports_a_status_per_requested_horizon_and_never_a_made_up_number",
+    "backend/tests/Feature/Plans/CommercialPlansTest.php::test_customer_reads_horizon_15_and_abstains_with_a_reason_from_a_horizon_the_run_does_not_have",
+    "engine/predictily_engine/platform/config.py::HORIZONS; engine/predictily_engine/customer/service.py"
+   ],
+   "note": "El Customer Core ofrece recompra a 7, 14, 15, 30 y 90 días (subconjunto del catálogo único; 60 queda fuera por decisión documentada), cada horizonte con su propio modelo y manifiesto, y W3-C verifica que el número de pedidos, la cantidad por pedido, las unidades y la ventana de S05 funcionan en 14 y 15 y que E(N) no decrece con H; un horizonte sin datos responde insufficient_data con su motivo y no una cifra. Los modelos de Customer ya entrenados no tienen 14 ni 15: hay que reentrenar. Verificado con datos sintéticos."
+  },
+  {
+   "id": "V25-HOR-009",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_s05_works_for_the_catalog_horizons_14_and_15_and_keeps_orders_nested",
+    "engine/predictily_engine/customer/s05.py"
+   ],
+   "note": "Además de lo registrado en W2, S05 (número de pedidos, cantidad por pedido, unidades y ventana) funciona en los horizontes 14 y 15 del catálogo con las columnas de customer_predictions y E(N) anidado entre horizontes."
+  },
+  {
+   "id": "V25-CUS-037",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_customer_s05_integration.py::test_unstable_ids_disable_individual_recommendations_and_publish_an_aggregate_ranking",
+    "engine/tests/integration/test_customer_s05_integration.py::test_generic_buyers_degradation_marks_the_run_and_keeps_the_aggregate_ranking",
+    "engine/tests/integration/test_customer_s05_integration.py::test_block_disables_individual_output_without_inventing_an_aggregate_ranking",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_aggregate_ranking_from_demand_and_from_identified_purchases_never_names_buyers",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_individual_recommendations_block_documents_the_disabled_state",
+    "engine/predictily_engine/customer/degrade.py"
+   ],
+   "note": "Además de lo registrado en W2, cuando el gate degrada a agregado o bloquea, W3-C publica el bloque summary.individual_recommendations (status = disabled, código, motivos, funciones deshabilitadas e individual_rows_written = 0) y, solo en DEGRADE, un ranking agregado de productos por demanda vigente o por unidades vendidas a compradores identificados que nunca nombra ni inventa compradores. Las «filas marcadas» son las de horizon_support: no se escribe ninguna fila individual."
+  },
+  {
+   "id": "V25-CUS-040",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_orders.py::test_zero_truncated_poisson_mean_is_at_least_one_and_matches_the_closed_form",
+    "engine/tests/unit/test_customer_s05_orders.py::test_hurdle_orders_are_coherent_by_construction_without_any_row_level_bound",
+    "engine/tests/unit/test_customer_s05_orders.py::test_orders_are_non_decreasing_in_the_horizon_and_the_correction_is_measured",
+    "engine/tests/unit/test_customer_s05_orders.py::test_conditional_count_model_beats_the_rate_reference_when_there_is_signal_and_the_served_bias_is_within_bound",
+    "engine/tests/unit/test_customer_s05_orders.py::test_the_conditional_count_is_fitted_only_with_positive_cases",
+    "engine/tests/unit/test_customer_s05_orders.py::test_count_model_is_not_promoted_without_signal_the_reference_is_served",
+    "engine/tests/unit/test_customer_s05_orders.py::test_a_complex_count_model_whose_final_bias_exceeds_the_bound_is_not_promoted_even_if_it_improves_the_deviance",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_expected_orders_are_a_coherent_hurdle_not_a_function_of_p_and_rarely_equal_to_it",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_served_orders_bias_is_within_the_bound_or_the_complex_model_is_not_promoted",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_nesting_correction_is_measured_per_horizon_in_training_and_prediction",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_number_of_orders_is_a_count_not_the_probability_and_is_coherent",
+    "engine/predictily_engine/customer/orders.py"
+   ],
+   "note": "E(nº de pedidos en H) = P × E(N | N ≥ 1), un hurdle: el conteo condicionado es un modelo propio (1 + Poisson con LightGBM sobre los pedidos adicionales o la referencia de tasa de la Poisson truncada en cero), ajustado solo con los casos positivos, y P solo compone el hurdle; E(N) > P en todas las filas sin cotas ni subidas a P, no decrece con el horizonte (el máximo acumulado se mide y se publica por horizonte) y el conteo complejo solo se sirve si baja la desvianza de Poisson de la referencia ≥ 2 % y su sesgo servido final cumple |sesgo| ≤ 15 % (si no, se sirve la referencia con rol fallback). Límites: el sesgo de E(N) hereda el de P (con deriva entre calibración y holdout el E(N) servido puede quedar fuera del tope y se declara por horizonte); en la demo ficticia se sirve la referencia en los tres horizontes; umbrales iniciales «a aprobar en el piloto»; datos sintéticos."
+  },
+  {
+   "id": "V25-CUS-041",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_orders.py::test_per_order_quantity_weights_by_orders_and_serves_the_reference_when_it_does_not_improve",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_new_columns_follow_the_contract_and_are_coherent",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_expected_orders_grow_with_the_horizon_and_the_unit_conversion_differs_from_p_times_q",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_conditional_quantity_returns_to_the_normal_pattern_after_the_episode",
+    "engine/tests/integration/test_customer_s05_integration.py::test_predictions_persist_the_w3_columns_with_coherent_values",
+    "engine/predictily_engine/customer/per_order.py"
+   ],
+   "note": "quantity_per_order = E(cantidad por pedido | ocurre) es una magnitud distinta de la cantidad total de la ventana (quantity_if_purchase, que se conserva): la referencia son las últimas 5 compras de la relación y el candidato LightGBM ponderado por el número de pedidos (objetivos comparados) se sirve solo si mejora el MAE y el sesgo es aceptable; trae un intervalo conformal del 80 % cuya cobertura en el holdout de una prueba de verdad conocida queda entre 0,65 y 0,95; expected_units = E(nº pedidos) × E(cantidad por pedido) bajo independencia documentada, y su diferencia con expected_quantity = P × E(cantidad | compra) está explicada y probada. Límites: el intervalo viaja como factores relativos en el resumen (customer_predictions no tiene columna para él); la independencia no se contrasta con una covarianza; datos sintéticos."
+  },
+  {
+   "id": "V25-CUS-013",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_new_columns_follow_the_contract_and_are_coherent",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_expected_orders_grow_with_the_horizon_and_the_unit_conversion_differs_from_p_times_q",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_number_of_orders_is_a_count_not_the_probability_and_is_coherent",
+    "engine/tests/integration/test_customer_s05_integration.py::test_predictions_persist_the_w3_columns_with_coherent_values",
+    "engine/predictily_engine/customer/orders.py; engine/predictily_engine/customer/per_order.py"
+   ],
+   "note": "El motor estima el número de pedidos (un pedido es un día de compra de la relación; dos documentos el mismo día no se cuentan por separado) y la cantidad por pedido, y las unidades esperadas como su producto bajo independencia, evaluadas en el holdout frente a lo realizado junto a P × E(cantidad | compra) (sin afirmar que una sustituya a la otra). Límites: en la demo ficticia, sin recompra real por comprador, el sesgo de las unidades esperadas fue −22,7 % a 7 días, −22,6 % a 30 y +5,2 % a 90; los datos reales del piloto no existen."
+  },
+  {
+   "id": "V25-CUS-009",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_orders.py::test_per_order_quantity_weights_by_orders_and_serves_the_reference_when_it_does_not_improve",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_conditional_quantity_returns_to_the_normal_pattern_after_the_episode",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_new_columns_follow_the_contract_and_are_coherent",
+    "engine/predictily_engine/customer/per_order.py"
+   ],
+   "note": "La cantidad por pedido tiene un baseline histórico por cliente y SKU (media de las últimas 5 compras de la relación, con respaldos) contra el que se compara el modelo en el holdout (MAE y sesgo del servido y de la referencia) y el modelo solo se sirve si lo mejora; en el fixture de las cubetas la referencia (qty_mean5) es la del episodio y vuelve al patrón de 5-7. Límites: datos sintéticos; la referencia de la cantidad total de la ventana (quantity_if_purchase) conserva su multiplicador de Poisson truncado."
+  },
+  {
+   "id": "V25-CUS-014",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_window.py::test_regular_buyer_window_is_a_range_around_the_remaining_interval_never_an_exact_day",
+    "engine/tests/unit/test_customer_s05_window.py::test_window_is_counted_from_the_cutoff_and_conditions_on_the_elapsed_time",
+    "engine/tests/unit/test_customer_s05_window.py::test_too_few_own_intervals_means_insufficient_data_without_numbers",
+    "engine/tests/unit/test_customer_s05_window.py::test_overdue_relation_is_flagged_not_called_abandoned_and_keeps_a_tail_window",
+    "engine/tests/unit/test_customer_s05_window.py::test_stockout_at_the_cutoff_censors_the_window",
+    "engine/tests/unit/test_customer_s05_window.py::test_hierarchical_smoothing_pulls_a_thin_relation_toward_its_category",
+    "engine/tests/unit/test_customer_s05_window.py::test_window_uses_only_what_was_known_at_the_cutoff",
+    "engine/tests/unit/test_customer_s05_window.py::test_window_status_reflects_the_validation_and_unvalidated_rows_have_no_figures",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_window_contains_the_typical_interval_and_the_later_purchase",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_new_columns_follow_the_contract_and_are_coherent",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_window_figures_are_published_only_where_the_validation_backs_them",
+    "engine/predictily_engine/customer/window.py; engine/predictily_engine/customer/s05_persist.py"
+   ],
+   "note": "La ventana de recompra es la distribución del tiempo hasta la siguiente compra contado desde as_of, resumida en cuantiles P10/P50/P90 (días enteros ≥ 1, nunca un día exacto): empírica con los últimos 12 intervalos propios, suavizada hacia otras relaciones del comprador y de la categoría, condicionada a la recencia y con niveles recalibrados por cantidad de intervalos propios; window_status (estimated, insufficient_data, overdue, censored) refleja la validación por cobertura y, sin evidencia, las cifras quedan nulas. Límites: en la demo ficticia la ventana no se valida (cobertura 0,40 frente a 0,09 de la referencia ingenua; no hay recompra real por comprador) y no publica cifras; no es un modelo de supervivencia con censura (V25-CUS-005 queda DISEÑADO); un abandono baja la cobertura; umbrales iniciales «a aprobar en el piloto»; datos sintéticos."
+  },
+  {
+   "id": "V25-CUS-029",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_window.py::test_window_is_validated_by_coverage_on_a_renewal_process_with_known_intervals",
+    "engine/tests/unit/test_customer_s05_window.py::test_a_slow_cycle_widens_the_follow_up_until_the_window_can_be_validated_and_unvalidated_groups_stay_without_figures",
+    "engine/tests/unit/test_customer_s05_window.py::test_the_minimum_evidence_counts_distinct_relations_and_customers_not_rows",
+    "engine/tests/unit/test_customer_s05_window.py::test_two_hundred_days_of_history_cannot_validate_the_window_and_publish_no_figures",
+    "engine/tests/unit/test_customer_s05_window.py::test_fit_cutoffs_stay_before_every_holdout_and_their_outcomes_too",
+    "engine/tests/integration/test_customer_s05_integration.py::test_a_validated_window_publishes_figures_only_for_validated_groups_and_declares_what_it_cannot_assess",
+    "engine/tests/integration/test_customer_s05_integration.py::test_two_hundred_days_of_history_publish_no_window_figures_end_to_end",
+    "engine/tests/integration/test_customer_s05_integration.py::test_training_persists_segment_rows_the_window_and_keeps_the_existing_keys",
+    "engine/predictily_engine/customer/window.py (evaluate_window, apply_validation)"
+   ],
+   "note": "La ventana se valida con cobertura de [P10, P90] (nominal 80 %), masa por debajo del P10 y por encima del P90, fracción con T ≤ P50 y error absoluto del P50 en días, comparados con la referencia ingenua, por estado, por grupo de intervalos propios y por corte, y se persisten en model_evaluations (level_key = 'window', evaluation_type = 'out_of_sample'). La evidencia se cuenta en relaciones y compradores distintos (≥ 100 y ≥ 30) y cortes de evaluación (≥ 4), cada grupo exige 50 relaciones y su propia cobertura; un grupo o la validación global sin evidencia o bajo la tolerancia no publica cifras, y las filas cuyo P90 excede el seguimiento llevan window_beyond_validation. Los cortes de ajuste de los niveles terminan antes de todo holdout. Límites: la evaluación es condicionada al seguimiento y el error del P50 es optimista; con 200 días de historia no hay ningún corte maduro; en datos ficticios; umbrales iniciales «a aprobar en el piloto»."
+  },
+  {
+   "id": "V25-CUS-016",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_cold_relation_has_no_window_and_says_so",
+    "engine/tests/unit/test_customer_s05_window.py::test_too_few_own_intervals_means_insufficient_data_without_numbers",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segmenter_labels_tenure_cold_start_and_unknown_value",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/predictily_engine/customer/segments.py; engine/predictily_engine/customer/window.py"
+   ],
+   "note": "Las relaciones con menos de cold_start_min_purchases (3) compras llevan la bandera cold_start y su ventana es insufficient_data sin cifras (menos de 2 intervalos propios); el segmento history:cold_start se evalúa por separado (probabilidad servida frente a la referencia, número de pedidos) en cada horizonte y se persiste en model_evaluations. Compradores nuevos y pares nunca comprados no son candidatos. Límites: el corte es compras < 3 frente a ≥ 3 (no los tramos 1, 2-3, 4-7, 8+); en un mundo sintético con 10 % de abandono el cold start sale mal calibrado (razón ≈ 2), que es justo lo que el segmento hace visible; la rama «sin historial» de la ficha del backend no tiene prueba propia."
+  },
+  {
+   "id": "V25-CUS-025",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segmenter_fits_terciles_on_the_calibration_block_only_and_labels_every_dimension",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segment_calibration_flags_miscalibration_and_refuses_figures_for_thin_segments",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segment_recalibration_is_a_candidate_decided_on_selection_and_never_served",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_persisted_rows_use_segment_level_keys_and_do_not_touch_existing_keys",
+    "engine/tests/integration/test_customer_s05_integration.py::test_training_persists_segment_rows_the_window_and_keeps_the_existing_keys",
+    "engine/predictily_engine/customer/segments.py"
+   ],
+   "note": "Por horizonte y segmento (frecuencia, valor, antigüedad e historia, con cortes de terciles del bloque de calibración, nunca del holdout) se persisten n, positivos, tasa observada, media predicha, razón media/observada, Brier y log loss del servido y de la referencia, ECE y curva de calibración con n por tramo, con estado calibrated / miscalibrated / insufficient_data (menos de 200 filas o 20 positivos: sin cifras); una prueba con segmentos de calibración distinta detecta la diferencia. Límites: los segmentos son derivados (no el segmento comercial customers.segment_id, V25-CUS-046); la recalibración por segmento se evalúa como candidato y no se sirve; umbrales iniciales «a aprobar en el piloto»."
+  },
+  {
+   "id": "V25-CUS-027",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_lift_at_k_is_precision_over_random_precision_per_unit",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_global_lift_and_pr_auc_against_a_random_score",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_topk_mask_selects_k_per_unit_with_a_deterministic_tiebreak",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_ranking_extension_compares_the_served_source_with_popularity_and_recency",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/tests/integration/test_customer_s05_integration.py::test_training_persists_segment_rows_the_window_and_keeps_the_existing_keys",
+    "engine/predictily_engine/customer/ranking_eval.py"
+   ],
+   "note": "lift@k = precisión@k / precisión aleatoria@k (media por unidad comprador × corte), PR-AUC y lift global del 1 / 5 / 10 % superior se calculan para el ranking servido, la referencia, la popularidad y la recencia y se persisten en model_evaluations (h{H}:ranking_s05) con la comparación servido frente a cada una. Límites: en la demo ficticia el servido no supera a la popularidad (lift@5 de 0,92 / 1,03 / 1,44 a 7 / 30 / 90 días frente a 1,56 / 1,52 / 1,52), por eso el ranking sigue siendo por popularidad; los cortes consecutivos se solapan y las filas no son independientes; la exposición en /customer/evaluation y la UI es de W3-D."
+  },
+  {
+   "id": "V25-CUS-028",
+   "status": "PARCIAL",
+   "gap": "Las unidades y el importe (a precio neto conocido al corte) realizados por el top-K se calculan frente a popularidad, recencia y referencia, con la razón de captura frente al óptimo; el margen o contribución está BLOQUEADO porque la lectura de compras del Customer Core no trae costo unitario conocido al corte (db/customer_repository.py, fuera del paquete) y la función solo lo calcula con costo; no hay intervalo bootstrap por bloques de corte.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_economic_utility_counts_realized_units_amount_and_margin_only_with_known_cost",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_ranking_extension_compares_the_served_source_with_popularity_and_recency",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/predictily_engine/customer/ranking_eval.py (ranking_utility)"
+   ],
+   "note": "Solo se consideran las unidades con más de k candidatos (si no, el orden no aporta nada); sin costo el margen es null con margin_limitation y no se aproxima con el costo vigente. En la demo ficticia el servido captura 0,21 / 0,22 / 0,33 de las unidades óptimas a 7 / 30 / 90 días frente a 0,28 / 0,29 / 0,30 de la popularidad."
+  },
+  {
+   "id": "V25-CUS-030",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_orders.py::test_per_order_quantity_weights_by_orders_and_serves_the_reference_when_it_does_not_improve",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/tests/integration/test_customer_s05_integration.py::test_training_persists_segment_rows_the_window_and_keeps_the_existing_keys",
+    "engine/predictily_engine/customer/per_order.py; engine/predictily_engine/customer/metrics.py"
+   ],
+   "note": "La cantidad por pedido se valida en el holdout con MAE, sesgo, WAPE (nulo si Σ real = 0), RMSE, mediana del error absoluto y la cobertura y anchura relativa de su intervalo conformal del 80 % frente a la referencia, y la prueba de verdad conocida afirma MAE del servido menor que el de la referencia y cobertura entre 0,65 y 0,95; las filas h{H}:quantity_per_order se persisten. Límites: la afirmación de WAPE y sesgo por separado es de las cifras persistidas, no de una aserción numérica; datos sintéticos; cobertura en la demo ficticia de 76-88 %."
+  },
+  {
+   "id": "V25-CUS-036",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_price_changer_features_are_asof_associative_and_quantity_dips_then_recovers",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_price_changer_pipeline_serves_a_per_order_quantity_that_follows_the_pattern",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_conditional_quantity_returns_to_the_normal_pattern_after_the_episode",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_factors_describe_the_due_purchase_and_the_price_association",
+    "engine/tests/customer_s05_fixtures.py; engine/predictily_engine/customer/explain.py"
+   ],
+   "note": "Un cliente quincenal de 9-11 unidades a 1,00 con dos meses a 1,60 y 6-7 unidades y vuelta al patrón: las variables son as-of, el último precio sube ≈ 60 % (asociación), la cantidad media de las últimas compras cae en el episodio y se recupera al normalizarse el precio, la cantidad por pedido servida vuelve al entorno de 10 unidades y el siguiente pedido real cae dentro de la ventana; toda lectura del precio dice «asociación; no es un efecto causal». Límites: es un fixture funcional de verdad conocida, no una validación real; ninguna salida afirma elasticidad."
+  },
+  {
+   "id": "V25-CUS-039",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_asof_customer_integration.py::test_purchases_and_returns_contain_exactly_the_valid_documents",
+    "engine/tests/unit/test_asof_visibility.py::test_cells_follow_the_definition_of_valid_sales_and_returns",
+    "engine/tests/unit/test_customer_dataset.py::test_several_purchases_inside_the_window_are_summed_and_returns_stay_apart",
+    "engine/tests/unit/test_customer_dataset.py::test_voided_documents_and_credit_notes_are_not_purchases",
+    "docs/ml/CUSTOMER_REPURCHASE.md; engine/predictily_engine/db/customer_repository.py (CustomerRepository.purchases / returns)"
+   ],
+   "note": "El evento de P es ≥ 1 compra válida de la relación comprador × producto en (corte, corte + H] (sin anuladas ni notas de crédito, devoluciones aparte, todas las sucursales sin doble conteo): la consulta de producción se prueba contra PostgreSQL con un documento de cada tipo y estado y dos sucursales el mismo día, y docs/ml/CUSTOMER_REPURCHASE.md §2 documenta la definición del evento, del pedido (un día de compra), la etiqueta madura y la censura por quiebre. Límite: un pedido es una compra facturada válida; los pedidos aún no facturados se tratan aparte como demanda comprometida."
+  },
+  {
+   "id": "V25-CUS-020",
+   "status": "PARCIAL",
+   "gap": "La tarea A (probabilidad) se evalúa frente a la referencia calibrada y la climatología, la B (número de pedidos y cantidad por pedido) frente a la referencia de tasa y a las últimas 5 compras, la C (ventana) frente a los intervalos propios sin condicionar, y el ranking frente a popularidad, recencia y referencia; falta una «política comercial simple» formal (p. ej. contactar a quien supere N días sin comprar) como baseline del ranking y del valor.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_orders.py::test_conditional_count_model_beats_the_rate_reference_when_there_is_signal_and_the_served_bias_is_within_bound",
+    "engine/tests/unit/test_customer_s05_orders.py::test_per_order_quantity_weights_by_orders_and_serves_the_reference_when_it_does_not_improve",
+    "engine/tests/unit/test_customer_s05_window.py::test_window_is_validated_by_coverage_on_a_renewal_process_with_known_intervals",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_ranking_extension_compares_the_served_source_with_popularity_and_recency",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_served_probability_never_worsens_the_reference_with_s05",
+    "engine/predictily_engine/customer/s05.py"
+   ],
+   "note": "El servido de probabilidad nunca es peor que la referencia (regla de promoción); el conteo, la cantidad por pedido y la ventana complejos solo se sirven si superan a su alternativa simple."
+  },
+  {
+   "id": "V25-CUS-031",
+   "status": "PARCIAL",
+   "gap": "Se miden el PSI de la probabilidad servida (deciles de la referencia, ajustado por ruido muestral; 0,10 aviso / 0,25 alerta) y el cambio relativo de la tasa observada entre calibración y holdout, entre cortes consecutivos y, en la predicción diaria, contra la distribución guardada en el artefacto, con una limitación en la corrida cuando hay alerta; faltan el PSI/KS de las variables, el seguimiento rodante de Brier/ECE con desenlaces maduros, la alerta de degradación sostenida, que la alerta cambie el estado de calidad (hoy solo agrega una limitación) y que dispare el reentrenamiento.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_psi_is_zero_for_the_same_distribution_and_grows_with_the_shift",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_psi_adjusted_discounts_sampling_noise_in_small_samples",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_drift_between_flags_probability_and_observed_rate_changes_with_enough_positives",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_drift_across_cutoffs_reports_the_worst_consecutive_shift",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_prediction_summary_reports_window_states_nesting_and_drift",
+    "engine/predictily_engine/customer/drift.py"
+   ],
+   "note": "Los cortes consecutivos del holdout se solapan y no son independientes; en la demo ficticia el PSI ajustado calibración → holdout es 0,13 (aviso) a 7 días y 0,08-0,09 a 30 y 90."
+  },
+  {
+   "id": "V25-CUS-033",
+   "status": "PARCIAL",
+   "gap": "El fixture de las cubetas de huevo (3 años; 5-7 cubetas cada 9-15 días; episodio de ~2 meses con 3-5 cada 6-10; corte con la última compra 13 días antes) existe y sus pruebas afirman probabilidad a 7 días con su estado de calibración, ventana, cantidad por pedido, número de pedidos, factores y comparación con la referencia y con el histórico posterior separado; no afirman el riesgo de inactividad, el valor esperado ni la recomendación (la recomendación y el valor de contribución son del Decision Engine, W4/W5), y los escenarios de oferta externa (maíz, El Niño, costo del alimento) están BLOQUEADOS por requerir variables con fecha de conocimiento reales.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_egg_fixture_matches_the_functional_case_of_the_spec",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_window_contains_the_typical_interval_and_the_later_purchase",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_probability_is_calibrated_or_explicitly_not_estimable_and_better_ordered_than_the_reference",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_probability_depends_on_recency_the_due_purchase_beats_the_just_bought",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_conditional_quantity_returns_to_the_normal_pattern_after_the_episode",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_window_adapts_to_the_shorter_intervals_of_the_episode",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_number_of_orders_is_a_count_not_the_probability_and_is_coherent",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_factors_describe_the_due_purchase_and_the_price_association",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_posterior_history_is_separated_features_and_window_ignore_it",
+    "engine/tests/customer_s05_fixtures.py"
+   ],
+   "note": "Es un fixture funcional con verdad conocida dentro de un mundo sintético de 110 compradores: los modelos se entrenan solo con datos hasta el corte, el histórico posterior se guarda aparte y las pruebas afirman propiedades (la ventana contiene el intervalo típico y la compra real posterior; la cantidad por pedido vuelve a 5-7 tras el episodio), no números mágicos. No valida la precisión comercial de ninguna empresa."
+  },
+  {
+   "id": "V25-CUS-056",
+   "status": "PARCIAL",
+   "gap": "customer/explain.py::describe_factors calcula factores descriptivos al corte (recencia frente al intervalo habitual, dispersión, cambio de precio asociativo, precio frente al mercado, tendencia de cantidad, disponibilidad y promoción) con su lectura en español y sin lenguaje causal, y se prueba en el fixture de las cubetas; pero ninguna salida del pipeline lo invoca: los factores no se persisten (customer_predictions no tiene columna), no se exponen por fila ni por API, no hay atribución con signo y magnitud tipo SHAP/permutación y no hay prueba de que perturbar la recencia cambie el factor dominante ni de coherencia entre horizontes.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_factors_describe_the_due_purchase_and_the_price_association",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_price_changer_features_are_asof_associative_and_quantity_dips_then_recovers",
+    "engine/predictily_engine/customer/explain.py"
+   ],
+   "note": "Es una descripción de variables conocidas al corte, no una explicación del modelo."
+  },
+  {
+   "id": "V25-CUS-057",
+   "status": "PARCIAL",
+   "gap": "Las predicciones de S05 se repiten sin duplicar filas y los artefactos firmados con S05 hacen un viaje de ida y vuelta por el almacén firmado prediciendo lo mismo; siguen sin existir una prueba que entrene dos veces con el mismo snapshot, semilla y n_jobs y compare artefactos o métricas, el hash de las compras comprometidas en el snapshot de predicción y la exposición del hash de la huella y de feature_schema_version en la envoltura.",
+   "evidence": [
+    "engine/tests/integration/test_customer_s05_integration.py::test_idempotent_prediction_rerun_keeps_one_row_per_relation_and_horizon",
+    "engine/tests/integration/test_customer_s05_integration.py::test_signed_artifacts_carry_s05_and_verify_before_loading",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_artifacts_with_s05_roundtrip_through_the_signed_store_and_predict_identically",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_s05_does_not_change_the_served_probability_quantity_intervals_or_ranking",
+    "engine/predictily_engine/customer/s05_persist.py"
+   ],
+   "note": "S05 se apaga con s05_enabled = false sin cambiar la probabilidad, la cantidad condicionada, sus intervalos, expected_quantity ni el ranking (idénticos bit a bit)."
+  },
+  {
+   "id": "V25-CUS-007",
+   "status": "PARCIAL",
+   "gap": "La unidad de observación (relación comprador × producto sumando sucursales, en un corte de la rejilla) y el pedido (un día de compra de la relación) están definidos y las cohortes por antigüedad de la relación (nueva < 90 días / establecida / veterana), frecuencia, valor e historia se evalúan con Brier/ECE y estado; falta definir episodios de compra por pausa mínima y distinguir pedido, factura o reposición del mismo día.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segmenter_labels_tenure_cold_start_and_unknown_value",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segment_calibration_flags_miscalibration_and_refuses_figures_for_thin_segments",
+    "engine/tests/integration/test_customer_s05_integration.py::test_training_persists_segment_rows_the_window_and_keeps_the_existing_keys",
+    "engine/predictily_engine/customer/segments.py; docs/ml/CUSTOMER_REPURCHASE.md"
+   ],
+   "note": "Las cohortes son segmentos de calibración derivados de lo conocido al corte, no cohortes de primera compra."
+  },
+  {
+   "id": "V25-CUS-051",
+   "status": "PARCIAL",
+   "gap": "Por corte del holdout (con al menos 50 filas) se informa el Brier del servido y de la referencia, el desvío del Brier servido entre cortes y la fracción de cortes en que el servido no es peor que la referencia, y la cobertura de la ventana por corte; falta el ECE y precision@K por sub-período y un gate de estabilidad en la regla de promoción (la mejora sigue sin exigirse repartida entre sub-períodos); los cortes consecutivos se solapan y no son independientes.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_holdout_evaluation_covers_segments_lift_utility_stability_drift_and_cold_start",
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_drift_across_cutoffs_reports_the_worst_consecutive_shift",
+    "engine/predictily_engine/customer/s05.py"
+   ],
+   "note": "En la demo ficticia el servido no es peor que la referencia en el 100 % de los cortes de los tres horizontes."
+  },
+  {
+   "id": "V25-CUS-052",
+   "status": "PARCIAL",
+   "gap": "El sesgo de la probabilidad (razón media predicha / observada) y el error del número de pedidos se evalúan por segmento, con estado miscalibrated cuando la razón se desvía más de 0,25 o el ECE supera su umbral, y se publica la descomposición del sesgo de E(N) en el de P y el del factor condicionado; falta el sesgo de la cantidad por segmento y por tramo de volumen, el intervalo bootstrap y una alerta configurable por empresa.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_ranking_segments_drift.py::test_segment_calibration_flags_miscalibration_and_refuses_figures_for_thin_segments",
+    "engine/tests/unit/test_customer_s05_pipeline.py::test_served_orders_bias_is_within_the_bound_or_the_complex_model_is_not_promoted",
+    "engine/predictily_engine/customer/segments.py; engine/predictily_engine/customer/orders.py"
+   ],
+   "note": "El tramo de valor es un segmento (terciles del gasto de 180 días a precio al corte), no el tramo de volumen de la demanda."
+  },
+  {
+   "id": "V25-CUS-022",
+   "status": "PARCIAL",
+   "gap": "Hay una lectura asociativa del precio por relación (cambio del último precio, precio frente al mercado) que dice en cada caso «asociación; no es un efecto causal», y una prueba con un cliente de cambios temporales de precio; falta una salida explícita de sensibilidad (coeficiente o efecto parcial con intervalo, o «no estimable» sin variación suficiente) validada en un mundo sintético con respuesta al precio conocida.",
+   "evidence": [
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_price_changer_features_are_asof_associative_and_quantity_dips_then_recovers",
+    "engine/tests/unit/test_customer_s05_fixtures.py::test_text_case_factors_describe_the_due_purchase_and_the_price_association",
+    "engine/predictily_engine/customer/explain.py"
+   ],
+   "note": "Ninguna salida afirma elasticidad causal."
+  }
+ ]
+}

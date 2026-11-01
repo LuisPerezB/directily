@@ -28,8 +28,8 @@ Cuando cambie un JSON de `docs/roadmap/audit/2026-10-31` (estado de un requisito
 | --- | --- | --- |
 | [`audit/2026-10-31/datos.json`](audit/2026-10-31/datos.json) | datos | Datos, calidad y disponibilidad temporal: 97 requisitos (IMPLEMENTADO 18, PARCIAL 69, PENDIENTE 9, BLOQUEADO 1), 32 defectos, 11 conflictos. |
 | [`audit/2026-10-31/conectores.json`](audit/2026-10-31/conectores.json) | datos | Conectores, Bridge, Auto Mapper y cargas: 96 requisitos (IMPLEMENTADO 13, PARCIAL 42, PENDIENTE 36, BLOQUEADO 5), 20 defectos, 8 conflictos. |
-| [`audit/2026-10-31/demanda.json`](audit/2026-10-31/demanda.json) | datos | Demand Core, selección de modelos y horizontes: 103 requisitos (IMPLEMENTADO 30, PARCIAL 60, PENDIENTE 12, BLOQUEADO 1), 22 defectos, 8 conflictos. |
-| [`audit/2026-10-31/cliente.json`](audit/2026-10-31/cliente.json) | datos | Customer Core y agenda comercial: 78 requisitos (IMPLEMENTADO 14, PARCIAL 35, PENDIENTE 28, BLOQUEADO 1), 16 defectos, 8 conflictos. |
+| [`audit/2026-10-31/demanda.json`](audit/2026-10-31/demanda.json) | datos | Demand Core, selección de modelos y horizontes: 103 requisitos (IMPLEMENTADO 38, PARCIAL 58, PENDIENTE 6, BLOQUEADO 1), 22 defectos, 8 conflictos. |
+| [`audit/2026-10-31/cliente.json`](audit/2026-10-31/cliente.json) | datos | Customer Core y agenda comercial: 78 requisitos (IMPLEMENTADO 27, PARCIAL 32, PENDIENTE 18, BLOQUEADO 1), 16 defectos, 8 conflictos. |
 | [`audit/2026-10-31/modelos_aws.json`](audit/2026-10-31/modelos_aws.json) | datos | Ciclo de vida de modelos, Registry y AWS: 107 requisitos (IMPLEMENTADO 12, PARCIAL 59, PENDIENTE 22, BLOQUEADO 14), 27 defectos, 9 conflictos. |
 | [`audit/2026-10-31/supply_decision.json`](audit/2026-10-31/supply_decision.json) | datos | Supply Core, Decision Engine y Outcomes: 119 requisitos (IMPLEMENTADO 20, PARCIAL 47, PENDIENTE 49, BLOQUEADO 2, NO_APLICA 1), 22 defectos, 9 conflictos. |
 | [`audit/2026-10-31/seguridad_ui.json`](audit/2026-10-31/seguridad_ui.json) | datos | Seguridad, UI, Intelligence Gateway y onboarding: 123 requisitos (IMPLEMENTADO 25, PARCIAL 69, PENDIENTE 21, BLOQUEADO 6, NO_APLICA 2), 27 defectos, 8 conflictos. |
