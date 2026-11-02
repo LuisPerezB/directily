@@ -94,9 +94,11 @@ final class CatalogResolverAliasTest extends TestCase
     public function test_validity_windows_are_respected_for_a_given_date_and_for_today(): void
     {
         $product = $this->product('ACTUAL');
+        // «Hoy» es la fecha local de la empresa (como en CatalogResolver), no la de UTC: cerca de medianoche difieren.
+        $today = now($this->tenant->timezone ?: 'UTC');
         $this->alias($product, 'RANGO', ['valid_from' => '2026-03-01', 'valid_to' => '2026-06-30']);
-        $this->alias($product, 'FUTURO', ['valid_from' => now()->addDays(10)->toDateString()]);
-        $this->alias($product, 'CADUCADO', ['valid_to' => now()->subDay()->toDateString()]);
+        $this->alias($product, 'FUTURO', ['valid_from' => $today->copy()->addDays(10)->toDateString()]);
+        $this->alias($product, 'CADUCADO', ['valid_to' => $today->copy()->subDay()->toDateString()]);
         $this->alias($product, 'ABIERTO');
         $resolver = $this->resolver();
 
@@ -106,7 +108,7 @@ final class CatalogResolverAliasTest extends TestCase
         $this->assertNull($resolver->productId('RANGO', '2026-07-01'));
         $this->assertNull($resolver->productId('RANGO'), 'sin fecha rige hoy');
         $this->assertNull($resolver->productId('FUTURO'));
-        $this->assertSame($product->id, $resolver->productId('FUTURO', now()->addDays(11)->toDateString()));
+        $this->assertSame($product->id, $resolver->productId('FUTURO', $today->copy()->addDays(11)->toDateString()));
         $this->assertNull($resolver->productId('CADUCADO'));
         $this->assertSame($product->id, $resolver->productId('ABIERTO', '1999-01-01'));
 
