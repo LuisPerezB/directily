@@ -26,7 +26,7 @@ Los estados de este documento son honestos: **IMPLEMENTADO/VERIFICADO** nombra l
 | Trazabilidad: huella de la ejecución con la política de promoción, criterio generado, corrida histórica sin champion | IMPLEMENTADO/VERIFICADO | `test_the_promotion_policy_is_part_of_the_run_fingerprint_and_the_criterion_is_generated`, `test_a_historical_run_does_not_take_the_current_run_as_champion` |
 | Registro de ambas políticas con `is_effective`, gates con evidencia, tenant y FKs compuestas | IMPLEMENTADO/VERIFICADO | `test_promotion_shadow_integration.py` (PostgreSQL) |
 | La heredada gobierna por defecto; un parámetro por empresa deja gobernar a la V2.5 | IMPLEMENTADO/VERIFICADO en el motor | `governing_policy`; `test_the_v25_policy_governs_when_the_company_asks_for_it` |
-| Gobierno por empresa configurable desde la API/UI del backend | PENDIENTE (fuera del paquete) | `EffectiveConfigController::CORES` del backend no lista `promotion`; ver §9 |
+| Gobierno por empresa configurable desde la API/UI del backend | IMPLEMENTADO / VERIFICADO (W3-D) | `promotion` está en `EffectiveConfigController::CORES` (validación del motor como los demás cores): `backend/tests/Feature/DataCore/EffectiveConfigPromotionTest.php` |
 | Aprobación humana separada | DISEÑADO/NO IMPLEMENTADO (W4 · S06) | el gate `human_approval` queda `pending`; `approved_by`/`approved_at` siguen nulos |
 | Champion/challenger y shadow mode (challenger por clase, tope de series, sin servirse) | IMPLEMENTADO/VERIFICADO | `test_shadow_and_tuning.py`, `test_shadow_forecasts_are_persisted_for_the_challenger_and_are_not_served` |
 | Evaluación prospectiva del shadow con la misma censura de días que la servida | IMPLEMENTADO/VERIFICADO con datos fabricados y con una corrida histórica sintética | `test_shadow_evaluation_applies_the_same_censorship_as_the_served_evaluation` y 2 más |
@@ -239,9 +239,9 @@ mensaje explícito y la ejecución sigue con los hiperparámetros por defecto (`
 
 ## 9. Pendientes y notas
 
-- **Backend**: `EffectiveConfigController::CORES` no incluye `promotion` (ni `factors`): hasta ampliarlo, la configuración por empresa se fija en
-  `tenants.settings.cores.promotion`. El backend aún no expone decisiones ni shadow (W3-D); sus tablas con `tenant_id` deben clasificarse en el
-  exportador LOPDP.
+- **Backend (W3-D)**: `promotion` es configurable por empresa en la configuración efectiva (`EffectiveConfigController::CORES`; `factors` sigue
+  fuera). Las decisiones y el shadow se exponen en `GET /api/v1/models/promotion-decisions` y `/models/shadow-evaluations`
+  (`docs/06-contratos-integracion.md` §3.9.1); sus tablas están clasificadas en el exportador LOPDP (`TenantDataExporterW3Test`).
 - **Aprobación humana** (W4 · S06): completar `approved_by`/`approved_at` y activar `v25_approval_blocks_serving`.
 - Decisiones `horizon:<H>`: informativas; si en el futuro se sirviera un modelo distinto por horizonte habría que hacerlas efectivas.
 - `demand.max_backtest_windows` sigue sin validar en la configuración (R-064, parte fuera de este paquete).

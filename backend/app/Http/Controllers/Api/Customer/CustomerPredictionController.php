@@ -18,6 +18,8 @@ class CustomerPredictionController extends CustomerController
     private const ORDER = [
         'probability' => 'purchase_probability', 'expected_quantity' => 'expected_quantity',
         'expected_amount' => 'expected_amount', 'quantity_if_purchase' => 'quantity_if_purchase',
+        // V2.5 · W3-D (aditivo): S05.
+        'expected_orders' => 'expected_orders', 'expected_units' => 'expected_units',
     ];
 
     public function index(CustomerPredictionsRequest $request, CustomerRunService $service): JsonResponse
@@ -53,8 +55,14 @@ class CustomerPredictionController extends CustomerController
             ->when($request->filled('customer_id'), fn ($q) => $q->where('customer_id', (int) $request->integer('customer_id')))
             ->when($request->filled('product_id'), fn ($q) => $q->where('product_id', (int) $request->integer('product_id')))
             ->when($request->filled('min_probability'), fn ($q) => $q->where('purchase_probability', '>=', (float) $request->input('min_probability')))
+            ->when($request->filled('window_status'), fn ($q) => $q->where('window_status', (string) $request->input('window_status')))
+            ->when($request->filled('segment'), fn ($q) => $q->where('segment', (string) $request->input('segment')))
             ->with(['customer:id,external_code', 'product:id,sku,name,unit'])
-            ->orderBy($column, $direction)->orderBy('id')
+            // Las columnas nuevas de S05 son nulas en filas sin estimación: nunca encabezan un orden descendente.
+            ->when(in_array($column, ['expected_orders', 'expected_units'], true),
+                fn ($q) => $q->orderByRaw("{$column} {$direction} NULLS LAST"),
+                fn ($q) => $q->orderBy($column, $direction))
+            ->orderBy('id')
             ->paginate($this->perPage($request));
 
         return CustomerPredictionResource::collection($page)->additional([

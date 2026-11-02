@@ -1541,7 +1541,13 @@
     "price_unknown": "Precio desconocido",
     "coherence_adjusted": "Ajustada por coherencia",
     "calibration_degraded": "Calibración degradada",
-    "calibration_uncalibrated": "Sin calibrar"
+    "calibration_uncalibrated": "Sin calibrar",
+    "orders_nested_adjusted": "Pedidos ajustados entre horizontes",
+    "cold_start": "Pocas compras",
+    "window_beyond_validation": "Ventana más larga que lo validado",
+    "s05_unavailable": "Pedidos y ventana no disponibles",
+    "s05_failed": "Pedidos y ventana no calculados",
+    "quantity_coherence_adjusted": "Cantidad ajustada por coherencia"
   },
   "customers": {
     "title": "Compradores",
@@ -1594,7 +1600,11 @@
       "expected_amount": "Monto estimado",
       "committed_quantity": "Comprometido",
       "ranking_source": "Fuente del ranking",
-      "inactivity": "Inactividad"
+      "inactivity": "Inactividad",
+      "expected_orders": "Pedidos esperados",
+      "quantity_per_order": "Cantidad por pedido",
+      "expected_units": "Unidades esperadas",
+      "window": "Ventana probable de recompra"
     },
     "noRowsFilter": "Ninguna predicción cumple los filtros elegidos.",
     "horizonUnavailableTitle": "Sin predicciones a {n} días",
@@ -1784,6 +1794,70 @@
         "predict": "Predicción"
       },
       "asOf": "Fecha de cálculo"
+    },
+    "expectedOrders": "Pedidos esperados",
+    "expectedUnits": "Unidades esperadas",
+    "ordersUnit": "pedidos",
+    "perOrder": "{n} por pedido",
+    "unitsApprox": "≈ {n} {unit}",
+    "notEstimated": "No estimado",
+    "window": {
+      "title": "Ventana probable de recompra",
+      "range": "{p10} a {p90} días",
+      "median": "mediana {p50} días",
+      "overdue": "Atrasado",
+      "overdueHint": "Su pausa actual supera lo habitual en su patrón. Es una ventana más ancha; no significa que haya dejado de comprar.",
+      "state": {
+        "estimated": "Sin cifras",
+        "overdue": "Sin cifras",
+        "insufficient_data": "Sin estimar: evidencia insuficiente",
+        "censored": "Sin estimar: producto sin existencias",
+        "unavailable": "No estimada"
+      },
+      "stateHint": {
+        "estimated": "El motor no entregó los extremos de la ventana.",
+        "overdue": "El motor no entregó los extremos de la ventana.",
+        "insufficient_data": "No hay historial suficiente de este comprador o la validación del motor no respalda las ventanas de este grupo: no se publica ninguna cifra.",
+        "censored": "El producto no tenía existencias en la sucursal habitual al corte: la ausencia de compra no aporta información.",
+        "unavailable": "La corrida no estimó la ventana."
+      }
+    },
+    "s05": {
+      "segmentsTitle": "Calibración por segmento",
+      "segmentsText": "Si la probabilidad servida acierta igual en compradores de distinta frecuencia, valor, antigüedad e historial. Un segmento con pocas filas o compras no muestra cifras.",
+      "segmentsEmpty": "Esta evaluación no trae calibración por segmento para este horizonte.",
+      "observedRate": "Tasa observada",
+      "meanPredicted": "Probabilidad media predicha",
+      "referenceBrier": "Brier de la referencia",
+      "insufficient": "Sin datos suficientes para medir la calibración de este segmento.",
+      "status": {
+        "calibrated": "Calibrado",
+        "miscalibrated": "Descalibrado",
+        "insufficient_data": "Sin datos suficientes"
+      },
+      "windowTitle": "Validación de la ventana de recompra",
+      "windowStatus": {
+        "validated": "Ventana validada",
+        "not_validated": "Ventana no validada",
+        "insufficient_data": "Validación no concluyente",
+        "unknown": "Estado de la ventana desconocido"
+      },
+      "windowStatusText": {
+        "validated": "La cobertura medida respalda las ventanas de los grupos validados; solo esos grupos publican rangos.",
+        "not_validated": "La cobertura medida no alcanza lo esperado: no se publica ninguna ventana, solo el estado.",
+        "insufficient_data": "No hay evidencia suficiente para validar la ventana: no se publica ninguna ventana.",
+        "unknown": "El motor no informó el estado de la validación: no se publica ninguna ventana."
+      },
+      "windowCoverage": "Cobertura medida del rango P10–P90: {value} (nominal 80 %).",
+      "windowRelations": "Evaluada sobre {n} relaciones comprador × producto distintas.",
+      "cause": {
+        "unavailable": "modelo anterior a esta función",
+        "failed": "el cálculo falló en esta fila"
+      },
+      "causeHint": {
+        "unavailable": "El modelo servido se entrenó antes de que existiera este cálculo: se vuelve a estimar al reentrenar. La probabilidad y la cantidad no se ven afectadas.",
+        "failed": "El cálculo de pedidos y ventana falló para esta fila. La probabilidad y la cantidad condicionada no se ven afectadas."
+      }
     }
   },
   "sql": {
@@ -2085,7 +2159,8 @@
       "customer": "Comportamiento de compra",
       "supply": "Abastecimiento",
       "cost": "Costos",
-      "scenario": "Escenarios"
+      "scenario": "Escenarios",
+      "promotion": "Promoción de modelos"
     },
     "version": "Versión de la configuración",
     "profileApplied": "Perfil sectorial aplicado: {code} (versión {version}).",
@@ -2114,7 +2189,9 @@
       "lista": "Escriba una lista en formato JSON, por ejemplo [7, 30].",
       "objeto": "Escriba un objeto en formato JSON.",
       "json": "Escriba un JSON válido."
-    }
+    },
+    "promotionTitle": "Qué política decide lo servido",
+    "promotionNote": "«governing_policy» elige la política que decide qué modelo se sirve: «legacy» (la regla heredada, por defecto: no cambia lo servido) o «v25» (gates de promoción). La otra se calcula siempre y se registra como sombra de decisión. El motor valida los valores; los umbrales son iniciales y se aprobarán en el piloto."
   },
   "supply": {
     "title": "Plan de compras",
@@ -2654,5 +2731,222 @@
       "provider": "El proveedor del asistente no respondió. Intente de nuevo; el resto de la aplicación no se ve afectado.",
       "validation": "La pregunta no es válida (máximo de caracteres o historial)."
     }
+  },
+  "segments": {
+    "dimensions": {
+      "demand_class": "Clase de demanda",
+      "volume_tier": "Tramo de volumen",
+      "series_age": "Vida de la serie",
+      "category": "Categoría",
+      "branch": "Sucursal",
+      "frequency": "Frecuencia de compra",
+      "value": "Valor de la relación",
+      "tenure": "Antigüedad de la relación",
+      "history": "Historial de compras"
+    },
+    "values": {
+      "volume_tier": {
+        "top": "Top {n} % por volumen",
+        "rest": "Resto"
+      },
+      "series_age": {
+        "new": "Nueva (poca historia)",
+        "mature": "Madura"
+      },
+      "category": {
+        "none": "Sin categoría",
+        "unnamed": "Categoría n.º {id}"
+      },
+      "branch": {
+        "unnamed": "Sucursal n.º {id}"
+      },
+      "frequency": {
+        "low": "Baja",
+        "medium": "Media",
+        "high": "Alta",
+        "all": "Todas"
+      },
+      "value": {
+        "low": "Bajo",
+        "medium": "Medio",
+        "high": "Alto",
+        "unknown": "Sin precio conocido"
+      },
+      "tenure": {
+        "new": "Nueva",
+        "established": "Establecida",
+        "veteran": "Veterana"
+      },
+      "history": {
+        "cold_start": "Pocas compras (arranque en frío)",
+        "warm": "Con historial"
+      }
+    }
+  },
+  "segmentAccuracy": {
+    "title": "Precisión por horizonte y segmento",
+    "subtitle": "Cuánto se equivoca el modelo servido en cada grupo de series y cómo se compara con la línea base. Cada cifra dice sobre cuántas ventas y días se calculó.",
+    "dimension": "Agrupar por",
+    "columns": {
+      "segment": "Segmento",
+      "wape": "Error (WAPE)",
+      "denominator": "Ventas reales (denominador)",
+      "coverage": "Días evaluados",
+      "series": "Series",
+      "baseline": "Línea base",
+      "verdict": "Frente a la línea base",
+      "stability": "Estabilidad entre ventanas"
+    },
+    "units": "unidades",
+    "daysOf": "{evaluable} de {total} días",
+    "excluded": "{n} excluidos",
+    "windows": "{n} ventanas",
+    "insufficient": "Sin datos suficientes",
+    "reasons": {
+      "few_series": "Solo {n_series} series con datos (mínimo {min}).",
+      "few_observations": "Solo {evaluable_days} días evaluables (mínimo {min})."
+    },
+    "unstable": "WAPE inestable",
+    "unstableHint": "Las ventas reales del segmento ({sum} unidades) no llegan al mínimo de {min}: el porcentaje de error sería engañoso y no se publica.",
+    "undefined": "WAPE no definido",
+    "undefinedHint": "No hubo ventas reales en el segmento: el porcentaje de error no está definido.",
+    "alt": {
+      "aggregate_absolute_error": "En su lugar: error absoluto total de {value} unidades ({perDay} por día evaluado)",
+      "mase": "En su lugar: error escalado (MASE) de {value}"
+    },
+    "exclusions": {
+      "stockout_days": "quiebre de stock",
+      "missing_source_days": "fuente sin datos",
+      "closed_days": "sucursal cerrada",
+      "invalid_values_days": "valores no válidos"
+    },
+    "verdict": {
+      "better": "Mejor",
+      "similar": "Similar",
+      "worse": "Peor",
+      "not_comparable": "No comparable",
+      "not_available": "Sin comparación"
+    },
+    "stable": "Estable",
+    "variable": "Variable",
+    "cv": "variación {value}",
+    "attention": "{n} de {cells} combinaciones de segmento y horizonte merecen atención: peor que la línea base, WAPE inestable o sin datos suficientes.",
+    "unavailableTitle": "Métricas por segmento no disponibles",
+    "unavailableText": "Esta ejecución no pudo calcular las métricas por segmento. El pronóstico no cambió.",
+    "emptyTitle": "Sin métricas por segmento",
+    "emptyText": "Esta ejecución no tiene métricas por segmento para este horizonte (puede ser anterior a esta función o no haber alcanzado el horizonte).",
+    "horizonNotEvaluated": "El backtesting de esta ejecución no alcanzó el horizonte de {n} días: no se inventa una métrica.",
+    "scopeHoldout": "Medido en el período final reservado, que no participó en la selección del modelo.",
+    "scopeSelection": "Medido en las mismas ventanas que eligieron el modelo: es una cifra optimista, sin período final independiente.",
+    "denominatorNote": "El WAPE es el error absoluto total dividido por las ventas reales (el denominador). Los días de quiebre de stock, sin datos de la fuente o con la sucursal cerrada no cuentan como ventas cero: se excluyen y se muestran. Datos de demostración o sintéticos solo comprueban el procedimiento."
+  },
+  "promotion": {
+    "title": "Decisiones de promoción",
+    "subtitle": "Qué modelo sirve cada grupo de series y por qué. Se calculan dos políticas en paralelo y solo una gobierna lo servido.",
+    "governedBy": "Gobernó lo servido:",
+    "unknownPolicy": "No determinada",
+    "policies": {
+      "legacy": "Política heredada",
+      "v25": "Política V2.5"
+    },
+    "whyGoverned": {
+      "legacy": "Es la política por defecto: lo servido no cambia. La política V2.5 se calcula y se registra como «sombra de decisión» para ver qué habría servido; la empresa puede hacerla gobernar en Configuración → Módulos y configuración → Promoción de modelos.",
+      "v25": "La empresa eligió que gobiernen los gates de la política V2.5. La política heredada se registra como sombra de decisión."
+    },
+    "agreementNone": "No hay alcances comparables entre las dos políticas.",
+    "agreementAll": "Las dos políticas habrían servido el mismo modelo en los {n} alcances comparados.",
+    "agreementSome": "La política V2.5 habría servido un modelo distinto en {n} de {total} alcances:",
+    "differentItem": "{scope}: heredada → {legacy}; V2.5 → {v25}",
+    "pilotNote": "Los umbrales de ambas políticas son valores iniciales y se aprobarán en el piloto con datos reales.",
+    "showHorizons": "Mostrar también los alcances por horizonte (solo informativos)",
+    "columns": {
+      "scope": "Alcance"
+    },
+    "scope": {
+      "global": "Global",
+      "class": "Clase: {name}",
+      "horizon": "Horizonte de {n} días"
+    },
+    "informational": "informativo",
+    "informationalHint": "Alcance informativo: se registra pero no gobierna lo servido.",
+    "decision": {
+      "promote": "Promover",
+      "reject": "Rechazar",
+      "keep_champion": "Mantener el vigente",
+      "publish_baseline": "Publicar la línea base",
+      "shadow": "Observar en sombra"
+    },
+    "governs": "Gobierna",
+    "shadowPolicy": "Sombra de decisión",
+    "serves": "Sirve",
+    "fallback": "El entrenamiento final recurrió a un respaldo; se había planeado {planned}.",
+    "gatesSummary": "Gates: {pass} pasan, {fail} fallan, {other} sin resultado",
+    "gates": {
+      "no_leakage": "Sin fuga de información",
+      "valid_data": "Datos válidos",
+      "verifiable_artifacts": "Artefactos verificables",
+      "temporal_stability": "Estabilidad temporal",
+      "segment_regression": "Sin regresión por segmento",
+      "metrics_documented": "Métricas e intervalos documentados",
+      "improvement": "Mejora frente al modelo vigente",
+      "human_approval": "Aprobación humana",
+      "min_improvement": "Mejora mínima de WAPE",
+      "windows_won": "Ventanas ganadas",
+      "used_pooled": "Decisión agregada",
+      "beats_baseline": "Supera a la línea base",
+      "legacy_rule": "Regla heredada (LightGBM contra el mejor estadístico)"
+    },
+    "gateStatus": {
+      "pass": "Pasa",
+      "fail": "No cumple",
+      "not_evaluable": "No evaluable",
+      "not_applicable": "No aplica",
+      "pending": "Pendiente"
+    },
+    "approvalPending": "Aprobación humana separada: pendiente.",
+    "approved": "Aprobada por otra persona.",
+    "emptyTitle": "Sin decisiones de promoción",
+    "emptyText": "Esta ejecución no registró decisiones de promoción (es anterior a las dos políticas en paralelo).",
+    "legacyGatesNote": "Los gates de la política heredada miden si LightGBM reemplaza al mejor estadístico; que no se cumplan no es un error: se sirve el estadístico."
+  },
+  "shadow": {
+    "title": "Modelo observador (shadow)",
+    "subtitle": "El mejor candidato que no se sirve también pronostica y, cuando pasa el horizonte, se evalúa contra lo realmente vendido.",
+    "note": "El modelo observador nunca se sirve. Se evalúa con la misma regla de días que el modelo servido: los días de quiebre, sin datos de la fuente o con la sucursal cerrada no cuentan como ventas cero.",
+    "notServed": "No se sirve",
+    "columns": {
+      "challenger": "Modelo observador",
+      "predictions": "Predicciones",
+      "wape": "Error (WAPE)",
+      "served": "Modelo servido (mismos días)",
+      "bias": "Sesgo",
+      "observations": "Observaciones",
+      "evaluated": "Período evaluado",
+      "denominator": "Ventas reales (denominador)"
+    },
+    "status": {
+      "evaluated": "Evaluado",
+      "pending": "Pendiente"
+    },
+    "pendingText": "Pendiente: todavía no hay ventas posteriores al corte que comparar. No se muestra ninguna cifra.",
+    "improvement": "mejora {value} frente al servido",
+    "censored": "con días excluidos",
+    "sameDaysNote": "La comparación usa las mismas series y los mismos días no excluidos para el modelo observador y el servido.",
+    "emptyTitle": "Sin modelo observador",
+    "emptyText": "Esta ejecución no tiene un candidato en sombra (no había un candidato no servido, o la función estaba apagada).",
+    "evaluatedDays": "{n} días",
+    "evaluatedSeriesDays": "{n} series-día",
+    "evaluatedUnknown": "fechas no registradas",
+    "unstable": "WAPE inestable",
+    "unstableHint": "Las ventas reales evaluadas ({sum} unidades) no llegan al mínimo de {min}: el porcentaje sería engañoso y no se publica.",
+    "undefined": "WAPE no definido",
+    "undefinedHint": "No hubo ventas reales en lo evaluado: el porcentaje no está definido.",
+    "predictedRange": "predicho {from} – {to}"
+  },
+  "customerFlagHints": {
+    "orders_nested_adjusted": "El número esperado de pedidos se subió al de un horizonte menor para que los horizontes sean coherentes entre sí.",
+    "cold_start": "El comprador tiene muy pocas compras de este producto: su calibración se mide aparte y no hay ventana.",
+    "window_beyond_validation": "El extremo alto de la ventana es más largo que el seguimiento con que se validó: esa cola no está comprobada.",
+    "quantity_coherence_adjusted": "La cantidad si compra se subió a la de un horizonte menor para que los horizontes sean coherentes entre sí."
   }
 }

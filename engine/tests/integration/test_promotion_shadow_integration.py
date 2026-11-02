@@ -400,11 +400,44 @@ def test_shadow_evaluation_applies_the_same_censorship_as_the_served_evaluation(
         served_overall = conn.execute(text("SELECT wape::float8, n_obs FROM model_evaluations WHERE forecast_run_id = :r AND evaluation_type = 'realized' "
                                            "AND level = 'overall'"), {"r": run_id}).one()
         assert served_overall[1] == stored["n_obs"] == 97 and served_overall[0] == pytest.approx(0.25, abs=1e-6)
+        # W3-D: el período REALMENTE evaluado (no el de las predicciones), el denominador y el estado del WAPE, como en las filas de segmento (W3-A)
+        m = stored["metrics"]
+        assert m["evaluated_period"] == {"first_date": iso(CUTOFF + 1), "last_date": iso(LAST), "n_days": 50}, "60 días con predicción, 10 sin fuente"
+        assert m["denominator"]["sum_actual"] == m["sample"]["sum_actual"] > 0 and m["denominator"]["unit"] == "unidades"
+        assert m["denominator"]["min_required"] == 30.0 and m["wape_status"] == "ok" and m["wape_unstable"] is False
         # idempotente
         again = evaluate(conn, w)
         assert shadow_overall(conn, w, run_id)["n_obs"] == 97 and again["shadow_prospective"]["runs_with_shadow"] == 1
         assert conn.execute(text("SELECT COUNT(*) FROM model_evaluations WHERE forecast_run_id = :r AND evaluation_type = 'shadow_prospective' "
                                  "AND level = 'overall'"), {"r": run_id}).scalar_one() == 1
+
+
+def test_a_shadow_wape_over_too_few_real_sales_is_flagged_unstable_with_the_companys_threshold(db_engine):
+    """W3-D: el mismo umbral `demand.wape_min_denominator` de las métricas por segmento (W3-A) decide si el WAPE del shadow es estable, y la empresa puede cambiarlo."""
+    with rolled_back(db_engine) as conn:
+        w = make_world(conn, n_branches=1)
+        seed_sales(conn, w)
+        conn.execute(text("UPDATE tenants SET settings = CAST(:s AS jsonb) WHERE id = :t"), {"t": w.tenant_id, "s": '{"cores": {"demand": {"wape_min_denominator": 100000}}}'})
+        run_id = publish(conn, w)
+        evaluate(conn, w)
+        m = shadow_overall(conn, w, run_id)["metrics"]
+        assert m["denominator"]["min_required"] == 100000.0 and m["denominator"]["sum_actual"] < 100000.0
+        assert m["wape_status"] == "unstable" and m["wape_unstable"] is True
+        assert m["evaluated_period"]["n_days"] == 60 and m["evaluated_period"]["first_date"] == iso(CUTOFF + 1)
+        horizon_rows = conn.execute(text("SELECT metrics FROM model_evaluations WHERE forecast_run_id = :r AND evaluation_type = 'shadow_prospective' AND level = 'horizon'"),
+                                    {"r": run_id}).scalars().all()
+        assert horizon_rows and all("evaluated_period" in r and r["wape_status"] in {"ok", "unstable"} for r in horizon_rows), "cada nivel declara su período y estado"
+
+
+def test_an_unresolvable_company_threshold_falls_back_to_the_core_default_and_the_shadow_is_still_evaluated(db_engine):
+    with rolled_back(db_engine) as conn:
+        w = make_world(conn, n_branches=1)
+        seed_sales(conn, w)
+        conn.execute(text("UPDATE tenants SET settings = CAST(:s AS jsonb) WHERE id = :t"), {"t": w.tenant_id, "s": '{"cores": {"demand": {"clave_inventada": 1}}}'})
+        run_id = publish(conn, w)
+        evaluate(conn, w)
+        m = shadow_overall(conn, w, run_id)["metrics"]
+        assert m["denominator"]["min_required"] == 30.0 and m["wape_status"] == "ok"
 
 
 def test_an_undeclared_outage_is_still_a_zero_in_both_evaluations_and_a_declared_one_is_not(db_engine):

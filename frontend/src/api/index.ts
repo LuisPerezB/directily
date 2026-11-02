@@ -163,6 +163,28 @@ export const accuracyApi = {
     getPage<T.ModelRegistryEntry>('/models', params),
 }
 
+// ─── Calidad ML (V2.5 · W3-D; solo lectura, forecast.view): evaluaciones por segmento, decisiones de promoción y shadow ─
+/**
+ * Los filtros booleanos viajan como 1/0: axios serializaría `true`/`false` como texto y la API los acepta, pero 1/0 es lo que entiende cualquier cliente de Laravel
+ * (la regla `boolean` rechaza otras cadenas). Los demás parámetros no se tocan.
+ */
+export function booleanFiltersAsBits<P extends object>(params: P | undefined): P | undefined {
+  if (!params) return params
+  const out: Record<string, unknown> = { ...(params as Record<string, unknown>) }
+  for (const key of ['is_selected', 'is_baseline', 'is_effective']) {
+    if (typeof out[key] === 'boolean') out[key] = out[key] ? 1 : 0
+  }
+  return out as P
+}
+
+export const modelQualityApi = {
+  evaluations: (params?: T.ModelQualityQuery) => getPage<T.ModelQualityEvaluation>('/models/evaluations', booleanFiltersAsBits(params)),
+  promotionDecisions: (params?: { core?: 'demand' | 'customer'; run_id?: number; core_run_id?: number; policy?: T.PromotionPolicy; scope?: string; decision?: T.PromotionDecisionKind; is_effective?: boolean; page?: number; per_page?: number }) =>
+    http.get<T.PromotionDecisionsPage>('/models/promotion-decisions', { params: cleanParams(booleanFiltersAsBits(params)) }).then((r) => r.data),
+  shadowEvaluations: (params?: { run_id?: number; horizon?: number; level?: 'overall' | 'horizon'; model_family?: string; page?: number; per_page?: number }) =>
+    http.get<T.ShadowEvaluationsPage>('/models/shadow-evaluations', { params: cleanParams(params) }).then((r) => r.data),
+}
+
 // ─── Reversión de modelos (habilidad forecast.run) ─────────────────────────
 export const modelsApi = {
   rollbackDemand: (runId: number) => postData<T.DemandRollbackResult>('/models/demand/rollback', { run_id: runId }),
@@ -250,7 +272,7 @@ export const customerApi = {
   run: (id: number) => getData<T.CustomerRun>(`/customer/runs/${id}`),
   predictions: (params: {
     horizon?: T.CustomerHorizon; customer_id?: number; product_id?: number; min_probability?: number
-    order_by?: string; direction?: 'asc' | 'desc'; run_id?: number; page?: number; per_page?: number
+    order_by?: string; direction?: 'asc' | 'desc'; run_id?: number; window_status?: T.CustomerWindowStatus; segment?: string; page?: number; per_page?: number
   }) => http.get<T.CustomerPredictionsPage>('/customer/predictions', { params: cleanParams(params) }).then((r) => r.data),
   profile: (id: number, params?: { horizon?: T.CustomerHorizon }) =>
     http.get<{ data: T.CustomerProfile; envelope: T.ResultEnvelope; definitions?: Record<string, string> }>(`/customer/customers/${id}/profile`, { params: cleanParams(params) }).then((r) => r.data),

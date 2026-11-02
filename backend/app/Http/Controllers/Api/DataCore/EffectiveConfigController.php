@@ -21,7 +21,11 @@ use Illuminate\Validation\Rule;
  */
 final class EffectiveConfigController extends Controller
 {
-    public const CORES = ['demand', 'customer', 'supply', 'cost', 'scenario', 'quality_gates'];
+    /**
+     * `quality_gates` (W2-C): umbrales de los gates por módulo. `promotion` (V2.5 · W3-B, ADR-V25-21): política que gobierna lo servido (`governing_policy`,
+     * `legacy` por defecto) y umbrales de la política V2.5; el motor valida claves, tipos y rangos como en el resto de los cores.
+     */
+    public const CORES = ['demand', 'customer', 'supply', 'cost', 'scenario', 'quality_gates', 'promotion'];
 
     public function __construct(private readonly PlatformEngineClient $engine, private readonly TenantContext $context, private readonly AuditLogger $audit) {}
 
@@ -63,7 +67,8 @@ final class EffectiveConfigController extends Controller
 
         $settings = (array) ($tenant->settings ?? []);
         $cores = (array) ($settings['cores'] ?? []);
-        $previous = array_keys((array) ($cores[$core] ?? []));
+        $before = (array) ($cores[$core] ?? []);
+        $previous = array_keys($before);
         if ($overrides === []) {
             unset($cores[$core]);
         } else {
@@ -75,7 +80,17 @@ final class EffectiveConfigController extends Controller
         }
         Tenant::query()->whereKey($tenant->id)->update(['settings' => json_encode($settings, JSON_UNESCAPED_UNICODE)]);
         $tenant->settings = $settings;
-        $this->audit->log('tenant.core_config_updated', $tenant, ['core' => $core, 'keys' => array_keys($overrides), 'previous_keys' => $previous, 'config_version' => $result['body']['config_version'] ?? null]);
+        // Valor anterior y nuevo de cada clave que cambió (los valores de configuración de un core no son secretos): así un cambio como
+        // `governing_policy` legacy → v25 se puede reconstruir. Una clave sin sobrescritura (antes o después) figura como null.
+        $changes = [];
+        foreach (array_unique([...array_keys($before), ...array_keys($overrides)]) as $key) {
+            $old = $before[$key] ?? null;
+            $new = $overrides[$key] ?? null;
+            if (! array_key_exists($key, $before) || ! array_key_exists($key, $overrides) || $old !== $new) {
+                $changes[(string) $key] = ['old' => $old, 'new' => $new];
+            }
+        }
+        $this->audit->log('tenant.core_config_updated', $tenant, ['core' => $core, 'keys' => array_keys($overrides), 'previous_keys' => $previous, 'changes' => $changes, 'config_version' => $result['body']['config_version'] ?? null]);
 
         return response()->json(['data' => $this->present($result['body'], $tenant, $core)]);
     }

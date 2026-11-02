@@ -52,7 +52,10 @@ class AccuracyController extends AnalyticsController
     public function evaluations(AccuracyRequest $request): AnonymousResourceCollection
     {
         $run = $this->runs->resolve($request->intOrNull('run_id'));
+        // V2.5 · W3-D: las filas de segmento y la evaluación prospectiva del shadow solo salen si se piden con `level` / `evaluation_type`;
+        // los detalles por defecto son los de siempre (el detalle de calidad vive en GET /models/evaluations).
         $rows = ModelEvaluation::query()
+            ->classicView($request->validated('level'), $request->validated('evaluation_type'))
             ->where('forecast_run_id', $run->id)
             ->when($request->validated('evaluation_type'), fn ($q, $v) => $q->where('evaluation_type', $v))
             ->when($request->validated('level'), fn ($q, $v) => $q->where('level', $v))

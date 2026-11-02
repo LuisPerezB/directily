@@ -37,6 +37,14 @@ class CustomerPrediction extends Model
             'assumed_unit_price' => 'float',
             'expected_amount' => 'float',
             'median_interval_days' => 'float',
+            // V2.5 · W3-C (ADR-V25-11): nº de pedidos esperado (modelo de conteo), cantidad por pedido, unidades esperadas y la ventana de recompra
+            // (cuantiles del tiempo hasta la siguiente compra, desde as_of). Nulos cuando el motor no los estima: nunca un cero inventado.
+            'expected_orders' => 'float',
+            'quantity_per_order' => 'float',
+            'expected_units' => 'float',
+            'window_p10_days' => 'float',
+            'window_p50_days' => 'float',
+            'window_p90_days' => 'float',
             'quality_flags' => 'array',
         ];
     }

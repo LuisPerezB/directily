@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import Connection, text
 
-from predictily_engine.backtest.metrics import summarize
+from predictily_engine.backtest.metrics import summarize, wape_status
 from predictily_engine.backtest.rolling import BUCKET_DAYS, horizon_bucket
 from predictily_engine.data.asof import local_today
 from predictily_engine.db.repository import TenantRepository
@@ -44,7 +44,7 @@ from predictily_engine.demand.coverage import SalesCoverage
 from predictily_engine.pipeline.data import load_day_declarations
 from predictily_engine.models.registry import BASELINE_FAMILY
 from predictily_engine.pipeline.errors import NotFoundError
-from predictily_engine.platform.config import effective_config_record
+from predictily_engine.platform.config import CORE_DEFAULTS, effective_config_record
 from predictily_engine.profiling.days import BASIS_INFERRED, CLOSED, EXCLUDED_STATUSES, MISSING_SOURCE, DayRules, classify_days
 from predictily_engine.reconciliation.hierarchy import ALL_LEVELS, aggregate
 
@@ -304,6 +304,13 @@ def evaluate_shadow_prospective(conn: Connection, repo: TenantRepository, runs: 
     result: dict[str, Any] = {"evaluated": [], "runs_with_shadow": 0, "exclusions": {}}
     if last is None or runs is None or runs.empty:
         return result
+    # Mismo umbral de estabilidad del WAPE que las métricas por segmento (W3-A): `demand.wape_min_denominator` de la empresa; si su configuración no se
+    # puede resolver, el valor por defecto del core (la evaluación del shadow no debe fallar por eso).
+    try:
+        tenant_row = repo.tenant()
+        min_den = float(effective_config_record("demand", tenant_row.get("settings"), tenant_row.get("sector"))["effective_config"].get("wape_min_denominator") or 0.0)
+    except Exception:  # noqa: BLE001
+        min_den = float(CORE_DEFAULTS["demand"].get("wape_min_denominator") or 0.0)
     totals: dict[str, int] = {}
     for run in runs.to_dict("records"):
         run_id = int(run["id"])
@@ -357,8 +364,15 @@ def evaluate_shadow_prospective(conn: Connection, repo: TenantRepository, runs: 
                               "relative_improvement_vs_served": (None if level != "overall" or served_wape in (None, 0) or s["wape"] != s["wape"]
                                                                  else float((served_wape - s["wape"]) / served_wape)),
                               "n_served_compared": int(len(same)) if level == "overall" else None}
+                den = float(s["sum_actual"])
+                w_status = wape_status(den, min_den)
                 metrics = {"shadow": True, "served": False, "scope": "prospectivo (tras el corte)", "exclusions": exclusions,
-                           "sample": {"n_obs": int(s["n_obs"]), "n_series": int(df["node_key"].nunique()), "sum_actual": float(s["sum_actual"])},
+                           "sample": {"n_obs": int(s["n_obs"]), "n_series": int(df["node_key"].nunique()), "sum_actual": den},
+                           # Estabilidad del WAPE y período REALMENTE evaluado (W3-D): mismo denominador y estado que las filas de segmento (W3-A).
+                           "denominator": {"sum_actual": den, "unit": "unidades", "min_required": min_den},
+                           "wape_status": w_status, "wape_unstable": w_status != "ok",
+                           "evaluated_period": {"first_date": df["ds"].min().date().isoformat(), "last_date": df["ds"].max().date().isoformat(),
+                                                "n_days": int(df["ds"].nunique())},
                            "comparison": comparison, "coverage_80_n": int(len(with_band)),
                            "censorship": "misma clasificación de días que la evaluación servida (quiebre, fuente ausente, cierre)"}
                 out_rows.append({**base, "level": level, "level_key": key, "horizon_days": horizon_days,

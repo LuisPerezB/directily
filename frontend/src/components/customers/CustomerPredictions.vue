@@ -14,11 +14,12 @@ import InlineNotice from '@/components/ui/InlineNotice.vue'
 import ProductPicker from '@/components/forecast/ProductPicker.vue'
 import EnvelopePanel from '@/components/forecast/EnvelopePanel.vue'
 import QualityBadge from '@/components/ui/QualityBadge.vue'
+import CustomerWindowCell from '@/components/customers/CustomerWindowCell.vue'
 import { customerApi } from '@/api'
 import type { CustomerHorizon, CustomerPrediction, Product } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
-import { formatExpectedAmount, horizonNotAvailable, predictionAbstains } from '@/utils/customers'
+import { formatExpectedAmount, horizonNotAvailable, predictionAbstains, s05Cause, visibleFlags } from '@/utils/customers'
 import { formatNumber, formatProbability } from '@/utils/format'
 
 const props = defineProps<{ horizon: CustomerHorizon }>()
@@ -26,7 +27,7 @@ const emit = defineEmits<{ 'update:horizon': [value: CustomerHorizon] }>()
 const { t, te } = useI18n()
 const tenant = useTenantStore()
 
-const orderBy = ref<'probability' | 'expected_quantity' | 'expected_amount' | 'quantity_if_purchase'>('probability')
+const orderBy = ref<'probability' | 'expected_quantity' | 'expected_amount' | 'quantity_if_purchase' | 'expected_orders' | 'expected_units'>('probability')
 const minProbability = ref<number | null>(null)
 const product = ref<Product | null>(null)
 const page = ref(1)
@@ -67,6 +68,9 @@ const columns = computed<Column<CustomerPrediction>[]>(() => [
   { key: 'purchase_probability', label: t('customers.probability'), align: 'right' },
   { key: 'quantity_if_purchase', label: t('customers.quantityIfPurchase'), align: 'right' },
   { key: 'expected_quantity', label: t('customers.expectedQuantity'), align: 'right' },
+  { key: 'expected_orders', label: t('customers.expectedOrders'), align: 'right' },
+  { key: 'expected_units', label: t('customers.expectedUnits'), align: 'right' },
+  { key: 'window', label: t('customers.window.title') },
   { key: 'expected_amount', label: t('customers.estimatedAmount'), align: 'right' },
   { key: 'committed_quantity', label: t('customers.committed'), align: 'right', format: (r) => formatNumber(r.committed_quantity, 1) },
   { key: 'model', label: t('customers.model') },
@@ -84,6 +88,8 @@ const columns = computed<Column<CustomerPrediction>[]>(() => [
           <option value="expected_quantity">{{ t('customers.expectedQuantity') }}</option>
           <option value="expected_amount">{{ t('customers.estimatedAmount') }}</option>
           <option value="quantity_if_purchase">{{ t('customers.quantityIfPurchase') }}</option>
+          <option value="expected_orders">{{ t('customers.expectedOrders') }}</option>
+          <option value="expected_units">{{ t('customers.expectedUnits') }}</option>
         </select>
       </div>
       <div>
@@ -135,6 +141,24 @@ const columns = computed<Column<CustomerPrediction>[]>(() => [
             <span v-if="row.quantity_interval?.lo != null && row.quantity_interval?.hi != null" class="block text-xs text-fg-muted">{{ t('customers.range80', { lo: formatNumber(row.quantity_interval.lo, 1), hi: formatNumber(row.quantity_interval.hi, 1) }) }}</span>
           </template>
           <template #cell-expected_quantity="{ row }">{{ formatNumber(row.expected_quantity, 2) }} <span class="text-xs text-fg-muted">{{ row.product.unit }}</span></template>
+          <template #cell-expected_orders="{ row }">
+            <template v-if="row.expected_orders != null">
+              <span data-test="orders">{{ formatNumber(row.expected_orders, 2) }}</span>
+              <span class="block text-xs text-fg-muted">{{ t('customers.ordersUnit') }}</span>
+            </template>
+            <template v-else>
+              <span class="text-fg-muted text-sm" data-test="orders-missing" :title="s05Cause(row.quality_flags) ? t(`customers.s05.causeHint.${s05Cause(row.quality_flags)}`) : undefined">{{ t('customers.notEstimated') }}</span>
+              <span v-if="s05Cause(row.quality_flags)" class="block text-xs text-fg-muted" data-test="orders-cause">{{ t(`customers.s05.cause.${s05Cause(row.quality_flags)}`) }}</span>
+            </template>
+          </template>
+          <template #cell-expected_units="{ row }">
+            <template v-if="row.expected_units != null">
+              <span data-test="units">{{ formatNumber(row.expected_units, 2) }}</span> <span class="text-xs text-fg-muted">{{ row.product.unit }}</span>
+              <span v-if="row.quantity_per_order != null" class="block text-xs text-fg-muted" data-test="per-order">{{ t('customers.perOrder', { n: formatNumber(row.quantity_per_order, 1) }) }}</span>
+            </template>
+            <span v-else class="text-fg-muted text-sm" data-test="units-missing" :title="s05Cause(row.quality_flags) ? t(`customers.s05.causeHint.${s05Cause(row.quality_flags)}`) : undefined">{{ t('customers.notEstimated') }}</span>
+          </template>
+          <template #cell-window="{ row }"><CustomerWindowCell :window="row.window" :cause="s05Cause(row.quality_flags)" /></template>
           <template #cell-expected_amount="{ row }">
             <span data-test="amount">{{ formatExpectedAmount(row.expected_amount, tenant.currency) }}</span>
             <span class="block text-xs text-fg-muted" data-test="amount-label">{{ t('customers.amountAssumption') }}</span>
@@ -144,8 +168,8 @@ const columns = computed<Column<CustomerPrediction>[]>(() => [
             <span v-if="row.model.role === 'fallback'" class="badge badge-info ml-1">{{ t('customers.fallbackModel') }}</span>
           </template>
           <template #cell-quality_flags="{ row }">
-            <span v-if="!row.quality_flags?.length" class="text-fg-muted">—</span>
-            <span v-for="f in row.quality_flags" :key="f" class="badge badge-warning mr-1">{{ flagText(f) }}</span>
+            <span v-if="!visibleFlags(row.quality_flags).length" class="text-fg-muted">—</span>
+            <span v-for="f in visibleFlags(row.quality_flags)" :key="f" class="badge badge-warning mr-1" :title="te(`customerFlagHints.${f}`) ? t(`customerFlagHints.${f}`) : undefined">{{ flagText(f) }}</span>
           </template>
         </DataTable>
         <PaginationBar v-model:page="page" :meta="result.data.value?.meta ?? null" />

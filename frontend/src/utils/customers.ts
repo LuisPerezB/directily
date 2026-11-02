@@ -1,5 +1,5 @@
 import { isApiError } from '@/api/errors'
-import type { CustomerPrediction, CustomerReconciliationRow, ReconciliationStatus } from '@/api/types'
+import type { CustomerPrediction, CustomerReconciliationRow, CustomerWindow, CustomerWindowStatus, ReconciliationStatus } from '@/api/types'
 import { DASH, formatCurrency } from './format'
 
 /** Importe esperado: SIEMPRE una estimación con supuesto de precio, nunca una venta confirmada. */
@@ -77,4 +77,43 @@ export function rankingAtK(
 ): number | null {
   const v = metrics?.[`${kind}_at_${k}`]
   return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+// ─── V2.5 · W3-D: S05 (nº de pedidos, unidades y ventana de recompra) ──────────────────────────────────────────
+
+/**
+ * Banderas de diagnóstico del motor (`docs/ml/CUSTOMER_REPURCHASE.md` §14) que no se muestran al usuario: informan que el cálculo de S05 no estuvo disponible o
+ * falló en la fila, y la fila ya lo dice con «No estimado». Las demás —incluidas las de S05 que explican una cifra: `orders_nested_adjusted`, `cold_start`,
+ * `window_beyond_validation`— se traducen y se muestran. Una bandera desconocida se muestra (como hasta ahora) en lugar de ocultarse.
+ */
+export const DIAGNOSTIC_FLAGS: readonly string[] = ['s05_unavailable', 's05_failed']
+
+export function visibleFlags(flags: readonly string[] | null | undefined): string[] {
+  return (flags ?? []).filter((f) => !DIAGNOSTIC_FLAGS.includes(f))
+}
+
+/**
+ * Por qué una fila no tiene las cantidades de S05 (la bandera de diagnóstico del motor, que no se muestra como código): `unavailable` = el modelo servido es
+ * anterior a esta función; `failed` = el cálculo falló en la fila. Solo se usa para explicar un «No estimado»; nunca para inventar una cifra.
+ */
+export function s05Cause(flags: readonly string[] | null | undefined): 'failed' | 'unavailable' | null {
+  const list = flags ?? []
+  if (list.includes('s05_failed')) return 'failed'
+  if (list.includes('s05_unavailable')) return 'unavailable'
+  return null
+}
+
+export type WindowView =
+  /** Rango probable (P10–P90) con la mediana; `overdue` = atrasado respecto a su patrón (no es abandono). */
+  | { kind: 'range'; p10: number; p50: number | null; p90: number; overdue: boolean }
+  /** Sin cifras: el estado dice por qué (`insufficient_data`, `censored`) o `unavailable` si el motor no lo estimó (corrida anterior a S05). */
+  | { kind: 'state'; status: CustomerWindowStatus | 'unavailable' }
+
+/** La ventana se muestra como rango solo con un estado que la respalda y ambos extremos; en cualquier otro caso, solo el estado. Nunca un día exacto. */
+export function windowView(window: CustomerWindow | null | undefined): WindowView {
+  const status = window?.status ?? null
+  if ((status === 'estimated' || status === 'overdue') && typeof window?.p10_days === 'number' && typeof window?.p90_days === 'number') {
+    return { kind: 'range', p10: window.p10_days, p50: typeof window.p50_days === 'number' ? window.p50_days : null, p90: window.p90_days, overdue: status === 'overdue' }
+  }
+  return { kind: 'state', status: status ?? 'unavailable' }
 }

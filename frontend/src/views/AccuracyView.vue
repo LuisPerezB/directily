@@ -13,10 +13,13 @@ import ProductPicker from '@/components/forecast/ProductPicker.vue'
 import ProtocolManifest from '@/components/accuracy/ProtocolManifest.vue'
 import ExtendedMetrics from '@/components/accuracy/ExtendedMetrics.vue'
 import DemandModels from '@/components/accuracy/DemandModels.vue'
+import SegmentAccuracy from '@/components/accuracy/SegmentAccuracy.vue'
+import PromotionDecisions from '@/components/accuracy/PromotionDecisions.vue'
+import ShadowEvaluations from '@/components/accuracy/ShadowEvaluations.vue'
 import QualityBadge from '@/components/ui/QualityBadge.vue'
 import { accuracyApi, exportsApi, forecastApi } from '@/api'
 import { errorMessage, isApiError } from '@/api/errors'
-import type { AccuracyByGroup, Product } from '@/api/types'
+import type { AccuracyByGroup, Product, SegmentMetricsSummary } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
 import { useCatalogStore } from '@/stores/catalog'
 import { useTenantStore } from '@/stores/tenant'
@@ -35,6 +38,13 @@ const completedRuns = computed(() => (runs.data.value?.data ?? []).filter((r) =>
 const summary = useAsync(() => accuracyApi.summary({ run_id: runId.value ?? undefined }), { watch: [runId] })
 const s = computed(() => summary.data.value)
 const noData = computed(() => (isApiError(summary.error.value) && summary.error.value.status === 404) || (summary.loaded.value && !s.value?.run))
+
+// Ejecución resuelta (la elegida o la vigente): las secciones de calidad ML (segmentos, promoción, shadow) consultan por su id.
+const resolvedRunId = computed(() => s.value?.run?.id ?? null)
+const segmentSummary = computed<SegmentMetricsSummary | null>(() => {
+  const run = (runs.data.value?.data ?? []).find((r) => r.id === resolvedRunId.value)
+  return (run?.summary?.segment_metrics as SegmentMetricsSummary | undefined) ?? null
+})
 
 const selected = computed(() => s.value?.backtest?.selected ?? null)
 const baseline = computed(() => s.value?.backtest?.baseline ?? null)
@@ -190,6 +200,24 @@ const glossary = ['wape', 'mae', 'rmse', 'bias', 'coverage', 'baseline', 'backte
         <h2 class="section-title mb-1">{{ t('extended.title') }}</h2>
         <p class="text-sm text-fg-muted mb-3">{{ t('extended.subtitle') }}</p>
         <ExtendedMetrics :metrics="selected" :baseline="baseline" :p50="s.p50" :independent-holdout="independentHoldout" />
+      </section>
+
+      <section class="card p-4 sm:p-6" data-test="segment-section">
+        <h2 class="section-title mb-1">{{ t('segmentAccuracy.title') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('segmentAccuracy.subtitle') }}</p>
+        <SegmentAccuracy :run-id="resolvedRunId" :summary="segmentSummary" />
+      </section>
+
+      <section class="card p-4 sm:p-6" data-test="promotion-section">
+        <h2 class="section-title mb-1">{{ t('promotion.title') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('promotion.subtitle') }}</p>
+        <PromotionDecisions :run-id="resolvedRunId" />
+      </section>
+
+      <section class="card p-4 sm:p-6" data-test="shadow-section">
+        <h2 class="section-title mb-1">{{ t('shadow.title') }}</h2>
+        <p class="text-sm text-fg-muted mb-3">{{ t('shadow.subtitle') }}</p>
+        <ShadowEvaluations :run-id="resolvedRunId" />
       </section>
 
       <section class="card p-4 sm:p-6">

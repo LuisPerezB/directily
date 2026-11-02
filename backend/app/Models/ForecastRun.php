@@ -77,9 +77,31 @@ class ForecastRun extends Model
         return $this->hasMany(ForecastValue::class, 'forecast_run_id');
     }
 
+    /**
+     * Evaluaciones de la ejecución en la vista CLÁSICA (la de antes de W3): sin las filas de segmento ni la evaluación prospectiva del shadow
+     * (`ModelEvaluation::scopeClassicView`). El detalle de calidad: `qualityEvaluations()`.
+     */
     public function evaluations(): HasMany
     {
+        return $this->hasMany(ModelEvaluation::class, 'forecast_run_id')->classicView();
+    }
+
+    /** TODAS las evaluaciones de la ejecución (backtest, selección, segmento y shadow prospectivo). */
+    public function qualityEvaluations(): HasMany
+    {
         return $this->hasMany(ModelEvaluation::class, 'forecast_run_id');
+    }
+
+    /** V2.5 · W3-B: decisiones de promoción (política heredada y V2.5, por alcance). */
+    public function promotionDecisions(): HasMany
+    {
+        return $this->hasMany(ModelPromotionDecision::class, 'forecast_run_id');
+    }
+
+    /** V2.5 · W3-B: predicciones del challenger que NO se sirven (shadow mode). */
+    public function shadowForecastValues(): HasMany
+    {
+        return $this->hasMany(ShadowForecastValue::class, 'forecast_run_id');
     }
 
     public function recommendations(): HasMany

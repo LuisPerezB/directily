@@ -246,8 +246,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - { name: run_id, in: query, required: true, schema: { type: integer } }
-        - { name: evaluation_type, in: query, schema: { type: string, enum: [backtest, realized] } }
-        - { name: level, in: query, schema: { type: string, enum: [overall, demand_class, horizon, branch, category, product, series] } }
+        - { name: evaluation_type, in: query, description: 'Sin filtro no sale `shadow_prospective` (V2.5 · W3): se pide explícitamente o se usa GET /models/shadow-evaluations', schema: { type: string, enum: [backtest, selection_windows, realized, shadow_prospective] } }
+        - { name: level, in: query, description: 'Sin filtro no sale `segment` (V2.5 · W3): se pide explícitamente o se usa GET /models/evaluations', schema: { type: string, enum: [overall, demand_class, horizon, horizon_total, branch, category, product, series, total, segment] } }
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -275,6 +275,142 @@ paths:
       responses:
         '200': { description: Lista paginada de model_registry }
         '422': { $ref: '#/components/responses/ValidationError' }
+  /models/evaluations:
+    get:
+      tags: [Precisión]
+      summary: Evaluaciones de calidad de los modelos (por horizonte y segmento; Demand y Customer)
+      description: |
+        Explorador de `model_evaluations` (V2.5 · W3; V25-HOR-007, V25-AGD-011..014 y -016, V25-DEM-034). Solo lectura. A diferencia de
+        `GET /model-evaluations` (la vista clásica, que NO muestra las filas nuevas), aquí salen las **métricas por segmento y horizonte** de Demand
+        (`level=segment`, `level_key=<dimensión>:<valor>`; dimensiones `demand_class`, `category`, `branch`, `volume_tier`, `series_age`), la **calibración por
+        segmento y las métricas de S05** del Customer Core (`core=customer`; dimensiones `frequency`, `value`, `tenure`, `history`; `level_key` como
+        `h30:expected_orders` o `window`) y la evaluación prospectiva del shadow (`evaluation_type=shadow_prospective`).
+
+
+        Cada fila declara su **denominador** (`quality.denominator.sum_actual`, en unidades) y su **cobertura** (`quality.sample`: días evaluables, días excluidos
+        por clase —quiebre, fuente ausente, cierre—, series y ventanas). Un WAPE con denominador insuficiente o cero **nunca** se publica: `wape` es null,
+        `quality.wape_unstable = true` y la métrica alternativa explícita va en `quality.alternative_metric` (MASE o error absoluto agregado). Un segmento con
+        pocas observaciones trae `status = insufficient_data`, `figures_available = false` y **ninguna cifra de error**, solo los tamaños de muestra.
+
+
+        Sin `run_id` ni `core_run_id` devuelve solo las filas de la ejecución de Demand vigente y del último entrenamiento de Customer (si el plan lo incluye);
+        sin ninguna, una lista vacía. Las anteriores se piden con `run_id` o `core_run_id`. Un `run_id` o `core_run_id` de otra empresa responde 404. Los filtros
+        booleanos aceptan `true`, `false`, `1` y `0`; otro valor responde 422. 402 si se pide `core=customer` y el plan no incluye el comportamiento de compra, o un `horizon` fuera del plan (sin `horizon`, los
+        horizontes fuera del plan no aparecen). Habilidad requerida: `forecast.view`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: core, in: query, schema: { type: string, enum: [demand, customer] } }
+        - { name: run_id, in: query, description: 'Ejecución de pronóstico (forecast_run_id)', schema: { type: integer } }
+        - { name: core_run_id, in: query, description: 'Ejecución del Customer Core', schema: { type: integer } }
+        - { name: horizon, in: query, schema: { type: integer, enum: [7, 14, 15, 30, 60, 90] } }
+        - { name: evaluation_type, in: query, description: 'backtest, selection_windows, realized, holdout, out_of_sample, shadow_prospective…', schema: { type: string, maxLength: 20, pattern: '^[a-z_]+$' } }
+        - { name: level, in: query, schema: { type: string, enum: [overall, demand_class, horizon, horizon_total, branch, category, product, series, total, segment] } }
+        - { name: dimension, in: query, description: 'Dimensión de segmento (implica level=segment)', schema: { type: string, enum: [demand_class, category, branch, volume_tier, series_age, frequency, value, tenure, history] } }
+        - { name: level_key, in: query, description: 'Clave exacta, p. ej. demand_class:smooth', schema: { type: string, maxLength: 80 } }
+        - { name: model_family, in: query, schema: { type: string, maxLength: 40, pattern: '^[a-z0-9_]+$' } }
+        - { name: is_selected, in: query, description: 'true/false o 1/0', schema: { type: boolean } }
+        - { name: is_baseline, in: query, description: 'true/false o 1/0', schema: { type: boolean } }
+        - { name: status, in: query, description: 'Estado de la fila (metrics.status): ok | insufficient_data (Demand); calibrated | miscalibrated | insufficient_data (calibración por segmento del Customer Core); validated | not_validated | insufficient_data (validación de la ventana de recompra)', schema: { type: string, enum: [ok, insufficient_data, calibrated, miscalibrated, validated, not_validated] } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ModelQualityEvaluation' } }
+                  meta: { type: object, properties: { current_page: { type: integer }, per_page: { type: integer }, total: { type: integer }, last_page: { type: integer } } }
+                  links: { type: object }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /models/promotion-decisions:
+    get:
+      tags: [Precisión]
+      summary: Decisiones de promoción de la política heredada y de la V2.5, por ejecución y alcance
+      description: |
+        Una fila por **política** (`legacy` o `v25`) y **alcance** (`global`, `class:<clase de demanda>`, `horizon:<H>`, este último informativo) de la ejecución
+        (V2.5 · W3, ADR-V25-21). Las dos políticas se calculan siempre en paralelo; `is_effective` marca la que **gobernó lo servido**: por defecto la heredada
+        (no cambia lo servido), y la V2.5 solo si la empresa fijó `promotion.governing_policy = v25` (`GET /tenant/effective-config?core=promotion`). La otra
+        queda registrada como «sombra de decisión». `gates` trae el resultado de cada gate con su evidencia (`pass`, `fail`, `not_evaluable`, `not_applicable`,
+        `pending`); `served_family` es lo que la política dejó servido (con `planned_family` y `fallback_applied` si el entrenamiento final recurrió a un
+        respaldo). La aprobación humana separada (W4 · S06) aparece en `approval` y queda `pending` mientras nadie la complete.
+
+
+        Sin `run_id` ni `core_run_id`: la ejecución de Demand vigente (sin ninguna vigente, lista vacía y `run = null`; nunca todo el historial). `summary` (solo con una
+        ejecución de Demand) dice qué política gobernó, las huellas de ambas y en cuántos alcances la V2.5 habría servido otro modelo que la heredada; los alcances
+        informativos `horizon:<H>` no cuentan. Los alcances de un horizonte que el plan no incluye no salen, y pedirlos con `scope=horizon:<H>` responde 402
+        (`limit = horizons`). Un `run_id` o `core_run_id` de otra empresa responde 404. Habilidad requerida: `forecast.view`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: core, in: query, schema: { type: string, enum: [demand, customer] } }
+        - { name: run_id, in: query, description: 'Ejecución de pronóstico; por defecto la vigente', schema: { type: integer } }
+        - { name: core_run_id, in: query, schema: { type: integer } }
+        - { name: policy, in: query, schema: { type: string, enum: [legacy, v25] } }
+        - { name: scope, in: query, description: 'Clave de alcance exacta, p. ej. global o class:intermittent', schema: { type: string, maxLength: 80 } }
+        - { name: decision, in: query, schema: { type: string, enum: [promote, reject, keep_champion, publish_baseline, shadow] } }
+        - { name: is_effective, in: query, description: 'true/false o 1/0', schema: { type: boolean } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada de decisiones, la referencia de la ejecución y su resumen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/PromotionDecision' } }
+                  meta: { type: object, properties: { current_page: { type: integer }, per_page: { type: integer }, total: { type: integer }, last_page: { type: integer } } }
+                  links: { type: object }
+                  run: { $ref: '#/components/schemas/PromotionRunRef' }
+                  summary: { $ref: '#/components/schemas/PromotionSummary' }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /models/shadow-evaluations:
+    get:
+      tags: [Precisión]
+      summary: Evaluación prospectiva del challenger (shadow) frente a lo realizado
+      description: |
+        Shadow mode (V2.5 · W3, §8): el mejor candidato **no servido** de cada alcance predice el horizonte sin servirse (`shadow_forecast_values`) y, pasado el
+        corte, se evalúa contra lo realmente vendido con la **misma censura de días** que la evaluación servida (quiebre, fuente ausente y cierre no son ceros).
+        Cada fila (`evaluation_type = shadow_prospective`, nivel `overall` u `horizon`) trae el WAPE del challenger, su sesgo y su cobertura, y en `shadow` el
+        WAPE del modelo servido sobre las mismas series y días no censurados para una comparación justa.
+
+
+        `shadow_forecasts` lista, por familia, cuántos valores no servidos existen (y el rango de fechas de las PREDICCIONES) y su estado: `evaluated` o `pending`
+        (todavía no hay ventas realizadas posteriores al corte que comparar; no es un cero). El período REALMENTE evaluado y el denominador van en `shadow.evaluated` y
+        `shadow.denominator` de cada fila. Con menos ventas reales evaluadas que `demand.wape_min_denominator` el WAPE, el sesgo, el WAPE del servido y la mejora
+        relativa son `null` (`shadow.wape_unstable = true`). Nunca devuelve los valores pronosticados. Sin `run_id`: la ejecución vigente (que normalmente aún está
+        `pending`); las evaluaciones llegan cuando pasa el horizonte. Un `run_id` de otra empresa responde 404. Habilidad requerida: `forecast.view`.
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - { name: run_id, in: query, description: 'Por defecto, la ejecución vigente', schema: { type: integer } }
+        - { name: horizon, in: query, schema: { type: integer, enum: [7, 14, 15, 30, 60, 90] } }
+        - { name: level, in: query, schema: { type: string, enum: [overall, horizon] } }
+        - { name: model_family, in: query, schema: { type: string, maxLength: 40, pattern: '^[a-z0-9_]+$' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Evaluaciones del challenger y estado de sus predicciones no servidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ModelQualityEvaluation' } }
+                  meta: { type: object, properties: { current_page: { type: integer }, per_page: { type: integer }, total: { type: integer }, last_page: { type: integer } } }
+                  links: { type: object }
+                  run: { $ref: '#/components/schemas/PromotionRunRef' }
+                  shadow_forecasts: { type: array, items: { $ref: '#/components/schemas/ShadowForecastSummary' } }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Validation' }
   /models/{id}:
     get:
       tags: [Precisión]
@@ -591,7 +727,13 @@ paths:
     get:
       tags: [Exportaciones]
       summary: Evaluaciones de modelos
-      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/RunId' }, { $ref: '#/components/parameters/Delimiter' }]
+      description: 'El CSV de siempre: las filas por segmento y la evaluación prospectiva del shadow (V2.5 · W3) solo salen con `level=segment` o `evaluation_type=shadow_prospective`; el detalle de calidad está en GET /models/evaluations.'
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/RunId'
+        - { name: evaluation_type, in: query, schema: { type: string, enum: [backtest, selection_windows, realized, shadow_prospective] } }
+        - { name: level, in: query, schema: { type: string, enum: [overall, demand_class, horizon, horizon_total, branch, category, product, series, total, segment] } }
+        - $ref: '#/components/parameters/Delimiter'
       responses: { '200': { description: CSV, content: { text/csv: { schema: { type: string } } } } }
   /exports/sales-summary.csv:
     get:
@@ -684,6 +826,237 @@ components:
         promotion_decision: { type: [object, 'null'], additionalProperties: true }
         published: { type: boolean }
         retired_model_ids: { type: array, items: { type: integer }, description: 'Solo en la respuesta de promote' }
+    ModelQualityEvaluation:
+      type: object
+      description: >-
+        Fila de `model_evaluations` con su segmento, denominador y cobertura. `quality` (Demand), `calibration` (Customer, nivel segmento) y `shadow`
+        (evaluación prospectiva) son null cuando no aplican. Con `status = insufficient_data` no hay cifras de error (`figures_available = false`).
+      properties:
+        id: { type: integer }
+        core: { type: string, enum: [demand, customer] }
+        forecast_run_id: { type: [integer, 'null'] }
+        core_run_id: { type: [integer, 'null'] }
+        model_registry_id: { type: [integer, 'null'] }
+        model_family: { type: string, description: 'selection = el modelo servido; seasonal_naive = baseline' }
+        label: { type: string }
+        roles: { type: array, items: { type: string, enum: [selected, baseline, best_statistical, ml] } }
+        evaluation_type: { type: string }
+        level: { type: string }
+        level_key: { type: [string, 'null'] }
+        segment:
+          type: [object, 'null']
+          properties:
+            dimension: { type: string }
+            value: { type: string }
+        horizon_days: { type: [integer, 'null'] }
+        is_baseline: { type: boolean }
+        is_selected: { type: boolean }
+        status: { type: [string, 'null'], description: 'ok | insufficient_data (Demand); calibrated | miscalibrated | insufficient_data (Customer, segmento); validated | not_validated | insufficient_data (Customer, ventana de recompra)' }
+        figures_available: { type: boolean }
+        wape: { type: [number, 'null'], description: 'null si el denominador es 0 o menor que el mínimo (wape_unstable) o la fila es insufficient_data' }
+        mae: { type: [number, 'null'] }
+        rmse: { type: [number, 'null'] }
+        bias: { type: [number, 'null'] }
+        coverage_80: { type: [number, 'null'] }
+        coverage_95: { type: [number, 'null'] }
+        n_obs: { type: integer }
+        n_windows: { type: integer }
+        cutoffs: { type: array, items: { type: string, format: date } }
+        quality:
+          type: [object, 'null']
+          description: Calidad de una fila de Demand
+          properties:
+            metrics_version: { type: [string, 'null'] }
+            status: { type: [string, 'null'] }
+            insufficient_reasons: { type: array, items: { type: object, additionalProperties: true } }
+            wape_status: { type: [string, 'null'], enum: [ok, unstable, undefined, null] }
+            wape_unstable: { type: boolean }
+            wape_raw: { type: [number, 'null'], description: 'WAPE crudo cuando el denominador es positivo pero menor que el mínimo' }
+            denominator:
+              type: [object, 'null']
+              properties:
+                sum_actual: { type: [number, 'null'], description: 'Σ de lo realmente vendido (unidades) sobre los días evaluables' }
+                unit: { type: string }
+                min_required: { type: [number, 'null'] }
+            alternative_metric: { type: [object, 'null'], additionalProperties: true, description: 'Métrica alternativa explícita (aggregate_absolute_error o mase) con `used_because`' }
+            mase: { type: [number, 'null'] }
+            rmsse: { type: [number, 'null'] }
+            sum_abs_error: { type: [number, 'null'] }
+            pinball: { type: [object, 'null'], properties: { p10: { type: [number, 'null'] }, p50: { type: [number, 'null'] }, p90: { type: [number, 'null'] } } }
+            interval_width: { type: [object, 'null'], additionalProperties: { type: [number, 'null'] }, description: 'Anchura media de los intervalos 80 y 95' }
+            sample:
+              type: [object, 'null']
+              additionalProperties: true
+              description: 'evaluable_days, excluded_days, total_days, evaluable_share, n_series, n_windows y exclusions por causa (stockout_days, missing_source_days, closed_days, scale_undefined)'
+            stability:
+              type: [object, 'null']
+              properties:
+                status: { type: [string, 'null'] }
+                n_windows: { type: [integer, 'null'] }
+                wape_mean: { type: [number, 'null'] }
+                wape_std: { type: [number, 'null'] }
+                wape_cv: { type: [number, 'null'] }
+                unstable_across_windows: { type: [boolean, 'null'] }
+            comparison:
+              type: [object, 'null']
+              description: Solo en la fila del modelo servido, frente al baseline
+              properties:
+                baseline_family: { type: [string, 'null'] }
+                verdict: { type: [string, 'null'], enum: [better, similar, worse, not_comparable, not_available, null] }
+                metric: { type: [string, 'null'], enum: [wape, aggregate_absolute_error, null] }
+                value: { type: [number, 'null'] }
+                baseline_value: { type: [number, 'null'] }
+                relative_improvement: { type: [number, 'null'] }
+                reason: { type: [string, 'null'] }
+        calibration:
+          type: [object, 'null']
+          description: Calibración de un segmento del Customer Core (frecuencia, valor, antigüedad, historia)
+          properties:
+            status: { type: [string, 'null'], enum: [calibrated, miscalibrated, insufficient_data, null] }
+            n: { type: [integer, 'null'] }
+            n_positive: { type: [integer, 'null'] }
+            base_rate: { type: [number, 'null'] }
+            mean_predicted: { type: [number, 'null'] }
+            mean_ratio: { type: [number, 'null'] }
+            brier: { type: [number, 'null'] }
+            log_loss: { type: [number, 'null'] }
+            ece: { type: [number, 'null'] }
+            reference_brier: { type: [number, 'null'] }
+            brier_delta_vs_reference: { type: [number, 'null'] }
+            reason: { type: [string, 'null'] }
+        shadow:
+          type: [object, 'null']
+          description: Evaluación prospectiva del challenger (nunca servido)
+          properties:
+            served: { type: boolean, const: false }
+            scope: { type: string }
+            wape_status: { type: [string, 'null'], enum: [ok, unstable, undefined, null], description: 'Estabilidad del WAPE según lo realmente vendido en lo evaluado (misma regla que las filas de segmento)' }
+            wape_unstable: { type: boolean, description: 'true: el WAPE, el sesgo, el WAPE del servido y la mejora relativa son null' }
+            denominator:
+              type: [object, 'null']
+              properties:
+                sum_actual: { type: [number, 'null'] }
+                unit: { type: string }
+                min_required: { type: [number, 'null'] }
+            served_wape_same_series_days: { type: [number, 'null'] }
+            relative_improvement_vs_served: { type: [number, 'null'] }
+            n_served_compared: { type: [integer, 'null'] }
+            sum_actual: { type: [number, 'null'] }
+            n_series: { type: [integer, 'null'] }
+            coverage_80_n: { type: [integer, 'null'] }
+            evaluated:
+              type: object
+              description: 'Período REALMENTE evaluado (no el de las predicciones). Fechas y días son null en filas anteriores a W3-D.'
+              properties:
+                first_date: { type: [string, 'null'], format: date }
+                last_date: { type: [string, 'null'], format: date }
+                n_days: { type: [integer, 'null'] }
+                n_series_days: { type: [integer, 'null'] }
+                n_series: { type: [integer, 'null'] }
+            exclusions: { type: object, additionalProperties: true }
+        metrics: { type: [object, 'null'], additionalProperties: true, description: 'jsonb del motor, sin transformar' }
+        extra: { type: [object, 'null'], additionalProperties: true }
+        created_at: { type: [string, 'null'], format: date-time }
+    PromotionGate:
+      type: object
+      properties:
+        status: { type: string, enum: [pass, fail, not_evaluable, not_applicable, pending] }
+        blocking: { type: boolean }
+        message: { type: string }
+        evidence: { type: object, additionalProperties: true }
+    PromotionDecision:
+      type: object
+      properties:
+        id: { type: integer }
+        core: { type: string, enum: [demand, customer] }
+        forecast_run_id: { type: [integer, 'null'] }
+        core_run_id: { type: [integer, 'null'] }
+        scope_key: { type: string, description: 'global, class:<clase>, horizon:<H>' }
+        scope:
+          type: object
+          properties:
+            type: { type: string }
+            value: { type: [string, 'null'] }
+        policy: { type: string, enum: [legacy, v25] }
+        policy_version: { type: string, description: 'SHA-256 de los parámetros de la política' }
+        candidate_family: { type: string }
+        candidate_label: { type: string }
+        champion_family: { type: [string, 'null'] }
+        champion_label: { type: [string, 'null'] }
+        candidate_model_registry_id: { type: [integer, 'null'] }
+        champion_model_registry_id: { type: [integer, 'null'] }
+        decision: { type: string, enum: [promote, reject, keep_champion, publish_baseline, shadow] }
+        is_effective: { type: boolean, description: 'true = esta política gobernó lo servido en la ejecución' }
+        informational: { type: boolean, description: 'Alcance informativo (p. ej. por horizonte): no gobierna lo servido' }
+        served_family: { type: [string, 'null'], description: 'Lo que la política dejó servido en el alcance' }
+        served_label: { type: [string, 'null'] }
+        planned_family: { type: [string, 'null'], description: 'Familia planeada cuando el entrenamiento final recurrió a un respaldo' }
+        fallback_applied: { type: boolean }
+        gates: { type: object, additionalProperties: { $ref: '#/components/schemas/PromotionGate' } }
+        gates_summary: { type: object, additionalProperties: { type: integer } }
+        failed_gates: { type: array, items: { type: string } }
+        metrics: { type: object, additionalProperties: true }
+        reason: { type: string }
+        approval:
+          type: object
+          description: Aprobación humana separada (W4 · S06)
+          properties:
+            status: { type: string, enum: [pending, approved] }
+            approved_by: { type: [integer, 'null'] }
+            approved_at: { type: [string, 'null'], format: date-time }
+        decided_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: [string, 'null'], format: date-time }
+    PromotionRunRef:
+      type: [object, 'null']
+      properties:
+        id: { type: integer }
+        version: { type: integer }
+        run_type: { type: string }
+        cutoff_date: { type: [string, 'null'], format: date }
+        is_current: { type: boolean }
+    PromotionSummary:
+      type: [object, 'null']
+      description: Resumen de las decisiones de una ejecución de Demand; null si la ejecución no tiene decisiones (anterior a W3)
+      properties:
+        governing_policy: { type: [string, 'null'], enum: [legacy, v25, null] }
+        governing_source: { type: string, enum: [run_config, decisions] }
+        policies:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              policy_version: { type: [string, 'null'] }
+              decisions: { type: integer }
+              effective: { type: integer }
+              by_decision: { type: object, additionalProperties: { type: integer } }
+        agreement:
+          type: object
+          properties:
+            scopes_compared: { type: integer }
+            same_served: { type: integer }
+            different:
+              type: array
+              items:
+                type: object
+                properties:
+                  scope_key: { type: string }
+                  legacy_served_family: { type: [string, 'null'] }
+                  v25_served_family: { type: [string, 'null'] }
+    ShadowForecastSummary:
+      type: object
+      description: Predicciones del challenger que no se sirven (nunca incluye los valores)
+      properties:
+        forecast_run_id: { type: integer }
+        model_family: { type: string }
+        label: { type: string }
+        model_registry_id: { type: [integer, 'null'] }
+        served: { type: boolean, const: false }
+        n_values: { type: integer }
+        n_nodes: { type: integer }
+        first_target_date: { type: [string, 'null'], format: date }
+        last_target_date: { type: [string, 'null'], format: date }
+        status: { type: string, enum: [evaluated, pending] }
+        n_obs_evaluated: { type: [integer, 'null'] }
     PaginationEnvelope:
       type: object
       properties:

@@ -499,9 +499,20 @@ paths:
         schema: {type: number, minimum: 0, maximum: 1}
       - name: order_by
         in: query
+        description: '`expected_orders` y `expected_units` (V2.5 · W3) ordenan con los nulos al final.'
         schema:
           type: string
-          enum: [probability, expected_quantity, expected_amount, quantity_if_purchase]
+          enum: [probability, expected_quantity, expected_amount, quantity_if_purchase, expected_orders, expected_units]
+      - name: window_status
+        in: query
+        description: Estado de la ventana de recompra (V2.5 · W3)
+        schema:
+          type: string
+          enum: [estimated, insufficient_data, overdue, censored]
+      - name: segment
+        in: query
+        description: 'Segmento de calibración de la fila, p. ej. `frequency:high` (V2.5 · W3)'
+        schema: {type: string, maxLength: 60, pattern: '^[a-z_]+:[a-z0-9_]+$'}
       - name: direction
         in: query
         schema:
@@ -2626,14 +2637,20 @@ paths:
     get:
       tags: [Plataforma]
       summary: Configuración efectiva de un core (valor y procedencia por clave)
-      description: 'Habilidad requerida: `data.view`.'
+      description: 'Cores: `demand`, `customer`, `supply`, `cost`, `scenario`, `quality_gates` (umbrales de los gates de calidad de datos) y `promotion` (V2.5 · W3,
+        ADR-V25-21): `governing_policy` fija qué política decide lo servido —`legacy` (la regla heredada, por defecto: no cambia lo servido) o `v25` (gates de
+        promoción)— y los umbrales de la política V2.5, del shadow y de Optuna. La política que no gobierna se calcula siempre en paralelo y se registra
+        (`GET /models/promotion-decisions`). Cada valor es inicial y «a aprobar en el piloto».
+
+
+        Habilidad requerida: `data.view`.'
       parameters:
       - {$ref: '#/components/parameters/TenantHeader'}
       - name: core
         in: query
         schema:
           type: string
-          enum: [demand, customer, supply, cost, scenario, quality_gates]
+          enum: [demand, customer, supply, cost, scenario, quality_gates, promotion]
         required: true
       responses:
         '200':
@@ -4366,7 +4383,7 @@ components:
       required: true
       schema:
         type: string
-        enum: [demand, customer, supply, cost, scenario, quality_gates]
+        enum: [demand, customer, supply, cost, scenario, quality_gates, promotion]
     ExportId:
       name: export
       in: path
@@ -5052,7 +5069,7 @@ components:
       properties:
         core:
           type: string
-          enum: [demand, customer, supply, cost, scenario, quality_gates]
+          enum: [demand, customer, supply, cost, scenario, quality_gates, promotion]
         config_version:
           type: [string, 'null']
         profile:
@@ -5151,6 +5168,34 @@ components:
         quality_flags:
           type: array
           items: {type: string}
+          description: 'Banderas de la fila. Las de S05 (`orders_nested_adjusted`, `cold_start`, `window_beyond_validation`, `s05_unavailable`, `s05_failed`) están en docs/ml/CUSTOMER_REPURCHASE.md §14'
+        expected_orders:
+          type: [number, 'null']
+          description: E(nº de pedidos en el horizonte), de un modelo de conteo propio (no se deriva de la probabilidad); null = no estimado (nunca un cero inventado)
+        quantity_per_order:
+          type: [number, 'null']
+          description: E(cantidad por pedido | el pedido ocurre)
+        expected_units:
+          type: [number, 'null']
+          description: expected_orders × quantity_per_order bajo independencia (supuesto documentado); difiere de expected_quantity, que supone un solo evento
+        window:
+          $ref: '#/components/schemas/CustomerWindow'
+        segment:
+          type: [string, 'null']
+          description: 'Segmento con que se calibró la fila (p. ej. `frequency:high`)'
+    CustomerWindow:
+      type: object
+      description: >-
+        Ventana probable de recompra: cuantiles del tiempo hasta la siguiente compra contado desde `as_of`; nunca un día exacto. Las cifras solo salen cuando el
+        estado las respalda (`estimated`, `overdue`); con `insufficient_data` (sin evidencia de cobertura validada, historial insuficiente), `censored` (producto
+        sin stock al corte) o sin estado (corrida anterior a S05) los cuantiles son null. `overdue` = atrasado respecto a su patrón: no es abandono.
+      properties:
+        status:
+          type: [string, 'null']
+          enum: [estimated, insufficient_data, overdue, censored, null]
+        p10_days: {type: [number, 'null']}
+        p50_days: {type: [number, 'null']}
+        p90_days: {type: [number, 'null']}
     CustomerProfile:
       type: object
       properties:
@@ -5183,7 +5228,8 @@ components:
           additionalProperties:
             type: array
             items: {type: object, additionalProperties: true}
-          description: 'Productos probables por horizonte {"7": [...], "30": [...]}'
+          description: 'Productos probables por horizonte {"7": [...], "30": [...]}. Cada producto trae, además del ranking, `expected_orders`, `quantity_per_order`,
+            `expected_units`, `window` (ver CustomerWindow), `segment` y `quality_flags` de su predicción (V2.5 · W3); nulos si no hay estimación.'
         ranking_sources:
           type: object
           additionalProperties:

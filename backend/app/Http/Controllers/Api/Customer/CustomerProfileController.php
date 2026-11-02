@@ -10,12 +10,25 @@ use App\Models\CustomerPrediction;
 use App\Models\CustomerProductRanking;
 use App\Services\Customer\CustomerEnvelope;
 use App\Services\Customer\CustomerRunService;
+use App\Services\Customer\CustomerS05Presenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /** Perfil de un comprador: frecuencia, ranking de productos probables, riesgo de inactividad y cambio de comportamiento. */
 class CustomerProfileController extends CustomerController
 {
+    /**
+     * Cantidades de S05 de la predicción de la relación; sin predicción, todo nulo y sin ventana (nunca un valor inventado).
+     *
+     * @return array<string, mixed>
+     */
+    private static function s05(?CustomerPrediction $prediction): array
+    {
+        return $prediction === null
+            ? CustomerS05Presenter::fields((object) []) + ['quality_flags' => []]
+            : CustomerS05Presenter::fields($prediction) + ['quality_flags' => $prediction->quality_flags ?? []];
+    }
+
     public function show(Request $request, int $id, CustomerRunService $service): JsonResponse
     {
         $tenant = $this->tenant();
@@ -45,17 +58,28 @@ class CustomerProfileController extends CustomerController
         $hasPredictions = CustomerPrediction::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)->exists();
         $rankings = [];
         $rankingSources = [];
+        $ranked = [];
         foreach ($horizons as $h) {
             $rankingSources[(string) $h] = $run->model_versions[(string) $h]['ranking_source'] ?? null;
-            $rankings[(string) $h] = CustomerProductRanking::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)
-                ->where('horizon_days', $h)->with('product:id,sku,name,unit')->orderBy('rank')->get()
+            $ranked[$h] = CustomerProductRanking::query()->where('core_run_id', $run->id)->where('customer_id', $customer->id)
+                ->where('horizon_days', $h)->with('product:id,sku,name,unit')->orderBy('rank')->get();
+        }
+        // V2.5 · W3-D: cantidades de S05 (nº de pedidos, unidades, ventana de recompra, banderas) de la predicción del mismo comprador × producto × horizonte.
+        // Solo de los productos del ranking y solo las columnas que se muestran (no se carga toda la fila de cada predicción del comprador).
+        $productIds = collect($ranked)->flatten(1)->pluck('product_id')->unique()->values()->all();
+        $s05 = $productIds === [] ? collect() : CustomerPrediction::query()
+            ->select(['id', 'horizon_days', 'product_id', 'expected_orders', 'quantity_per_order', 'expected_units', 'window_p10_days', 'window_p50_days', 'window_p90_days', 'window_status', 'segment', 'quality_flags'])
+            ->where('core_run_id', $run->id)->where('customer_id', $customer->id)->whereIn('horizon_days', $horizons)->whereIn('product_id', $productIds)
+            ->get()->keyBy(fn (CustomerPrediction $p) => $p->horizon_days.':'.$p->product_id);
+        foreach ($horizons as $h) {
+            $rankings[(string) $h] = $ranked[$h]
                 ->map(fn (CustomerProductRanking $r) => [
                     'rank' => (int) $r->rank,
                     'ranking_source' => $r->ranking_source, 'ranking_score' => $r->ranking_score,
                     'product' => ['id' => (int) $r->product_id, 'sku' => $r->product?->sku, 'name' => $r->product?->name, 'unit' => $r->product?->unit],
                     'purchase_probability' => $r->purchase_probability, 'expected_quantity' => $r->expected_quantity,
                     'expected_amount' => ['value' => $r->expected_amount, 'currency' => $r->currency, 'basis' => 'supuesto, no venta confirmada'],
-                ])->all();
+                ] + self::s05($s05->get($h.':'.$r->product_id)))->all();
         }
         $status = 'predicted';
         $fallback = null;

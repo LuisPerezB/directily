@@ -12,6 +12,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import InlineNotice from '@/components/ui/InlineNotice.vue'
 import EnvelopePanel from '@/components/forecast/EnvelopePanel.vue'
+import CustomerS05Quality from '@/components/customers/CustomerS05Quality.vue'
 import { customerApi } from '@/api'
 import type { CustomerEvaluationRow, CustomerHorizon, ProbabilityMetrics, RankingMetrics } from '@/api/types'
 import { useAsync } from '@/composables/useAsync'
@@ -216,6 +217,8 @@ const diff = (a: number | null | undefined, b: number | null | undefined): strin
         <h3 class="section-title mb-1">{{ t('customers.eval.frequencyTitle') }}</h3>
         <p class="text-sm text-fg-muted m-0">{{ frequency.definition }}</p>
       </div>
+
+      <CustomerS05Quality :core-run-id="data.run_id ?? null" :horizon="horizon" />
 
       <ul v-if="data.notes?.length" class="list-disc pl-5 m-0 text-sm text-fg-muted flex flex-col gap-1">
         <li v-for="(n, i) in data.notes" :key="i">{{ n }}</li>

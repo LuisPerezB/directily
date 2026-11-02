@@ -252,6 +252,24 @@ export interface CustomerPrediction {
   n_purchases: number | null
   model: { family: string | null; role: 'primary' | 'fallback' | null }
   quality_flags: string[]
+  /** V2.5 · W3 (S05). Opcionales: una corrida anterior a S05 no los trae. Un valor no estimado es `null`, nunca cero. */
+  expected_orders?: number | null
+  quantity_per_order?: number | null
+  expected_units?: number | null
+  window?: CustomerWindow
+  segment?: string | null
+}
+
+/**
+ * Ventana probable de recompra (cuantiles del tiempo hasta la siguiente compra, desde el corte; nunca un día exacto). Solo `estimated` y `overdue` traen
+ * cifras; `insufficient_data` (sin evidencia validada), `censored` o sin estado (corrida anterior a S05) no.
+ */
+export type CustomerWindowStatus = 'estimated' | 'insufficient_data' | 'overdue' | 'censored'
+export interface CustomerWindow {
+  status: CustomerWindowStatus | null
+  p10_days: number | null
+  p50_days: number | null
+  p90_days: number | null
 }
 
 export interface CustomerPredictionsPage extends Paginated<CustomerPrediction> {
@@ -271,6 +289,13 @@ export interface CustomerProfileRanking {
   purchase_probability: number | null
   expected_quantity: number | null
   expected_amount: { value: number | null; currency: string | null; basis: string }
+  /** V2.5 · W3 (S05): de la predicción del mismo comprador × producto × horizonte. */
+  expected_orders?: number | null
+  quantity_per_order?: number | null
+  expected_units?: number | null
+  window?: CustomerWindow
+  segment?: string | null
+  quality_flags?: string[]
 }
 
 export interface CustomerProfile {
@@ -726,7 +751,8 @@ export interface UnitConversionPayload {
   source?: string | null
 }
 
-export type ConfigCore = 'demand' | 'customer' | 'supply' | 'cost' | 'scenario'
+/** `promotion` (V2.5 · W3, ADR-V25-21): política que gobierna lo servido (`legacy` por defecto | `v25`) y umbrales de la V2.5. */
+export type ConfigCore = 'demand' | 'customer' | 'supply' | 'cost' | 'scenario' | 'promotion'
 export type ConfigSource = 'core' | 'tenant' | `profile:${string}`
 
 export interface EffectiveConfigKey {
@@ -1310,4 +1336,240 @@ export interface AssistantReply {
 export interface AssistantHistoryItem {
   role: 'user' | 'assistant'
   content: string
+}
+
+// ─── V2.5 · W3-D: calidad ML (evaluaciones por segmento, decisiones de promoción y shadow) ─────────────────────────────
+
+/** Dimensiones de segmento: Demand (W3-A) y Customer (W3-C). */
+export type DemandSegmentDimension = 'demand_class' | 'category' | 'branch' | 'volume_tier' | 'series_age'
+export type CustomerSegmentDimension = 'frequency' | 'value' | 'tenure' | 'history'
+export type SegmentDimension = DemandSegmentDimension | CustomerSegmentDimension
+
+export type QualityRowStatus = 'ok' | 'insufficient_data' | 'calibrated' | 'miscalibrated' | 'validated' | 'not_validated'
+export type WapeStatus = 'ok' | 'unstable' | 'undefined'
+export type ComparisonVerdict = 'better' | 'similar' | 'worse' | 'not_comparable' | 'not_available'
+
+export interface QualitySample {
+  n_obs?: number
+  n_series?: number
+  n_windows?: number
+  evaluable_days?: number
+  excluded_days?: number
+  total_days?: number
+  evaluable_share?: number | null
+  /** Días excluidos por causa: quiebre, fuente ausente, cierre y observaciones sin escala. Nunca son ceros observados. */
+  exclusions?: Record<string, number>
+}
+
+export interface DemandQuality {
+  metrics_version: string | null
+  status: QualityRowStatus | null
+  insufficient_reasons: { code: string; [key: string]: unknown }[]
+  wape_status: WapeStatus | null
+  wape_unstable: boolean
+  wape_raw: number | null
+  /** Σ de lo realmente vendido (unidades) sobre los días evaluables: el denominador del WAPE. */
+  denominator: { sum_actual: number | null; unit: string; min_required: number | null } | null
+  alternative_metric: { name: string; used_because?: string; value?: number | null; per_evaluable_day?: number | null; [key: string]: unknown } | null
+  mase: number | null
+  rmsse: number | null
+  sum_abs_error: number | null
+  pinball: { p10: number | null; p50: number | null; p90: number | null } | null
+  interval_width: Record<string, number | null> | null
+  sample: QualitySample | null
+  stability: { status: string | null; n_windows: number | null; wape_mean: number | null; wape_std: number | null; wape_cv: number | null; unstable_across_windows: boolean | null } | null
+  comparison: {
+    baseline_family: string | null
+    verdict: ComparisonVerdict | null
+    metric: 'wape' | 'aggregate_absolute_error' | null
+    value: number | null
+    baseline_value: number | null
+    relative_improvement: number | null
+    reason: string | null
+  } | null
+}
+
+export interface SegmentCalibration {
+  status: QualityRowStatus | null
+  n: number | null
+  n_positive: number | null
+  base_rate: number | null
+  mean_predicted: number | null
+  mean_ratio: number | null
+  brier: number | null
+  log_loss: number | null
+  ece: number | null
+  reference_brier: number | null
+  brier_delta_vs_reference: number | null
+  reason: string | null
+}
+
+export interface ShadowEvaluationBlock {
+  served: false
+  scope: string
+  /** Mismo criterio de estabilidad que las métricas por segmento: con muy pocas ventas reales el WAPE no se publica (`wape_unstable`). */
+  wape_status: WapeStatus | null
+  wape_unstable: boolean
+  /** Σ de lo realmente vendido (unidades) en lo evaluado: el denominador del WAPE. */
+  denominator: { sum_actual: number | null; unit: string; min_required: number | null } | null
+  served_wape_same_series_days: number | null
+  relative_improvement_vs_served: number | null
+  n_served_compared: number | null
+  sum_actual: number | null
+  n_series: number | null
+  coverage_80_n: number | null
+  /** Período REALMENTE evaluado (no el de las predicciones); fechas y días `null` en filas anteriores a W3-D. */
+  evaluated: { first_date: ISODate | null; last_date: ISODate | null; n_days: number | null; n_series_days: number | null; n_series: number | null }
+  exclusions: Record<string, number>
+}
+
+export interface ModelQualityEvaluation {
+  id: number
+  core: 'demand' | 'customer'
+  forecast_run_id: number | null
+  core_run_id: number | null
+  model_registry_id: number | null
+  /** `selection` = el modelo servido; `seasonal_naive` = el baseline. */
+  model_family: string
+  label: string
+  roles: string[]
+  evaluation_type: string
+  level: string
+  level_key: string | null
+  segment: { dimension: string; value: string } | null
+  horizon_days: number | null
+  is_baseline: boolean
+  is_selected: boolean
+  status: QualityRowStatus | null
+  /** false = `insufficient_data`: la fila no trae cifras de error (solo tamaños de muestra y denominador). */
+  figures_available: boolean
+  wape: number | null
+  mae: number | null
+  rmse: number | null
+  bias: number | null
+  coverage_80: number | null
+  coverage_95: number | null
+  n_obs: number
+  n_windows: number
+  cutoffs: ISODate[]
+  quality: DemandQuality | null
+  calibration: SegmentCalibration | null
+  shadow: ShadowEvaluationBlock | null
+  metrics: Record<string, unknown> | null
+  extra: Record<string, unknown> | null
+  created_at: ISODateTime | null
+}
+
+/** Resumen compacto de la ejecución (`forecast_runs.summary.segment_metrics`): cuántas celdas merecen atención y si las métricas estuvieron disponibles. */
+export interface SegmentMetricsSummary {
+  enabled?: boolean
+  available?: boolean
+  counts?: { segments?: number; cells?: number; by_status?: Record<string, number>; by_reason?: Record<string, number> }
+  attention_total?: number
+  attention_truncated?: boolean
+  horizons_evaluated?: number[]
+  horizons_not_evaluated?: number[]
+  note?: string
+}
+
+export interface ModelQualityQuery {
+  core?: 'demand' | 'customer'
+  run_id?: number
+  core_run_id?: number
+  horizon?: number
+  evaluation_type?: string
+  level?: string
+  dimension?: SegmentDimension
+  level_key?: string
+  model_family?: string
+  is_selected?: boolean
+  is_baseline?: boolean
+  status?: QualityRowStatus
+  page?: number
+  per_page?: number
+}
+
+export type PromotionPolicy = 'legacy' | 'v25'
+export type PromotionDecisionKind = 'promote' | 'reject' | 'keep_champion' | 'publish_baseline' | 'shadow'
+export type PromotionGateStatus = 'pass' | 'fail' | 'not_evaluable' | 'not_applicable' | 'pending'
+
+export interface PromotionGate {
+  status: PromotionGateStatus
+  blocking: boolean
+  message: string
+  evidence: Record<string, unknown>
+}
+
+export interface PromotionDecision {
+  id: number
+  core: 'demand' | 'customer'
+  forecast_run_id: number | null
+  core_run_id: number | null
+  scope_key: string
+  scope: { type: string; value: string | null }
+  policy: PromotionPolicy
+  policy_version: string
+  candidate_family: string
+  candidate_label: string
+  champion_family: string | null
+  champion_label: string | null
+  candidate_model_registry_id: number | null
+  champion_model_registry_id: number | null
+  decision: PromotionDecisionKind
+  /** true = esta política gobernó lo servido en la ejecución. */
+  is_effective: boolean
+  /** Alcance informativo (por horizonte): se registra pero no gobierna lo servido. */
+  informational: boolean
+  served_family: string | null
+  served_label: string | null
+  planned_family: string | null
+  fallback_applied: boolean
+  gates: Record<string, PromotionGate>
+  gates_summary: Record<PromotionGateStatus, number>
+  failed_gates: string[]
+  metrics: Record<string, unknown>
+  reason: string
+  approval: { status: 'pending' | 'approved'; approved_by: number | null; approved_at: ISODateTime | null }
+  decided_at: ISODateTime | null
+  created_at: ISODateTime | null
+}
+
+export interface PromotionRunRef {
+  id: number
+  version: number
+  run_type: string
+  cutoff_date: ISODate | null
+  is_current: boolean
+}
+
+export interface PromotionSummary {
+  governing_policy: PromotionPolicy | null
+  governing_source: 'run_config' | 'decisions'
+  policies: Partial<Record<PromotionPolicy, { policy_version: string | null; decisions: number; effective: number; by_decision: Record<string, number> }>>
+  agreement: { scopes_compared: number; same_served: number; different: { scope_key: string; legacy_served_family: string | null; v25_served_family: string | null }[] }
+}
+
+export interface PromotionDecisionsPage extends Paginated<PromotionDecision> {
+  run: PromotionRunRef | null
+  summary: PromotionSummary | null
+}
+
+export interface ShadowForecastSummary {
+  forecast_run_id: number
+  model_family: string
+  label: string
+  model_registry_id: number | null
+  served: false
+  n_values: number
+  n_nodes: number
+  first_target_date: ISODate | null
+  last_target_date: ISODate | null
+  /** `pending` = todavía no hay ventas realizadas posteriores al corte que comparar (no es un cero). */
+  status: 'evaluated' | 'pending'
+  n_obs_evaluated: number | null
+}
+
+export interface ShadowEvaluationsPage extends Paginated<ModelQualityEvaluation> {
+  run: PromotionRunRef | null
+  shadow_forecasts: ShadowForecastSummary[]
 }
