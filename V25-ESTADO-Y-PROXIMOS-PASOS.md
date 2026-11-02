@@ -205,17 +205,17 @@ cuarentena y reconciliación.
   omitidas), motor 1071, frontend 389; E2E 32/32 y 256/256; demo sin cambio en lo servido (el motor de W2 sobre los mismos
   datos sirve lo mismo fila a fila) y reproducible entre procesos. Evidencia: `docs/roadmap/evidence/2026-11-01-w3-integration/`;
   auditoría: `docs/roadmap/audit/progress/2026-11-01-w3.json` (IMPLEMENTADO 149 → 171).
-- **W4:** W4-A (`c77deab`) y W4-C (`bc54d9c`) confirmados. **W4-B (CLI y serving del motor) en curso**, en paralelo
-  con W3-D (no comparten archivos). Decisión del arquitecto: el motor sirve solo modelos con base `approved` o
-  `legacy_pipeline` (la misma política que `ModelServingPolicy` del backend) y firma válida; la promoción automática
-  del pipeline sigue como legado.
+- **W4 · ✅ cerrada:** W4-A (`c77deab`), W4-C (`bc54d9c`) y W4-B (`53400d4`: CLI de entrenamiento privado, almacén de
+  objetos, serving solo de lo aprobado o del pipeline propio con firma verificada; revisión: 1 HIGH, 4 MEDIUM, 8 LOW
+  corregidos). Integración en un stack aislado con `vendor` propio: E2E 32/32 y 256/256, demo idéntica a W3; backend
+  1219, motor 1327, frontend 389. Evidencia: `docs/roadmap/evidence/2026-11-02-w4-integration/`; auditoría:
+  `2026-11-02-w4.json` (IMPLEMENTADO 171 → 188). AWS real sigue BLOQUEADO.
 - **Base de datos:** FKs compuestas `ON DELETE SET NULL` que solo anulan la referencia (`e0378db`) y nunca
   `tenant_id`, tampoco donde es NULLABLE (`003fd69`, migración `2026_03_12_000500`; en `model_registry` borrar el
   modelo anterior convertía el de la empresa en uno de plataforma).
-- **W5 · en curso:** contrato activado (`d54076e`: migración, exportación LOPDP, `product@2026.03.2`, modelos mínimos e
-  interfaz `RecommendationSink` para que Radar y Decision Engine no dupliquen lógica). En implementación en paralelo:
-  W5-A (Revenue Radar y Agenda), W5-B (Decision Engine y workflow) y W5-D (Supply con perecibilidad y FEFO); después
-  W5-C (outcomes y ROI) y W5-E (vistas Enterprise).
+- **W5 · en curso:** contrato `d54076e`; W5-D (`f18541b`, perecibilidad y FEFO) y W5-A + W5-B (`6fb4819`, Revenue Radar y
+  Decision Engine, en un commit por quedar acoplados) confirmados tras revisión y corrección. W5-C (outcomes y ROI) en
+  corrección tras su revisión (2 HIGH); W5-E (vistas Enterprise) en revisión. Después: integración de W5.
 - **W6:** contrato listo (migración verificada sobre HEAD), no activado.
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
 - **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;

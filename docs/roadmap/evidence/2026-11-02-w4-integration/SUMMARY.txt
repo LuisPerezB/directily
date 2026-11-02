@@ -1,0 +1,12 @@
+Integración de W4 (MLOps y AWS) · rama v25/w1-cierre-y-w2 · 2026-11-02 · macOS arm64, PostgreSQL 15, PHP 8.3, Python 3.12
+Paquetes (implementación → revisión adversarial → corrección): activación 7170174 · W4-A c77deab · W4-C bc54d9c · W4-B 53400d4.
+Correcciones transversales: FKs compuestas ON DELETE SET NULL solo de la referencia (e0378db) y nunca tenant_id (003fd69).
+Stack aislado en 53400d4 (con vendor propio: un vendor enlazado hace que Laravel cargue las clases de la copia principal;
+la primera corrida de W4 se descartó por eso y se repitió).
+backend  :: {"tests":1219,"passed":1210,"skipped":9}
+engine   :: 1327 passed, 1 skipped (S3 con emulador: requiere boto3/moto, fuera del venv del motor)
+frontend :: type-check 0 · lint 0 · vitest 389 passed · build OK
+E2E (BD de desarrollo migrada, demo recreada): mvp_acceptance 32/32 · stage2_acceptance 256/256 (1 aviso de diseño, el de W2/W3).
+Demo (datos ficticios, demo_metrics.json): demanda y Customer Core idénticos a W3 en ambas empresas; los modelos del pipeline
+   (legacy_pipeline) se siguen sirviendo con la política de serving solo de lo aprobado.
+AWS real: BLOQUEADO (solo CDK synth/cdk-nag y emulador S3). Rutas locales reemplazadas por <repo>, <scratchpad> y ~.

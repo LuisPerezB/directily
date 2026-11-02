@@ -1,0 +1,432 @@
+{
+ "meta": {
+  "schema": "w4-demo-metrics-v1",
+  "captured": "2026-11-02",
+  "datos": "FICTICIOS (empresas demo). Ninguna cifra es evidencia de precisión con datos reales.",
+  "codigo": "53400d4 (W4 integrado) en el stack local",
+  "comparado_con": "docs/roadmap/evidence/2026-11-01-w3-integration/demo_metrics.json"
+ },
+ "demanda": [
+  {
+   "run": 72,
+   "empresa": "Ferretería Andina (Demo ficticia)",
+   "corte": "2026-10-26",
+   "holdout": {
+    "selected_wape": 0.49077400559708034,
+    "baseline_wape": 0.6603794110066593,
+    "coverage_80": 0.8498701298701299,
+    "coverage_95": 0.9780519480519481,
+    "selected_bias": -0.04029699741171417
+   },
+   "n_obs": 15400,
+   "models_by_class": {
+    "pooled": "auto_ets",
+    "smooth": "auto_ets",
+    "erratic": "auto_ets",
+    "intermittent": "lightgbm_global"
+   },
+   "quality_gate": {
+    "outcome": "PASS"
+   },
+   "series_days": {
+    "sale": 80677,
+    "closed": 0,
+    "missing_source": 1097,
+    "zero_confirmed": 43222,
+    "stockout_censored": 8323
+   },
+   "promotion": {
+    "governing": null,
+    "disagreements": {
+     "scopes": 5,
+     "different": {
+      "global": {
+       "v25": "lightgbm_global",
+       "legacy": "auto_ets"
+      },
+      "class:lumpy": {
+       "v25": "lightgbm_global",
+       "legacy": "auto_ets"
+      },
+      "class:smooth": {
+       "v25": "lightgbm_global",
+       "legacy": "auto_ets"
+      },
+      "class:erratic": {
+       "v25": "lightgbm_global",
+       "legacy": "auto_ets"
+      }
+     },
+     "same_served_model": 1
+    }
+   },
+   "segment_metrics": {
+    "available": true,
+    "counts": {
+     "cells": 108,
+     "segments": 18,
+     "by_reason": {
+      "worse": 2,
+      "insufficient_data": 9
+     },
+     "by_status": {
+      "ok": 99,
+      "insufficient_data": 9
+     },
+     "by_dimension": {
+      "branch": {
+       "ok": 18,
+       "cells": 18,
+       "better": 18,
+       "no_alert": 18,
+       "segments": 3
+      },
+      "category": {
+       "ok": 48,
+       "cells": 48,
+       "worse": 2,
+       "better": 45,
+       "similar": 1,
+       "no_alert": 46,
+       "segments": 8
+      },
+      "series_age": {
+       "ok": 6,
+       "cells": 6,
+       "better": 6,
+       "no_alert": 6,
+       "segments": 1
+      },
+      "volume_tier": {
+       "ok": 12,
+       "cells": 12,
+       "better": 12,
+       "no_alert": 12,
+       "segments": 2
+      },
+      "demand_class": {
+       "ok": 15,
+       "cells": 24,
+       "better": 15,
+       "no_alert": 15,
+       "segments": 4,
+       "insufficient_data": 9
+      }
+     }
+    }
+   },
+   "config_version": "8006debe022fc6c9ff792a1721042dd27276d5684cbf4cb94afa6276bce90d78"
+  },
+  {
+   "run": 73,
+   "empresa": "Distribuidora Costa (Demo ficticia)",
+   "corte": "2026-10-26",
+   "holdout": {
+    "selected_wape": 0.4488488430143674,
+    "baseline_wape": 0.5982548511340418,
+    "coverage_80": 0.8027814765497855,
+    "coverage_95": 0.9517680130196775,
+    "selected_bias": 0.006098070695952983
+   },
+   "n_obs": 6759,
+   "models_by_class": {
+    "lumpy": "lightgbm_global",
+    "pooled": "lightgbm_global",
+    "smooth": "auto_ets",
+    "erratic": "lightgbm_global",
+    "intermittent": "lightgbm_global"
+   },
+   "quality_gate": {
+    "outcome": "PASS"
+   },
+   "series_days": {
+    "sale": 28658,
+    "closed": 0,
+    "missing_source": 280,
+    "zero_confirmed": 5726,
+    "stockout_censored": 1817
+   },
+   "promotion": {
+    "governing": null,
+    "disagreements": {
+     "scopes": 5,
+     "different": {
+      "class:smooth": {
+       "v25": "lightgbm_global",
+       "legacy": "auto_ets"
+      }
+     },
+     "same_served_model": 4
+    }
+   },
+   "segment_metrics": {
+    "available": true,
+    "counts": {
+     "cells": 102,
+     "segments": 17,
+     "by_reason": {
+      "insufficient_data": 14
+     },
+     "by_status": {
+      "ok": 88,
+      "insufficient_data": 14
+     },
+     "by_dimension": {
+      "branch": {
+       "ok": 12,
+       "cells": 12,
+       "better": 12,
+       "no_alert": 12,
+       "segments": 2
+      },
+      "category": {
+       "ok": 39,
+       "cells": 48,
+       "better": 39,
+       "no_alert": 39,
+       "segments": 8,
+       "insufficient_data": 9
+      },
+      "series_age": {
+       "ok": 6,
+       "cells": 6,
+       "better": 6,
+       "no_alert": 6,
+       "segments": 1
+      },
+      "volume_tier": {
+       "ok": 12,
+       "cells": 12,
+       "better": 12,
+       "no_alert": 12,
+       "segments": 2
+      },
+      "demand_class": {
+       "ok": 19,
+       "cells": 24,
+       "better": 19,
+       "no_alert": 19,
+       "segments": 4,
+       "insufficient_data": 5
+      }
+     }
+    }
+   },
+   "config_version": "8006debe022fc6c9ff792a1721042dd27276d5684cbf4cb94afa6276bce90d78"
+  }
+ ],
+ "customer_core": [
+  {
+   "core_run": 133,
+   "name": "Ferretería Andina (Demo ficticia)",
+   "status": "completed",
+   "quality_status": "degraded",
+   "promoted": [
+    "h7:probability:reference",
+    "h7:quantity:poisson",
+    "h14:probability:reference",
+    "h14:quantity:gamma",
+    "h30:probability:reference",
+    "h30:quantity:gamma",
+    "h90:probability:logistic",
+    "h90:quantity:gamma"
+   ],
+   "s05_version": "cust-s05-2026.11-v1",
+   "window": null,
+   "per_h": {
+    "7": {
+     "served": "reference",
+     "brier": 0.014877,
+     "pr_auc": 0.01454,
+     "orders_served": "reference",
+     "orders_bias": -0.0584
+    },
+    "14": {
+     "served": "reference",
+     "brier": 0.028581,
+     "pr_auc": 0.029168,
+     "orders_served": "reference",
+     "orders_bias": -0.0803
+    },
+    "30": {
+     "served": "reference",
+     "brier": 0.058271,
+     "pr_auc": 0.062173,
+     "orders_served": "reference",
+     "orders_bias": -0.0691
+    },
+    "90": {
+     "served": "logistic",
+     "brier": 0.138295,
+     "pr_auc": 0.236447,
+     "orders_served": "reference",
+     "orders_bias": 0.1142
+    }
+   }
+  },
+  {
+   "core_run": 134,
+   "name": "Distribuidora Costa (Demo ficticia)",
+   "status": "completed",
+   "quality_status": "degraded",
+   "promoted": [
+    "h7:probability:reference",
+    "h7:quantity:poisson",
+    "h14:probability:reference",
+    "h14:quantity:tweedie",
+    "h30:probability:reference",
+    "h30:quantity:gamma",
+    "h90:probability:reference",
+    "h90:quantity:reference"
+   ],
+   "s05_version": "cust-s05-2026.11-v1",
+   "window": null,
+   "per_h": {
+    "7": {
+     "served": "reference",
+     "brier": 0.023208,
+     "pr_auc": 0.024141,
+     "orders_served": "reference",
+     "orders_bias": -0.0195
+    },
+    "14": {
+     "served": "reference",
+     "brier": 0.044248,
+     "pr_auc": 0.04768,
+     "orders_served": "reference",
+     "orders_bias": 0.0257
+    },
+    "30": {
+     "served": "reference",
+     "brier": 0.087664,
+     "pr_auc": 0.099178,
+     "orders_served": "reference",
+     "orders_bias": 0.11
+    },
+    "90": {
+     "served": "reference",
+     "brier": 0.192601,
+     "pr_auc": 0.269758,
+     "orders_served": "reference",
+     "orders_bias": 0.1593
+    }
+   }
+  }
+ ],
+ "comparacion_w3": {
+  "demanda": [
+   {
+    "empresa": "Ferretería Andina (Demo ficticia)",
+    "selected_wape": {
+     "w3": 0.49077400559708034,
+     "w4": 0.49077400559708034,
+     "igual": true
+    },
+    "baseline_wape": {
+     "w3": 0.6603794110066593,
+     "w4": 0.6603794110066593,
+     "igual": true
+    },
+    "coverage_80": {
+     "w3": 0.8498701298701299,
+     "w4": 0.8498701298701299,
+     "igual": true
+    },
+    "coverage_95": {
+     "w3": 0.9780519480519481,
+     "w4": 0.9780519480519481,
+     "igual": true
+    },
+    "selected_bias": {
+     "w3": -0.04029699741171417,
+     "w4": -0.04029699741171417,
+     "igual": true
+    },
+    "series_days_igual": true
+   },
+   {
+    "empresa": "Distribuidora Costa (Demo ficticia)",
+    "selected_wape": {
+     "w3": 0.4488488430143674,
+     "w4": 0.4488488430143674,
+     "igual": true
+    },
+    "baseline_wape": {
+     "w3": 0.5982548511340418,
+     "w4": 0.5982548511340418,
+     "igual": true
+    },
+    "coverage_80": {
+     "w3": 0.8027814765497855,
+     "w4": 0.8027814765497855,
+     "igual": true
+    },
+    "coverage_95": {
+     "w3": 0.9517680130196775,
+     "w4": 0.9517680130196775,
+     "igual": true
+    },
+    "selected_bias": {
+     "w3": 0.006098070695952983,
+     "w4": 0.006098070695952983,
+     "igual": true
+    },
+    "series_days_igual": true
+   }
+  ],
+  "customer_core": [
+   {
+    "name": "Ferretería Andina (Demo ficticia)",
+    "promoted_igual": true,
+    "per_h": {
+     "7": {
+      "served": true,
+      "brier_w3": 0.014877,
+      "brier_w4": 0.014877
+     },
+     "14": {
+      "served": true,
+      "brier_w3": 0.028581,
+      "brier_w4": 0.028581
+     },
+     "30": {
+      "served": true,
+      "brier_w3": 0.058271,
+      "brier_w4": 0.058271
+     },
+     "90": {
+      "served": true,
+      "brier_w3": 0.138295,
+      "brier_w4": 0.138295
+     }
+    }
+   },
+   {
+    "name": "Distribuidora Costa (Demo ficticia)",
+    "promoted_igual": true,
+    "per_h": {
+     "7": {
+      "served": true,
+      "brier_w3": 0.023208,
+      "brier_w4": 0.023208
+     },
+     "14": {
+      "served": true,
+      "brier_w3": 0.044248,
+      "brier_w4": 0.044248
+     },
+     "30": {
+      "served": true,
+      "brier_w3": 0.087664,
+      "brier_w4": 0.087664
+     },
+     "90": {
+      "served": true,
+      "brier_w3": 0.192601,
+      "brier_w4": 0.192601
+     }
+    }
+   }
+  ]
+ }
+}
