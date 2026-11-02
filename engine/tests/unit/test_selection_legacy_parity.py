@@ -88,6 +88,14 @@ def test_parameters_are_range_validated_in_the_policy_and_in_the_config():
         resolve_config("promotion", {}, tenant_overrides={"legacy_windows_won_fraction": 2})
 
 
+def test_critical_segments_must_be_dimensions_the_segment_provider_knows():
+    # Arquitecto: una dimensión inventada haría pasar el gate de segmentos sin evaluar nada.
+    errors = validate_overrides("promotion", {"v25_critical_segments": ["inventada"]})
+    assert [(e["key"], e["code"]) for e in errors] == [("v25_critical_segments", "invalid_list")]
+    assert "inventada" in errors[0]["message"]
+    assert validate_overrides("promotion", {"v25_critical_segments": ["demand_class", "volume_tier", "series_life"]}) == []
+
+
 def test_policy_version_is_a_sha256_of_the_parameters():
     a, b = LegacyPolicy(), LegacyPolicy()
     assert a.version == b.version and len(a.version) == 64 and int(a.version, 16) >= 0

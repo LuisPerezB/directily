@@ -422,6 +422,9 @@ CONFIG_CONSTRAINTS.update({
 CONFIG_CONSTRAINTS[("demand", "min_improvement")] = {"min": 0.0, "max": 0.5}
 CONFIG_CONSTRAINTS.update({
     ("promotion", "governing_policy"): {"choices": ["legacy", "v25"]},
+    # Arquitecto: dimensiones que existen en el proveedor de segmentos (demand/segments.py y selection/promotion.default_segments); una
+    # dimensión inventada haría pasar el gate «sin regresión por segmento» sin evaluar nada.
+    ("promotion", "v25_critical_segments"): {"list_choices": ["demand_class", "category", "branch", "volume_tier", "series_age", "series_life"], "list_max_len": 6},
     ("promotion", "legacy_windows_won_fraction"): {"min": 0.5, "max": 1.0},
     ("promotion", "v25_min_selection_windows"): {"min": 1, "max": 20},
     ("promotion", "v25_max_consecutive_losing_windows"): {"min": 0, "max": 10},
@@ -477,6 +480,10 @@ def _list_errors(value: list[Any], rule: dict[str, Any]) -> str | None:
         return f"debe tener al menos {rule['list_min_len']} elementos"
     if rule.get("list_increasing") and any(b <= a for a, b in zip(value, value[1:])):
         return "debe estar en orden estrictamente creciente"
+    if "list_choices" in rule:
+        unknown = [v for v in value if v not in rule["list_choices"]]
+        if unknown:
+            return f"valores no admitidos {unknown}; admitidos: {rule['list_choices']}"
     lo, hi = rule.get("list_elem_min_exclusive"), rule.get("list_elem_max")
     if any((lo is not None and v <= lo) or (hi is not None and v > hi) for v in value):
         return f"cada elemento debe estar en el rango ({lo}, {hi}]"
