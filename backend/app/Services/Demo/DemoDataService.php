@@ -71,6 +71,11 @@ final class DemoDataService
                 $tenant->save();
                 $tenant->users()->attach($user->id, ['role' => TenantRole::Owner->value]);
             }
+            // Las empresas demo declaran su origen: el ROI y los resultados (W5-C) lo advierten y la UI no supone datos reales.
+            if (($tenant->settings['data_origin'] ?? null) !== 'demo') {
+                $tenant->settings = array_merge($tenant->settings ?? [], ['data_origin' => 'demo']);
+                $tenant->save();
+            }
 
             return $tenant;
         });
