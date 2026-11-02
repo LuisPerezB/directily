@@ -92,7 +92,7 @@ final class TenantDataExporter
         'external_indicators' => ['id', 'code', 'name', 'source', 'frequency', 'unit', 'country', 'description', 'affected_sectors', 'connector_key', 'is_active', 'created_at', 'updated_at'],
         'external_indicator_observations' => ['id', 'indicator_id', 'period_date', 'value', 'published_at', 'ingested_at', 'revision', 'source_url', 'created_at'],
         // Membresías (quién tiene acceso y con qué rol); nombres y correos viven en la cuenta de la plataforma, no se exportan aquí.
-        'tenant_users' => ['id', 'user_id', 'role', 'invited_by', 'created_at', 'updated_at'],
+        'tenant_users' => ['id', 'user_id', 'role', 'invited_by', 'created_at', 'updated_at', 'commercial_role', 'commercial_scope'],
         // Sin `path` (ruta interna del archivo en el servidor) ni `error_message`.
         'tenant_exports' => ['id', 'user_id', 'status', 'file_size', 'file_hash', 'summary', 'expires_at', 'created_at', 'updated_at'],
         'tenant_usage' => ['id', 'period', 'metric', 'value', 'created_at', 'updated_at'],
@@ -139,6 +139,12 @@ final class TenantDataExporter
         'experiment_assignments' => ['id', 'experiment_key', 'unit_type', 'unit_key', 'group', 'policy', 'assigned_at'],
         'decision_outcomes' => ['id', 'recommendation_id', 'action_kind', 'action_at', 'window_from', 'window_to', 'observed_event', 'observed_ref', 'observed_units', 'observed_net_amount', 'contribution', 'contact_cost', 'classification', 'method', 'evidence', 'measured_at'],
         'inventory_lots' => ['id', 'branch_id', 'product_id', 'lot_code', 'snapshot_date', 'expiry_date', 'quantity', 'created_at', 'updated_at'],
+        // ── V2.5 · W6 plataforma (ADR-V25-10, -15 y -17): dispositivos y checkpoints del Bridge (sin token_hash: credencial), plantillas
+        //    de mapeo de la empresa (las públicas, con tenant_id NULL, no son datos de la empresa) y auditoría del Intelligence Gateway. ──
+        'bridge_devices' => ['id', 'data_source_id', 'name', 'public_key_fingerprint', 'agent_version', 'platform', 'registered_at', 'last_seen_at', 'revoked_at', 'revoked_by', 'created_at', 'updated_at'],
+        'bridge_checkpoints' => ['id', 'bridge_device_id', 'entity', 'watermark', 'checkpoint', 'bronze_object_id', 'updated_at'],
+        'mapping_templates' => ['id', 'system_kind', 'vendor', 'entity', 'version', 'schema_fingerprint', 'field_map', 'value_maps', 'confidence', 'status', 'approved_by', 'approved_at', 'created_at', 'updated_at'],
+        'gateway_tool_calls' => ['id', 'user_id', 'channel', 'tool', 'decision', 'arguments', 'result_summary', 'latency_ms', 'created_at'],
     ];
 
     /**
