@@ -18,6 +18,8 @@ enum ImportEntity: string
     case CalendarEvents = 'calendar_events';
     case UnitConversions = 'unit_conversions';
     case Warehouses = 'warehouses';
+    // V2.5 · W5-D: lotes con vencimiento por sucursal y producto (perecibilidad y FEFO; ADR-V25-12..14, §10).
+    case InventoryLots = 'inventory_lots';
 
     public function label(): string
     {
@@ -33,6 +35,7 @@ enum ImportEntity: string
             self::CalendarEvents => 'Calendario (eventos con alcance)',
             self::UnitConversions => 'Conversiones de unidades',
             self::Warehouses => 'Almacenes',
+            self::InventoryLots => 'Lotes de inventario (vencimiento por lote)',
         };
     }
 

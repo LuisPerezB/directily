@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 from typing import Any
 
 from predictily_engine.platform.extensions import get_profile
@@ -207,6 +208,19 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "max_nodes": 3000,
         "batch_integer": True,
         "historical_review_days": 7,
+        # ── W5-D · perecibilidad, FEFO, compromisos y validez del stock (docs/supply/SUPPLY_CORE.md) ──
+        # TODOS son valores INICIALES de diseño, «a aprobar en el piloto»; ninguno es universal. Con `perishability_enabled = false`, el plan de
+        # un producto es idéntico al anterior a W5-D; los productos sin vida útil declarada ni lotes se planifican siempre igual (no se inventa).
+        "perishability_enabled": True,             # interruptor: false ignora vida útil y lotes
+        "perishability_enforce_shelf_cap": True,   # limita el stock de fin de período de compras nuevas a lo vendible dentro de la vida útil
+        "perishability_receipt_life_fraction": 1.0,    # fracción de la vida útil con que se recibe un lote nuevo (SUPUESTO: proveedor entrega fresco)
+        "perishability_lots_max_age_days": 7,      # un lote más antiguo que el snapshot de existencias por más días se ignora (stock obsoleto)
+        "perishability_loss_demand_basis": "yhat",     # yhat | lo_80: demanda con que se proyecta la merma que reduce la existencia utilizable
+        "perishability_excess_drop": "latest_first",   # latest_first (conservador: merma mayor) | earliest_first (consumo FEFO desde la foto): qué lote se descarta si los lotes suman más que la existencia
+        "perishability_expired_stock_mode": "in_on_hand",   # in_on_hand (vencidos dentro de la existencia: se restan) | written_off (el ERP ya los dio de baja: no se restan dos veces)
+        "commitments_mode": "reconcile",           # reconcile: pedidos confirmados dentro del pronóstico, sin doble conteo | ignore (conducta anterior)
+        "adjustments_mode": "apply",               # apply: ajustes de inventario posteriores al snapshot ajustan la existencia | ignore
+        "inventory_stale_days": 30,                # snapshot de existencias más antiguo que esto (días antes del corte) ⇒ stock obsoleto declarado
     },
     "cost": {
         "horizons": list(HORIZONS["cost"]),
@@ -417,6 +431,18 @@ CONFIG_CONSTRAINTS.update({
     ("customer", "aggregate_ranking_days"): {"min": 7, "max": 730},
 })
 
+# ── W5-D · supply: perecibilidad, compromisos y validez del stock (rangos validados) ──
+CONFIG_CONSTRAINTS.update({
+    ("supply", "perishability_receipt_life_fraction"): {"min": 0.05, "max": 1.0},
+    ("supply", "perishability_lots_max_age_days"): {"min": 0, "max": 365},
+    ("supply", "perishability_loss_demand_basis"): {"choices": ["yhat", "lo_80"]},
+    ("supply", "perishability_excess_drop"): {"choices": ["latest_first", "earliest_first"]},
+    ("supply", "perishability_expired_stock_mode"): {"choices": ["in_on_hand", "written_off"]},
+    ("supply", "commitments_mode"): {"choices": ["reconcile", "ignore"]},
+    ("supply", "adjustments_mode"): {"choices": ["apply", "ignore"]},
+    ("supply", "inventory_stale_days"): {"min": 1, "max": 3650},
+})
+
 
 # ── W3-B · promotion: rangos validados (la mejora mínima de la política heredada es `demand.min_improvement`) ──
 CONFIG_CONSTRAINTS[("demand", "min_improvement")] = {"min": 0.0, "max": 0.5}
@@ -503,6 +529,9 @@ def validate_overrides(core: str, overrides: dict[str, Any] | None, origin: str 
         problem = _type_error(defaults[key], value)
         if problem:
             errors.append({"key": key, "code": "invalid_type", "message": problem})
+            continue
+        if isinstance(value, float) and not math.isfinite(value):      # NaN/inf pasan cualquier comparación de rango: se rechazan
+            errors.append({"key": key, "code": "invalid_number", "message": "debe ser un número finito (no NaN ni infinito)"})
             continue
         rule = CONFIG_CONSTRAINTS.get((core, key), {})
         if isinstance(value, list) and any(k.startswith("list_") for k in rule):      # W3-C: listas numéricas

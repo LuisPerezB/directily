@@ -9,6 +9,7 @@ use App\Services\Imports\Processors\CalendarEventImportProcessor;
 use App\Services\Imports\Processors\CommitmentImportProcessor;
 use App\Services\Imports\Processors\ImportProcessor;
 use App\Services\Imports\Processors\InventoryImportProcessor;
+use App\Services\Imports\Processors\InventoryLotImportProcessor;
 use App\Services\Imports\Processors\LeadTimeImportProcessor;
 use App\Services\Imports\Processors\ProductImportProcessor;
 use App\Services\Imports\Processors\PromotionImportProcessor;
@@ -33,6 +34,7 @@ final class ImportProcessorFactory
             ImportEntity::CalendarEvents => app(CalendarEventImportProcessor::class),
             ImportEntity::UnitConversions => app(UnitConversionImportProcessor::class),
             ImportEntity::Warehouses => app(WarehouseImportProcessor::class),
+            ImportEntity::InventoryLots => app(InventoryLotImportProcessor::class),
         };
     }
 }

@@ -24,6 +24,7 @@ final class ImportFieldRegistry
             ImportEntity::CalendarEvents => $this->calendarEvents(),
             ImportEntity::UnitConversions => $this->unitConversions(),
             ImportEntity::Warehouses => $this->warehouses(),
+            ImportEntity::InventoryLots => $this->inventoryLots(),
         };
     }
 
@@ -86,6 +87,8 @@ final class ImportFieldRegistry
             new FieldDefinition('is_active', 'Activo', false, 'boolean', 'Sí/No. Por defecto: sí.', ['activo', 'estado', 'is_active', 'habilitado']),
             new FieldDefinition('price_known_at', 'Precio conocido desde', false, 'datetime', 'Desde cuándo la fuente conocía el precio vigente (disponibilidad en la fuente). Vacío = desconocido (NULL); no se rellena con la fecha de la carga.', ['price_known_at', 'fecha_precio', 'precio_desde', 'fecha_actualizacion_precio']),
             new FieldDefinition('cost_known_at', 'Costo conocido desde', false, 'datetime', 'Desde cuándo la fuente conocía el costo vigente (factura o lista de costos recibida). Vacío = desconocido (NULL).', ['cost_known_at', 'fecha_costo', 'costo_desde', 'fecha_actualizacion_costo']),
+            new FieldDefinition('is_perishable', 'Perecible', false, 'boolean', 'Sí/No. Un perecible se planifica con su vida útil y los vencimientos de sus lotes (FEFO). Celda vacía = no perecible. Si el archivo no trae esta columna, la declaración existente no se toca (no se deriva de la vida útil).', ['perecible', 'es_perecible', 'is_perishable', 'perishable']),
+            new FieldDefinition('shelf_life_days', 'Vida útil (días)', false, 'integer', 'Días de vida útil declarados desde la recepción (1 a 3650). Celda vacía = no declarada: el plan no inventa vencimientos. Si el archivo no trae esta columna, la declaración existente no se toca.', ['vida_util', 'vida_util_dias', 'dias_vida_util', 'caducidad_dias', 'shelf_life', 'shelf_life_days']),
         ];
     }
 
@@ -100,6 +103,19 @@ final class ImportFieldRegistry
             new FieldDefinition('reserved', 'Reservado', false, 'number', 'Unidades comprometidas con clientes.', ['reservado', 'comprometido', 'reserved', 'apartado']),
             new FieldDefinition('in_transit', 'En tránsito', false, 'number', 'Unidades compradas aún no recibidas.', ['en_transito', 'transito', 'in_transit', 'por_recibir', 'pedido']),
             new FieldDefinition('unit_cost', 'Costo unitario', false, 'number', 'Costo unitario del inventario.', ['costo', 'costo_unitario', 'unit_cost', 'costo_promedio']),
+        ];
+    }
+
+    /** @return list<FieldDefinition> */
+    private function inventoryLots(): array
+    {
+        return [
+            new FieldDefinition('snapshot_date', 'Fecha de corte', true, 'date', 'Fecha de la foto de lotes (cierre del día). Cada archivo REEMPLAZA la foto de esa fecha de cada sucursal × producto que trae: los lotes de esa foto que el archivo no trae se eliminan; las fotos de otras fechas no se tocan. El motor usa la última foto anterior o igual al corte.', ['fecha', 'fecha_corte', 'fecha_inventario', 'snapshot_date', 'date']),
+            new FieldDefinition('branch_code', 'Código de sucursal', true, 'string', 'Código del establecimiento o bodega.', ['sucursal', 'codigo_sucursal', 'establecimiento', 'bodega', 'local', 'branch', 'branch_code']),
+            new FieldDefinition('product_sku', 'Código de producto (SKU)', true, 'string', 'Código interno del producto.', ['codigo', 'codigo_producto', 'sku', 'item', 'product_sku', 'product_code', 'referencia']),
+            new FieldDefinition('lot_code', 'Código de lote', true, 'string', 'Identificador del lote en la fuente (hasta 60 caracteres). Se guarda en mayúsculas: «l-001» y «L-001» son el mismo lote.', ['lote', 'codigo_lote', 'nro_lote', 'numero_lote', 'lot', 'lot_code', 'batch', 'batch_code']),
+            new FieldDefinition('quantity', 'Cantidad', true, 'number', 'Unidades del lote en la foto. No puede ser negativa.', ['cantidad', 'existencia', 'stock', 'saldo', 'unidades', 'quantity', 'qty']),
+            new FieldDefinition('expiry_date', 'Fecha de vencimiento', false, 'date', 'Último día vendible del lote. Vacío = lote sin vencimiento declarado (no se inventa).', ['vencimiento', 'fecha_vencimiento', 'caducidad', 'fecha_caducidad', 'fecha_expiracion', 'expiry_date', 'expires_on', 'expiration_date']),
         ];
     }
 

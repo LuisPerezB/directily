@@ -81,6 +81,8 @@ está documentado en este apartado; la huella `rules_version` cambia con las reg
 | `currency_mismatch` | La moneda difiere de la de la empresa: no hay conversión declarada. |
 | `unknown_product` | Como error: producto ausente del catálogo y sin autorización para crearlo. Como advertencia: se creará. |
 | `capacity_unit_required` | La capacidad exige unidad y no la trae. |
+| `negative_lot_quantity` | La cantidad de un lote es negativa: un lote negativo no existe y corregir el signo cambiaría el stock (W5-D, importación `inventory_lots`). |
+| `expiry_implausible` | El vencimiento de un lote está a más de 15 años del corte: se presume un error de captura y adivinarlo movería pérdidas y compras (W5-D). |
 
 **WARNING**
 
@@ -120,6 +122,13 @@ está documentado en este apartado; la huella `rules_version` cambia con las reg
 | `decimal_separator_ambiguous` | Número con una sola coma seguida de exactamente tres dígitos (p. ej. «1,234»): puede ser 1,234 o 1234. Se lee como miles (1234) salvo que la carga declare el separador decimal; confirmar el formato de la fuente. |
 | `date_format_ambiguous` | Fecha en d/m/a con día y mes ≤ 12: se interpretó como día/mes (convención de la empresa); confirmar el formato de la fuente. |
 | `alias_resolved` | El código del maestro de productos es un alias vigente de otro producto (cambio de código): se actualiza el producto canónico en lugar de crear un duplicado (ADR-V25-24). |
+| `lot_expired_on_snapshot` | El lote ya estaba vencido en la fecha de corte: no es vendible; se escribe y el motor lo excluye de la existencia utilizable (W5-D). |
+| `lot_expiry_missing` | Un producto perecible trae un lote sin vencimiento: el motor lo trata como existencia sin vencimiento, no inventa la fecha (W5-D). |
+| `expiry_exceeds_shelf_life` | El vencimiento del lote excede la vida útil declarada del producto: revisar la vida útil o la fecha (W5-D). |
+| `lots_exceed_on_hand` | Los lotes de una serie suman más que la existencia del snapshot del mismo día: el motor limita los lotes a la existencia (W5-D). |
+| `perishable_without_shelf_life` | Producto perecible sin vida útil declarada: el plan no proyecta vencimientos sin vida útil ni lotes (W5-D). |
+| `shelf_life_without_perishable` | Vida útil declarada en un producto no perecible: el plan no la usa (W5-D). |
+| `lots_replaced` | Una foto de lotes se reemplazó: los lotes de la misma sucursal × producto × fecha que el archivo no trae se eliminan (W5-D). |
 
 **AUTO_FIX_SAFE**
 

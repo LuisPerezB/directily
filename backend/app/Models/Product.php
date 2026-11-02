@@ -26,6 +26,8 @@ class Product extends Model
             'current_price' => 'float',
             'current_cost' => 'float',
             'is_active' => 'boolean',
+            'is_perishable' => 'boolean',
+            'shelf_life_days' => 'integer',
             'attributes' => 'array',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',

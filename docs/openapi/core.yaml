@@ -830,6 +830,8 @@ components:
         current_price: {type: [number, 'null']}
         current_cost: {type: [number, 'null']}
         is_active: {type: boolean}
+        is_perishable: {type: boolean, description: 'W5-D · el producto vence: el plan lo trata con su vida útil y los vencimientos de sus lotes (FEFO).'}
+        shelf_life_days: {type: [integer, 'null'], description: 'W5-D · vida útil declarada en días desde la recepción; null = no declarada (el plan no inventa vencimientos).'}
         stats: {type: object, properties: {units_90d: {type: number}, revenue_90d: {type: number}, last_sale_date: {type: [string, 'null'], format: date}}}
     ProductInput:
       type: object

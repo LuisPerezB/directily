@@ -42,6 +42,9 @@ def _simulate_node(node, arrivals: np.ndarray, prod_out: np.ndarray, consumption
     for tau in range(n):
         avail = prev + receipts[tau]
         peak[tau] = avail
+        if node.avail_cap is not None and tau < len(node.avail_cap) and avail > float(node.avail_cap[tau]) + max(tol, REL_TOL * max(1.0, avail)):
+            violations.append({"type": "shelf_life_cap", "branch_id": node.branch_id, "product_id": node.product_id, "period": tau,
+                               "available": round(avail, 6), "limit": round(float(node.avail_cap[tau]), 6)})
         cons = float(consumption[tau])
         left = avail - cons
         if left < -max(tol, REL_TOL * max(1.0, avail)):
@@ -53,6 +56,9 @@ def _simulate_node(node, arrivals: np.ndarray, prod_out: np.ndarray, consumption
         unmet[tau] = float(node.demand[tau]) - s
         prev = left - s
         inv[tau] = prev
+        if node.shelf_cap is not None and tau < len(node.shelf_cap) and prev > float(node.shelf_cap[tau]) + max(tol, REL_TOL * max(1.0, prev)):
+            violations.append({"type": "shelf_life_cap", "branch_id": node.branch_id, "product_id": node.product_id, "period": tau,
+                               "inventory": round(prev, 6), "limit": round(float(node.shelf_cap[tau]), 6)})
         if node.safety_stock > 0 and tau >= ss_from:
             ss_short[tau] = max(0.0, node.safety_stock - prev)
     return NodeResult(inv, sales, unmet, ss_short, receipts, peak)

@@ -9582,6 +9582,16 @@ components:
           - 'null'
         is_active:
           type: boolean
+        is_perishable:
+          type: boolean
+          description: 'W5-D · el producto vence: el plan lo trata con su vida útil y los vencimientos de sus lotes
+            (FEFO).'
+        shelf_life_days:
+          type:
+          - integer
+          - 'null'
+          description: W5-D · vida útil declarada en días desde la recepción; null = no declarada (el plan no inventa
+            vencimientos).
         stats:
           type: object
           properties:
@@ -13548,6 +13558,40 @@ components:
           additionalProperties: true
           description: 'status: not_configured sin recetas'
         receipts_summary: {}
+        availability:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: 'W5-D · posición de inventario del plan: regla (disponible = físico + ajustes posteriores
+            al snapshot − reservado no respaldado por pedidos), validez del stock (sobrerreserva, físico negativo,
+            snapshot obsoleto), compromisos conciliados con el pronóstico sin doble conteo y ajustes. El detalle
+            por serie (`series`) solo con `?include=inventory_position`.'
+        perishability:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: 'W5-D · perecibilidad: series con vida útil o lotes, merma FEFO proyectada (esperada y de
+            demanda baja con los cuantiles ya persistidos), unidades vencidas en el estante y auditoría diaria del
+            plan (`audit`). El detalle por serie (`series`, `audit.series`) solo con `?include=perishability_detail`.
+            Un producto sin vida útil ni lotes se planifica como durable y se declara.'
+        no_purchase_baseline:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: 'W5-D · escenario «sin compra»: el plan evaluado sin ninguna compra nueva (unidades no atendidas,
+            primera fecha de faltante y margen perdido cuando precio y costo son conocidos).'
+        replenishment_policy:
+          type:
+          - array
+          - 'null'
+          items:
+            type: object
+            additionalProperties: true
+          description: W5-D · política de reposición por serie (stock de seguridad, punto de reorden, nivel de servicio,
+            plazo y su variabilidad, fórmula). null = no solicitado; con `?include=replenishment_policy`, la lista.
         balance:
           type:
           - array
