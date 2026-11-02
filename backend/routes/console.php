@@ -46,3 +46,16 @@ Schedule::command('predictily:intelligence-expire')
 Schedule::command('predictily:usage-snapshot')
     ->dailyAt('05:00')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
+
+// ── Revenue Radar (V2.5 · W5-A): tras la predicción diaria de comportamiento (04:20), propone al Decision Engine las oportunidades de la predicción vigente (idempotente) ──
+Schedule::command('predictily:radar-materialize')
+    ->dailyAt('04:50')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();
+
+// ── Decision Engine (V2.5 · W5-B): genera las recomendaciones tras la predicción de comportamiento (04:20) y el radar (04:50); vence las caducadas cada hora (ambos idempotentes, por empresa) ──
+Schedule::command('predictily:decisions-generate')
+    ->dailyAt('05:30')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();
+Schedule::command('predictily:decisions-expire')
+    ->hourlyAt(25)->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();

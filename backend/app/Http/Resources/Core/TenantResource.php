@@ -30,7 +30,8 @@ final class TenantResource extends JsonResource
             'timezone' => $this->timezone,
             'locale' => $this->locale,
             'status' => $this->status,
-            'settings' => $this->effectiveSettings(),
+            // V2.5 · W5-B: la semilla del experimento de contacto no se publica (permitiría recalcular quién queda en el grupo de control).
+            'settings' => array_replace_recursive($this->effectiveSettings(), isset($this->effectiveSettings()['decision']['experiment_seed']) ? ['decision' => ['experiment_seed' => '[registrada]']] : []),
             'allow_shared_training' => (bool) $this->allow_shared_training,
             'shared_training_consented_at' => $this->shared_training_consented_at?->toIso8601String(),
             'data_retention_months' => $this->data_retention_months,

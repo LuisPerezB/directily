@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Contracts\Decision\RecommendationSink;
 use App\Models\PersonalAccessToken;
 use App\Services\DataCore\Bronze\BronzeStore;
 use App\Services\DataCore\Bronze\FilesystemBronzeStore;
+use App\Services\Decision\DecisionEngine;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
@@ -24,6 +26,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(TenantContext::class);
         // Almacén Bronze inmutable (ADR-V25-24): implementación por sistema de archivos; el controlador S3 lo agrega W2-B.
         $this->app->bind(BronzeStore::class, FilesystemBronzeStore::class);
+        // V2.5 · W5-B (ADR-V25-13) · >>> W5-B decision-engine: punto único por el que Radar, reposición y escenarios proponen recomendaciones.
+        $this->app->bind(RecommendationSink::class, DecisionEngine::class);
     }
 
     public function boot(): void

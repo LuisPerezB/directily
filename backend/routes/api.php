@@ -28,4 +28,8 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/lineage.php';
     // V2.5 · W4-A: ciclo de vida del registro de modelos (detalle, validar, aprobar, rechazar, promover).
     require __DIR__.'/api/models.php';
+    // V2.5 · W5-A: Revenue Radar y Agenda Comercial (fachadas V2.2: radar, ficha del comprador, pronósticos agregados y preparación de abastecimiento).
+    require __DIR__.'/api/radar.php';
+    // V2.5 · W5-B: Decision Engine y workflow (recomendaciones, transiciones con segregación e idempotencia, parámetros de la empresa).
+    require __DIR__.'/api/decision.php';
 });

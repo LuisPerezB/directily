@@ -41,6 +41,8 @@ tags:
 - name: Asistente
 - name: Linaje e identidades
 - name: Factor Intelligence
+- name: Decision Engine
+- name: Revenue Radar
 paths:
   /accuracy/comparison:
     get:
@@ -1901,6 +1903,262 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
       x-ability: forecast.view
+  /customers/{id}/demand:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Demanda esperada de un comprador en un horizonte (incluida la comprometida)
+      description: 'Suma, sobre las relaciones comprador × producto de la corrida vigente (o `run_id`), de `max(esperanza,
+        comprometido)` (`total_view_quantity`), con el desglose esperado / comprometido / incremental; coincide
+        con la suma de `GET /customer/predictions?customer_id=`. Las cantidades de S05 (`expected_orders`, `expected_units`)
+        suman solo los pares estimados: `pairs_without_estimate` dice cuántos no lo están (nunca un cero inventado).
+        El importe es un supuesto, no una venta confirmada. Comprador genérico o sin historial: `status = no_individual_prediction`
+        con todo en null. 422 `horizon_not_available` si la corrida se abstuvo de ese horizonte.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/CustomerHorizon'
+      - name: run_id
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Demanda esperada del comprador
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CustomerDemand'
+                  envelope:
+                    oneOf:
+                    - $ref: '#/components/schemas/ResultEnvelope'
+                    - type: 'null'
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /customers/{id}/overview:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Ficha comercial del comprador (compras, frecuencia, SKU habituales, evolución, ventana y seguimiento)
+      description: 'Ficha del comprador sin PII innecesaria (solo código, tipo, zona y segmento; el nombre sigue
+        cifrado y no sale): últimas compras con importes netos y totales, frecuencia y estado de inactividad (ficha
+        de actividad del Customer Core; ausencia respecto a su patrón, no abandono), SKU habituales, **evolución
+        mensual de 12 meses** (los meses sin compras salen con cero porque ahí el cero es un hecho de las ventas),
+        ventana futura de recompra de sus productos probables (nunca un día exacto; sin cifras si el estado no es
+        `estimated` u `overdue`) y seguimiento (sus oportunidades y los últimos eventos; las del grupo de control
+        no se muestran).
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/CustomerHorizon'
+      - name: run_id
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Ficha del comprador
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CustomerOverview'
+                  envelope:
+                    oneOf:
+                    - $ref: '#/components/schemas/ResultEnvelope'
+                    - type: 'null'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /customers/{id}/predictions:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Predicciones de compra de un comprador (alias de /customer/predictions?customer_id=)
+      description: '**Alias V2.2** de `GET /customer/predictions?customer_id={id}`: delega en el mismo controlador,
+        con los mismos filtros (`horizon`, `product_id`, `min_probability`, `order_by`, `window_status`, `segment`,
+        `direction`, `run_id`, `per_page`, `page`), la misma validación, la misma envoltura y el mismo cuerpo (salvo
+        las URL de paginación). Respuesta con la cabecera `X-Equivalent-Of`. Un comprador de otra empresa responde
+        404.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/CustomerHorizon'
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: min_probability
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1
+      - name: order_by
+        in: query
+        schema:
+          type: string
+          enum:
+          - probability
+          - expected_quantity
+          - expected_amount
+          - quantity_if_purchase
+          - expected_orders
+          - expected_units
+      - name: window_status
+        in: query
+        schema:
+          type: string
+          enum:
+          - estimated
+          - insufficient_data
+          - overdue
+          - censored
+      - name: segment
+        in: query
+        schema:
+          type: string
+          maxLength: 60
+      - name: direction
+        in: query
+        schema:
+          type: string
+          enum:
+          - asc
+          - desc
+      - name: run_id
+        in: query
+        schema:
+          type: integer
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Mismo cuerpo que /customer/predictions filtrado por el comprador
+          headers:
+            X-Equivalent-Of:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomerPrediction'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+                  envelope:
+                    $ref: '#/components/schemas/ResultEnvelope'
+                  ranking_source:
+                    type:
+                    - string
+                    - 'null'
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+      x-equivalent-of: /customer/predictions
+  /customers/{id}/products:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Productos habituales y probables de un comprador
+      description: '`habitual`: productos con más días de compra en los últimos 365 días (ventas válidas, sin devoluciones
+        ni anuladas), base `purchase_history`. `probable`: ranking del Customer Core del horizonte, con su fuente
+        (`ranking_source`: model, popularity o recency), probabilidad y la ventana de recompra (cuantiles solo con
+        estado `estimated` u `overdue`), base `customer_core_ranking`. Con `kind` se devuelve solo esa lista. `probable.status`
+        dice `no_prediction_run`, `horizon_not_available` o `no_candidate_relations` cuando corresponde.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - habitual
+          - probable
+      - $ref: '#/components/parameters/CustomerHorizon'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+      - name: run_id
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Productos del comprador
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CustomerProducts'
+                  envelope:
+                    oneOf:
+                    - $ref: '#/components/schemas/ResultEnvelope'
+                    - type: 'null'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
   /dashboard/summary:
     get:
       tags:
@@ -2873,6 +3131,420 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
       x-ability: datasources.manage
+  /decisions:
+    get:
+      tags:
+      - Decision Engine
+      summary: Recomendaciones del Decision Engine (lista con filtros)
+      description: 'Recomendaciones de contacto, recuperación, riesgo de cliente, reposición, inventario-demanda
+        y presupuesto, con el contrato completo de §11 (fuente y huella, versiones de modelos, probabilidad e intervalo,
+        supuestos, restricciones, disponibilidad, costo de la acción, valor bruto, contribución, incremental, etiqueta
+        de atribución, score con la versión de su fórmula, incertidumbre, explicación sin PII, prioridad, dueño,
+        estado, vencimiento y siguiente paso) más lo necesario para actuar (`version`, `requires_approval`, `allowed_transitions`).
+
+
+        **Sin cifras ficticias.** `expected_contribution` es `null` cuando el costo no es confiable (`uncertainty.cost.reasons`
+        dice por qué); `incremental_estimate` es `null` sin evidencia de uplift y `attribution_label` es `potential_unproven`
+        («oportunidad potencial, atribución no demostrada»): el valor esperado NO implica ventas incrementales causadas
+        por la acción. Predictily no escribe en el ERP ni envía mensajes.
+
+
+        Las recomendaciones del **grupo de control** de un experimento no se listan (quedan para medición y nunca
+        se asignan); solo quien puede aprobar las ve con `include_control=true`. Orden por defecto: `-score` (las
+        sin score al final).
+
+
+        Habilidad requerida: `decisions.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: status
+        in: query
+        description: Uno o varios estados separados por coma.
+        schema:
+          type: string
+          example: suggested,assigned
+      - name: kind
+        in: query
+        description: Uno o varios tipos separados por coma.
+        schema:
+          type: string
+          example: contact,recovery
+      - name: priority
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 5
+      - name: horizon_days
+        in: query
+        schema:
+          type: integer
+      - name: customer_id
+        in: query
+        schema:
+          type: integer
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: branch_id
+        in: query
+        schema:
+          type: integer
+      - name: assigned_user_id
+        in: query
+        schema:
+          type: integer
+      - name: mine
+        in: query
+        description: Solo las asignadas al usuario.
+        schema:
+          type: boolean
+      - name: requires_approval
+        in: query
+        description: Solo las que exigen (true) o no exigen (false) aprobación antes de ejecutarse.
+        schema:
+          type: boolean
+      - name: attribution_label
+        in: query
+        schema:
+          type: string
+          enum:
+          - potential_unproven
+          - incremental_estimated
+          - causally_attributable
+      - name: as_of
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: expiring_before
+        in: query
+        description: Aún sin acción en curso y con vencimiento hasta esta fecha.
+        schema:
+          type: string
+          format: date-time
+      - name: include_control
+        in: query
+        description: Incluye al grupo de control (solo con decisions.approve; para los demás se ignora).
+        schema:
+          type: boolean
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - -score
+          - score
+          - priority
+          - -priority
+          - -created_at
+          - created_at
+          - expires_at
+          - -expires_at
+          - -as_of
+          default: -score
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Recomendaciones de la empresa activa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DecisionRecommendation'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: decisions.view
+  /decisions/settings:
+    get:
+      tags:
+      - Decision Engine
+      summary: Parámetros del Decision Engine de la empresa
+      description: 'Valores efectivos (los de la empresa sobre los por defecto), los valores por defecto y la versión
+        de la fórmula del score (SHA-256 de sus parámetros efectivos). **Todos los valores por defecto son provisionales**,
+        no umbrales universales: se aprueban con datos reales en el piloto. La fracción de control vale 0 por defecto
+        (sin experimento). La semilla del experimento no se devuelve en claro (`[registrada]`).
+
+
+        Habilidad requerida: `decisions.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Parámetros
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DecisionSettings'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: decisions.view
+    put:
+      tags:
+      - Decision Engine
+      summary: Actualizar los parámetros del Decision Engine
+      description: 'Actualiza solo las claves enviadas (las desconocidas se ignoran). Con `control_fraction` > 0
+        y sin semilla registrada, se genera y registra una (queda en cada asignación de `experiment_assignments.policy`);
+        no se reemplaza después. `control_fraction` máximo 0,5. Cambiar `experiment_key` abre un experimento nuevo;
+        las asignaciones ya registradas no cambian. Queda en auditoría (`decision.settings_updated`, sin la semilla).
+
+
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionSettingsUpdate'
+      responses:
+        '200':
+          description: Parámetros efectivos tras el cambio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DecisionSettings'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /decisions/summary:
+    get:
+      tags:
+      - Decision Engine
+      summary: Conteos de recomendaciones por estado, tipo y etiqueta de atribución
+      description: 'Conteos de la empresa activa (sin el grupo de control). `awaiting_approval` cuenta las revisadas
+        que exigen aprobación. No suma importes: sumar oportunidades de distintos tipos podría contar dos veces
+        la misma venta. `control_group_units` solo aparece con `decisions.approve`.
+
+
+        Habilidad requerida: `decisions.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Conteos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DecisionSummary'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: decisions.view
+  /decisions/{id}:
+    get:
+      tags:
+      - Decision Engine
+      summary: Detalle de una recomendación con su línea de tiempo
+      description: 'El contrato completo, los eventos de auditoría (de la más antigua a la más reciente) y las transiciones
+        que el usuario puede o no hacer ahora (`allowed_transitions`, con `blocked_by` cuando no: `forbidden`, `decision_segregation_of_duties`,
+        `decision_approval_required`, `control_group_not_actionable`). `version` es el valor que se manda como `expected_version`
+        en la revisión. Una recomendación de otra empresa responde 404; una del grupo de control también para quien
+        no puede aprobar.
+
+
+        Habilidad requerida: `decisions.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Recomendación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DecisionRecommendation'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: decisions.view
+  /decisions/{id}/transition:
+    post:
+      tags:
+      - Decision Engine
+      summary: Transición del workflow (idempotente, con segregación de funciones y bloqueo optimista)
+      description: 'Workflow `suggested → assigned → reviewed → approved | rejected → in_progress → executed → measured
+        → closed` (+ `expired`). Una transición fuera de la tabla responde 409 `decision_transition_not_allowed`.
+        `measured` y `expired` solo los pone el sistema.
+
+
+        | Hacia | Desde | Habilidad | Reglas |
+
+        |---|---|---|---|
+
+        | `assigned` | `suggested` (asignar), `assigned` (reasignar) | `decisions.manage` | `expected_version` obligatorio;
+        `assignee_user_id`: miembro con `decisions.manage`. Las de control no se asignan (409 `control_group_not_actionable`
+        para quien aprueba; 404 para los demás). |
+
+        | `reviewed` | `assigned` | `decisions.manage` | `expected_version` obligatorio. |
+
+        | `approved` | `reviewed` | `decisions.approve` | `expected_version` obligatorio. Segregación: no aprueba
+        quien la propuso ni quien debe ejecutarla (403 `decision_segregation_of_duties`). |
+
+        | `rejected` | `reviewed` (rechazo formal) | `decisions.approve` | `expected_version` y `reason` obligatorios;
+        misma segregación. |
+
+        | `rejected` | `suggested`, `assigned` (descartar) | `decisions.manage` | `expected_version` y `reason`
+        obligatorios. |
+
+        | `in_progress` | `approved`; `reviewed` solo si no es sensible | `decisions.manage` | Una acción sensible
+        (reposición, inventario-demanda, presupuesto, escenarios, sobre presupuesto o sobre el umbral de costo de
+        la empresa) no pasa de `reviewed` sin aprobación (409 `decision_approval_required`). Quien aprobó no la
+        ejecuta (403). Solo la persona asignada (o un supervisor con `decisions.approve`). |
+
+        | `executed` | `in_progress` | `decisions.manage` | Mismas reglas de ejecución. Registrar la ejecución NO
+        escribe en el ERP ni envía mensajes: la persona hizo la acción fuera de Predictily. |
+
+        | `closed` | `measured` | `decisions.manage` | `expected_version` obligatorio. |
+
+
+        **Idempotencia**: `idempotency_key` obligatorio; repetir la **misma petición** (misma clave, destino, usuario
+        y cuerpo) devuelve el mismo resultado sin otro evento (`meta.idempotent_replay = true`) **si el rol sigue
+        teniendo la habilidad con la que se hizo** (si no, 403); la misma clave con otro destino, otro cuerpo u
+        otro usuario responde 409 `idempotency_key_reused`. **Concurrencia**: `expected_version` (la `version` leída)
+        es **obligatoria en toda transición** (422 si falta) y, desfasada, responde 409 `decision_version_conflict`
+        con `context.current_version`; la `version` es el id del último evento que cambia el estado o el seguimiento
+        (los comentarios del sistema, como un refresco de linaje, no cuentan); la fila se bloquea durante la decisión.
+        **Grupo de control**: para quien no tiene `decisions.approve` una recomendación de control responde 404,
+        idéntico al de un id inexistente, antes de cualquier otra comprobación. Toda transición queda en `decision_events`
+        (y en auditoría).
+
+
+        Habilidad mínima: `decisions.manage`; la de aprobar o rechazar formalmente es `decisions.approve`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionTransitionRequest'
+      responses:
+        '200':
+          description: Recomendación tras la transición (o su repetición idempotente)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DecisionRecommendation'
+                  meta:
+                    type: object
+                    properties:
+                      idempotent_replay:
+                        type: boolean
+                      event_id:
+                        type: integer
+        '403':
+          description: Sin la habilidad (code forbidden, required_ability) o segregación de funciones (code decision_segregation_of_duties,
+            context.roles)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 'code: decision_transition_not_allowed, decision_version_conflict, decision_approval_required,
+            control_group_not_actionable, idempotency_key_reused'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: decisions.manage
+  /demand/forecasts:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Pronósticos de demanda agregada (alias de /forecasts/products, /forecasts/categories y /forecasts/series)
+      description: '**Alias V2.2**: según `level` delega en `GET /forecasts/products` (por defecto), `GET /forecasts/categories`
+        o `GET /forecasts/series` con la misma validación y el mismo cuerpo, y lo declara en la cabecera `X-Equivalent-Of`.
+        Los demás parámetros son los del endpoint equivalente.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: level
+        in: query
+        schema:
+          type: string
+          enum:
+          - product
+          - category
+          - series
+          default: product
+      - $ref: '#/components/parameters/Horizon'
+      - $ref: '#/components/parameters/BranchId'
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/ProductId'
+      - $ref: '#/components/parameters/RunId'
+      - name: search
+        in: query
+        schema:
+          type: string
+          maxLength: 100
+      - name: sort
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/Granularity'
+      - name: history_days
+        in: query
+        description: Solo level=series
+        schema:
+          type: integer
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Mismo cuerpo que el endpoint equivalente
+          headers:
+            X-Equivalent-Of:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+      x-equivalent-of: /forecasts/products
   /exports/accuracy.csv:
     get:
       tags:
@@ -6529,6 +7201,437 @@ paths:
       responses:
         '204':
           description: Eliminada
+  /radar/agenda:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Agenda comercial de una fecha, agrupada por cliente
+      description: 'Oportunidades a gestionar en `date` (por defecto hoy en la zona horaria de la empresa), **agrupadas
+        por cliente** (un cliente no se duplica por SKU) y paginadas por cliente. Vigentes a esa fecha (corte ≤
+        fecha, sin vencer), sin pedido recibido ni descartadas, y las **pospuestas solo reaparecen desde su fecha
+        de reactivación**. Cada grupo trae el recuento, el mejor puntaje, la prioridad más urgente, el recuento
+        por estado, la próxima acción (la de su mejor oportunidad) y las oportunidades. Mismos filtros que `/radar/opportunities`
+        (cliente, SKU, horizonte, vendedor, segmento, zona, categoría, estado); con `state` se ve exactamente ese
+        estado. Las del grupo de control no se asignan ni se muestran. Un `seller_id` sin oportunidades asignadas
+        devuelve lista vacía, no la de otros. TODO(W6): alcance por cartera del rol vendedor.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: date
+        in: query
+        description: Fecha de la agenda (AAAA-MM-DD). Por defecto hoy en la zona horaria de la empresa.
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/RadarFilterHorizon'
+      - $ref: '#/components/parameters/RadarFilterKind'
+      - $ref: '#/components/parameters/RadarFilterCustomer'
+      - $ref: '#/components/parameters/RadarFilterProduct'
+      - $ref: '#/components/parameters/RadarFilterSeller'
+      - $ref: '#/components/parameters/RadarFilterSegmentId'
+      - $ref: '#/components/parameters/RadarFilterSegment'
+      - $ref: '#/components/parameters/RadarFilterZone'
+      - $ref: '#/components/parameters/RadarFilterCategory'
+      - $ref: '#/components/parameters/RadarFilterState'
+      - $ref: '#/components/parameters/RadarFilterStatus'
+      - $ref: '#/components/parameters/RadarOrderBy'
+      - $ref: '#/components/parameters/RadarDirection'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Página de clientes con sus oportunidades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RadarAgendaGroup'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+                  date:
+                    type: string
+                    format: date
+                  envelope:
+                    $ref: '#/components/schemas/ResultEnvelope'
+                  label:
+                    type: string
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  status_map:
+                    type: object
+                    properties:
+                      version:
+                        type: string
+                      table:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AgendaStatusMapRow'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /radar/opportunities:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Oportunidades del Revenue Radar (lista de trabajo con filtros y paginación)
+      description: 'Oportunidades cliente × producto (y de cliente) que el Decision Engine guardó como recomendaciones
+        de contacto, recuperación y riesgo de cliente, con su probabilidad, `expected_orders` (E(nº de pedidos)
+        servido por el modelo de conteo), cantidad por pedido, unidades, ventana de recompra (cuantiles solo con
+        estado `estimated` u `overdue`; nunca un día exacto), valor bruto esperado, contribución (null sin costo
+        confiable; `value.cost_status` y `cost_reasons` lo dicen), disponibilidad de inventario al corte (`unknown`
+        si no hay fotografía vigente: nunca cero), puntaje con la versión de su fórmula, prioridad, estado de workflow
+        (`status`) y estado heredado de la agenda (`state`). Sin nombres ni datos personales: solo el código del
+        comprador.
+
+
+        **Lista de trabajo.** Sin `state` ni `status`: vigentes (ni vencidas, medidas, cerradas ni rechazadas) y
+        sin pedido recibido ni descartadas. Con `state` se ve exactamente ese estado heredado (sin gestión = `pendiente`);
+        con `status`, exactamente ese estado de workflow. Las del **grupo de control** de un experimento nunca aparecen.
+        Orden por defecto determinista: `score` descendente (nulos al final), valor bruto esperado descendente e
+        `id`.
+
+
+        `seller_id` filtra por el usuario asignado. TODO(W6): el alcance por cartera del rol vendedor llega en W6
+        (diseñado, no implementado); hoy los roles owner/admin/analyst/viewer ven toda la empresa.
+
+
+        Plan sin Customer: 402 `features.customer`; horizonte fuera del plan: 402; ids de otra empresa: 422.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RadarFilterHorizon'
+      - $ref: '#/components/parameters/RadarFilterKind'
+      - $ref: '#/components/parameters/RadarFilterCustomer'
+      - $ref: '#/components/parameters/RadarFilterProduct'
+      - $ref: '#/components/parameters/RadarFilterSeller'
+      - $ref: '#/components/parameters/RadarFilterSegmentId'
+      - $ref: '#/components/parameters/RadarFilterSegment'
+      - $ref: '#/components/parameters/RadarFilterZone'
+      - $ref: '#/components/parameters/RadarFilterCategory'
+      - $ref: '#/components/parameters/RadarFilterState'
+      - $ref: '#/components/parameters/RadarFilterStatus'
+      - $ref: '#/components/parameters/RadarFilterAsOf'
+      - $ref: '#/components/parameters/RadarOrderBy'
+      - $ref: '#/components/parameters/RadarDirection'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Página de oportunidades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RadarOpportunity'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+                  envelope:
+                    $ref: '#/components/schemas/ResultEnvelope'
+                  label:
+                    type: string
+                    example: Oportunidad potencial, atribución no demostrada
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
+  /radar/opportunities/materialize:
+    post:
+      tags:
+      - Revenue Radar
+      summary: Proponer al Decision Engine las oportunidades de la predicción vigente
+      description: 'Convierte la predicción de comportamiento vigente (producción, completada) en oportunidades
+        por relación cliente × producto y las **propone al Decision Engine** por `RecommendationSink::propose()`
+        (el Radar nunca escribe recomendaciones por su cuenta): contacto (P(≥ 1 compra) ≥ `min_probability` de la
+        política `radar-v1`) y recuperación (ventana de recompra atrasada con historia suficiente). La economía
+        unitaria, la disponibilidad, el puntaje, la prioridad, el vencimiento y el experimento los resuelve el Decision
+        Engine. La recuperación y el riesgo a nivel de cliente los genera el propio Decision Engine (`predictily:decisions-generate`).
+
+
+        Idempotente: con los mismos insumos no crea nada nuevo (`existing`). Una oportunidad que falla se cuenta
+        en `failed` y no detiene las demás (`status = partial`). El comando `predictily:radar-materialize` hace
+        lo mismo para todas las empresas (programado a las 04:50, tras la predicción diaria). 503 `decision_engine_unavailable`
+        si el motor de decisiones no está registrado.
+
+
+        Habilidad requerida: `forecast.run`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                horizons:
+                  type: array
+                  description: Solo estos horizontes (por defecto, todos los de la predicción que el plan permite).
+                  items:
+                    type: integer
+                    enum:
+                    - 7
+                    - 14
+                    - 15
+                    - 30
+                    - 90
+      responses:
+        '200':
+          description: Resultado de la propuesta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RadarMaterialization'
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '503':
+          description: El Decision Engine no está disponible (code decision_engine_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-ability: forecast.run
+  /radar/opportunities/{id}:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Detalle de una oportunidad con su explicación y su historial de seguimiento
+      description: 'Además de los campos de la lista: explicación verificable (sin PII), supuestos, restricciones,
+        incertidumbre, versiones de modelos, intervalos, fuente, los destinos de seguimiento permitidos (`allowed_feedback`)
+        y el historial completo e inmutable de eventos (`history`: del motor y de la agenda, con estado previo y
+        nuevo, autor, fecha y nota). Incluye la tabla de mapeo de los estados heredados al workflow. Una oportunidad
+        de otra empresa o del grupo de control responde 404.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Detalle
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RadarOpportunityDetail'
+                  label:
+                    type: string
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  status_map:
+                    type: object
+                    properties:
+                      version:
+                        type: string
+                        example: radar-agenda-map-v1
+                      table:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AgendaStatusMapRow'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: forecast.view
+  /radar/opportunities/{id}/feedback:
+    post:
+      tags:
+      - Revenue Radar
+      summary: Registrar el seguimiento de una oportunidad (estados heredados de la Agenda V2.2)
+      description: 'Cambia el estado heredado de la agenda (`pendiente`, `contactado`, `interesado`, `pedido_recibido`,
+        `pospuesto`, `descartado`) con autor, fecha, estado previo, estado nuevo y nota. **Auditable e inmutable**:
+        cada cambio inserta un evento `feedback` en `decision_events` (nunca se edita ni se borra) y una fila en
+        la auditoría general. **Idempotente**: `idempotency_key` (obligatoria, 8–120 caracteres) identifica la petición;
+        repetirla devuelve el mismo evento con **200** (`replayed = true`, cabecera `Idempotent-Replayed`); la primera
+        vez responde **201**; la misma clave con otro contenido, **409** `idempotency_key_reused`. Concurrencia:
+        la fila se bloquea durante el cambio.
+
+
+        Transición válida según la matriz de `status_map` (`pedido_recibido` y `descartado` son finales); inválida:
+        422 `invalid_transition` con los destinos permitidos. `pospuesto` exige `snoozed_until` (posterior a hoy,
+        a lo sumo en un año **y no posterior al vencimiento de la oportunidad**: 422 `snooze_beyond_expiry`): la
+        oportunidad sale de la agenda hasta esa fecha. La nota es texto libre acotado a 500 caracteres y se enmascaran
+        correos y números de 10/13 dígitos.
+
+
+        **Mapeo al workflow** (`radar-agenda-map-v1`, sin perder historial): el evento registra el estado de workflow
+        que implica el estado heredado (`implied_workflow_status`: contactado e interesado → `in_progress`, pedido_recibido
+        → `executed`, descartado → `rejected`, pendiente → `suggested`/`assigned`, pospuesto → sin cambio). La transición
+        implicada la aplica el workflow de W5-B COMO CUALQUIER OTRA (habilidades del rol, segregación de funciones,
+        aprobación de acciones sensibles, bloqueo optimista); si el workflow no la admite desde el estado actual
+        (p. ej. `suggested`/`assigned`/`reviewed` → `in_progress` sin revisión, o una acción sensible sin aprobar),
+        el seguimiento se registra igual, el workflow no se mueve y el motivo queda en `payload.workflow_sync` (`applied`,
+        `unchanged`, `not_applicable`, `skipped`) y `workflow_sync_reason`. Solo mientras el workflow admite seguimiento
+        (no rechazada, vencida, medida ni cerrada: 422 `opportunity_closed`). Las del grupo de control, y las de
+        otra empresa, responden 404. **Predictily no envía mensajes**: registra lo que una persona hizo.
+
+
+        Habilidad requerida: `decisions.manage` (analyst, admin, owner; el viewer recibe 403).'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RadarFeedbackRequest'
+      responses:
+        '201':
+          description: Seguimiento registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RadarFeedbackResult'
+        '200':
+          description: 'Reintento de la misma petición (misma `idempotency_key`): se devuelve el resultado original
+            sin otro evento'
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum:
+                - 'true'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RadarFeedbackResult'
+        '403':
+          description: 'Sin la habilidad decisions.manage, o el estado CIERRA la oportunidad (pedido_recibido, descartado)
+            y el rol no podría hacer esa transición del workflow (code forbidden con required_ability, o decision_segregation_of_duties):
+            no se registra nada'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La clave de idempotencia ya se usó con otro contenido (code idempotency_key_reused)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación, transición inválida (`invalid_transition`, con `from`, `to` y `allowed`), oportunidad
+            cerrada (`opportunity_closed`) o posposición más allá del vencimiento (`snooze_beyond_expiry`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-ability: decisions.manage
+  /radar/summary:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Resumen del Revenue Radar por horizonte (oportunidades y valor potencial)
+      description: 'Conteos por horizonte y tipo, clientes distintos, desglose por estado heredado e inventario
+        **dentro de cada horizonte** (`by_horizon[h]`), y valor potencial **por horizonte**. Nada se suma entre
+        horizontes (las ventanas se solapan y se contaría dos veces la misma compra): `totals` cuenta relaciones
+        **distintas** (tipo, cliente, producto) y lleva su unidad en `unit`. `value` es el **pronóstico** de las
+        relaciones cliente × producto (`basis_code = forecast_units_x_last_net_price`), rotulado **«Oportunidad
+        potencial, atribución no demostrada»**: un supuesto (unidades esperadas × último precio neto), no una venta
+        confirmada ni causada por el contacto; `contribution` solo suma las oportunidades que el Decision Engine
+        valoró con costo confiable y `contribution_unavailable` dice cuántas no la tienen. `customer_level` es lo
+        de **nivel de cliente** (recuperación y riesgo): su importe es la **caída observada del gasto neto** (`basis_code
+        = observed_spend_decline`), que no es pronóstico ni contribución y **no se suma a `value`**.
+
+
+        Las oportunidades del grupo de control de un experimento no se cuentan; `control_withheld` (cuántas se retienen)
+        solo lo ve quien tiene `decisions.approve` y solo sin filtro de cliente o producto (con uno revelaría a
+        qué cliente pertenece). La lista base es la de trabajo (vigentes, sin pedido recibido ni descartadas). Sin
+        oportunidades propuestas pero con predicción vigente, `message` indica cómo generarlas. Sin predicción:
+        `envelope.quality_status = insufficient_data`, nunca ceros inventados.
+
+
+        Fachada sobre las recomendaciones del Decision Engine (no duplica su lógica). Plan sin Customer: 402 `features.customer`;
+        horizonte fuera del plan: 402.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/RadarFilterHorizon'
+      - $ref: '#/components/parameters/RadarFilterKind'
+      - $ref: '#/components/parameters/RadarFilterCustomer'
+      - $ref: '#/components/parameters/RadarFilterProduct'
+      - $ref: '#/components/parameters/RadarFilterSeller'
+      - $ref: '#/components/parameters/RadarFilterSegmentId'
+      - $ref: '#/components/parameters/RadarFilterSegment'
+      - $ref: '#/components/parameters/RadarFilterZone'
+      - $ref: '#/components/parameters/RadarFilterCategory'
+      - $ref: '#/components/parameters/RadarFilterState'
+      - $ref: '#/components/parameters/RadarFilterStatus'
+      - $ref: '#/components/parameters/RadarFilterAsOf'
+      responses:
+        '200':
+          description: Resumen del Radar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RadarSummary'
+                  envelope:
+                    $ref: '#/components/schemas/ResultEnvelope'
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  message:
+                    type:
+                    - string
+                    - 'null'
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
   /reports/forecast-summary:
     get:
       tags:
@@ -8247,6 +9350,72 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
       x-ability: catalog.manage
+  /supply/readiness:
+    get:
+      tags:
+      - Revenue Radar
+      summary: Preparación de abastecimiento para atender el horizonte (por producto)
+      description: 'Por producto: **disponible al corte** (existencias − reservado por sucursal, sumadas; las sucursales
+        en negativo aportan 0; el **tránsito va aparte**) con la MISMA definición que usa el Decision Engine (fotografía
+        más reciente ≤ corte y no más antigua que `inventory_max_age_days` de la empresa; sin fotografía vigente,
+        `status = unknown`: se desconoce, nunca es cero), la demanda esperada de los compradores identificados (`max(esperanza,
+        comprometido)`, Customer Core) y la agregada pronosticada, la **cobertura en días** (disponible ÷ demanda
+        diaria pronosticada; null si falta alguno) y si el horizonte es **atendible** (`sufficient`, `insufficient`
+        o `unknown`). No es una orden de compra. Sin plan de Customer solo falta la demanda de compradores.
+
+
+        Habilidad requerida: `forecast.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/ProductId'
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/Horizon'
+      - name: as_of
+        in: query
+        description: Corte del inventario (AAAA-MM-DD). Por defecto hoy en la zona horaria de la empresa.
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Preparación por producto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SupplyReadinessItem'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+                  as_of:
+                    type: string
+                    format: date
+                  horizon_days:
+                    type: integer
+                  forecast_run:
+                    type:
+                    - object
+                    - 'null'
+                  customer_run:
+                    type:
+                    - object
+                    - 'null'
+                  definitions:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '402':
+          $ref: '#/components/responses/PlanLimit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: forecast.view
   /supply/scenarios/evaluate:
     post:
       tags:
@@ -9218,6 +10387,134 @@ components:
         - 15
         - 30
         - 90
+    RadarFilterHorizon:
+      name: horizon
+      in: query
+      description: 'Horizonte de la oportunidad (catálogo de Customer). Fuera del plan: 402.'
+      schema:
+        type: integer
+        enum:
+        - 7
+        - 14
+        - 15
+        - 30
+        - 90
+    RadarFilterKind:
+      name: kind
+      in: query
+      description: contact = contacto; recovery = recuperación; customer_risk = riesgo de cliente.
+      schema:
+        type: string
+        enum:
+        - contact
+        - recovery
+        - customer_risk
+    RadarFilterCustomer:
+      name: customer_id
+      in: query
+      description: 'Comprador (de la empresa activa; de otra: 422).'
+      schema:
+        type: integer
+    RadarFilterProduct:
+      name: product_id
+      in: query
+      description: 'SKU (de la empresa activa; de otra: 422).'
+      schema:
+        type: integer
+    RadarFilterSeller:
+      name: seller_id
+      in: query
+      description: Vendedor = usuario asignado a la oportunidad (miembro de la empresa activa). El alcance por cartera
+        del rol vendedor llega en W6.
+      schema:
+        type: integer
+    RadarFilterSegmentId:
+      name: segment_id
+      in: query
+      description: Segmento comercial del comprador.
+      schema:
+        type: integer
+    RadarFilterSegment:
+      name: segment
+      in: query
+      description: Segmento de calibración de la fila del modelo, p. ej. `frequency:high`.
+      schema:
+        type: string
+        maxLength: 60
+        pattern: ^[a-z_]+:[a-z0-9_]+$
+    RadarFilterZone:
+      name: zone
+      in: query
+      description: Zona comercial del comprador.
+      schema:
+        type: string
+        maxLength: 80
+    RadarFilterCategory:
+      name: category_id
+      in: query
+      description: Categoría del producto.
+      schema:
+        type: integer
+    RadarFilterState:
+      name: state
+      in: query
+      description: Estado heredado de la agenda V2.2; sin gestión es `pendiente`. Con este filtro se ve exactamente
+        ese estado.
+      schema:
+        type: string
+        enum:
+        - pendiente
+        - contactado
+        - interesado
+        - pedido_recibido
+        - pospuesto
+        - descartado
+    RadarFilterStatus:
+      name: status
+      in: query
+      description: Estado del workflow del Decision Engine. Con este filtro se ve exactamente ese estado.
+      schema:
+        type: string
+        enum:
+        - suggested
+        - assigned
+        - reviewed
+        - approved
+        - rejected
+        - in_progress
+        - executed
+        - measured
+        - closed
+        - expired
+    RadarFilterAsOf:
+      name: as_of
+      in: query
+      description: Fecha de corte de la predicción de origen (AAAA-MM-DD).
+      schema:
+        type: string
+        format: date
+    RadarOrderBy:
+      name: order_by
+      in: query
+      description: Orden (lista blanca). Por defecto `score` descendente, luego valor bruto esperado e `id` (determinista).
+      schema:
+        type: string
+        enum:
+        - score
+        - priority
+        - expected_gross_value
+        - expected_contribution
+        - probability
+        - as_of
+        - horizon_days
+    RadarDirection:
+      name: direction
+      in: query
+      schema:
+        type: string
+        enum:
+        - asc
+        - desc
   responses:
     Error:
       description: Error
@@ -11543,6 +12840,1035 @@ components:
           type: object
         base_run:
           $ref: '#/components/schemas/RunRef'
+    RadarWindow:
+      type: object
+      description: 'Ventana de recompra: cuantiles de los días hasta la siguiente compra desde el corte; nunca un
+        día exacto. Solo con estado estimated u overdue hay cifras.'
+      properties:
+        status:
+          type:
+          - string
+          - 'null'
+          enum:
+          - estimated
+          - insufficient_data
+          - overdue
+          - censored
+          - null
+        p10_days:
+          type:
+          - number
+          - 'null'
+        p50_days:
+          type:
+          - number
+          - 'null'
+        p90_days:
+          type:
+          - number
+          - 'null'
+    RadarOpportunity:
+      type: object
+      description: 'Oportunidad del Revenue Radar (recomendación contact, recovery o customer_risk del Decision
+        Engine). Sin nombres ni datos personales: solo el código del comprador.'
+      properties:
+        id:
+          type: integer
+          description: Identificador estable de la recomendación
+        kind:
+          type: string
+          enum:
+          - contact
+          - recovery
+          - customer_risk
+        entity_type:
+          type: string
+          enum:
+          - customer_product
+          - customer
+        as_of:
+          type: string
+          format: date
+        horizon_days:
+          type: integer
+        source_run_id:
+          type:
+          - integer
+          - 'null'
+          description: Corrida del Customer Core de origen
+        customer:
+          type: object
+          properties:
+            id:
+              type: integer
+            code:
+              type:
+              - string
+              - 'null'
+            type:
+              type:
+              - string
+              - 'null'
+            zone:
+              type:
+              - string
+              - 'null'
+            segment:
+              type:
+              - object
+              - 'null'
+              properties:
+                id:
+                  type: integer
+                code:
+                  type: string
+                name:
+                  type: string
+        product:
+          type:
+          - object
+          - 'null'
+          description: null en el riesgo de cliente (sin producto)
+          properties:
+            id:
+              type: integer
+            sku:
+              type:
+              - string
+              - 'null'
+            name:
+              type:
+              - string
+              - 'null'
+            unit:
+              type:
+              - string
+              - 'null'
+            category:
+              type:
+              - object
+              - 'null'
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+        state:
+          type: string
+          enum:
+          - pendiente
+          - contactado
+          - interesado
+          - pedido_recibido
+          - pospuesto
+          - descartado
+          description: Estado heredado de la agenda V2.2
+        status:
+          type: string
+          enum:
+          - suggested
+          - assigned
+          - reviewed
+          - approved
+          - rejected
+          - in_progress
+          - executed
+          - measured
+          - closed
+          - expired
+          description: Estado del workflow
+        priority:
+          type: integer
+        score:
+          type:
+          - number
+          - 'null'
+        score_formula_version:
+          type: string
+        policy:
+          type:
+          - string
+          - 'null'
+          description: Política que originó la oportunidad (p. ej. radar-v1:<huella>)
+        probability:
+          type:
+          - number
+          - 'null'
+          description: P(≥ 1 compra en el horizonte); null en el riesgo de cliente
+        expected_orders:
+          type:
+          - number
+          - 'null'
+          description: E(nº de pedidos) servido por el modelo de conteo; null si no se estimó
+        quantity_per_order:
+          type:
+          - number
+          - 'null'
+        expected_units:
+          type:
+          - number
+          - 'null'
+        window:
+          $ref: '#/components/schemas/RadarWindow'
+        model_segment:
+          type:
+          - string
+          - 'null'
+        activity:
+          type:
+          - object
+          - 'null'
+          description: 'Ficha de actividad (solo en el riesgo de cliente): ausencia respecto al patrón propio, no
+            abandono'
+          properties:
+            inactivity_status:
+              type: string
+            inactivity_risk:
+              type:
+              - number
+              - 'null'
+            behavior_change:
+              type: string
+            days_since_last_purchase:
+              type:
+              - integer
+              - 'null'
+            median_interval_days:
+              type:
+              - number
+              - 'null'
+        value:
+          type: object
+          properties:
+            expected_gross_value:
+              type:
+              - number
+              - 'null'
+              description: 'Supuesto: unidades vendibles × último precio neto; no es una venta confirmada'
+            expected_contribution:
+              type:
+              - number
+              - 'null'
+              description: Null si el costo no es confiable
+            cost_status:
+              type: string
+              enum:
+              - reliable
+              - unreliable
+              - unknown
+            cost_reasons:
+              type: array
+              items:
+                type: string
+            action_cost:
+              type:
+              - number
+              - 'null'
+            incremental_estimate:
+              type:
+              - number
+              - 'null'
+              description: Solo con evidencia de uplift
+            attribution:
+              type: object
+              properties:
+                label:
+                  type: string
+                  enum:
+                  - potential_unproven
+                  - incremental_estimated
+                  - causally_attributable
+                text:
+                  type: string
+                  example: Oportunidad potencial, atribución no demostrada
+            basis:
+              type: string
+        inventory:
+          type: object
+          additionalProperties: true
+          description: 'Disponibilidad al corte según el Decision Engine: status known (available = existencias
+            − reservado; in_transit aparte), unknown (sin fotografía vigente: no es cero) o not_applicable (riesgo
+            de cliente)'
+        owner_user_id:
+          type:
+          - integer
+          - 'null'
+        assigned_user:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            name:
+              type:
+              - string
+              - 'null'
+        experiment_group:
+          type:
+          - string
+          - 'null'
+          enum:
+          - treatment
+          - null
+          description: Solo se incluye con decisions.approve; las de control nunca se listan
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        next_step:
+          type:
+          - string
+          - 'null'
+        follow_up:
+          type: object
+          properties:
+            last_feedback_at:
+              type:
+              - string
+              - 'null'
+              format: date-time
+            snoozed_until:
+              type:
+              - string
+              - 'null'
+              format: date
+    RadarEvent:
+      type: object
+      description: Evento inmutable del historial de una oportunidad (decision_events)
+      properties:
+        id:
+          type: integer
+        event:
+          type: string
+          enum:
+          - transition
+          - feedback
+          - assignment
+          - comment
+        at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        from_agenda_status:
+          type:
+          - string
+          - 'null'
+        agenda_status:
+          type:
+          - string
+          - 'null'
+        from_status:
+          type:
+          - string
+          - 'null'
+        to_status:
+          type:
+          - string
+          - 'null'
+        actor_kind:
+          type: string
+          enum:
+          - user
+          - system
+        actor_user_id:
+          type:
+          - integer
+          - 'null'
+        note:
+          type:
+          - string
+          - 'null'
+        interest:
+          type:
+          - boolean
+          - 'null'
+        snoozed_until:
+          type:
+          - string
+          - 'null'
+          format: date
+        implied_workflow_status:
+          type:
+          - string
+          - 'null'
+        workflow_sync:
+          type:
+          - string
+          - 'null'
+          enum:
+          - applied
+          - unchanged
+          - not_applicable
+          - skipped
+          - null
+          description: Resultado de la sincronización con el workflow; viene de un evento `comment` (kind workflow_sync)
+            enlazado al seguimiento, que nunca se modifica
+        workflow_sync_reason:
+          type:
+          - string
+          - 'null'
+        workflow_status_after:
+          type:
+          - string
+          - 'null'
+        workflow_event_id:
+          type:
+          - integer
+          - 'null'
+    RadarOpportunityDetail:
+      allOf:
+      - $ref: '#/components/schemas/RadarOpportunity'
+      - type: object
+        properties:
+          explanation:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+            description: Factores verificables, sin PII
+          assumptions:
+            type: array
+            items: {}
+          constraints:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+            description: 'Siempre objetos con `code` (un texto suelto se normaliza a {code: note, note})'
+          uncertainty:
+            type: object
+            additionalProperties: true
+          model_versions:
+            type: object
+            additionalProperties: true
+          interval:
+            type: object
+            additionalProperties: true
+          source:
+            type: object
+            properties:
+              core_run_id:
+                type:
+                - integer
+                - 'null'
+              forecast_run_id:
+                type:
+                - integer
+                - 'null'
+              data_snapshot_id:
+                type:
+                - integer
+                - 'null'
+          allowed_feedback:
+            type: array
+            items:
+              type: string
+            description: Destinos de seguimiento permitidos desde el estado vigente (vacío si es final o no admite
+              seguimiento)
+          history:
+            type: array
+            items:
+              $ref: '#/components/schemas/RadarEvent'
+    AgendaStatusMapRow:
+      type: object
+      description: Mapeo (radar-agenda-map-v1) de un estado heredado de la Agenda V2.2 al workflow Enterprise
+      properties:
+        legacy:
+          type: string
+          enum:
+          - pendiente
+          - contactado
+          - interesado
+          - pedido_recibido
+          - pospuesto
+          - descartado
+        workflow:
+          type:
+          - string
+          - 'null'
+          description: Estado de workflow que implica; null = el workflow no cambia
+        note:
+          type: string
+        allowed_next:
+          type: array
+          items:
+            type: string
+    RadarSummary:
+      type: object
+      properties:
+        as_of:
+          type:
+          - string
+          - 'null'
+          format: date
+        totals:
+          type: object
+          description: Relaciones DISTINTAS (tipo, cliente, producto), sin repetir por horizonte.
+          properties:
+            opportunities:
+              type: integer
+            customers:
+              type: integer
+            unit:
+              type: string
+        by_horizon:
+          type: object
+          description: 'Claves = horizontes. Nada se suma entre horizontes: el valor, los estados y el inventario
+            se informan dentro de cada uno.'
+          additionalProperties:
+            type: object
+            properties:
+              opportunities:
+                type: integer
+              customers:
+                type: integer
+              by_kind:
+                type: object
+                additionalProperties:
+                  type: integer
+              by_state:
+                type: object
+                description: Recuento por estado heredado de ese horizonte (incluye los finales; sin el grupo de
+                  control)
+                additionalProperties:
+                  type: integer
+              inventory:
+                type: object
+                properties:
+                  known:
+                    type: integer
+                  unknown:
+                    type: integer
+                  below_expected:
+                    type: integer
+                    description: El Decision Engine limitó el valor a lo disponible
+                  not_applicable:
+                    type: integer
+              value:
+                type: object
+                description: Valor PRONOSTICADO de las relaciones cliente × producto; no incluye lo de nivel de
+                  cliente
+                properties:
+                  currency:
+                    type: string
+                  scope:
+                    type: string
+                    enum:
+                    - customer_product
+                  opportunities:
+                    type: integer
+                  attribution:
+                    type: object
+                    properties:
+                      label:
+                        type: string
+                      text:
+                        type: string
+                  gross_value:
+                    type:
+                    - number
+                    - 'null'
+                  gross_value_opportunities:
+                    type: integer
+                  contribution:
+                    type:
+                    - number
+                    - 'null'
+                    description: Solo suma las valoradas con costo confiable
+                  contribution_opportunities:
+                    type: integer
+                  contribution_unavailable:
+                    type: integer
+                  basis_code:
+                    type: string
+                    enum:
+                    - forecast_units_x_last_net_price
+                  basis:
+                    type: string
+              customer_level:
+                type: object
+                description: 'Recuperación y riesgo a nivel de cliente: importe OBSERVADO (caída del gasto neto
+                  entre dos ventanas); no es pronóstico ni contribución y no se suma a `value`'
+                properties:
+                  opportunities:
+                    type: integer
+                  customers:
+                    type: integer
+                  currency:
+                    type: string
+                  observed_spend_decline:
+                    type:
+                    - number
+                    - 'null'
+                  observed_spend_decline_opportunities:
+                    type: integer
+                  basis_code:
+                    type: string
+                    enum:
+                    - observed_spend_decline
+                  basis:
+                    type: string
+        control_withheld:
+          type: integer
+          description: 'Solo con decisions.approve y sin filtro de cliente o producto: oportunidades en el grupo
+            de control de un experimento (no se listan ni se asignan)'
+        label:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+        run_id:
+          type:
+          - integer
+          - 'null'
+    RadarAgendaGroup:
+      type: object
+      properties:
+        customer:
+          type: object
+          properties:
+            id:
+              type: integer
+            code:
+              type:
+              - string
+              - 'null'
+            type:
+              type:
+              - string
+              - 'null'
+            zone:
+              type:
+              - string
+              - 'null'
+            segment:
+              type:
+              - object
+              - 'null'
+              additionalProperties: true
+        opportunities_count:
+          type: integer
+        best_score:
+          type:
+          - number
+          - 'null'
+        top_priority:
+          type: integer
+        states:
+          type: object
+          additionalProperties:
+            type: integer
+        next_action:
+          type:
+          - string
+          - 'null'
+        opportunities:
+          type: array
+          items:
+            $ref: '#/components/schemas/RadarOpportunity'
+    RadarFeedbackRequest:
+      type: object
+      required:
+      - state
+      - idempotency_key
+      properties:
+        state:
+          type: string
+          enum:
+          - pendiente
+          - contactado
+          - interesado
+          - pedido_recibido
+          - pospuesto
+          - descartado
+        note:
+          type:
+          - string
+          - 'null'
+          maxLength: 500
+          description: Texto libre; se enmascaran correos y números de 10/13 dígitos
+        idempotency_key:
+          type: string
+          minLength: 8
+          maxLength: 120
+          pattern: ^[A-Za-z0-9._:-]+$
+        snoozed_until:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: 'Obligatoria con state = pospuesto: posterior a hoy y a lo sumo en un año'
+    RadarFeedbackResult:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            opportunity:
+              $ref: '#/components/schemas/RadarOpportunityDetail'
+            event:
+              $ref: '#/components/schemas/RadarEvent'
+            replayed:
+              type: boolean
+        status_map:
+          type: object
+          properties:
+            version:
+              type: string
+    RadarMaterialization:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - completed
+          - partial
+          - no_run
+        run_id:
+          type:
+          - integer
+          - 'null'
+        as_of:
+          type:
+          - string
+          - 'null'
+          format: date
+        horizons:
+          type: array
+          items:
+            type: integer
+        policy:
+          type: string
+        candidates:
+          type: integer
+        created:
+          type: integer
+        existing:
+          type: integer
+        failed:
+          type: integer
+        created_by_kind:
+          type: object
+          additionalProperties:
+            type: integer
+        errors:
+          type: array
+          items:
+            type: string
+    CustomerDemand:
+      type: object
+      properties:
+        customer:
+          type: object
+          properties:
+            id:
+              type: integer
+            code:
+              type:
+              - string
+              - 'null'
+            type:
+              type:
+              - string
+              - 'null'
+            is_generic:
+              type: boolean
+            zone:
+              type:
+              - string
+              - 'null'
+            segment:
+              type:
+              - object
+              - 'null'
+              additionalProperties: true
+        horizon_days:
+          type: integer
+        status:
+          type: string
+          enum:
+          - predicted
+          - no_individual_prediction
+          - no_candidate_relations
+          - no_prediction_run
+        fallback:
+          type:
+          - string
+          - 'null'
+        as_of:
+          type:
+          - string
+          - 'null'
+          format: date
+        pairs:
+          type: integer
+        total_view_quantity:
+          type:
+          - number
+          - 'null'
+          description: Σ de max(esperanza, comprometido) sobre sus relaciones
+        breakdown:
+          type: object
+          properties:
+            expected_quantity:
+              type:
+              - number
+              - 'null'
+            committed_quantity:
+              type:
+              - number
+              - 'null'
+            incremental_quantity:
+              type:
+              - number
+              - 'null'
+        s05:
+          type: object
+          properties:
+            pairs_estimated:
+              type: integer
+            pairs_without_estimate:
+              type: integer
+            expected_orders:
+              type:
+              - number
+              - 'null'
+            expected_units:
+              type:
+              - number
+              - 'null'
+        expected_amount:
+          type:
+          - object
+          - 'null'
+          properties:
+            value:
+              type:
+              - number
+              - 'null'
+            currency:
+              type:
+              - string
+              - 'null'
+            basis:
+              type: string
+        products:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        definition:
+          type: string
+    CustomerProducts:
+      type: object
+      properties:
+        customer:
+          type: object
+          properties:
+            id:
+              type: integer
+            code:
+              type:
+              - string
+              - 'null'
+        horizon_days:
+          type: integer
+        habitual:
+          type: object
+          properties:
+            basis:
+              type: string
+              enum:
+              - purchase_history
+            window:
+              type: object
+              additionalProperties: true
+            definition:
+              type: string
+            data:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+        probable:
+          type: object
+          properties:
+            basis:
+              type: string
+              enum:
+              - customer_core_ranking
+            status:
+              type: string
+              enum:
+              - predicted
+              - no_candidate_relations
+              - no_prediction_run
+              - horizon_not_available
+            horizon_days:
+              type: integer
+            ranking_source:
+              type:
+              - string
+              - 'null'
+              enum:
+              - model
+              - popularity
+              - recency
+              - null
+            data:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+    CustomerOverview:
+      type: object
+      description: 'Ficha comercial del comprador (sin PII innecesaria: el nombre sigue cifrado)'
+      properties:
+        customer:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+        fallback:
+          type:
+          - string
+          - 'null'
+        as_of:
+          type:
+          - string
+          - 'null'
+          format: date
+        reference_date:
+          type: string
+          format: date
+        horizon_days:
+          type: integer
+        purchases:
+          type: object
+          properties:
+            recent:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            totals:
+              type: object
+              additionalProperties: true
+            definition:
+              type: string
+        frequency:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        habitual_products:
+          type: object
+          additionalProperties: true
+        evolution:
+          type: object
+          properties:
+            granularity:
+              type: string
+              enum:
+              - month
+            months:
+              type: integer
+            series:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+        next_purchase_window:
+          type: object
+          additionalProperties: true
+        follow_up:
+          type: object
+          properties:
+            opportunities:
+              type: array
+              items:
+                $ref: '#/components/schemas/RadarOpportunity'
+            events:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            definition:
+              type: string
+    SupplyReadinessItem:
+      type: object
+      properties:
+        product:
+          type: object
+          additionalProperties: true
+        horizon_days:
+          type: integer
+        as_of:
+          type: string
+          format: date
+        inventory:
+          type: object
+          additionalProperties: true
+          description: 'status known (on_hand, reserved, available, in_transit; el tránsito NO cuenta como disponible)
+            o unknown (sin fotografía vigente: no es cero)'
+        buyers_demand:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        aggregate_demand:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        coverage_days:
+          type:
+          - number
+          - 'null'
+        serviceable:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+              - sufficient
+              - insufficient
+              - unknown
+            value:
+              type:
+              - boolean
+              - 'null'
+            required_units:
+              type:
+              - number
+              - 'null'
+            required_basis:
+              type:
+              - string
+              - 'null'
+              enum:
+              - max_of_buyers_and_aggregate
+              - identified_buyers_only
+              - aggregate_forecast
+              - null
+              description: 'Con qué demanda se compara: la mayor entre compradores identificados y agregada (max_of_buyers_and_aggregate);
+                solo compradores (identified_buyers_only: no necesariamente toda la demanda); solo agregada'
+            required_basis_note:
+              type:
+              - string
+              - 'null'
+            available:
+              type:
+              - number
+              - 'null'
+            reason:
+              type:
+              - string
+              - 'null'
     BronzeObject:
       type: object
       description: Metadatos de un objeto Bronze (sin clave del almacén ni contenido).
@@ -15956,3 +18282,565 @@ components:
                 type: string
             forecast_available:
               type: boolean
+    DecisionRecommendation:
+      type: object
+      description: Recomendación del Decision Engine con el contrato de §11. Sin PII. Los mapas JSON (`model_versions`,
+        `interval`, `availability`, `uncertainty`) salen siempre como objeto.
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum:
+          - contact
+          - recovery
+          - customer_risk
+          - replenishment
+          - inventory_mismatch
+          - budget_constraint
+          - scenario
+        as_of:
+          type: string
+          format: date
+          description: Fecha de corte de los insumos
+        horizon_days:
+          type: integer
+        entity_type:
+          type: string
+          enum:
+          - customer_product
+          - customer
+          - product_branch
+          - product
+        customer:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            external_code:
+              type: string
+        product:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            sku:
+              type: string
+            name:
+              type: string
+            unit:
+              type: string
+        branch:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            code:
+              type: string
+            name:
+              type: string
+        source:
+          type: object
+          description: Fuente y huella de los insumos
+          properties:
+            core_run_id:
+              type:
+              - integer
+              - 'null'
+            forecast_run_id:
+              type:
+              - integer
+              - 'null'
+            data_snapshot_id:
+              type:
+              - integer
+              - 'null'
+        model_versions:
+          type: object
+          additionalProperties: true
+        probability:
+          type:
+          - number
+          - 'null'
+          description: Probabilidad de la magnitud usada (compra en contacto; quiebre en reposición); null si no
+            aplica
+        interval:
+          type: object
+          additionalProperties: true
+        assumptions:
+          type: array
+          items: {}
+        constraints:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: 'Restricciones activas (`code`: stock_below_expected_units, out_of_stock, over_budget, budget,
+            moq, ...)'
+        availability:
+          type: object
+          additionalProperties: true
+          description: Existencias, reservado, disponible y tránsito al corte (el tránsito NO cuenta como disponible);
+            `status = unknown` si no hay foto vigente (nunca cero)
+        currency:
+          type: string
+        action_cost:
+          type:
+          - number
+          - 'null'
+          description: Costo de contacto (gasto) o desembolso de compra (capital comprometido); null si no se conoce
+        expected_gross_value:
+          type:
+          - number
+          - 'null'
+        expected_contribution:
+          type:
+          - number
+          - 'null'
+          description: Solo con costo confiable; null en otro caso (ver uncertainty.cost y uncertainty.expected_contribution_null_because)
+        incremental_estimate:
+          type:
+          - number
+          - 'null'
+          description: Solo con evidencia de uplift; null si no la hay
+        incremental_evidence:
+          type:
+          - object
+          - 'null'
+        attribution_label:
+          type: string
+          enum:
+          - potential_unproven
+          - incremental_estimated
+          - causally_attributable
+        attribution_note:
+          type: string
+        score:
+          type:
+          - number
+          - 'null'
+          description: Valor esperado menos gasto de la acción; ver docs/decision/ECONOMIC_PRIORITIZATION.md
+        score_formula_version:
+          type: string
+          description: SHA-256 de los parámetros efectivos de la fórmula con la que se calculó
+        uncertainty:
+          type: object
+          additionalProperties: true
+        explanation:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: Factores verificables con su fuente (sin PII); `value_calculation` trae los insumos del cálculo
+        policy:
+          type:
+          - string
+          - 'null'
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: '1 = la más alta; determinista por la posición del score dentro de su grupo (tipo, entidad,
+            corte y, en contacto/recuperación/riesgo, horizonte): cada recomendación nueva reordena el grupo'
+        owner_user_id:
+          type:
+          - integer
+          - 'null'
+        assigned_user_id:
+          type:
+          - integer
+          - 'null'
+        status:
+          type: string
+          enum:
+          - suggested
+          - assigned
+          - reviewed
+          - approved
+          - rejected
+          - in_progress
+          - executed
+          - measured
+          - closed
+          - expired
+        agenda_status:
+          type:
+          - string
+          - 'null'
+          enum:
+          - pendiente
+          - contactado
+          - interesado
+          - pedido_recibido
+          - pospuesto
+          - descartado
+          - null
+        experiment_group:
+          type:
+          - string
+          - 'null'
+          enum:
+          - treatment
+          - control
+          - null
+          description: Solo con decisions.approve
+        proposed_by:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - system
+              - user
+            user_id:
+              type:
+              - integer
+              - 'null'
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        next_step:
+          type:
+          - string
+          - 'null'
+        version:
+          type:
+          - integer
+          - 'null'
+          description: 'Id del último evento: se manda como expected_version al revisar'
+        requires_approval:
+          type:
+          - boolean
+          - 'null'
+        allowed_transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DecisionAllowedTransition'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/DecisionEvent'
+          description: Solo en el detalle
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    DecisionAllowedTransition:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+          - assign
+          - reassign
+          - review
+          - approve
+          - reject
+          - dismiss
+          - start
+          - start_without_approval
+          - execute
+          - close
+        to_status:
+          type: string
+        ability:
+          type:
+          - string
+          - 'null'
+        requires:
+          type: object
+          properties:
+            assignee:
+              type: boolean
+            reason:
+              type: boolean
+            expected_version:
+              type: boolean
+        allowed:
+          type: boolean
+        blocked_by:
+          type:
+          - string
+          - 'null'
+          description: forbidden, decision_segregation_of_duties, decision_approval_required o control_group_not_actionable
+    DecisionEvent:
+      type: object
+      description: Evento de auditoría de una recomendación (nunca se actualiza ni se borra).
+      properties:
+        id:
+          type: integer
+        event:
+          type: string
+          enum:
+          - transition
+          - feedback
+          - assignment
+          - comment
+        from_status:
+          type:
+          - string
+          - 'null'
+        to_status:
+          type:
+          - string
+          - 'null'
+        agenda_status:
+          type:
+          - string
+          - 'null'
+        actor_user_id:
+          type:
+          - integer
+          - 'null'
+        actor_kind:
+          type: string
+          enum:
+          - user
+          - system
+        reason:
+          type:
+          - string
+          - 'null'
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    DecisionTransitionRequest:
+      type: object
+      required:
+      - to_status
+      - idempotency_key
+      - expected_version
+      properties:
+        to_status:
+          type: string
+          enum:
+          - assigned
+          - reviewed
+          - approved
+          - rejected
+          - in_progress
+          - executed
+          - closed
+        idempotency_key:
+          type: string
+          minLength: 8
+          maxLength: 120
+          pattern: ^[A-Za-z0-9._:-]+$
+          description: Una clave por intento lógico; reintentar con la misma no repite la transición
+        expected_version:
+          type: integer
+          minimum: 1
+          description: 'Obligatorio en toda transición humana (bloqueo optimista): la `version` leída'
+        reason:
+          type:
+          - string
+          - 'null'
+          maxLength: 1000
+          description: Obligatorio (≥ 5 caracteres) al rechazar o descartar
+        assignee_user_id:
+          type:
+          - integer
+          - 'null'
+          description: Obligatorio al asignar o reasignar
+    DecisionSummary:
+      type: object
+      properties:
+        by_status:
+          type: object
+          additionalProperties:
+            type: integer
+        by_kind:
+          type: object
+          additionalProperties:
+            type: integer
+        by_attribution_label:
+          type: object
+          additionalProperties:
+            type: integer
+        awaiting_assignment:
+          type: integer
+        awaiting_approval:
+          type: integer
+        expiring_within_24h:
+          type: integer
+        control_group_units:
+          type: integer
+          description: Solo con decisions.approve
+        attribution_note:
+          type: string
+    DecisionSettings:
+      type: object
+      properties:
+        settings:
+          type: object
+          additionalProperties: true
+          description: Valores efectivos; `experiment_seed` es `[registrada]` o null
+        defaults:
+          type: object
+          additionalProperties: true
+        score_formula:
+          type: object
+          properties:
+            id:
+              type: string
+            revision:
+              type: integer
+            version:
+              type: string
+              description: SHA-256 de los parámetros efectivos
+            parameters:
+              type: object
+              additionalProperties: true
+        currency:
+          type: string
+        note:
+          type: string
+    DecisionSettingsUpdate:
+      type: object
+      description: Solo las claves enviadas cambian. Todos los valores por defecto son provisionales.
+      properties:
+        control_fraction:
+          type: number
+          minimum: 0
+          maximum: 0.5
+          description: Fracción de clientes en control; 0 = sin experimento
+        experiment_key:
+          type: string
+          minLength: 3
+          maxLength: 80
+        experiment_seed:
+          type:
+          - string
+          - 'null'
+          minLength: 8
+          maxLength: 120
+        horizons:
+          type: array
+          items:
+            type: integer
+            enum:
+            - 7
+            - 14
+            - 15
+            - 30
+            - 90
+          minItems: 1
+          maxItems: 5
+        contact_cost:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          description: Costo de un contacto; null = no configurado
+        contact_source:
+          type: string
+          enum:
+          - radar
+          - engine
+          default: radar
+          description: 'Quién produce los contactos y recuperaciones cliente × producto: el Radar (predictily:radar-materialize;
+            por defecto, ADR-V25-12) o el Decision Engine (predictily:decisions-generate); la huella de idempotencia
+            es la misma y usar ambos nunca duplica'
+        contact_min_probability:
+          type: number
+          minimum: 0
+          maximum: 1
+        max_contact_per_horizon:
+          type: integer
+          minimum: 1
+          maximum: 2000
+        max_supply_candidates:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          default: 500
+          description: Tope de candidatos por grupo de reposición, inventario-demanda y presupuesto; entran los
+            más urgentes
+        expiry_days:
+          type: object
+          properties:
+            recovery:
+              type: integer
+              minimum: 1
+              maximum: 365
+            customer_risk:
+              type: integer
+              minimum: 1
+              maximum: 365
+            inventory_mismatch:
+              type: integer
+              minimum: 1
+              maximum: 365
+            budget_constraint:
+              type: integer
+              minimum: 1
+              maximum: 365
+            scenario:
+              type: integer
+              minimum: 1
+              maximum: 365
+        approval_required_kinds:
+          type: array
+          items:
+            type: string
+            enum:
+            - contact
+            - recovery
+            - customer_risk
+            - replenishment
+            - inventory_mismatch
+            - budget_constraint
+            - scenario
+        approval_cost_threshold:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+        unreliable_cost_weight:
+          type: number
+          minimum: 0
+          maximum: 1
+        cost_reliability:
+          type: object
+          properties:
+            window_days:
+              type: integer
+              minimum: 7
+              maximum: 730
+            min_observations:
+              type: integer
+              minimum: 1
+              maximum: 100
+            min_coverage:
+              type: number
+              minimum: 0
+              maximum: 1
+            max_cv:
+              type: number
+              minimum: 0
+              maximum: 5
+        inventory_max_age_days:
+          type: integer
+          minimum: 0
+          maximum: 90
+        excess_demand_ratio:
+          type: number
+          minimum: 0
+          maximum: 1

@@ -32,10 +32,12 @@ enum TenantRole: string
      */
     public function abilities(): array
     {
-        $viewer = ['data.view', 'forecast.view', 'alerts.view'];
-        $analyst = [...$viewer, 'imports.manage', 'forecast.run', 'scenarios.run', 'alerts.manage', 'data.export', 'catalog.manage'];
+        // V2.5 · W5-B (ADR-V25-13): `decisions.view` = ver recomendaciones de decisión; `decisions.manage` = asignar, revisar, descartar, iniciar, ejecutar y cerrar;
+        // `decisions.approve` = aprobar o rechazar (decisión formal, siempre con segregación de funciones). Los roles comerciales gerente/vendedor llegan en W6.
+        $viewer = ['data.view', 'forecast.view', 'alerts.view', 'decisions.view'];
+        $analyst = [...$viewer, 'imports.manage', 'forecast.run', 'scenarios.run', 'alerts.manage', 'data.export', 'catalog.manage', 'decisions.manage'];
         // V2.5 · W4 (ADR-V25-07): `models.approve` = aprobar, rechazar y promover modelos (aprobación separada de quien los publica o entrena).
-        $admin = [...$analyst, 'users.manage', 'branches.manage', 'datasources.manage', 'settings.manage', 'audit.view', 'models.approve'];
+        $admin = [...$analyst, 'users.manage', 'branches.manage', 'datasources.manage', 'settings.manage', 'audit.view', 'models.approve', 'decisions.approve'];
         $owner = [...$admin, 'tenant.delete', 'tenant.consent', 'owners.manage', 'tenant.export_all'];
 
         return match ($this) {

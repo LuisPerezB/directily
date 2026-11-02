@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Tabla `decision_events` (V2.5 · W5, ADR-V25-13): auditoría de cada transición del workflow y del feedback de la agenda; idempotente por
@@ -29,4 +30,18 @@ class DecisionEvent extends Model
             'created_at' => 'datetime',
         ];
     }
+
+    // >>> W5-B decision engine
+    public const EVENTS = ['transition', 'feedback', 'assignment', 'comment'];
+
+    public function recommendation(): BelongsTo
+    {
+        return $this->belongsTo(DecisionRecommendation::class, 'recommendation_id');
+    }
+
+    public function actor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'actor_user_id');
+    }
+    // <<< W5-B decision engine
 }

@@ -12,7 +12,11 @@ use App\Models\DecisionRecommendation;
  * registra en AppServiceProvider; las fachadas NO escriben `decision_recommendations` directamente ni duplican su lógica.
  *
  * - `propose()` es idempotente: calcula `idempotency_key` = SHA-256(kind, as_of, horizonte, entidad, fuente) y, con los mismos
- *   insumos, devuelve la recomendación existente sin duplicarla; con insumos nuevos crea otra y expira la anterior del mismo alcance.
+ *   insumos, devuelve la recomendación existente sin duplicarla. Con insumos nuevos crea otra y expira la anterior del mismo alcance
+ *   solo si esa sigue en `suggested` sin seguimiento; si está EN CURSO (agenda contactado/interesado/pospuesto, o estado assigned,
+ *   reviewed, approved o in_progress) no crea sucesora: devuelve la en curso y deja un evento `comment` (kind=refresh) con la fuente
+ *   y los valores nuevos (revisión de W5-A/B, docs/decision/DECISION_ENGINE.md §14). La implementación ofrece además
+ *   `proposeMany()` para lotes.
  * - Completa los campos del contrato de §11 que la fachada no aporta (score y su versión de fórmula, etiqueta de atribución, prioridad,
  *   expiración, asignación a experimento) y deja el evento inicial en `decision_events`.
  * - Nunca inventa valores económicos: sin costo confiable, `expected_contribution` queda NULL y la incertidumbre lo declara.
