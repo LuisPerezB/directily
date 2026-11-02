@@ -35,6 +35,8 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- El origen de la SPA de las pruebas (AuthTest) no depende del .env de desarrollo. -->
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1,127.0.0.1:5173" force="true"/>
         <!--
           Hermeticidad (W1-B): el backend/.env de desarrollo define la lista blanca SQL de 127.0.0.1 y las claves de firma; sin
           estas líneas cambiaría el resultado de las pruebas de SSRF y de firma. force="true" gana al .env y, con las líneas <server> (Laravel lee
