@@ -60,7 +60,7 @@ verifica que ambas coinciden). La *Huella* es el SHA-256 completo en el código;
 | `tenant` | Tenant | `tenants` | `tenant@2026.03.1` | IMPLEMENTADO | `d109afa65dda` |
 | `branch` | Branch | `branches` | `branch@2026.03.1` | PARCIAL | `c1c0d16678e4` |
 | `source_system` | SourceSystem | `data_sources` | `source_system@2026.03.1` | IMPLEMENTADO | `8a64cdfcfd9c` |
-| `product` | Product | `products` | `product@2026.03.1` | PARCIAL | `2f3e028a4898` |
+| `product` | Product | `products` | `product@2026.03.2` | PARCIAL | `3b7b4711a189` |
 | `product_alias` | ProductAlias | `product_aliases` | `product_alias@2026.03.1` | IMPLEMENTADO | `a41ea0f4bd9d` |
 | `category` | Category | `product_categories` | `category@2026.03.1` | PARCIAL | `03944e5c5aef` |
 | `customer` | Customer | `customers` | `customer@2026.03.1` | PARCIAL | `9dbca8a6f259` |

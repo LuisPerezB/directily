@@ -48,7 +48,7 @@ final class CanonicalContracts
         'sales' => 'sales@2026.03.1',
         'sales_line' => 'sales_line@2026.03.1',
         'inventory_snapshot' => 'inventory_snapshot@2026.03.1',
-        'product' => 'product@2026.03.1',
+        'product' => 'product@2026.03.2',
         'customer' => 'customer@2026.03.1',
         'commercial_commitment' => 'commercial_commitment@2026.03.1',
     ];
@@ -130,13 +130,13 @@ final class CanonicalContracts
         'product' => [
             'entity' => 'Product',
             'status' => 'PARCIAL',
-            'version' => 'product@2026.03.1',
+            'version' => 'product@2026.03.2',
             'tables' => ['products'],
             'implemented_by' => null,
             'fields' => [
-                'products' => 'id tenant_id category_id sku name unit brand current_price current_cost is_active attributes created_at updated_at deleted_at',
+                'products' => 'id tenant_id category_id sku name unit brand current_price current_cost is_active attributes created_at updated_at deleted_at is_perishable shelf_life_days',
             ],
-            'fingerprint' => '2f3e028a48988ec010ed11fb5919260558063f088949d356045573624c33493e',
+            'fingerprint' => '3b7b4711a1895a60cd5748db39f3bba3e8453a2777a050cd7cc49c33327597a9',
             'required' => [
                 'source_system_id' => null,
                 'source_id' => 'sku',

@@ -25,7 +25,7 @@ final class TenantDataExporter
     public const TABLES = [
         'branches' => ['id', 'code', 'name', 'province', 'canton', 'commercial_zone', 'address', 'is_active', 'created_at'],
         'product_categories' => ['id', 'parent_id', 'code', 'name'],
-        'products' => ['id', 'sku', 'name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'created_at'],
+        'products' => ['id', 'sku', 'name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'created_at', 'is_perishable', 'shelf_life_days'],
         'customer_segments' => ['id', 'code', 'name'],
         'customers' => ['id', 'external_code', 'segment_id', 'customer_type', 'province', 'canton', 'commercial_zone', 'created_at'],
         'suppliers' => ['id', 'code', 'name', 'tax_id', 'country', 'default_lead_time_days'],
@@ -132,6 +132,13 @@ final class TenantDataExporter
         // ── V2.5 · W4 MLOps (ADR-V25-07): transiciones auditadas del registro y medición de uso por empresa (sin published_object_key) ──
         'model_registry_events' => ['id', 'model_registry_id', 'from_status', 'to_status', 'actor_user_id', 'actor_kind', 'reason', 'evidence', 'created_at'],
         'tenant_usage_records' => ['id', 'period', 'metric', 'quantity', 'unit', 'source', 'source_ref', 'created_at'],
+        // ── V2.5 · W5 flujo empresarial (ADR-V25-12/-13/-14): recomendaciones del Decision Engine, su workflow auditado, asignación a
+        //    experimentos, outcomes medidos y lotes de inventario (perecibles). Datos de negocio de la empresa: se exportan completos. ──
+        'decision_recommendations' => ['id', 'kind', 'as_of', 'horizon_days', 'entity_type', 'customer_id', 'product_id', 'branch_id', 'source_core_run_id', 'source_forecast_run_id', 'data_snapshot_id', 'model_versions', 'probability', 'interval', 'assumptions', 'constraints', 'availability', 'action_cost', 'expected_gross_value', 'expected_contribution', 'incremental_estimate', 'incremental_evidence', 'attribution_label', 'score', 'score_formula_version', 'uncertainty', 'explanation', 'policy', 'priority', 'owner_user_id', 'assigned_user_id', 'status', 'agenda_status', 'experiment_group', 'proposed_by_kind', 'proposed_by_user_id', 'expires_at', 'next_step', 'idempotency_key', 'created_at', 'updated_at'],
+        'decision_events' => ['id', 'recommendation_id', 'event', 'from_status', 'to_status', 'agenda_status', 'actor_user_id', 'actor_kind', 'reason', 'payload', 'idempotency_key', 'created_at'],
+        'experiment_assignments' => ['id', 'experiment_key', 'unit_type', 'unit_key', 'group', 'policy', 'assigned_at'],
+        'decision_outcomes' => ['id', 'recommendation_id', 'action_kind', 'action_at', 'window_from', 'window_to', 'observed_event', 'observed_ref', 'observed_units', 'observed_net_amount', 'contribution', 'contact_cost', 'classification', 'method', 'evidence', 'measured_at'],
+        'inventory_lots' => ['id', 'branch_id', 'product_id', 'lot_code', 'snapshot_date', 'expiry_date', 'quantity', 'created_at', 'updated_at'],
     ];
 
     /**
