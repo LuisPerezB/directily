@@ -212,9 +212,11 @@ cuarentena y reconciliación.
 - **Base de datos:** FKs compuestas `ON DELETE SET NULL` que solo anulan la referencia (`e0378db`) y nunca
   `tenant_id`, tampoco donde es NULLABLE (`003fd69`, migración `2026_03_12_000500`; en `model_registry` borrar el
   modelo anterior convertía el de la empresa en uno de plataforma).
-- **W5 y W6:** contratos listos; sus migraciones suben, bajan y vuelven a subir limpias sobre HEAD (base de prueba
-  desechable). W3 está cerrada: W5 se activa a continuación (W5-A usa los campos de Customer y el endpoint de
-  evaluaciones de W3-D, ya integrados).
+- **W5 · en curso:** contrato activado (`d54076e`: migración, exportación LOPDP, `product@2026.03.2`, modelos mínimos e
+  interfaz `RecommendationSink` para que Radar y Decision Engine no dupliquen lógica). En implementación en paralelo:
+  W5-A (Revenue Radar y Agenda), W5-B (Decision Engine y workflow) y W5-D (Supply con perecibilidad y FEFO); después
+  W5-C (outcomes y ROI) y W5-E (vistas Enterprise).
+- **W6:** contrato listo (migración verificada sobre HEAD), no activado.
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
 - **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;
   el propietario debe iniciar sesión con la cuenta dueña del repositorio para subir la rama y abrir el PR.
