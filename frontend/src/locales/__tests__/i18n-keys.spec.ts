@@ -63,7 +63,7 @@ describe('claves de traducción', () => {
       caseLabelHints: ['new_product_category_median', 'new_product_own_average', 'new_product_own_average_low_evidence', 'sparse_history', 'discontinued_zero', 'branch_closed_declared', 'branch_opening', 'exceptional_event'],
       horizonSupport: ['degraded', 'insufficient_data', 'not_computed', 'unknown'],
       'horizonSupport.status': ['ok', 'degraded', 'insufficient_data', 'not_computed', 'unknown'],
-      'horizonSupport.reasonCode': ['coverage_insufficient', 'insufficient_horizon', 'no_independent_holdout', 'no_model', 'unknown_legacy_run', 'model_unusable', 'no_identified_buyers', 'fallback_reference', 'calibration_not_calibrated', 'stale_data'],
+      'horizonSupport.reasonCode': ['coverage_insufficient', 'insufficient_horizon', 'no_independent_holdout', 'no_model', 'unknown_legacy_run', 'model_unusable', 'model_not_approved', 'no_identified_buyers', 'fallback_reference', 'calibration_not_calibrated', 'stale_data'],
       'plan.features': ['scenarios', 'api_access', 'external_indicators', 'custom_models', 'customer', 'roles'],
       'envelope.uncertainty': ['empirical_holdout', 'conformal', 'model', 'unknown', 'none'],
       'envelope.abstention': ['insufficient_data', 'not_configured', 'insufficient_evidence'],

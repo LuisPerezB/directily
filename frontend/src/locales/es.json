@@ -1293,6 +1293,7 @@
       "no_model": "Sin modelo en producción",
       "unknown_legacy_run": "Motivo no registrado (corrida anterior)",
       "model_unusable": "Modelo no utilizable",
+      "model_not_approved": "Modelo en producción sin aprobar",
       "no_identified_buyers": "Sin compradores identificados",
       "fallback_reference": "Se sirve la referencia",
       "calibration_not_calibrated": "Calibración no verificada",

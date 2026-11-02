@@ -1,6 +1,6 @@
 # Registro de modelos: ciclo de vida, aprobación separada y firma de artefactos
 
-Fecha: 31-oct-2026 (actualizado el 1-nov-2026 por V2.5 · W4-A) · Rama `v25/w1-cierre-y-w2` · Fuentes: ADR-V25-07 (registro de modelos: aprobación separada y serving solo de lo aprobado), ADR-V25-20 (artefactos firmados antes de
+Fecha: 31-oct-2026 (actualizado el 1-nov-2026 por V2.5 · W4-A y W4-B) · Rama `v25/w1-cierre-y-w2` · Fuentes: ADR-V25-07 (registro de modelos: aprobación separada y serving solo de lo aprobado), ADR-V25-20 (artefactos firmados antes de
 deserializar), defecto HIGH de `docs/roadmap/audit/2026-10-31/modelos_aws.json`.
 
 Este documento define **la firma y verificación de artefactos** (§2–§4) y **el ciclo de vida del registro con aprobación separada** (§5, implementado en el backend por W4-A). Lo que sigue pendiente de la gestión del registro está en
@@ -249,7 +249,7 @@ Los modelos que entrenó y promovió el pipeline propio **antes** de la aprobaci
 
 La migración `2026_03_12_000300` fija la clasificación en un **evento de línea base** («legado aprobado por migración», `evidence.legacy_policy = legacy_approved_by_migration`) solo para lo que el motor dejó en `production`, `validated` o `retired` sin
 `published_*` ni `approved_*` (idempotente y reversible); sirve también cuando la corrida enlazada se purgó (FK en nulo). Lo que el motor registre después conserva su corrida enlazada y recibe la misma línea base —solo si es `production`/`validated`/`retired`— al
-primer cambio de estado; un `candidate` **nunca** recibe la marca. Que un legado no pueda publicarse a otro entorno sin aprobación y sin re-firmado (ADR-V25-20) lo aplicará la CLI de W4-B (**DISEÑADO / NO IMPLEMENTADO** aquí).
+primer cambio de estado; un `candidate` **nunca** recibe la marca. Que un legado no pueda publicarse a otro entorno sin aprobación y sin re-firmado (ADR-V25-20) lo aplica la CLI de W4-B (§5.10): `publish` solo acepta paquetes firmados que creó `train` y registra siempre un `candidate`; re-firmar un legado para publicarlo no está implementado (se reentrena).
 
 **Contrato de publicación que debe cumplir la CLI (W4-B).** Un modelo publicado jamás es legado, pero solo si el backend puede reconocerlo como publicado. Al registrar el candidato la CLI debe:
 
@@ -313,13 +313,29 @@ El alias heredado `status=rejected` devuelve los validados no promovidos de la e
 | Promociones sucesivas del mismo alcance dejan una sola producción | `ServingPolicyHardeningTest::test_successive_promotions_of_the_same_scope_always_leave_a_single_production_model` |
 | Medición de uso y foto diaria de almacenamiento (el fallo de una empresa no detiene a las demás) | `TenantUsageMeterTest`, `UsageSnapshotCommandTest` (incl. `test_a_failure_in_one_company_does_not_stop_the_others`), `RegistryMigrationsAndExportTest` |
 
-### 5.10 Lo que NO cubre W4-A (depende del motor / la CLI de W4-B)
+### 5.10 Lo que dependía del motor y la CLI (W4-B) — IMPLEMENTADO / VERIFICADO en el motor
 
-- **DISEÑADO / NO IMPLEMENTADO en el backend, a cargo de W4-B**: que la CLI `publish` suba el artefacto al almacén y registre el `candidate` con el contrato completo de §5.6 (`published_by`, `published_env`, `published_at`, `published_object_key`, eventos `cli`); que el **motor cargue
-  solo `approved`/`production` con firma verificada** y que la clave de caché incluya empresa + versión + esquema de variables. El backend deja el contrato listo (los candidatos publicados jamás son legado y no llegan a producción sin aprobación)
-  pero **no puede impedir** que un proceso con escritura directa en la base ponga `status = production` en una fila: ese riesgo lo acota la política (`serving_basis = not_approved` en lista y detalle) y el filtro del motor, no un CHECK.
-- El motor sigue promoviendo automáticamente los modelos de sus propias corridas (legado, §5.6) hasta que W4-B registre cada entrenamiento como `candidate`.
-- La compuerta de datos de un candidato sin corrida asociada depende de que la CLI declare `artifact_compat.data_gate.outcome` (de `validate-data`); sin ese dato no se puede aprobar.
+Detalle, comandos, códigos de salida y pruebas en [`PRIVATE_TENANT_TRAINING.md`](PRIVATE_TENANT_TRAINING.md); pasos del propietario en [`docs/operations/TENANT_TRAINING_RUNBOOK.md`](../operations/TENANT_TRAINING_RUNBOOK.md).
+
+| Elemento | Estado | Evidencia (`engine/tests/`) |
+|---|---|---|
+| La CLI `publish` sube el artefacto firmado al almacén de objetos (clave del servidor `tenants/<uuid>/models/<core>/<versión>/…` + `.manifest.json` al lado) y registra el `candidate` con el contrato completo de §5.6: `published_by`, `published_env`, `published_at`, `published_object_key`, `artifact_sha256`, eventos `actor_kind = cli` con `actor_user_id` y `artifact_compat.data_gate.outcome`; **nunca** `validated`, `approved` ni `production` | **IMPLEMENTADO / VERIFICADO** | `integration/test_mlops_integration.py::test_publish_meets_the_registry_publication_contract`, `…::test_the_status_written_by_publish_can_only_be_candidate`, `…::test_production_publish_with_confirmation_is_still_only_a_candidate`; `integration/test_mlops_demand_integration.py::test_demand_bundle_is_packaged_verified_and_published_as_a_candidate` |
+| El backend reconoce lo que escribe la CLI: `ModelApprovalGates` verifica la firma desde el objeto del almacén, toma el gate de datos declarado y la compatibilidad, y `ModelServingPolicy` lo clasifica `not_approved` | **VERIFICADO** ejecutando el backend real sobre un objeto publicado por la CLI (no es una prueba automática: ver `PRIVATE_TENANT_TRAINING.md` §9.3) | — |
+| El motor carga solo modelos con base de servicio `approved` o `legacy_pipeline` (espejo de `ModelServingPolicy::basis()`, mismos casos que el backend) y con firma verificada; nunca un `not_approved`, aunque alguien deje su estado en `production`. Un modelo publicado se verifica desde el almacén (clave de la empresa del trabajo) y siempre debe estar firmado | **IMPLEMENTADO / VERIFICADO** | `unit/test_serving_policy_mirror.py` (33 casos del backend; coincidencia con el PHP real comprobada también contra la base), `unit/test_mlops_serving.py`, `integration/test_mlops_integration.py::test_a_published_model_forced_to_production_without_approval_is_not_loaded`, `…::test_a_published_model_approved_by_someone_else_is_served_from_the_object_store` |
+| Clave de caché = empresa + core + versión del modelo + versión del esquema de variables (+ SHA-256 del artefacto), acotada por entradas y por bytes; la verificación se repite siempre antes de consultar la caché. Caveat: la clave de confianza se lee del entorno **del proceso**; retirarla en un motor en marcha exige reiniciarlo (la prueba cambia el entorno dentro del propio proceso) | **IMPLEMENTADO / VERIFICADO** | `unit/test_mlops_serving.py::test_the_cache_key_carries_company_version_schema_and_content`, `…::test_a_cache_hit_skips_deserialization_but_verification_is_always_repeated`, `…::test_retiring_a_trusted_key_takes_effect_even_for_cached_artifacts` |
+| Pruebas negativas entre empresas en registro, caché y trabajos: un trabajo de A nunca carga artefactos ni cachés de B (ni con una fila de A envenenada con la ruta o la clave de B) | **IMPLEMENTADO / VERIFICADO** | `integration/test_mlops_integration.py::test_registry_queries_return_only_the_jobs_own_company`, `…::test_a_job_of_company_a_never_loads_artifacts_or_caches_of_company_b`, `…::test_a_registry_row_of_a_pointing_at_the_artifacts_of_b_is_refused`, `…::test_an_approved_published_model_of_b_cannot_be_served_to_a_even_if_a_row_claims_it`; `unit/test_mlops_serving.py::test_two_companies_never_share_cache_entries_even_with_the_same_version_and_content` |
+| `rollback` de la CLI no escribe `production`: comprueba la versión con la misma política y deja la instrucción del backend (`POST /models/{id}/promote`, `/models/customer/rollback` o `/models/demand/rollback`) | **IMPLEMENTADO / VERIFICADO** | `integration/test_mlops_integration.py::test_rollback_only_prints_the_backend_instruction_and_changes_nothing` |
+| La compuerta de datos de un candidato sin corrida asociada: la CLI declara `artifact_compat.data_gate.outcome` a partir del gate de `train` (un BLOCK no llega a empaquetarse) | **IMPLEMENTADO / VERIFICADO** | ídem contrato de publicación |
+| Controlador S3 del almacén (boto3) | **IMPLEMENTADO / SOLO EMULADOR** (moto); AWS real **BLOQUEADO** | `unit/test_object_store_s3_emulator.py` |
+
+Pendiente (no cubierto por W4-B):
+
+- El motor sigue **promoviendo automáticamente** los modelos de sus propias corridas (legado, §5.6): no se cambió para no alterar la demo ni los E2E (con la configuración por defecto lo servido es idéntico, verificado). Que cada entrenamiento
+  del pipeline se registre como `candidate` y espere aprobación es **DISEÑADO / NO IMPLEMENTADO** ([`AUTOMATED_TRAINING.md`](AUTOMATED_TRAINING.md) §3).
+- El motor de **demanda** no carga artefactos al servir (reajusta los estadísticos y reentrena LightGBM en cada corrida): el filtro de serving está implementado y probado para el Customer Core, que sí los carga; lo publicado para demanda es evidencia auditable.
+- **No hay un CHECK** que impida a un proceso con escritura directa en la base poner `status = production` en una fila publicada: lo acotan la política (`serving_basis = not_approved` en lista y detalle) y el filtro del motor.
+- Re-firmado de artefactos legados para publicarlos: no implementado (se reentrena con la clave de firma; `publish` solo acepta paquetes firmados que creó `train`).
+- La identidad del publicador (`published_by`) es una **declaración** del operador de la CLI, comprobada contra la empresa y el rol (`forecast.run`) y acompañada de `cli_operator` en el evento: control organizativo, no criptográfico (`PRIVATE_TENANT_TRAINING.md` §10).
 
 ## 6. Gestión del registro — DISEÑADO / NO IMPLEMENTADO (lo que sigue pendiente)
 

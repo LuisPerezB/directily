@@ -18,6 +18,7 @@ import json
 import logging
 import time
 from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,15 @@ from predictily_engine.db.customer_repository import CustomerRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import ProgressReporter, jdump, none_if_nan
 from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
-from predictily_engine.platform.artifacts import SavedArtifact, deserialize, save_signed_artifact, tenant_of_stored_path, verify_stored_artifact
+from predictily_engine.mlops.serving import (
+    ARTIFACT_CACHE,
+    REASON_NOT_APPROVED,
+    CacheKey,
+    deserialize_cached,
+    partition_servable,
+    verify_row_artifact,
+)
+from predictily_engine.platform.artifacts import SavedArtifact, save_signed_artifact, tenant_of_stored_path
 from predictily_engine.platform.config import resolve_config
 from predictily_engine.platform.snapshot import DataSnapshot, persist_snapshot
 from predictily_engine.quality.persistence import insert_run_quality_report
@@ -152,6 +161,7 @@ def execute_customer_run(run_id: int, req: CustomerExecuteRequest) -> dict[str, 
         op = run["operation"]
         if op == "train":
             result = _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0)
+            ARTIFACT_CACHE.invalidate_tenant(tenant_id)      # los modelos de la empresa cambiaron: se libera su memoria ya (la verificación no depende de esto)
         elif op == "predict":
             result = _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0)
         else:
@@ -219,16 +229,23 @@ def load_artifact(row: dict[str, Any], tenant_id: int | None = None) -> tuple[di
     empresa o con la ruta fuera del directorio de su empresa NO se deserializa: el llamador sirve el respaldo (referencia validada
     o abstención) y el motivo queda en `limitations` y en el registro (sin PII). `tenant_id` es la empresa a la que sirve la
     corrida; sin él se usa `row["tenant_id"]` y, en último caso, la de la propia ruta.
+
+    W4-B: un modelo PUBLICADO por la CLI (`published_object_key`) se verifica sobre el objeto del almacén (la clave debe ser de la empresa del
+    trabajo) y no sobre el directorio de artefactos; el objeto ya deserializado se guarda en una caché con empresa + versión + esquema de
+    variables + SHA-256 (`mlops.serving`). La verificación se repite siempre; la caché solo evita deserializar de nuevo.
     """
     stored = row.get("artifact_path")
-    if not stored:
+    published = row.get("published_object_key")
+    has_published = published is not None and published == published and published != ""      # NaN de pandas = ausente
+    if not stored and not has_published:
         return None, "artifact_missing"
-    owner = tenant_id if tenant_id is not None else (row.get("tenant_id") if row.get("tenant_id") is not None else tenant_of_stored_path(stored))
+    owner = tenant_id if tenant_id is not None else (row.get("tenant_id") if row.get("tenant_id") is not None
+                                                     else (tenant_of_stored_path(stored) if stored else None))
     if owner is None:
         return None, "artifact_path_invalid"
     if not row.get("artifact_sha256"):
         return None, "artifact_sha256_mismatch"
-    verification = verify_stored_artifact(stored, tenant_id=int(owner), core="customer", expected_sha256=row.get("artifact_sha256"))
+    verification = verify_row_artifact(row, tenant_id=int(owner), core="customer")
     if not verification.ok or verification.artifact is None:
         if verification.reason != "artifact_missing":
             log.warning("Artefacto rechazado antes de deserializar: motivo=%s empresa=%s modelo=%s", verification.reason, owner, row.get("version"))
@@ -243,7 +260,8 @@ def load_artifact(row: dict[str, Any], tenant_id: int | None = None) -> tuple[di
         a, b = (compat.get("libraries") or {}).get(lib), cur["libraries"].get(lib)
         if a and b and a.split(".")[:2] != b.split(".")[:2]:
             return None, f"{lib}_version_incompatible"
-    return deserialize(verification.artifact), None      # desde los MISMOS bytes verificados: sin reabrir el archivo
+    key = CacheKey(int(owner), "customer", str(row.get("version") or ""), str(compat["feature_schema_version"]), verification.artifact.sha256)
+    return deserialize_cached(key, verification.artifact, ARTIFACT_CACHE), None      # desde los MISMOS bytes verificados: sin reabrir el archivo
 
 
 def _slot(h: int, target: str) -> str:
@@ -531,7 +549,7 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
 
 
 def _predict_horizon_support(requested: list[int], out: PredictionOutput | None, abstained: dict[int, dict[str, str]],
-                             stale: bool) -> dict[str, Any]:
+                             stale: bool, refused: dict[int, list[str]] | None = None) -> dict[str, Any]:
     """Estado por horizonte pedido (misma forma que el respaldo de demanda): `ok` | `degraded` | `insufficient_data` con sus
     motivos. Un horizonte sin modelo utilizable (o sin compras identificadas) NO tiene filas: se abstiene, nunca se inventa."""
     served = set(out.horizons) if out is not None else set()
@@ -539,7 +557,12 @@ def _predict_horizon_support(requested: list[int], out: PredictionOutput | None,
     for h in requested:
         if h in served:
             reasons: list[dict[str, str]] = []
-            if out.served[h]["role"] == "fallback":
+            if refused and h in refused:
+                # (W4-B) el modelo en producción NO está aprobado y no se cargó: se sirve la referencia validada. No es que «no superó la regla de promoción».
+                targets = " y ".join({"probability": "probabilidad", "quantity": "cantidad"}.get(t, t) for t in refused[h])
+                reasons.append({"code": "model_not_approved", "reason_code": "model_not_approved",
+                                "message": f"El modelo en producción de {targets} a {h} días no está aprobado (ADR-V25-07) y no se cargó: se sirve la referencia validada de respaldo."})
+            elif out.served[h]["role"] == "fallback":
                 reasons.append({"code": "fallback_reference", "reason_code": "fallback_reference",
                                 "message": f"Se sirve la referencia frecuencia/recencia a {h} días (el modelo complejo no superó la regla de promoción)."})
             if out.served[h]["calibration_status"] != "calibrated":
@@ -812,6 +835,98 @@ def _persist_evaluations(conn: Connection, tenant_id: int, run_id: int, results:
 
 # ───────────────────────────── predicción ─────────────────────────────
 
+@dataclass
+class ServingSelection:
+    """Modelos que sirve una predicción: artefactos por horizonte, versiones usadas, motivos de rechazo y horizontes en abstención."""
+
+    artifacts: dict[int, dict[str, Any]]
+    model_versions: dict[str, Any]
+    rejected: list[str]
+    abstained: dict[int, dict[str, str]]       # horizonte → {reason_code, message}: estado insufficient_data (ADR-V25-02)
+    refused: dict[int, list[str]] = field(default_factory=dict)       # horizonte → objetivos cuyo modelo en producción NO está aprobado (se sirve el respaldo o se abstiene)
+
+
+def _hyperparameters(row: dict[str, Any]) -> dict[str, Any]:
+    hp = row["hyperparameters"]
+    return json.loads(hp) if isinstance(hp, str) else (hp or {})
+
+
+def _load_serving_models(engine, tenant_id: int, requested: list[int]) -> ServingSelection:
+    """Elige y carga los modelos que sirve una predicción de UNA empresa (W4-B · ADR-V25-07).
+
+    Solo se cargan modelos servibles según `mlops.policy` (aprobado o legado del pipeline propio, ver MODEL_REGISTRY §5.6): un modelo en
+    `production` cuya base es `not_approved` (publicado sin aprobar, validado solo por una persona, sin origen) NO se carga y se trata como un artefacto
+    que falló: se sirve la referencia validada del mismo horizonte o, si no hay, abstención con `model_not_approved`. Todo se lee con la empresa del
+    trabajo; los artefactos se verifican antes de deserializar (`load_artifact`).
+    """
+    with engine.connect() as conn:
+        repo = CustomerRepository(conn, tenant_id)
+        prod = partition_servable(conn, tenant_id, repo.production_models().to_dict("records"))
+        refs = partition_servable(conn, tenant_id, repo.validated_references().to_dict("records"))
+    artifacts: dict[int, dict[str, Any]] = {}
+    references: dict[str, dict[str, Any]] = {}
+    for row in refs.servable:
+        references.setdefault(_hyperparameters(row).get("slot", ""), row)
+    model_versions: dict[str, Any] = {}
+    rejected: list[str] = []
+    abstained: dict[int, dict[str, str]] = {}
+    slots: dict[str, dict[str, Any]] = {}
+    for row in prod.servable:
+        slots[_hyperparameters(row).get("slot", "")] = row
+    refused: dict[str, dict[str, Any]] = {}
+    refused_horizons: dict[int, list[str]] = {}
+    for row in prod.excluded:
+        refused.setdefault(_hyperparameters(row).get("slot", ""), row)
+    for h in requested:
+        slot_p, slot_q = _slot(h, "probability"), _slot(h, "quantity")
+        rp, rq = slots.get(slot_p), slots.get(slot_q)
+        if (rp is None and slot_p not in refused) or (rq is None and slot_q not in refused):
+            rejected.append(f"H={h}: no hay modelo en producción (ejecute el entrenamiento); abstención.")
+            abstained[h] = {"reason_code": "no_model", "message": f"No hay modelo en producción para {h} días: entrene primero."}
+            continue
+        ap = aq = None
+        why_p = why_q = None
+        for target, row, refusal in (("probability", rp, refused.get(slot_p)), ("quantity", rq, refused.get(slot_q))):
+            if row is None:
+                rejected.append(f"H={h}: el modelo de {target} en producción ({refusal['version']}) no está aprobado "
+                                f"(base «{refusal['serving_basis']}»): no se carga.")
+                refused_horizons.setdefault(h, []).append(target)
+        if rp is not None:
+            ap, why_p = load_artifact(rp, tenant_id)
+        else:
+            why_p = REASON_NOT_APPROVED
+        if rq is not None:
+            aq, why_q = load_artifact(rq, tenant_id)
+        else:
+            why_q = REASON_NOT_APPROVED
+        if ap is None or aq is None:
+            # el ganador falló: se sirve la referencia validada del mismo horizonte (respaldo identificado)
+            refs_loaded = {}
+            for target in ("probability", "quantity"):
+                cand = references.get(_slot(h, target))
+                refs_loaded[target] = load_artifact(cand, tenant_id) if cand is not None else (None, "no_validated_reference")
+            if ap is None and refs_loaded["probability"][0] is not None:
+                ap, rp = refs_loaded["probability"][0], references[_slot(h, "probability")]
+                rejected.append(f"H={h}: " + ("el modelo de probabilidad en producción no está aprobado" if why_p == REASON_NOT_APPROVED
+                                              else f"el artefacto de probabilidad en producción falló ({why_p})") + "; se sirve la referencia validada (respaldo).")
+            if aq is None and refs_loaded["quantity"][0] is not None:
+                aq, rq = refs_loaded["quantity"][0], references[_slot(h, "quantity")]
+                rejected.append(f"H={h}: " + ("el modelo de cantidad en producción no está aprobado" if why_q == REASON_NOT_APPROVED
+                                              else f"el artefacto de cantidad en producción falló ({why_q})") + "; se sirve la referencia validada (respaldo).")
+        if ap is None or aq is None:
+            rejected.append(f"H={h}: artefacto no utilizable ({why_p or why_q}); abstención.")
+            if REASON_NOT_APPROVED in (why_p, why_q):
+                abstained[h] = {"reason_code": REASON_NOT_APPROVED, "message": f"El modelo de {h} días no está aprobado para servirse (ADR-V25-07): "
+                                "apruébelo en el registro o entrene de nuevo."}
+            else:
+                abstained[h] = {"reason_code": "model_unusable", "message": f"El artefacto del modelo de {h} días no es utilizable ({why_p or why_q})."}
+            continue
+        artifacts[h] = {"prob": ap, "qty": aq}
+        model_versions[str(h)] = {"probability": rp["version"], "quantity": rq["version"], "probability_id": int(rp["id"]),
+                                  "quantity_id": int(rq["id"]), "role": rp["role"]}
+    return ServingSelection(artifacts, model_versions, rejected, abstained, refused_horizons)
+
+
 def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0) -> dict[str, Any]:
     tenant_id, run_id = int(tenant["id"]), int(run["id"])
     requested = sorted({int(h) for h in (run.get("horizons") or cfg["horizons"]) if int(h) in SUPPORTED_HORIZONS and int(h) in cfg["horizons"]})
@@ -820,51 +935,8 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
     progress("loading_models", 3)
     limitations: list[str] = []          # las limitaciones fijas se anteponen al final: dependen de si S05 está en vigor en esta corrida
     assumptions: list[str] = []
-    with engine.connect() as conn:
-        repo = CustomerRepository(conn, tenant_id)
-        prod = repo.production_models()
-        refs_df = repo.validated_references()
-    artifacts: dict[int, dict[str, Any]] = {}
-    references: dict[str, dict[str, Any]] = {}
-    for row in refs_df.to_dict("records"):
-        hp_ = row["hyperparameters"]
-        hp_ = json.loads(hp_) if isinstance(hp_, str) else (hp_ or {})
-        references.setdefault(hp_.get("slot", ""), row)
-    model_versions: dict[str, Any] = {}
-    rejected: list[str] = []
-    abstained: dict[int, dict[str, str]] = {}       # horizonte → {reason_code, message}: estado insufficient_data (ADR-V25-02)
-    slots: dict[str, dict[str, Any]] = {}
-    for row in prod.to_dict("records"):
-        hp = row["hyperparameters"]
-        hp = json.loads(hp) if isinstance(hp, str) else (hp or {})
-        slots[hp.get("slot", "")] = row
-    for h in requested:
-        rp, rq = slots.get(_slot(h, "probability")), slots.get(_slot(h, "quantity"))
-        if rp is None or rq is None:
-            rejected.append(f"H={h}: no hay modelo en producción (ejecute el entrenamiento); abstención.")
-            abstained[h] = {"reason_code": "no_model", "message": f"No hay modelo en producción para {h} días: entrene primero."}
-            continue
-        ap, why_p = load_artifact(rp, tenant_id)
-        aq, why_q = load_artifact(rq, tenant_id)
-        if ap is None or aq is None:
-            # el ganador falló: se sirve la referencia validada del mismo horizonte (respaldo identificado)
-            refs = {}
-            for target in ("probability", "quantity"):
-                cand = references.get(_slot(h, target))
-                refs[target] = load_artifact(cand, tenant_id) if cand is not None else (None, "no_validated_reference")
-            if ap is None and refs["probability"][0] is not None:
-                ap, rp = refs["probability"][0], references[_slot(h, "probability")]
-                rejected.append(f"H={h}: el artefacto de probabilidad en producción falló ({why_p}); se sirve la referencia validada (respaldo).")
-            if aq is None and refs["quantity"][0] is not None:
-                aq, rq = refs["quantity"][0], references[_slot(h, "quantity")]
-                rejected.append(f"H={h}: el artefacto de cantidad en producción falló ({why_q}); se sirve la referencia validada (respaldo).")
-        if ap is None or aq is None:
-            rejected.append(f"H={h}: artefacto no utilizable ({why_p or why_q}); abstención.")
-            abstained[h] = {"reason_code": "model_unusable", "message": f"El artefacto del modelo de {h} días no es utilizable ({why_p or why_q})."}
-            continue
-        artifacts[h] = {"prob": ap, "qty": aq}
-        model_versions[str(h)] = {"probability": rp["version"], "quantity": rq["version"], "probability_id": int(rp["id"]),
-                                  "quantity_id": int(rq["id"]), "role": rp["role"]}
+    selection = _load_serving_models(engine, tenant_id, requested)
+    artifacts, model_versions, rejected, abstained = selection.artifacts, selection.model_versions, selection.rejected, selection.abstained
     limitations += rejected
     progress("loading_data", 10)
     with engine.connect() as conn:
@@ -942,7 +1014,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         else:
             quality = "degraded"
         for h in out.horizons:
-            if out.served[h]["role"] == "fallback":
+            if out.served[h]["role"] == "fallback" and h not in selection.refused:      # (con un modelo no aprobado, `rejected` ya dice el motivo real)
                 limitations.append(f"H={h}: se sirve la referencia frecuencia/recencia (rol fallback): el modelo complejo no superó la regla de promoción o no hubo datos para validarlo.")
             if out.served[h]["calibration_status"] != "calibrated":
                 limitations.append(f"H={h}: calibración en estado «{out.served[h]['calibration_status']}» en el holdout.")
@@ -976,7 +1048,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
     horizons_out = sorted(out.horizons) if out is not None else []
     summary: dict[str, Any] = {"horizons": horizons_out, "as_of_requested": as_of_req.isoformat(), "as_of_effective": as_of.isoformat(), "stale_data": stale,
                                "excluded_from_individual_prediction": data.excluded, "duration_ms": duration_ms_pre,
-                               "horizon_support": _predict_horizon_support(requested, out, abstained, stale)}
+                               "horizon_support": _predict_horizon_support(requested, out, abstained, stale, selection.refused)}
     if out is not None:
         summary |= {"rows": out.summary.get("rows"), "candidates": out.summary.get("candidates"), "coherence": out.summary.get("coherence"),
                     "quantity_coherence": out.summary.get("quantity_coherence"), "served": out.served,

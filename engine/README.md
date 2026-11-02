@@ -28,6 +28,10 @@ cp .env.example .env            # ajustar ENGINE_DATABASE_URL y ENGINE_API_TOKEN
 .venv/bin/python -m predictily_engine.cli evaluate --tenant-id 3
 ```
 
+Entrenamiento privado por empresa (W4-B): `diagnose`, `validate-data`, `build-features`, `train`, `backtest`, `tune`, `package`, `sign`, `verify`, `publish`, `compare`,
+`rollback`, `list-models`, `export-local` y `cleanup-exports`. Ayuda en español con `<comando> --help`; códigos de salida estables y pasos exactos en
+[`docs/ml/PRIVATE_TENANT_TRAINING.md`](../docs/ml/PRIVATE_TENANT_TRAINING.md) y [`docs/operations/TENANT_TRAINING_RUNBOOK.md`](../docs/operations/TENANT_TRAINING_RUNBOOK.md).
+
 ## Pruebas
 
 ```bash

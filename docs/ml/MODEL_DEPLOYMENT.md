@@ -11,12 +11,12 @@ Este documento describe **cómo un modelo llega a producción y cómo se reviert
 
 | Paso | Quién | Qué ocurre | Estado |
 |---|---|---|---|
-| 1. Publicar | Quien entrena (CLI de entrenamiento privado, W4-B) | Sube el artefacto firmado y su manifiesto al almacén de objetos con una clave que genera el servidor (`tenants/<uuid de la empresa>/models/<core>/<versión>/…`) y registra el modelo como `candidate` con `published_by`, `published_env`, `published_at` y `published_object_key`. **Nunca** `production` | **DISEÑADO / NO IMPLEMENTADO** en la CLI (W4-B); el backend ya trata cualquier modelo con marcas `published_*` como no aprobado |
+| 1. Publicar | Quien entrena (CLI de entrenamiento privado, W4-B) | Sube el artefacto firmado y su manifiesto al almacén de objetos con una clave que genera el servidor (`tenants/<uuid de la empresa>/models/<core>/<versión>/…`) y registra el modelo como `candidate` con `published_by`, `published_env`, `published_at` y `published_object_key`. **Nunca** `production` | **IMPLEMENTADO / VERIFICADO** (`python -m predictily_engine.cli publish`; [`PRIVATE_TENANT_TRAINING.md`](PRIVATE_TENANT_TRAINING.md) §5); el backend trata cualquier modelo con marcas `published_*` como no aprobado |
 | 2. Validar | Analista o superior (`forecast.run`) para un candidato publicado; `models.approve` para un modelo del pipeline propio | `POST /api/v1/models/{id}/validate`: compuertas automáticas (firma Ed25519 verificada, gate de datos ≠ BLOCK, política no rechazada, compatibilidad). `candidate → validated`. **No vuelve servible al modelo**: solo la aprobación separada lo hace | **IMPLEMENTADO / VERIFICADO** (`ModelApprovalApiTest`) |
 | 3. Aprobar | Propietario o administrador (`models.approve`) **distinto** de quien publicó o entrenó | `POST /api/v1/models/{id}/approve`. Vuelve a verificar firma y gate de datos; completa la decisión de promoción de W3. `validated → approved` | **IMPLEMENTADO / VERIFICADO** |
 | 3b. Rechazar | Igual que aprobar | `POST /api/v1/models/{id}/reject` con motivo obligatorio. Terminal | **IMPLEMENTADO / VERIFICADO** |
 | 4. Promover | Propietario o administrador (`models.approve`) | `POST /api/v1/models/{id}/promote`. Vuelve a verificar; retira al modelo que servía en el mismo alcance. `approved → production` | **IMPLEMENTADO / VERIFICADO** |
-| 5. Servir | Motor (W4-B) | Carga solo `approved`/`production` con firma verificada; clave de caché con empresa + versión + esquema de variables | **DISEÑADO / NO IMPLEMENTADO** en este paquete (W4-B) |
+| 5. Servir | Motor (W4-B) | Carga solo modelos con base de servicio `approved` o `legacy_pipeline` (espejo de `ModelServingPolicy::basis()`) con firma verificada, desde el almacén de objetos si son publicados; clave de caché con empresa + versión + esquema de variables | **IMPLEMENTADO / VERIFICADO** para el Customer Core, que carga artefactos (`PRIVATE_TENANT_TRAINING.md` §7); el motor de demanda no carga artefactos (NO APLICA hoy) |
 
 Alcance de una promoción (qué reemplaza): Customer Core = el mismo slot (`h30:probability`, `h30:quantity`…); los demás cores = la misma familia, clase de demanda y rol. Lo retirado queda `retired` con `retired_at` y un evento
 `production → retired` (`evidence.replaced_by`).
@@ -56,9 +56,9 @@ positivo** (una corrida enlazada —`forecast_run_id`, `core_run_id` o `training
 - Se identifica dinámicamente (`ModelServingPolicy::basis() = legacy_pipeline`), de modo que también cubre los modelos que el motor registre después del despliegue (que conservan su corrida enlazada).
 - Los retadores que el motor deja como `candidate` **no** son legado servible: aunque una persona con `models.approve` los valide, siguen `not_approved` hasta su aprobación separada (otra persona ≠ quien los entrenó).
 - La migración `2026_03_12_000300` fija la clasificación en un evento de línea base («legado aprobado por migración», `evidence.legacy_policy = legacy_approved_by_migration`) solo para lo que el motor dejó en `production`/`validated`/`retired` antes de W4 (idempotente, reversible); cubre también los modelos cuya corrida se purgó. Un `candidate` nunca recibe la marca.
-- Un modelo con cualquier marca `published_*` o con un evento de la CLI jamás es legado. Que un legado no pueda publicarse a otro entorno sin aprobación ni re-firmado es regla de ADR-V25-20 que aplicará la CLI de W4-B (**DISEÑADO / NO IMPLEMENTADO** aquí). El contrato de publicación que debe cumplir la CLI está en [`MODEL_REGISTRY.md`](MODEL_REGISTRY.md) §5.6.
+- Un modelo con cualquier marca `published_*` o con un evento de la CLI jamás es legado. Que un legado no pueda publicarse a otro entorno sin aprobación ni re-firmado es regla de ADR-V25-20 que aplica la CLI de W4-B (**IMPLEMENTADO**: `publish` solo acepta paquetes firmados creados por `train`; re-firmar un legado para publicarlo no está implementado). El contrato de publicación que debe cumplir la CLI está en [`MODEL_REGISTRY.md`](MODEL_REGISTRY.md) §5.6.
 - La lista y el detalle exponen `serving_basis` (`approved` | `legacy_pipeline` | `not_approved`) para que la interfaz y el operador vean qué se sirve y por qué.
-- Cuando el motor (W4-B) registre cada entrenamiento como `candidate` y exija aprobación, la categoría «legado» dejará de crecer; los existentes podrán aprobarse explícitamente (`validate` → `approve`) si se quiere salir de la excepción.
+- Cuando el pipeline propio registre cada entrenamiento como `candidate` y exija aprobación (**DISEÑADO / NO IMPLEMENTADO**: [`AUTOMATED_TRAINING.md`](AUTOMATED_TRAINING.md) §3; W4-B no cambió la promoción automática del pipeline), la categoría «legado» dejará de crecer; los existentes podrán aprobarse explícitamente (`validate` → `approve`) si se quiere salir de la excepción.
 
 Estado: **IMPLEMENTADO / VERIFICADO** (`ModelLifecycleTest::test_legacy_is_a_positive_definition_that_fails_closed`, `ServingPolicyHardeningTest`, `RegistryMigrationsAndExportTest::test_the_backfill_*`, las pruebas de reversión). La suite E2E con motor real no se ejecutó en este paquete (requiere la pila completa).
 
@@ -113,10 +113,10 @@ apuntar `PREDICTILY_MODELS_DISK` (y `PREDICTILY_BRONZE_DISK`) a un disco S3 de `
 | Política de legados explícita y marcada | **IMPLEMENTADO / VERIFICADO** |
 | Lista (core, estado, familia), detalle con eventos, OpenAPI, exportación LOPDP | **IMPLEMENTADO / VERIFICADO** |
 | Medición de uso por ejecución y foto diaria de almacenamiento | **IMPLEMENTADO / VERIFICADO** |
-| CLI `publish` que registra el candidato con las marcas `published_*` | **DISEÑADO / NO IMPLEMENTADO** aquí (W4-B) |
-| Serving del motor solo de `approved`/`production`; clave de caché empresa + versión + esquema | **DISEÑADO / NO IMPLEMENTADO** aquí (W4-B) |
+| CLI `publish` que registra el candidato con las marcas `published_*` | **IMPLEMENTADO / VERIFICADO** (W4-B; `PRIVATE_TENANT_TRAINING.md`) |
+| Serving del motor solo de `approved`/`legacy_pipeline` con firma verificada; clave de caché empresa + versión + esquema; pruebas negativas entre empresas | **IMPLEMENTADO / VERIFICADO** (W4-B) para el Customer Core; demanda NO APLICA |
 | CHECK en la base de datos que impida `production` sin aprobación para lo publicado | **DISEÑADO / NO IMPLEMENTADO** (ver MODEL_REGISTRY §5.10 y §6) |
 | Índice único parcial de una producción por alcance | **DISEÑADO / NO IMPLEMENTADO** (MODEL_REGISTRY §5.5); hoy lo garantizan los bloqueos de la aplicación |
 | Medición del consumo de ejecuciones fallidas | **DISEÑADO / NO IMPLEMENTADO** |
 | Almacén S3 real y despliegue en AWS | **BLOQUEADO** (sin cuenta del propietario) |
-| Pruebas E2E con la pila real y un modelo publicado | **BLOQUEADO** hasta integrar W4-B |
+| Pruebas E2E con la pila completa (API + cola + motor) y un modelo publicado | **BLOQUEADO** (no se levantó la pila completa en W4-B). Sí se verificó la lectura cruzada: las compuertas reales del backend (`ModelApprovalGates`, `ModelServingPolicy`) sobre un objeto publicado por la CLI en un disco local compartido (`PRIVATE_TENANT_TRAINING.md` §9.3) |

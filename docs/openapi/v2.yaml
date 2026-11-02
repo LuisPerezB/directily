@@ -480,7 +480,7 @@ paths:
       summary: Predicciones de compra por comprador × producto
       description: 'Los montos esperados son supuestos (esperanza × último precio neto), no ventas confirmadas. 422 `horizon_not_available` si la corrida
         se abstuvo de ese horizonte: la respuesta trae `quality_status = insufficient_data`, el motivo en `reason_code` (no_model, coverage_insufficient,
-        insufficient_horizon, no_identified_buyers...), `reasons` y `available_horizons`; nunca una cifra inventada. 402 `features.customer` si el plan no incluye
+        insufficient_horizon, no_identified_buyers, model_not_approved...), `reasons` y `available_horizons`; nunca una cifra inventada. 402 `features.customer` si el plan no incluye
         el comportamiento de compra (Starter).
 
 
