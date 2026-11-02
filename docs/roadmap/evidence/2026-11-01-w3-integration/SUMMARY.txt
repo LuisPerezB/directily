@@ -1,0 +1,20 @@
+Integración de W3 (Calidad ML P0) · rama v25/w1-cierre-y-w2 · 2026-11-01 · macOS arm64, PostgreSQL 15, PHP 8.3, Python 3.12
+Paquetes (implementación → revisión adversarial → corrección): W3-A a656521 · W3-B 562f2b0 · W3-C 552f6c0 · W3-D 7586c57.
+Revisión adversarial: A 1 MEDIUM + 7 LOW · B 2 MEDIUM + 7 LOW · C 2 MEDIUM + 7 LOW · D 1 HIGH + 3 MEDIUM + 8 LOW; todo corregido.
+Suites sobre 7586c57 (copia del stack, sin cambios ajenos):
+backend  :: {"tests":1217,"passed":1209,"skipped":8}   (omitidas: 5 emulador S3 sin servidor, 3 servidores MySQL/SQL Server)
+engine   :: 1071 passed, 1 warning in 1999.67s
+frontend :: type-check 0 · lint 0 · vitest 389 passed · build OK
+E2E (stack en 7586c57, BD de desarrollo migrada, demo recreada): mvp_acceptance 32/32 · stage2_acceptance 256/256 (1 aviso de diseño, el mismo
+   de W2). Una primera corrida dio 255/255 con un aviso más: se lanzó sin --engine-dir y la verificación independiente del SHA-256 no encontró
+   el volumen de artefactos (no es regresión; con --engine-dir la comprobación pasa).
+Demo (datos ficticios, demo_metrics.json): gate de calidad PASS en ambas empresas.
+   Distribuidora: idéntica a W2 (WAPE 0,4488 vs Seasonal Naive 0,5983; cob. 80 % 0,803).
+   Ferretería: WAPE 0,49077 vs 0,6604 (cob. 80 % 0,850), idéntico a W1; W2 registró 0,49052. El motor de W2 (fbb1739) sobre los mismos datos
+   da 0,49077 y las mismas 27 604 filas servidas y recomendaciones que el de W3 (reproducibility_hashseed.jsonl): W3 no cambia lo servido; la
+   cifra de W2 corresponde al estado de los datos o del stack de aquel momento. Cinco corridas con PYTHONHASHSEED 0/1/0/2 dan resultados
+   idénticos fila a fila: el pipeline es reproducible entre procesos.
+   Customer Core: mismos modelos promovidos que W2 en 7/14/30/90 días y mismo Brier (redondeo); S05 nuevo: la ventana queda not_validated y no
+   publica cifras (comportamiento exigido); config_version de demanda cambia porque ahora incluye la política de promoción.
+Auditoría: docs/roadmap/audit/progress/2026-11-01-w3.json (59 requisitos; IMPLEMENTADO 149 → 171, PENDIENTE 217 → 201; 6 defectos).
+Rutas locales reemplazadas por <repo>, <scratchpad> y ~ en los registros.

@@ -200,14 +200,11 @@ cuarentena y reconciliación.
 
 ### Estado actual (1-nov-2026, tarde)
 
-- **W3 · motor confirmado:** W3-A (`a656521`), W3-B (`562f2b0`) y W3-C (`552f6c0`), cada uno tras revisión
-  adversarial y corrección (A: 1 MEDIUM + 7 LOW; B: 2 MEDIUM + 7 LOW; C: 2 MEDIUM + 7 LOW). Cada commit se probó
-  aislado (instantánea del índice). El cableado de `pipeline/core.py` de A y B va en el commit de B porque sus
-  líneas están intercaladas.
-- **W3-D (API y UI) en curso:** endpoints de evaluaciones, decisiones de promoción y shadow; columnas nuevas de
-  Customer; consumidores existentes de `model_evaluations` filtrados para que no cambie lo que muestran; bloque
-  `promotion` en la configuración efectiva por empresa. Al terminar: revisión, suites completas, E2E, demo frente a
-  la línea base, overlay de auditoría y gates; con eso se cierra W3.
+- **W3 · ✅ cerrada:** W3-A (`a656521`), W3-B (`562f2b0`), W3-C (`552f6c0`) y W3-D (`7586c57`), cada uno tras revisión
+  adversarial y corrección (1 HIGH y 8 MEDIUM en total). Integración sobre `7586c57`: backend 1217 (1209 aprobadas, 8
+  omitidas), motor 1071, frontend 389; E2E 32/32 y 256/256; demo sin cambio en lo servido (el motor de W2 sobre los mismos
+  datos sirve lo mismo fila a fila) y reproducible entre procesos. Evidencia: `docs/roadmap/evidence/2026-11-01-w3-integration/`;
+  auditoría: `docs/roadmap/audit/progress/2026-11-01-w3.json` (IMPLEMENTADO 149 → 171).
 - **W4:** W4-A (`c77deab`) y W4-C (`bc54d9c`) confirmados. **W4-B (CLI y serving del motor) en curso**, en paralelo
   con W3-D (no comparten archivos). Decisión del arquitecto: el motor sirve solo modelos con base `approved` o
   `legacy_pipeline` (la misma política que `ModelServingPolicy` del backend) y firma válida; la promoción automática
@@ -216,13 +213,13 @@ cuarentena y reconciliación.
   `tenant_id`, tampoco donde es NULLABLE (`003fd69`, migración `2026_03_12_000500`; en `model_registry` borrar el
   modelo anterior convertía el de la empresa en uno de plataforma).
 - **W5 y W6:** contratos listos; sus migraciones suben, bajan y vuelven a subir limpias sobre HEAD (base de prueba
-  desechable). Se activan después de cerrar W3 (W5-A depende de los campos de Customer y del endpoint de
-  evaluaciones de W3-D).
+  desechable). W3 está cerrada: W5 se activa a continuación (W5-A usa los campos de Customer y el endpoint de
+  evaluaciones de W3-D, ya integrados).
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
 - **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;
   el propietario debe iniciar sesión con la cuenta dueña del repositorio para subir la rama y abrir el PR.
 
-### Paso 1b · Oleada W3 · Calidad ML P0 (motor confirmado; API y UI en curso)
+### Paso 1b · Oleada W3 · Calidad ML P0 (✅ cerrada el 1-nov-2026)
 
 Contrato activado (`4eb34f4`): `customer_predictions` con nº de pedidos, cantidad por pedido, unidades y ventana;
 `model_promotion_decisions`; `shadow_forecast_values`. Guion: `docs/roadmap/contracts/w3/workflow/v25-w3.js`.
@@ -232,7 +229,7 @@ Contrato activado (`4eb34f4`): `customer_predictions` con nº de pedidos, cantid
 | W3-A | métricas por horizonte y segmento (volumen y vida de la serie as-of), escenarios de forma de serie | ✅ `a656521` |
 | W3-B | política heredada parametrizada y V2.5, champion/challenger, shadow mode, Optuna acotado | ✅ `562f2b0` |
 | W3-C | Customer S05: nº de pedidos (hurdle), cantidad por pedido, unidades, ventana validada, ranking y calibración | ✅ `552f6c0` |
-| W3-D | API y UI de la calidad ML, exportación LOPDP de lo nuevo | en curso |
+| W3-D | API y UI de la calidad ML, exportación LOPDP de lo nuevo | ✅ `7586c57` |
 
 ### Paso 2 · Piloto con datos reales (en cuanto exista la fuente)
 

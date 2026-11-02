@@ -6,7 +6,7 @@
   - import "./vite.config" without a file extension (vitest.config.ts:3:24). Add the file extension
 Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
 
- RUN  v5.0.5 /Users/luisfernandoperezbrito/Desktop/predictily/frontend
+ RUN  v5.0.5 <repo>/frontend
 
 
  Test Files  35 passed (35)
