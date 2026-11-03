@@ -1,0 +1,12 @@
+Integración de W5 (flujo empresarial P1) · rama v25/w1-cierre-y-w2 · 2026-11-03 · macOS arm64, PostgreSQL 15, PHP 8.3, Python 3.12
+Paquetes (implementación → revisión adversarial → corrección): activación d54076e · W5-D f18541b · W5-A + W5-B 6fb4819 ·
+W5-C cb31a03 · W5-E 2d1a0b1 (y ab8816d: la demo declara data_origin=demo). Revisiones: W5-D 1 HIGH + 7 MEDIUM; W5-A/B 4 HIGH +
+7 MEDIUM; W5-C 2 HIGH + 10 MEDIUM; W5-E 1 HIGH + 5 MEDIUM (contra el backend real); todo corregido.
+Stack aislado en 2d1a0b1 con vendor propio (incluye el contrato de W6 ya activado, sin sus paquetes):
+backend  :: {"tests":1640,"passed":1631,"skipped":9}
+engine   :: 1413 passed, 1 skipped
+frontend :: type-check 0 · lint 0 · vitest 737 passed · build OK
+E2E (BD de desarrollo migrada, demo recreada): mvp_acceptance 32/32 · stage2_acceptance 256/256 (1 aviso de diseño, el mismo).
+Demo (datos ficticios, demo_metrics.json): demanda y Customer Core idénticos a W4 en ambas empresas (no hay compromisos
+   confirmados cargados en la demo, así que la conciliación de compromisos de W5-D no cambia sus planes).
+Outcomes, uplift y ROI reales: BLOQUEADO hasta un piloto. Rutas locales reemplazadas por <repo>, <scratchpad> y ~.

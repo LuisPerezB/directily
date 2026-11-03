@@ -1,0 +1,5 @@
+
+> predictily-frontend@0.1.0 type-check
+> vue-tsc -b --noEmit
+
+exit=0
