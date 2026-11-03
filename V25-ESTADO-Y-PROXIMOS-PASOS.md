@@ -213,10 +213,16 @@ cuarentena y reconciliación.
 - **Base de datos:** FKs compuestas `ON DELETE SET NULL` que solo anulan la referencia (`e0378db`) y nunca
   `tenant_id`, tampoco donde es NULLABLE (`003fd69`, migración `2026_03_12_000500`; en `model_registry` borrar el
   modelo anterior convertía el de la empresa en uno de plataforma).
-- **W5 · en curso:** contrato `d54076e`; W5-D (`f18541b`, perecibilidad y FEFO) y W5-A + W5-B (`6fb4819`, Revenue Radar y
-  Decision Engine, en un commit por quedar acoplados) confirmados tras revisión y corrección. W5-C (outcomes y ROI) en
-  corrección tras su revisión (2 HIGH); W5-E (vistas Enterprise) en revisión. Después: integración de W5.
-- **W6:** contrato listo (migración verificada sobre HEAD), no activado.
+- **W5 · en curso:** contrato `d54076e`; W5-D (`f18541b`) y W5-A + W5-B (`6fb4819`) confirmados tras revisión y
+  corrección. W5-C (outcomes y ROI; revisión: 2 HIGH, 10 MEDIUM) y W5-E (vistas Enterprise; revisión: 1 HIGH, 5 MEDIUM, con
+  la vista contra el backend real) en corrección; el hallazgo común es que el ROI no debe sumar valores de tipos
+  distintos. Después: integración de W5. Las empresas demo declaran `data_origin = demo` (`ab8816d`).
+- **W6 · en curso:** contrato activado (`d46f839`; tablas clasificadas en la exportación sin `token_hash` del Bridge).
+  En implementación en paralelo: W6-A seguridad Enterprise (MFA, roles comerciales y alcance del vendedor en el
+  Radar), W6-B Bridge de solo lectura, W6-C Auto Mapper, W6-D Intelligence Gateway y W6-E factores y contratos
+  sectoriales; W6-F (cierre, E2E V2.5 y evaluación final de gates) al final.
+- **Límite de uso:** el 2-nov se alcanzó el límite semanal y los siete agentes se detuvieron; se reanudaron el
+  3-nov desde donde quedaron (su trabajo estaba guardado, sin confirmar).
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
 - **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;
   el propietario debe iniciar sesión con la cuenta dueña del repositorio para subir la rama y abrir el PR.
