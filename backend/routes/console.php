@@ -59,3 +59,8 @@ Schedule::command('predictily:decisions-generate')
 Schedule::command('predictily:decisions-expire')
     ->hourlyAt(25)->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
+
+// ── Outcomes (V2.5 · W5-C): mide lo ocurrido en la ventana de cada recomendación cuya ventana ya cerró (más el margen de espera de documentos tardíos), tras generar y vencer las decisiones (05:30 y cada hora); idempotente, por empresa ──
+Schedule::command('predictily:outcomes-measure')
+    ->dailyAt('06:10')->timezone('America/Guayaquil')
+    ->withoutOverlapping()->onOneServer();

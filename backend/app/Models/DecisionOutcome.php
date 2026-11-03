@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Tabla `decision_outcomes` (V2.5 · W5, ADR-V25-14): recomendación → acción → evento observable posterior, con clasificación honesta
@@ -38,4 +39,11 @@ class DecisionOutcome extends Model
             'measured_at' => 'datetime',
         ];
     }
+
+    // >>> W5-C outcomes (relaciones; no cambian la tabla ni los casts)
+    public function recommendation(): BelongsTo
+    {
+        return $this->belongsTo(DecisionRecommendation::class, 'recommendation_id');
+    }
+    // <<< W5-C outcomes
 }

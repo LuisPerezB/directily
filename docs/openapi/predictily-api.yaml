@@ -42,6 +42,7 @@ tags:
 - name: Linaje e identidades
 - name: Factor Intelligence
 - name: Decision Engine
+- name: Outcomes y ROI
 - name: Revenue Radar
 paths:
   /accuracy/comparison:
@@ -3264,6 +3265,294 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/Validation'
+      x-ability: decisions.view
+  /decisions/outcomes:
+    get:
+      tags:
+      - Outcomes y ROI
+      summary: Resultados medidos de las recomendaciones (lista con filtros)
+      description: 'Solo lectura. Une cada recomendación con la acción registrada y el evento observable posterior
+        en su **ventana fija** (`as_of + 1 … as_of + horizonte`), medida solo cuando la ventana cerró **más un margen
+        de espera** (`settling_lag_days`, provisional, «a aprobar en el piloto»). Las ventas se leen **as-of** (tal
+        como se conocían al cierre de ventana + margen): un documento ingerido después no entra en esa medición
+        y se cuenta aparte (`evidence.source.late_lines_not_counted`). Las devoluciones y notas de crédito con fecha
+        posterior al cierre de la ventana pero conocidas al corte se restan de las compras de la ventana (`evidence.observation.returns_after_window`);
+        las posteriores al corte se informan sin restarse.
+
+
+        Se miden **también** las ejecutadas, rechazadas, caducadas, no contactadas y el grupo de control (`action_kind`:
+        `contacted`, `executed`, `not_contacted`, `not_executed`, `rejected`, `expired`, `control`). Una acción
+        registrada **después** de cerrar la ventana no cuenta como atendida ni genera costo de contacto (`evidence.action.action_registered_after_window_at`).
+        Lo aún no medible (ventana abierta o en espera) no aparece aquí: es «previsto» (`forecast`) y se informa
+        en `GET /decisions/roi`.
+
+
+        **Clasificación honesta** (`classification`) de cada FILA: `observed` (lo ocurrido; no se atribuye a ninguna
+        acción) o `temporally_associated` (hubo una compra **posterior** a una acción registrada, sin contrafactual:
+        NO causal). `incremental_estimated` es un resultado AGREGADO del experimento (`GET /decisions/roi`), no
+        de una fila: ninguna fila se estampa con él (compre o no, la hayan contactado o no). `causally_attributable`
+        **no lo produce** esta versión. Lo de nivel producto (reposición, inventario-demanda, presupuesto, escenarios)
+        es siempre `observed`: no se afirma que una compra al proveedor cause las ventas posteriores.
+
+
+        **Lo asociado a la acción** está en `after_action`: SOLO las compras emitidas después de la acción (netas
+        de las devoluciones emitidas también después) y su contribución. La ventana completa (`observed_units`,
+        `observed_net_amount`, `contribution`) es observación y puede incluir compras anteriores a la acción.
+
+
+        **Contribución, no ingresos brutos**: `contribution` = importe neto − unidades netas × costo unitario **confiable**
+        (W5-B); es `null` (con `contribution_status = unknown` y `contribution_reasons`) cuando el costo no es confiable
+        y `0` cuando no hubo compra. `contact_cost` es el costo de la acción de la recomendación solo si hubo una
+        acción registrada dentro de la ventana (`null` si no hay costo configurado: desconocido, no cero).
+
+
+        **Control y experimento**: quien no puede aprobar (`decisions.approve`) no recibe NINGUNA información del
+        control ni del experimento (ExperimentRedaction de W5-B): no se listan los resultados del control, `experiment_group`
+        no aparece, `evidence` no trae `experiment`, `itt`, `unit` ni claves de experimento, y filtrar por `experiment_group`
+        o `experiment_key` no devuelve nada. Sin datos personales: el comprador se identifica por id y código externo;
+        `observed_ref` es `sale:<id>`.
+
+
+        Habilidad requerida: `decisions.view`. Aislada por empresa.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: kind
+        in: query
+        description: Uno o varios tipos de recomendación separados por coma.
+        schema:
+          type: string
+          example: contact,recovery
+      - name: classification
+        in: query
+        description: Una o varias clasificaciones separadas por coma.
+        schema:
+          type: string
+          example: observed,temporally_associated
+      - name: action_kind
+        in: query
+        description: Una o varias acciones separadas por coma.
+        schema:
+          type: string
+          example: rejected,expired,control
+      - name: observed_event
+        in: query
+        description: Uno o varios eventos observables separados por coma.
+        schema:
+          type: string
+          example: purchase,stockout
+      - name: horizon_days
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 730
+      - name: experiment_key
+        in: query
+        description: Solo con decisions.approve; para los demás no devuelve nada.
+        schema:
+          type: string
+          maxLength: 80
+      - name: experiment_group
+        in: query
+        description: Solo con decisions.approve; para los demás no devuelve nada (no se revela quién quedó en cada
+          grupo).
+        schema:
+          type: string
+          enum:
+          - treatment
+          - control
+      - name: recommendation_id
+        in: query
+        schema:
+          type: integer
+      - name: customer_id
+        in: query
+        schema:
+          type: integer
+      - name: product_id
+        in: query
+        schema:
+          type: integer
+      - name: assigned_user_id
+        in: query
+        description: Responsable de la recomendación al medirla.
+        schema:
+          type: integer
+      - name: contribution_known
+        in: query
+        description: true = solo con contribución conocida; false = solo con contribución desconocida (costo no
+          confiable).
+        schema:
+          type: boolean
+      - name: from
+        in: query
+        description: 'Periodo: corte (`as_of`) de la recomendación desde esta fecha.'
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        description: 'Periodo: corte (`as_of`) de la recomendación hasta esta fecha.'
+        schema:
+          type: string
+          format: date
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - -measured_at
+          - measured_at
+          - -window_to
+          - window_to
+          - -observed_net_amount
+          - -contribution
+          - -id
+          - id
+          default: -measured_at
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Resultados de la empresa activa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DecisionOutcome'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: decisions.view
+  /decisions/roi:
+    get:
+      tags:
+      - Outcomes y ROI
+      summary: ROI honesto con su método (potencial vs. observado vs. incremento estimado)
+      description: 'Solo lectura. Separa siempre, sin sumarlos entre sí:
+
+
+        - **Oportunidad potencial** (`summary.potential`): contribución esperada de las recomendaciones accionables,
+        **por tipo y horizonte** (`cells`); no hay total entre tipos ni horizontes (contarían dos veces la misma
+        venta). «Oportunidad potencial, atribución no demostrada»; no es ingreso recuperado.
+
+        - **Observación** (`summary.observed`, `summary.associated`): lo ocurrido después, con **contribución conocida**
+        (no ingresos brutos) y **sin doble conteo**: varias recomendaciones pueden observar la misma línea de venta
+        (horizontes de 7 y 30 días, contacto y recuperación), así que los totales se deduplican por línea de venta
+        distinta; la suma por recomendación queda aparte (`per_recommendation`) como detalle no aditivo. `associated`
+        suma SOLO lo posterior a la acción registrada (neto de las devoluciones posteriores).
+
+        - **Incremento estimado** (`experiments`, `roi`): solo con un experimento con grupo de control analizado
+        por **intención de tratamiento** (ITT): tasa de conversión (diferencia de proporciones, intervalo de Newcombe)
+        y contribución por unidad (diferencia de medias, **intervalo percentil bootstrap con semilla registrada**;
+        el de Welch solo como diagnóstico), con tamaños de muestra e intervalo. El intervalo monetario exige un
+        mínimo de **compradores por grupo** (`min_buyers_per_arm`, 10 por defecto, provisional) y varianza distinta
+        de cero: si no, `contribution.status = not_estimable` y no hay cifra monetaria. Cada cliente entra una sola
+        vez por experimento y horizonte; se informan las unidades descartadas por grupo (`dropped_units`) y el cociente
+        de muestras frente a la fracción de control registrada (`sample_ratio`).
+
+
+        **`roi.status`**: `potential_unproven` (sin grupo de control o con muestra insuficiente: **no hay cifra
+        de ROI** y nunca se presenta como probado), `incremental_estimated` (incremento de contribución neto de
+        costos de contacto, con intervalo; `significant = false` si el intervalo incluye 0), `incremental_conversion_only`
+        (hay estimación de conversión pero no de contribución: sin cifra monetaria) o `multiple_experiments` (varios
+        experimentos u horizontes no son aditivos: filtrar). `roi.proven` es siempre `false` y `roi.causal_claims`
+        es `0`: esta versión no produce atribución causal. `roi.data_origin_warning` aparece mientras el origen
+        de los datos no esté declarado como real (`data_origin`).
+
+
+        **Quien no puede aprobar** (`decisions.approve`) no recibe información del control ni del experimento: se
+        omiten `experiments`, `funnel.control_held_out`, `by_action_kind.control`, `control_baseline` y las filas
+        del control dentro de los desgloses; `roi` solo muestra su estado, etiqueta y método, sin datos por grupo.
+
+
+        **Periodo**: por el corte (`as_of`) de la recomendación. **Sin `from`/`to` se toman los últimos 180 días**;
+        el rango no puede superar 730 días (422 `to`). Las filas se leen por bloques con paginación por clave (memoria
+        acotada).
+
+
+        **Costos**: el contacto es el `action_cost` de cada recomendación atendida dentro de la ventana (desconocido,
+        no cero, si no está configurado); el costo de contacto del ROI sale de las unidades de tratamiento del propio
+        análisis, no del filtro de tipo. El uso de plataforma (`tenant_usage_records`, W4) son **cantidades** y
+        solo se convierte en dinero con los precios que la empresa configure (`outcomes.usage_prices`); sin precios
+        `total_cost` es `null` (`no_price_model`).
+
+
+        Los filtros de `kind` no aplican al análisis ITT (la unidad es el cliente). `limitations` enumera los límites
+        del método.
+
+
+        Habilidad requerida: `decisions.view`. Aislada por empresa.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: kind
+        in: query
+        description: Uno o varios tipos de recomendación separados por coma (un valor desconocido devuelve un informe
+          vacío, no «todos»).
+        schema:
+          type: string
+          example: contact
+      - name: horizon_days
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 730
+      - name: experiment_key
+        in: query
+        description: 'Solo con decisions.approve (para los demás no devuelve nada). Solo resultados de ese experimento:
+          excluye lo aún previsto (no se conoce su experimento).'
+        schema:
+          type: string
+          maxLength: 80
+      - name: from
+        in: query
+        description: Corte (`as_of`) desde esta fecha. Por omisión, 180 días antes de `to`.
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        description: Corte (`as_of`) hasta esta fecha. Por omisión, hoy (zona de la empresa). El rango no puede
+          superar 730 días.
+        schema:
+          type: string
+          format: date
+      - name: group_by
+        in: query
+        schema:
+          type: string
+          enum:
+          - kind
+          - horizon
+          - segment
+          - owner
+          default: kind
+      responses:
+        '200':
+          description: Informe de ROI y outcomes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/OutcomeRoiReport'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: 'Validación: fechas inválidas, `to` anterior a `from`, o periodo de más de 730 días'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       x-ability: decisions.view
   /decisions/settings:
     get:
@@ -18844,3 +19133,871 @@ components:
           type: number
           minimum: 0
           maximum: 1
+    DecisionOutcome:
+      type: object
+      description: 'Resultado medido de una recomendación (V2.5 · W5-C; ADR-V25-14): acción registrada, evento observable
+        posterior en la ventana fija, contribución (no ingresos brutos) y clasificación honesta, con la evidencia
+        completa de la medición. `causally_attributable` no lo produce esta versión e `incremental_estimated` es
+        un resultado agregado del informe, no de una fila.'
+      properties:
+        id:
+          type: integer
+        recommendation:
+          type: object
+          properties:
+            id:
+              type: integer
+            kind:
+              type: string
+              enum:
+              - contact
+              - recovery
+              - customer_risk
+              - replenishment
+              - inventory_mismatch
+              - budget_constraint
+              - scenario
+            status:
+              type: string
+              description: Estado de la recomendación AHORA (puede haber pasado a `measured`/`closed` tras medirla)
+            as_of:
+              type: string
+              format: date
+            horizon_days:
+              type: integer
+            entity_type:
+              type: string
+            priority:
+              type: integer
+            assigned_user_id:
+              type:
+              - integer
+              - 'null'
+            customer:
+              type:
+              - object
+              - 'null'
+              properties:
+                id:
+                  type: integer
+                external_code:
+                  type: string
+            product:
+              type:
+              - object
+              - 'null'
+              properties:
+                id:
+                  type: integer
+                sku:
+                  type: string
+                name:
+                  type: string
+            expected_contribution:
+              type:
+              - number
+              - 'null'
+              description: Lo esperado al generar; NULL si el costo no era confiable
+            attribution_label_at_generation:
+              type: string
+              enum:
+              - potential_unproven
+              - incremental_estimated
+              - causally_attributable
+              description: La etiqueta al generar no cambia al medir; la clasificación medida está en `classification`
+        action_kind:
+          type: string
+          enum:
+          - contacted
+          - executed
+          - not_contacted
+          - not_executed
+          - rejected
+          - expired
+          - control
+          description: Qué pasó con la recomendación DENTRO de la ventana. `control` = retenida a propósito en el
+            experimento. Una acción registrada tras cerrar la ventana no cuenta (not_contacted / not_executed)
+        action_label:
+          type:
+          - string
+          - 'null'
+        action_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 'PRIMER momento en que quedó REGISTRADA la acción (cota conservadora: la acción real pudo
+            ser anterior)'
+        window:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+              description: as_of + 1
+            to:
+              type: string
+              format: date
+              description: as_of + horizonte
+            knowledge_cutoff:
+              type:
+              - string
+              - 'null'
+              format: date
+              description: Fecha local hasta la que se leyeron las ventas (to + margen de espera)
+        observed_event:
+          type: string
+          enum:
+          - purchase
+          - no_purchase
+          - product_sales
+          - stockout
+          - no_sell_through
+          description: '`no_sell_through` = al cierre de la ventana la disponibilidad no bajó respecto de la de
+            la recomendación (observación de existencias, no un diagnóstico de exceso)'
+        observed_ref:
+          type:
+          - string
+          - 'null'
+          description: Referencia sin datos personales (`sale:<id>`)
+        observed_units:
+          type:
+          - number
+          - 'null'
+          description: Unidades netas de devoluciones (nunca negativas) de la VENTANA COMPLETA
+        observed_net_amount:
+          type:
+          - number
+          - 'null'
+          description: Importe neto de la ventana completa (observación; incluye compras anteriores a la acción)
+        contribution:
+          type:
+          - number
+          - 'null'
+          description: Importe neto − unidades netas × costo unitario confiable, de la ventana completa. `null`
+            si el costo no es confiable; 0 si no hubo compra
+        contribution_status:
+          type:
+          - string
+          - 'null'
+          enum:
+          - known
+          - unknown
+          - not_applicable_no_purchase
+          - null
+        contribution_reasons:
+          type: array
+          items:
+            type: string
+          description: Por qué el costo no es confiable (códigos de W5-B)
+        after_action:
+          type:
+          - object
+          - 'null'
+          description: 'SOLO lo posterior a la acción registrada (compras emitidas después, netas de las devoluciones
+            emitidas también después) y su contribución: lo único asociable a la acción. `null` si no hubo acción
+            registrada dentro de la ventana'
+          properties:
+            units:
+              type: number
+            net_amount:
+              type: number
+            contribution:
+              type:
+              - number
+              - 'null'
+            contribution_status:
+              type:
+              - string
+              - 'null'
+              enum:
+              - known
+              - unknown
+              - not_applicable_no_purchase
+              - null
+            contribution_reasons:
+              type: array
+              items:
+                type: string
+            purchase_lines:
+              type: integer
+        contact_cost:
+          type:
+          - number
+          - 'null'
+          description: action_cost de la recomendación si hubo una acción registrada dentro de la ventana; 0 sin
+            acción; null si hubo acción y no hay costo configurado (desconocido) o si es un tipo por producto
+        classification:
+          type: string
+          enum:
+          - forecast
+          - observed
+          - temporally_associated
+          - incremental_estimated
+          - causally_attributable
+          description: Las filas son `observed` o `temporally_associated`
+        classification_label:
+          type: string
+        classification_note:
+          type: string
+          description: Lo que la clasificación SÍ y NO afirma
+        method:
+          type: string
+          enum:
+          - itt
+          - quasi_experiment
+          - none
+          description: 'Siempre `none` en las filas: el ITT es un método del agregado'
+        evidence:
+          type: object
+          additionalProperties: true
+          description: 'Ventana y margen de espera (`window`), lectura as-of (`source`: corte de conocimiento, huella
+            SHA-256 de las líneas leídas, líneas tardías no contadas, líneas revisadas o retiradas después), acción
+            (`action`), alcance (`scope`), observación (`observation`, incluidas `returns_after_window` y `purchases_before/after_action`),
+            `after_action`, contribución (`contribution`: por producto, desconocidos y motivos), `unit_costs`, `lines`
+            (venta, línea, producto, unidades, importe, devolución, posterior a la acción; para deduplicar entre
+            recomendaciones; `lines_truncated` si hay más de 100) y `classification_reason`. Solo para quien puede
+            aprobar: `experiment`, `itt` y `unit`. Sin datos personales.'
+        measured_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        experiment_group:
+          type:
+          - string
+          - 'null'
+          enum:
+          - treatment
+          - control
+          - null
+          description: Solo con decisions.approve
+    OutcomeExperiment:
+      type: object
+      description: Análisis por intención de tratamiento de un experimento y horizonte. Solo para quien puede aprobar.
+        Cada parte se publica solo si su base lo permite; si no, no hay diferencia ni intervalo.
+      properties:
+        experiment_key:
+          type:
+          - string
+          - 'null'
+          description: null = unidades con grupo que no se pudieron atribuir a un experimento (clave no registrada
+            o ambigua)
+        horizon_days:
+          type: integer
+        method:
+          type: string
+          enum:
+          - itt
+        status:
+          type: string
+          enum:
+          - estimated
+          - insufficient_sample
+          - no_control_group
+          - no_treatment_group
+          - heterogeneous_control_fraction
+          - not_analysed
+        confidence_level:
+          type: number
+        z:
+          type: number
+        min_group_size:
+          type: integer
+          description: Provisional, «a aprobar en el piloto»; piso de 20
+        min_buyers_per_arm:
+          type: integer
+          description: Compradores mínimos por grupo para publicar el intervalo monetario; provisional, piso de
+            5
+        sample:
+          type: object
+          properties:
+            treatment:
+              type: integer
+            control:
+              type: integer
+            treatment_converted:
+              type: integer
+            control_converted:
+              type: integer
+        control_fractions:
+          type: array
+          items:
+            type: number
+        sample_ratio:
+          type: object
+          description: 'Cociente de muestras (SRM): proporción observada de control frente a la fracción registrada
+            al asignar (χ², 1 g.l.)'
+          properties:
+            status:
+              type: string
+              enum:
+              - ok
+              - mismatch
+              - not_evaluable
+            expected_control_fraction:
+              type:
+              - number
+              - 'null'
+            observed_control_share:
+              type:
+              - number
+              - 'null'
+            chi_square:
+              type: number
+            p_value:
+              type: number
+            threshold:
+              type: number
+            note:
+              type: string
+        dropped_units:
+          type: object
+          description: Clientes descartados del análisis por grupo declarado en la recomendación
+          properties:
+            repeat_customer:
+              $ref: '#/components/schemas/OutcomeArmCounts'
+            unverified_assignment:
+              $ref: '#/components/schemas/OutcomeArmCounts'
+            conflicting_groups:
+              $ref: '#/components/schemas/OutcomeArmCounts'
+        contamination:
+          type: object
+          properties:
+            control_units_with_registered_action:
+              type: integer
+        estimators:
+          type: object
+          additionalProperties:
+            type: string
+        conversion:
+          type: object
+          properties:
+            rate_treatment:
+              type:
+              - number
+              - 'null'
+            rate_control:
+              type:
+              - number
+              - 'null'
+            difference:
+              type:
+              - number
+              - 'null'
+            ci_low:
+              type:
+              - number
+              - 'null'
+            ci_high:
+              type:
+              - number
+              - 'null'
+            significant:
+              type:
+              - boolean
+              - 'null'
+              description: El intervalo excluye 0
+        contribution:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+              - estimated
+              - insufficient_sample
+              - not_estimable
+              - not_estimated
+            reason:
+              type:
+              - string
+              - 'null'
+              description: contribution_population_below_min_group_size · buyers_below_min_per_arm · zero_variance
+                · bootstrap_budget_exceeded · o el estado del experimento si no se estimó
+            population:
+              $ref: '#/components/schemas/OutcomeArmCounts'
+            buyers:
+              $ref: '#/components/schemas/OutcomeArmCounts'
+            excluded_unreliable_cost:
+              $ref: '#/components/schemas/OutcomeArmCounts'
+            mean_treatment:
+              type: number
+            mean_control:
+              type: number
+            difference_per_unit:
+              type: number
+            ci_low:
+              type: number
+              description: Percentil del bootstrap
+            ci_high:
+              type: number
+            significant:
+              type: boolean
+            interval:
+              type: object
+              properties:
+                method:
+                  type: string
+                  enum:
+                  - bootstrap_percentile
+                engine:
+                  type: string
+                resamples:
+                  type: integer
+                  description: Remuestreos efectivos (pueden ser menos que los pedidos si el cómputo supera el tope)
+                resamples_requested:
+                  type: integer
+                seed:
+                  type: integer
+                  description: 'Semilla registrada: mismos datos y semilla, mismo intervalo'
+                seed_derivation:
+                  type: string
+                resampling:
+                  type: string
+                std_error:
+                  type: number
+            tail_diagnostic:
+              type: object
+              description: 'Cola de la contribución de quienes compran. Ningún intervalo no paramétrico alcanza
+                su nivel nominal con muestras de decenas o cientos de unidades cuando pocos compradores concentran
+                el importe (cobertura medida de 74 a 94 %): con `heavy_tailed` el ROI añade el motivo `heavy_tailed_contribution`
+                y el intervalo monetario debe leerse como indicativo'
+              properties:
+                buyer_cv:
+                  type: number
+                  description: Coeficiente de variación de los valores de quien compra (umbral 1,5)
+                largest_buyer_share_of_arm:
+                  type: number
+                  description: Mayor participación de un solo comprador en el total de su grupo (umbral 0,25)
+                heavy_tailed:
+                  type: boolean
+                thresholds:
+                  type: object
+                  additionalProperties:
+                    type: number
+                note:
+                  type: string
+            diagnostic_welch:
+              type: object
+              description: 'Solo diagnóstico: NO es el intervalo publicado (subestima la incertidumbre con contribución
+                cero-inflada y de cola pesada)'
+              properties:
+                std_error:
+                  type: number
+                ci_low:
+                  type: number
+                ci_high:
+                  type: number
+                note:
+                  type: string
+        incremental:
+          type:
+          - object
+          - 'null'
+          properties:
+            basis:
+              type: string
+            treated_units:
+              type: integer
+            contribution:
+              type: number
+            ci_low:
+              type: number
+            ci_high:
+              type: number
+        note:
+          type: string
+        contact_cost:
+          type: object
+          description: De las unidades de tratamiento del propio análisis (sin el filtro de tipo)
+          properties:
+            total:
+              type: number
+            actions:
+              type: integer
+            actions_cost_unknown:
+              type: integer
+            basis:
+              type: string
+    OutcomeArmCounts:
+      type: object
+      properties:
+        treatment:
+          type: integer
+        control:
+          type: integer
+    OutcomeRoi:
+      type: object
+      description: ROI honesto. `proven` es siempre false y `causal_claims` es 0 en esta versión. Quien no puede
+        aprobar solo recibe status, label, value, proven, causal_claims, currency y message.
+      properties:
+        status:
+          type: string
+          enum:
+          - potential_unproven
+          - incremental_estimated
+          - incremental_conversion_only
+          - multiple_experiments
+        label:
+          type: string
+        proven:
+          type: boolean
+        causal_claims:
+          type: integer
+        currency:
+          type: string
+        value:
+          type:
+          - number
+          - 'null'
+          description: Siempre null sin estimación (potential_unproven, multiple_experiments y el detalle oculto)
+        reasons:
+          type: array
+          items:
+            type: string
+          description: no_control_group, insufficient_sample, contact_cost_unknown, buyers_below_min_per_arm, sample_ratio_mismatch,
+            platform_usage_not_monetized…
+        message:
+          type: string
+        associated_note:
+          type: string
+        data_origin_warning:
+          type: string
+          description: 'Presente mientras el origen de los datos no esté declarado como real (sin declarar: «origen
+            no verificado»; demo o simulado: los importes NO son reales)'
+        experiments:
+          type: array
+          items:
+            type: string
+          description: 'Con multiple_experiments: «clave|horizonte» de cada experimento estimado'
+        experiment_key:
+          type: string
+        horizon_days:
+          type: integer
+        confidence_level:
+          type: number
+        conversion:
+          type: object
+          additionalProperties: true
+        sample:
+          type: object
+          additionalProperties:
+            type: integer
+        sample_ratio:
+          type: object
+          additionalProperties: true
+        incremental_contribution:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+        contact_cost:
+          type: object
+          additionalProperties: true
+        net_incremental_contribution:
+          type:
+          - object
+          - 'null'
+          description: Incremento − costos de contacto, con intervalo; null si el costo de algún contacto es desconocido
+          properties:
+            estimate:
+              type: number
+            ci_low:
+              type: number
+            ci_high:
+              type: number
+            significant:
+              type: boolean
+        roi_ratio:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: neto / costo de contacto, con intervalo; null sin costo de contacto
+        net_after_platform_usage:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: Solo con precios de uso configurados
+    OutcomeRoiReport:
+      type: object
+      description: Informe de ROI y outcomes honesto (V2.5 · W5-C). Separa oportunidad potencial, observación e
+        incremento estimado; nunca los suma.
+      properties:
+        method:
+          type: object
+          additionalProperties: true
+          description: Método, clasificaciones y parámetros provisionales vigentes
+        filters:
+          type: object
+          properties:
+            kind:
+              type:
+              - array
+              - 'null'
+              items:
+                type: string
+            horizon_days:
+              type:
+              - integer
+              - 'null'
+            from:
+              type: string
+              format: date
+              description: Efectivo (con el valor por omisión aplicado si no se indicó)
+            to:
+              type: string
+              format: date
+            period_days:
+              type: integer
+            period_defaulted:
+              type: boolean
+              description: true si `from` o `to` se tomaron por omisión (últimos 180 días)
+            period_default_days:
+              type: integer
+            period_max_days:
+              type: integer
+            period_basis:
+              type: string
+            experiment_key:
+              type:
+              - string
+              - 'null'
+            group_by:
+              type: string
+              enum:
+              - kind
+              - horizon
+              - segment
+              - owner
+        currency:
+          type: string
+        today:
+          type: string
+          format: date
+        data_origin:
+          type: object
+          description: 'Origen declarado de los datos (`tenants.settings.data_origin`; las empresas de demostración
+            declaran `demo`). Sin declarar no se supone real; demo o simulado: los importes NO son resultados reales.'
+          properties:
+            value:
+              type:
+              - string
+              - 'null'
+              enum:
+              - real
+              - demo
+              - simulated
+              - null
+            declared:
+              type: boolean
+            note:
+              type: string
+        summary:
+          $ref: '#/components/schemas/OutcomeRoiSummary'
+        experiments:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutcomeExperiment'
+          description: Solo con decisions.approve
+        costs:
+          type: object
+          properties:
+            contact:
+              type: object
+              additionalProperties: true
+            platform_usage:
+              type: object
+              additionalProperties: true
+        roi:
+          $ref: '#/components/schemas/OutcomeRoi'
+        breakdown:
+          type: object
+          properties:
+            group_by:
+              type: string
+              enum:
+              - kind
+              - horizon
+              - segment
+              - owner
+            rows:
+              type: array
+              items:
+                allOf:
+                - $ref: '#/components/schemas/OutcomeRoiSummary'
+                - type: object
+                  properties:
+                    key:
+                      type: string
+                    label:
+                      type: string
+                    contact_cost:
+                      type: object
+                      additionalProperties: true
+        limitations:
+          type: array
+          items:
+            type: string
+    OutcomeRoiSummary:
+      type: object
+      properties:
+        funnel:
+          type: object
+          properties:
+            recommendations:
+              type: integer
+            superseded_not_counted:
+              type: integer
+              description: 'Reemplazadas por una más nueva: no son otra oportunidad'
+            identified:
+              type: integer
+            control_held_out:
+              type: integer
+              description: Solo con decisions.approve
+            actionable:
+              type: integer
+            measured:
+              type: integer
+            measured_actionable:
+              type: integer
+            forecast_pending:
+              type: object
+              description: 'Previsto (aún sin medir): ventana abierta, en espera de documentos tardíos o medible
+                y aún sin medir'
+              additionalProperties:
+                type: integer
+            attended:
+              type: integer
+            action_rate:
+              type:
+              - number
+              - 'null'
+            responded_after_action:
+              type: integer
+            response_rate:
+              type:
+              - number
+              - 'null'
+              description: Asociación temporal, no efecto
+            notes:
+              type: object
+              additionalProperties:
+                type: string
+        by_classification:
+          type: object
+          additionalProperties:
+            type: integer
+          description: 'Incluye `forecast` (virtual: no se persiste). `incremental_estimated` es siempre 0 en las
+            filas'
+        by_action_kind:
+          type: object
+          additionalProperties:
+            type: integer
+          description: '`control` solo con decisions.approve'
+        potential:
+          type: object
+          properties:
+            label:
+              type: string
+            cells:
+              type: array
+              description: Una celda por tipo y horizonte; no se suman
+              items:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                  horizon_days:
+                    type: integer
+                  recommendations:
+                    type: integer
+                  expected_contribution:
+                    type: number
+                  recommendations_without_reliable_cost:
+                    type: integer
+                  expected_gross_value:
+                    type: number
+            note:
+              type: string
+        observed:
+          type: object
+          description: Compras de clientes en la ventana, deduplicadas por línea de venta (cliente × producto ×
+            venta × línea)
+          properties:
+            label:
+              type: string
+            customers:
+              type: integer
+            purchase_lines:
+              type: integer
+            units:
+              type: number
+            net_amount:
+              type: number
+            contribution_known:
+              type: number
+            pairs_with_unknown_contribution:
+              type: integer
+            recommendations_with_purchase:
+              type: integer
+            rows_without_line_detail:
+              type: integer
+              description: 'Resultados sin detalle de líneas (más de 100 o anteriores a este formato): se suman
+                por recomendación'
+            per_recommendation:
+              $ref: '#/components/schemas/OutcomePerRecommendation'
+            note:
+              type: string
+        associated:
+          type: object
+          description: SOLO lo posterior a la acción registrada, deduplicado
+          properties:
+            label:
+              type: string
+            recommendations:
+              type: integer
+            customers:
+              type: integer
+            units:
+              type: number
+            net_amount:
+              type: number
+            contribution_known:
+              type: number
+            pairs_with_unknown_contribution:
+              type: integer
+            rows_without_line_detail:
+              type: integer
+            per_recommendation:
+              $ref: '#/components/schemas/OutcomePerRecommendation'
+            note:
+              type: string
+        control_baseline:
+          type: object
+          additionalProperties: true
+          description: Solo con decisions.approve
+        supply:
+          type: object
+          additionalProperties: true
+          description: Quiebres, `no_sell_through` y ventas del producto observados en los tipos por producto
+    OutcomePerRecommendation:
+      type: object
+      description: 'Suma por recomendación, solo para el detalle: NO es aditiva (varias recomendaciones pueden observar
+        la misma venta)'
+      properties:
+        rows:
+          type: integer
+        units:
+          type: number
+        net_amount:
+          type: number
+        contribution_known:
+          type: number
+        rows_with_known_contribution:
+          type: integer
+        rows_with_unknown_contribution:
+          type: integer
+        note:
+          type: string

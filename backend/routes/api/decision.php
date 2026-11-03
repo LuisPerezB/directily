@@ -12,10 +12,15 @@
 | - POST decisions/{id}/transition    transición del workflow con idempotency_key (decisions.manage como mínimo; approve/reject exigen decisions.approve
 |                                     y segregación de funciones; el workflow lo decide por transición).
 | Rutas de outcomes y ROI (W5-C) se agregan al final de este archivo.
+|
+| Outcomes y ROI honestos (V2.5 · W5-C; ADR-V25-14), SOLO LECTURA. Contrato: docs/decision/OUTCOME_MEASUREMENT.md y docs/openapi/v2.yaml.
+| - GET decisions/outcomes  resultados medidos por recomendación, con filtros y paginado (decisions.view). El grupo de control solo lo lista quien aprueba.
+| - GET decisions/roi       ROI honesto con su método: potencial vs observado vs incremento estimado (ITT), costos y límites (decisions.view).
 */
 
 use App\Http\Controllers\Api\Decision\DecisionController;
 use App\Http\Controllers\Api\Decision\DecisionSettingsController;
+use App\Http\Controllers\Api\Decision\OutcomeController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', 'throttle:api', 'tenant'])->prefix('decisions')->name('decisions.')->group(function (): void {
@@ -31,3 +36,7 @@ Route::middleware(['auth:sanctum', 'throttle:api', 'tenant'])->prefix('decisions
 });
 
 // >>> W5-C outcomes y ROI (rutas de outcomes: las agrega W5-C debajo de esta línea)
+Route::middleware(['auth:sanctum', 'throttle:api', 'tenant', 'tenant.ability:decisions.view'])->prefix('decisions')->name('decisions.')->group(function (): void {
+    Route::get('outcomes', [OutcomeController::class, 'index'])->name('outcomes.index');
+    Route::get('roi', [OutcomeController::class, 'roi'])->name('outcomes.roi');
+});
