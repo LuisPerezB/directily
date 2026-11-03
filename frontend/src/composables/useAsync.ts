@@ -15,7 +15,16 @@ export interface AsyncState<T> {
  */
 export function useAsync<T>(
   fn: () => Promise<T>,
-  options: { immediate?: boolean; watch?: WatchSource[] | WatchSource; debounce?: number } = {},
+  options: {
+    immediate?: boolean
+    watch?: WatchSource[] | WatchSource
+    debounce?: number
+    /**
+     * A quién pertenecen los datos (p. ej. la empresa activa). Al cambiar, los datos y el error anteriores se descartan DE INMEDIATO y se vuelve a pedir: ninguna
+     * respuesta de un alcance anterior queda en pantalla (ni llega tarde) bajo el nombre, la moneda o los permisos del nuevo.
+     */
+    scope?: WatchSource<unknown>
+  } = {},
 ): AsyncState<T> {
   const data = shallowRef<T | null>(null) as Ref<T | null>
   const error = ref<unknown>(null)
@@ -55,6 +64,16 @@ export function useAsync<T>(
         void execute()
       }
     }, { deep: true })
+  }
+  if (options.scope) {
+    watch(options.scope, () => {
+      if (timer) clearTimeout(timer)
+      // Lo que esté en vuelo es del alcance anterior: execute() invalida su respuesta (nueva secuencia) y ya no se aplica.
+      data.value = null
+      error.value = null
+      loaded.value = false
+      void execute()
+    })
   }
   onScopeDispose(() => {
     if (timer) clearTimeout(timer)

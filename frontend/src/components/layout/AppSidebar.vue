@@ -36,6 +36,16 @@ const groups = computed<{ title: string; items: NavItem[] }[]>(() => [
     ],
   },
   {
+    title: t('nav.groupEnterprise'),
+    items: [
+      { name: 'executive-overview', label: t('nav.executiveOverview'), icon: 'trend-up', ability: 'forecast.view' },
+      { name: 'radar', label: t('nav.radar'), icon: 'search', ability: 'forecast.view' },
+      { name: 'decision-center', label: t('nav.decisionCenter'), icon: 'shield', ability: 'decisions.view' },
+      { name: 'roi-outcomes', label: t('nav.roiOutcomes'), icon: 'chart', ability: 'decisions.view' },
+      { name: 'enterprise-admin', label: t('nav.enterpriseAdmin'), icon: 'key', ability: 'models.approve' },
+    ],
+  },
+  {
     title: t('nav.groupData'),
     items: [
       { name: 'data-sources', label: t('nav.dataSources'), icon: 'database', ability: 'data.view' },

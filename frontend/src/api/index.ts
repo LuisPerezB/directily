@@ -159,7 +159,7 @@ export const accuracyApi = {
     getData<T.AccuracyComparison>('/accuracy/comparison', params),
   evaluations: (params: { run_id: number; evaluation_type?: string; level?: string }) =>
     getData<T.ModelEvaluation[]>('/model-evaluations', params),
-  models: (params?: { status?: string; role?: string; core?: string; run_id?: number; per_page?: number }) =>
+  models: (params?: { status?: string; role?: string; core?: string; run_id?: number; per_page?: number; page?: number }) =>
     getPage<T.ModelRegistryEntry>('/models', params),
 }
 
@@ -171,7 +171,7 @@ export const accuracyApi = {
 export function booleanFiltersAsBits<P extends object>(params: P | undefined): P | undefined {
   if (!params) return params
   const out: Record<string, unknown> = { ...(params as Record<string, unknown>) }
-  for (const key of ['is_selected', 'is_baseline', 'is_effective']) {
+  for (const key of ['is_selected', 'is_baseline', 'is_effective', 'mine', 'requires_approval', 'contribution_known']) {
     if (typeof out[key] === 'boolean') out[key] = out[key] ? 1 : 0
   }
   return out as P
@@ -189,6 +189,43 @@ export const modelQualityApi = {
 export const modelsApi = {
   rollbackDemand: (runId: number) => postData<T.DemandRollbackResult>('/models/demand/rollback', { run_id: runId }),
   rollbackCustomer: (modelRegistryId: number) => postData<T.CustomerRollbackResult>('/models/customer/rollback', { model_registry_id: modelRegistryId }),
+}
+
+// ─── Ciclo de vida de modelos (V2.5 · W4): validar (forecast.run), aprobar, rechazar y promover (models.approve; aprobación separada) ─
+export const modelLifecycleApi = {
+  show: (id: number) => getData<T.ModelLifecycleDetail>(`/models/${id}`),
+  validate: (id: number, reason?: string) => postData<T.ModelLifecycleDetail>(`/models/${id}/validate`, reason ? { reason } : {}),
+  approve: (id: number, reason?: string) => postData<T.ModelLifecycleDetail>(`/models/${id}/approve`, reason ? { reason } : {}),
+  reject: (id: number, reason: string) => postData<T.ModelLifecycleDetail>(`/models/${id}/reject`, { reason }),
+  promote: (id: number, reason?: string) => postData<T.ModelLifecycleDetail>(`/models/${id}/promote`, reason ? { reason } : {}),
+}
+
+// ─── Revenue Radar y Agenda Comercial (V2.5 · W5-A; fachadas sobre Customer Core y el Decision Engine) ─
+export const radarApi = {
+  summary: (params?: T.RadarFilterQuery) => http.get<T.RadarSummaryResponse>('/radar/summary', { params: cleanParams(params) }).then((r) => r.data),
+  opportunities: (params?: T.RadarFilterQuery) => http.get<T.RadarOpportunitiesPage>('/radar/opportunities', { params: cleanParams(params) }).then((r) => r.data),
+  opportunity: (id: number) => http.get<T.RadarOpportunityResponse>(`/radar/opportunities/${id}`).then((r) => r.data),
+  agenda: (params?: T.RadarFilterQuery & { date?: string }) => http.get<T.RadarAgendaPage>('/radar/agenda', { params: cleanParams(params) }).then((r) => r.data),
+  /** Seguimiento de una oportunidad (decisions.manage). Registra lo que una persona hizo: Predictily no envía mensajes. */
+  feedback: (id: number, body: T.RadarFeedbackBody) => http.post<T.RadarFeedbackResult>(`/radar/opportunities/${id}/feedback`, body).then((r) => r.data),
+  /** Propone al Decision Engine las oportunidades de la predicción vigente (forecast.run). */
+  materialize: (horizons?: number[]) => postData<T.RadarMaterialization>('/radar/opportunities/materialize', horizons?.length ? { horizons } : {}),
+}
+
+// ─── Decision Engine y workflow (V2.5 · W5-B) ──────────────────────────────
+export const decisionApi = {
+  list: (params?: T.DecisionQuery) => getPage<T.DecisionRecommendation>('/decisions', booleanFiltersAsBits(params)),
+  summary: () => getData<T.DecisionSummary>('/decisions/summary'),
+  show: (id: number) => getData<T.DecisionRecommendation>(`/decisions/${id}`),
+  /** Transición del workflow (decisions.manage como mínimo). Siempre con `expected_version` e `idempotency_key`; el servidor decide la habilidad y la segregación. */
+  transition: (id: number, body: T.DecisionTransitionBody) => http.post<T.DecisionTransitionResult>(`/decisions/${id}/transition`, body).then((r) => r.data),
+  settings: () => getData<T.DecisionSettingsData>('/decisions/settings'),
+}
+
+// ─── Outcomes y ROI honestos (V2.5 · W5-C; solo lectura, decisions.view) ───
+export const outcomeApi = {
+  list: (params?: T.OutcomeQuery) => getPage<T.DecisionOutcome>('/decisions/outcomes', booleanFiltersAsBits(params)),
+  roi: (params?: T.RoiQuery) => getData<T.OutcomeRoiReport>('/decisions/roi', params),
 }
 
 // ─── Inventario y alertas ──────────────────────────────────────────────────

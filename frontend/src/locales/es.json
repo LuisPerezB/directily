@@ -154,7 +154,13 @@
     "admin": "Administración de la plataforma",
     "customers": "Compradores",
     "supply": "Plan de compras",
-    "assistant": "Asistente"
+    "assistant": "Asistente",
+    "groupEnterprise": "Enterprise",
+    "executiveOverview": "Resumen ejecutivo",
+    "radar": "Revenue Radar",
+    "decisionCenter": "Centro de decisiones",
+    "roiOutcomes": "ROI y resultados",
+    "enterpriseAdmin": "Administración"
   },
   "filters": {
     "title": "Filtros",
@@ -2949,5 +2955,755 @@
     "cold_start": "El comprador tiene muy pocas compras de este producto: su calibración se mide aparte y no hay ventana.",
     "window_beyond_validation": "El extremo alto de la ventana es más largo que el seguimiento con que se validó: esa cola no está comprobada.",
     "quantity_coherence_adjusted": "La cantidad si compra se subió a la de un horizonte menor para que los horizontes sean coherentes entre sí."
+  },
+  "enterprise": {
+    "asOf": "Datos hasta {date}",
+    "asOfMissing": "Fecha de corte no informada",
+    "asOfLive": "Conteo al momento de la consulta",
+    "stale": "{n} día(s) de antigüedad",
+    "unit": "Unidad: {unit}",
+    "unitUndeclared": "Unidad no declarada",
+    "currency": "Moneda: {currency}",
+    "uncertainty": "Incertidumbre: {text}",
+    "coverage": "Cobertura: {text}",
+    "origin": {
+      "real": "Datos reales (declarado)",
+      "demo": "Datos de demostración",
+      "simulated": "Datos simulados",
+      "undeclared": "Origen de datos no verificado"
+    },
+    "originBand": {
+      "demo": {
+        "title": "Datos de demostración",
+        "text": "Esta empresa declaró datos de demostración: los importes y resultados de estas vistas NO son resultados reales."
+      },
+      "simulated": {
+        "title": "Datos simulados",
+        "text": "Esta empresa declaró datos simulados: los importes y resultados de estas vistas NO son resultados reales."
+      },
+      "undeclared": {
+        "text": "Origen de los datos no verificado: la empresa no declaró si son reales, de demostración o simulados, y no se supone que sean reales."
+      }
+    },
+    "notEstimated": "No estimado",
+    "notEstimatedF": "No estimada",
+    "unreliableCost": "Costo no confiable",
+    "attribution": {
+      "potential_unproven": "Oportunidad potencial, atribución no demostrada",
+      "incremental_estimated": "Incremento estimado con evidencia (no es causalidad demostrada)",
+      "causally_attributable": "Atribuible causalmente (grupo de control registrado)"
+    },
+    "attributionNote": "El valor esperado no implica ventas incrementales causadas por la acción.",
+    "system": "Sistema",
+    "userN": "Usuario {id}",
+    "reasons": {
+      "no_sales_history": "Sin historial de ventas del producto",
+      "no_cost_in_sales_lines": "Las ventas no traen costo",
+      "insufficient_cost_observations": "Pocas observaciones de costo",
+      "cost_coverage_low": "Cobertura de costo baja",
+      "cost_dispersion_high": "Costo muy variable",
+      "purchase_history_insufficient": "Historial de compras insuficiente",
+      "purchase_history_dispersion_high": "Costo de compra muy variable",
+      "no_purchase_cost_history": "Sin historial de costo de compra",
+      "no_product_scope": "Sin producto asociado",
+      "no_units_or_price": "Sin unidades o precio"
+    },
+    "roles": {
+      "proposer": "quien la propuso",
+      "executor": "quien debe ejecutarla",
+      "approver": "quien la aprobó",
+      "published_by": "quien publicó el modelo",
+      "training_job_user_id": "quien disparó su entrenamiento",
+      "run_training_job_user_id": "quien disparó el entrenamiento de su corrida",
+      "forecast_runs_user_id": "quien lanzó su corrida de pronóstico",
+      "core_runs_user_id": "quien lanzó su corrida"
+    },
+    "errors": {
+      "version_conflict": "Otra persona cambió esta recomendación mientras usted la revisaba. Se recargó con la versión vigente: revísela y repita la acción si aún corresponde.",
+      "forbidden": "Su rol no tiene permiso para esta acción. Pida acceso al propietario o administrador.",
+      "segregation": "La segregación de funciones no le permite hacer esta acción: debe decidirla otra persona.",
+      "segregationRoles": "La segregación de funciones no le permite hacer esta acción porque usted es {roles}. Debe decidirla otra persona.",
+      "approval_required": "Esta acción es sensible y exige la aprobación de otra persona antes de ejecutarse.",
+      "not_allowed": "Esa transición ya no está permitida desde el estado actual. Se recargó la información vigente.",
+      "control": "Esta recomendación se retiene para medición: no se puede asignar, aprobar ni ejecutar.",
+      "key_reused": "La clave de la operación ya se usó con otro contenido. Cierre este cuadro y repita la acción.",
+      "validation": "Los datos enviados no son válidos. Revise los campos.",
+      "not_found": "No se encontró el registro. Puede haber cambiado o no pertenecer a esta empresa.",
+      "conflict": "La acción no se pudo completar por un conflicto de estado. Recargue e intente de nuevo.",
+      "network": "No se pudo conectar con el servidor. Reintente: si la acción ya se registró, no se repetirá.",
+      "server": "El servidor tuvo un problema. Reintente en unos minutos: la acción no se duplicará.",
+      "unknown": "No se pudo completar la acción.",
+      "codes": {
+        "invalid_transition": "Ese cambio de estado no está permitido desde el estado actual de la oportunidad.",
+        "opportunity_closed": "La oportunidad ya está cerrada (rechazada, vencida, medida o cerrada): no admite más seguimiento.",
+        "snooze_beyond_expiry": "La fecha de reactivación supera el vencimiento de la oportunidad: elija una fecha anterior.",
+        "horizon_not_available": "Ese horizonte no está disponible en la corrida vigente."
+      }
+    },
+    "generatedAt": "Informe generado el {date}",
+    "actionsHeader": "Acciones",
+    "partial": {
+      "cost": "{n} sin costo confiable: su contribución no está estimada y no entra en esta suma.",
+      "value": "{n} sin valor estimado: no entran en esta suma."
+    }
+  },
+  "exec": {
+    "refresh": "Actualizar",
+    "title": "Resumen ejecutivo",
+    "subtitle": "Pronóstico, stock, oportunidades, decisiones pendientes y resultados medidos. Solo agrega lo que entregan las APIs de Predictily; lo que no existe se dice.",
+    "forecast": {
+      "title": "Pronóstico de demanda",
+      "none": "Aún no hay un pronóstico para este horizonte.",
+      "incomplete": "El horizonte no tiene respaldo suficiente: no se publica una cifra como completa.",
+      "noInterval": "Intervalo no disponible",
+      "lastSale": "última venta {date}"
+    },
+    "stock": {
+      "title": "Stock y capacidad",
+      "unit": "productos",
+      "noInterval": "sin intervalo (conteo de productos)",
+      "none": "Aún no hay una fotografía de inventario.",
+      "atRisk": "Productos con riesgo alto o crítico",
+      "coverage": "Cobertura mediana",
+      "capacityUnavailable": "Capacidad: no disponible. Ninguna API entrega hoy un indicador de capacidad; no se inventa uno."
+    },
+    "radar": {
+      "title": "Oportunidades comerciales",
+      "uncertainty": "valor supuesto; sin intervalo",
+      "none": "Aún no hay oportunidades.",
+      "horizon": "Horizonte de {n} días",
+      "count": "{opportunities} oportunidades de {customers} clientes",
+      "decline": "Caída observada del gasto (nivel de cliente)",
+      "open": "Abrir Revenue Radar"
+    },
+    "decisions": {
+      "title": "Decisiones pendientes",
+      "unit": "recomendaciones",
+      "uncertainty": "conteos exactos; sin intervalo",
+      "open": "Abrir Centro de decisiones"
+    },
+    "outcomes": {
+      "title": "Resultados medidos",
+      "note": "Cada resultado lleva su clasificación. Observado y asociado no son beneficio atribuible; sin grupo de control no hay cifra de ROI.",
+      "open": "Abrir ROI y resultados",
+      "period": "Periodo: cortes del {from} al {to} ({n} días)."
+    },
+    "unavailable": {
+      "title": "Indicadores no disponibles",
+      "capacity": "Capacidad: la API no entrega un indicador de capacidad.",
+      "benefit": "Beneficio incremental probado: no existe en esta versión; requiere un piloto con datos reales y grupo de control.",
+      "kpis": "No se muestran otros indicadores: solo los que entregan las APIs de pronóstico, inventario, Radar, decisiones y resultados."
+    }
+  },
+  "radar": {
+    "title": "Revenue Radar",
+    "subtitle": "Oportunidades de contacto y recuperación por cliente y producto, ordenadas por prioridad. Un valor es una oportunidad potencial, no una venta confirmada.",
+    "noSendTitle": "Sin envíos automáticos",
+    "noSendNotice": "Predictily no envía mensajes ni escribe en el ERP. El seguimiento solo registra lo que una persona hizo.",
+    "notInPlan": "Su plan no incluye el comportamiento de compra, en el que se basa el Revenue Radar.",
+    "tabs": {
+      "oportunidades": "Oportunidades",
+      "agenda": "Agenda"
+    },
+    "unitOpportunities": "oportunidades",
+    "priority": "Prioridad {n}",
+    "wholeCustomer": "Todo el cliente",
+    "customerLevel": "Nivel de cliente",
+    "expectedOrders": "Pedidos esperados: {n}",
+    "expectedUnits": "Unidades esperadas: {n} {unit}",
+    "assignedTo": "Asignada a {name}",
+    "snoozedUntil": "Pospuesta hasta {date}",
+    "detail": "Detalle",
+    "detailTitle": "Oportunidad {id}",
+    "noRows": "No hay oportunidades con estos filtros.",
+    "emptyTitle": "Sin oportunidades",
+    "emptyText": "No hay oportunidades en la lista de trabajo con estos filtros. Pruebe otros filtros o genere las oportunidades de la predicción vigente.",
+    "explanation": "Explicación verificable",
+    "activity": "Ficha de actividad: {status}. Es ausencia respecto a su propio patrón, no abandono.",
+    "costUnreliable": "El costo no es confiable: no se estima la contribución.",
+    "costUnknown": "No hay declaración de costo para esta oportunidad: no se estima la contribución.",
+    "cols": {
+      "opportunity": "Oportunidad",
+      "signal": "Señal",
+      "value": "Valor",
+      "inventory": "Disponibilidad",
+      "state": "Estado",
+      "next": "Próxima acción"
+    },
+    "value": {
+      "forecastGross": "Valor bruto esperado (supuesto)",
+      "contribution": "Contribución esperada",
+      "observedDecline": "Caída observada del gasto",
+      "observedNote": "Importe observado, no un pronóstico ni una contribución; no se suma al valor pronosticado."
+    },
+    "inventory": {
+      "available": "{n} {unit} disponibles",
+      "inTransit": "En tránsito (aparte): {n}",
+      "unknown": "Sin dato de inventario",
+      "notApplicable": "No aplica"
+    },
+    "state": {
+      "pendiente": "Pendiente",
+      "contactado": "Contactado",
+      "interesado": "Interesado",
+      "pedido_recibido": "Pedido recibido",
+      "pospuesto": "Pospuesto",
+      "descartado": "Descartado"
+    },
+    "order": {
+      "score": "Puntaje",
+      "priority": "Prioridad",
+      "expected_gross_value": "Valor bruto esperado",
+      "expected_contribution": "Contribución esperada",
+      "probability": "Probabilidad",
+      "horizon_days": "Horizonte"
+    },
+    "filters": {
+      "all": "Todos",
+      "allHorizons": "Todos los horizontes",
+      "kind": "Tipo",
+      "state": "Estado de la agenda",
+      "status": "Estado del flujo",
+      "worklist": "Lista de trabajo",
+      "zone": "Zona comercial",
+      "mine": "Solo las asignadas a mí",
+      "customer": "Comprador {id}",
+      "clearCustomer": "Quitar el filtro de comprador"
+    },
+    "summary": {
+      "title": "Resumen por horizonte",
+      "totals": "{opportunities} oportunidades distintas · {customers} clientes",
+      "run": "corrida {id}",
+      "noCrossHorizon": "Cada horizonte se informa por separado: las ventanas se solapan y sumarlos contaría dos veces la misma compra.",
+      "horizonCounts": "{opportunities} oportunidades · {customers} clientes",
+      "forecastTitle": "Pronóstico de relaciones cliente por producto",
+      "forecastNote": "Supuesto: unidades esperadas por último precio neto. No es una venta confirmada.",
+      "contributionUnavailable": "{n} sin costo confiable: su contribución no está estimada.",
+      "customerLevelTitle": "Nivel de cliente (recuperación y riesgo)",
+      "customerLevelNote": "Es una caída observada del gasto neto, no un pronóstico ni una contribución; no se suma al pronóstico.",
+      "customerLevelCounts": "{opportunities} oportunidades · {customers} clientes",
+      "inventory": "Disponibilidad conocida: {known} · sin dato de inventario: {unknown}",
+      "degraded": "La calidad de la predicción no es completa: revise sus limitaciones.",
+      "envelope": "Trazabilidad de la predicción"
+    },
+    "agenda": {
+      "date": "Fecha de la agenda",
+      "hint": "Las pospuestas reaparecen desde su fecha de reactivación. Las cerradas (pedido recibido, descartada) salen de la agenda.",
+      "emptyTitle": "Agenda vacía",
+      "emptyText": "No hay oportunidades para gestionar en esta fecha con estos filtros.",
+      "count": "{n} oportunidades",
+      "nextAction": "Próxima acción"
+    },
+    "feedback": {
+      "open": "Registrar seguimiento",
+      "title": "Seguimiento de la oportunidad",
+      "noSend": "Registrar el seguimiento anota lo que usted hizo. Predictily no envía ningún mensaje al cliente.",
+      "none": "Esta oportunidad no admite más seguimiento (está cerrada o ya no está vigente).",
+      "readOnly": "Su rol puede consultar esta oportunidad, pero no registrar seguimiento.",
+      "state": "Nuevo estado",
+      "choose": "Elija un estado",
+      "snoozeUntil": "Reactivar el",
+      "snoozeHint": "Debe ser posterior a hoy y no superar un año ni el vencimiento de la oportunidad.",
+      "snoozeRequired": "Indique la fecha de reactivación.",
+      "note": "Nota (opcional)",
+      "noteHint": "Texto libre, hasta 500 caracteres. Se enmascaran correos y números largos.",
+      "submit": "Registrar",
+      "saved": "Seguimiento registrado.",
+      "replayed": "Ese seguimiento ya estaba registrado; no se repitió.",
+      "snoozeUnavailable": "Esta oportunidad vence antes de mañana: no se puede posponer.",
+      "snoozeUnavailableShort": "no disponible: vence pronto",
+      "alreadyApplied": "El seguimiento ya figuraba registrado: se recargó la oportunidad y no se repitió."
+    },
+    "history": {
+      "title": "Historial",
+      "feedbackFromTo": "Seguimiento: de {from} a {to}",
+      "feedbackTo": "Seguimiento: {to}",
+      "transition": "Flujo: {to}",
+      "assignment": "Asignación: {to}",
+      "comment": "Comentario del sistema"
+    },
+    "sync": {
+      "applied": "El flujo de trabajo avanzó a «{to}».",
+      "unchanged": "El flujo de trabajo ya estaba en ese estado.",
+      "skipped": "El seguimiento quedó registrado, pero el flujo de trabajo no se movió: {reason}"
+    },
+    "syncReasons": {
+      "decision_approval_required": "la acción es sensible y necesita aprobación",
+      "decision_segregation_of_duties": "la segregación de funciones lo impide",
+      "forbidden": "su rol no tiene la habilidad necesaria",
+      "transition_not_defined": "falta pasar por la revisión del flujo",
+      "already_in_state": "ya estaba en ese estado",
+      "control_group_not_actionable": "no se puede mover este registro",
+      "decision_version_conflict": "otra persona la cambió antes",
+      "agenda_state_does_not_change_workflow": "este estado no cambia el flujo",
+      "agenda_pending_never_moves_workflow_back": "reabrir no retrocede el flujo"
+    },
+    "statusMap": {
+      "title": "Estados heredados y flujo de trabajo ({version})",
+      "legacy": "Estado heredado",
+      "workflow": "Estado del flujo",
+      "note": "Regla",
+      "noChange": "Sin cambio"
+    },
+    "materialize": {
+      "button": "Generar oportunidades",
+      "hint": "Propone al Decision Engine las oportunidades de la predicción vigente. No envía mensajes.",
+      "done": "Oportunidades propuestas: {created} nuevas, {existing} ya existentes, {failed} con error."
+    }
+  },
+  "decisions": {
+    "title": "Centro de decisiones",
+    "subtitle": "Recomendaciones del Decision Engine y su flujo de trabajo: asignar, revisar, aprobar, ejecutar y cerrar, siempre con persona responsable e historial.",
+    "noSendTitle": "Predictily propone y audita",
+    "noSendNotice": "Registrar una acción anota lo que usted decide o hizo fuera de Predictily. No envía mensajes ni escribe en el ERP.",
+    "unitRecommendation": "recomendación",
+    "hasInterval": "intervalo registrado",
+    "noInterval": "sin intervalo registrado",
+    "snapshot": "huella de datos {id}",
+    "you": "Usted",
+    "nobody": "Sin asignar",
+    "assignToMe": "Asignarme a mí",
+    "assignee": "Responsable",
+    "assigneeRequired": "Elija quién ejecutará la acción.",
+    "reason": "Motivo",
+    "reasonHint": "Obligatorio, al menos {n} caracteres.",
+    "reasonRequired": "Escriba un motivo de al menos {n} caracteres.",
+    "noteOptional": "Nota (opcional)",
+    "replay": "Esa acción ya estaba registrada; no se repitió.",
+    "done": "Acción registrada.",
+    "kind": {
+      "contact": "Contacto",
+      "recovery": "Recuperación",
+      "customer_risk": "Riesgo de cliente",
+      "replenishment": "Reposición",
+      "inventory_mismatch": "Inventario y demanda",
+      "budget_constraint": "Restricción de presupuesto",
+      "scenario": "Escenario"
+    },
+    "status": {
+      "suggested": "Sugerida",
+      "assigned": "Asignada",
+      "reviewed": "Revisada",
+      "approved": "Aprobada",
+      "rejected": "Rechazada",
+      "in_progress": "En curso",
+      "executed": "Ejecutada",
+      "measured": "Medida",
+      "closed": "Cerrada",
+      "expired": "Vencida"
+    },
+    "action": {
+      "assign": "Asignar",
+      "reassign": "Reasignar",
+      "review": "Marcar como revisada",
+      "approve": "Aprobar",
+      "reject": "Rechazar",
+      "dismiss": "Descartar",
+      "start": "Iniciar la acción",
+      "start_without_approval": "Iniciar sin aprobación",
+      "execute": "Registrar ejecución",
+      "close": "Cerrar"
+    },
+    "actionHint": {
+      "assign": "Elige quién gestionará la recomendación.",
+      "reassign": "Cambia a la persona responsable.",
+      "review": "Confirma que la recomendación fue revisada.",
+      "approve": "Aprueba formalmente la acción. No puede aprobar quien la propuso ni quien debe ejecutarla.",
+      "reject": "Rechaza formalmente la acción y deja constancia del motivo.",
+      "dismiss": "Descarta la recomendación sin compromiso; deje el motivo.",
+      "start": "Registra que la acción comenzó. Quien la aprobó no la ejecuta.",
+      "start_without_approval": "Registra que la acción comenzó sin aprobación porque no es sensible.",
+      "execute": "Registra que una persona hizo la acción fuera de Predictily. Predictily no ejecuta nada.",
+      "close": "Cierra la recomendación ya medida."
+    },
+    "blocked": {
+      "forbidden": "Su rol no tiene la habilidad para esta acción.",
+      "decision_segregation_of_duties": "La segregación de funciones lo impide: debe hacerlo otra persona.",
+      "decision_approval_required": "Es una acción sensible: necesita aprobación antes de iniciarse.",
+      "control_group_not_actionable": "Retenida para medición: no se asigna ni se ejecuta."
+    },
+    "constraint": {
+      "stock_below_expected_units": "Stock menor que las unidades esperadas",
+      "out_of_stock": "Sin stock",
+      "over_budget": "Sobre presupuesto",
+      "budget": "Presupuesto",
+      "moq": "Pedido mínimo",
+      "window_without_figures": "Ventana de recompra sin cifras",
+      "overstock_without_demand": "Exceso de inventario sin demanda",
+      "demand_exceeds_availability": "Demanda mayor que lo disponible",
+      "note": "Nota de la restricción"
+    },
+    "experimentGroup": {
+      "treatment": "Tratamiento (se contacta)",
+      "control": "Control (retenida para medición)"
+    },
+    "sort": {
+      "desc_score": "Mayor puntaje primero",
+      "desc_priority": "Prioridad: de menos a más urgente",
+      "priority": "Prioridad: de más a menos urgente",
+      "expires_at": "Vence antes",
+      "desc_created_at": "Más recientes",
+      "desc_as_of": "Corte más reciente"
+    },
+    "summary": {
+      "title": "Estado de las recomendaciones",
+      "awaitingAssignment": "Por asignar",
+      "awaitingApproval": "Esperan aprobación",
+      "expiring": "Vencen en 24 horas"
+    },
+    "filters": {
+      "status": "Estado",
+      "inProgress": "En trabajo",
+      "allStatuses": "Todos los estados",
+      "approval": "Aprobación",
+      "requiresApproval": "Exigen aprobación",
+      "noApproval": "No exigen aprobación",
+      "mine": "Solo las asignadas a mí"
+    },
+    "list": {
+      "title": "Recomendaciones",
+      "empty": "No hay recomendaciones con estos filtros."
+    },
+    "cols": {
+      "recommendation": "Recomendación",
+      "cutoff": "Corte",
+      "status": "Estado",
+      "value": "Valor",
+      "score": "Puntaje",
+      "expires": "Vence"
+    },
+    "detail": {
+      "title": "Detalle de la recomendación",
+      "heading": "{kind} n.º {id}",
+      "value": "Valor y evidencia",
+      "grossValue": "Valor bruto esperado",
+      "grossHint": "Supuesto con insumos persistidos; no es una venta confirmada.",
+      "contribution": "Contribución esperada",
+      "actionCost": "Costo de la acción",
+      "costNotConfigured": "Costo no configurado",
+      "incremental": "Incremento estimado",
+      "noUplift": "Sin evidencia de incremento",
+      "score": "Puntaje",
+      "noScore": "Sin puntaje",
+      "formula": "Fórmula {v}",
+      "probability": "Probabilidad",
+      "noProbability": "No aplica",
+      "availability": "Disponibilidad",
+      "assignedTo": "Responsable",
+      "proposedBy": "Propuesta por",
+      "expires": "Vence",
+      "requiresApproval": "Exige aprobación",
+      "version": "Versión",
+      "experiment": "Grupo del experimento",
+      "experimentHint": "Solo lo ven quienes aprueban. No se muestra en el Radar ni en la agenda.",
+      "constraints": "Restricciones",
+      "actions": "Acciones",
+      "readOnly": "Su rol puede consultar esta recomendación, pero no actuar sobre ella.",
+      "noActions": "No hay acciones disponibles en este estado.",
+      "timeline": "Historial"
+    },
+    "timeline": {
+      "transition": "De «{from}» a «{to}»",
+      "feedback": "Seguimiento de la agenda: {state}"
+    },
+    "alreadyApplied": "La acción anterior ya figura registrada: se recargó la recomendación y no se repitió."
+  },
+  "roi": {
+    "title": "ROI y resultados",
+    "subtitle": "Separa la oportunidad potencial, lo observado, lo asociado a una acción y el incremento estimado. Nunca los suma ni presenta el ROI como probado.",
+    "unit": "recomendaciones",
+    "uncertaintyIntervals": "intervalos solo con experimento de control",
+    "empty": "Aún no hay un informe de resultados.",
+    "limitations": "Límites del método",
+    "filters": {
+      "from": "Corte desde",
+      "to": "Corte hasta",
+      "groupBy": "Agrupar por",
+      "periodBasis": "El periodo filtra por el corte (as-of) de la recomendación.",
+      "rangeInvalid": "La fecha final (hoy, si no se indica) no puede ser anterior a la inicial. Se muestra el periodo por defecto.",
+      "rangeTooLong": "El periodo no puede superar 730 días. Se muestra el periodo por defecto.",
+      "periodApplied": "Periodo aplicado: cortes del {from} al {to}.",
+      "periodDefault": "Sin periodo indicado, el servidor usa por defecto los últimos {n} días de corte.",
+      "periodDefaulted": "El periodo se completó por omisión: sin «desde» o «hasta», el servidor toma los últimos {n} días de corte (máximo {max} días).",
+      "periodAppliedDays": "Periodo aplicado: cortes del {from} al {to} ({n} días)."
+    },
+    "status": {
+      "potential_unproven": "Potencial, no demostrado",
+      "incremental_estimated": "Incremento estimado (no demostrado)",
+      "incremental_conversion_only": "Solo conversión estimada",
+      "multiple_experiments": "Varios experimentos: filtre"
+    },
+    "headline": {
+      "title": "Retorno de la inversión",
+      "notProven": "No demostrado",
+      "net": "Incremento neto de contribución",
+      "interval": "Intervalo de confianza {level}: {low} a {high}",
+      "ratio": "Razón neto / costo de contacto",
+      "ratioInterval": "Intervalo: {low} a {high}",
+      "significance": "Intervalo frente a cero",
+      "excludesZero": "El intervalo excluye 0",
+      "includesZero": "El intervalo incluye 0: no se puede afirmar un beneficio distinto de cero",
+      "notCausal": "Es una estimación por intención de tratamiento, no causalidad demostrada.",
+      "noFigure": "No hay cifra de ROI: sin un grupo de control con muestra suficiente no hay base para afirmar un beneficio.",
+      "noFigureConversionOnly": "No hay cifra de ROI en dinero: la conversión se estimó, pero la contribución monetaria no es estimable con estos datos.",
+      "noFigureMultiple": "No hay una cifra única de ROI: hay varios experimentos u horizontes con estimación y no son aditivos. Filtre por tipo y horizonte.",
+      "noFigureNet": "No se muestra una cifra neta: necesita el costo de contacto completo y su detalle solo lo ve quien puede aprobar.",
+      "conversionTitle": "Incremento de conversión (intención de tratamiento)",
+      "conversionNote": "Es la diferencia de tasas de compra entre tratamiento y control. No es una cifra en dinero.",
+      "multipleItem": "{key} · {days} días"
+    },
+    "method": {
+      "title": "Método",
+      "id": "Método {id} · versión {version}"
+    },
+    "reasons": {
+      "no_control_group": "No hay grupo de control registrado",
+      "no_treatment_group": "No hay grupo de tratamiento",
+      "insufficient_sample": "Muestra insuficiente en algún grupo",
+      "heterogeneous_control_fraction": "La fracción de control no es única",
+      "contact_cost_unknown": "Hay contactos sin costo configurado",
+      "no_contact_cost_registered": "No hay costo de contacto registrado",
+      "platform_usage_not_monetized": "El uso de la plataforma no se convirtió en dinero",
+      "experiments_not_additive": "Varios experimentos u horizontes no son aditivos",
+      "contribution_population_below_min_group_size": "Pocas unidades con costo confiable",
+      "contribution_not_estimable": "La contribución no es estimable",
+      "heavy_tailed_contribution": "Compradores muy concentrados: el intervalo monetario es solo indicativo",
+      "sample_ratio_mismatch": "La proporción de control no coincide con la fracción registrada al asignar",
+      "zero_variance": "No hay variación en la contribución de los compradores",
+      "buyers_below_min_per_arm": "Pocos compradores en algún grupo",
+      "bootstrap_budget_exceeded": "El intervalo monetario excede el presupuesto de cálculo",
+      "not_analysed": "Hay unidades con grupo que no se pudieron atribuir a un experimento"
+    },
+    "columns": {
+      "title": "Cuatro tipos de valor, sin total",
+      "noTotal": "Cada columna es una cosa distinta. Sumarlas contaría dos veces la misma venta, por eso no hay total.",
+      "potential": "Oportunidad potencial",
+      "potentialContribution": "Contribución esperada",
+      "withoutReliableCost": "{n} recomendaciones sin costo confiable: su contribución no está estimada.",
+      "grossValue": "Valor bruto esperado",
+      "observed": "Observado",
+      "observedShort": "Observado",
+      "observedNote": "Lo ocurrido en la ventana completa de cada recomendación, con o sin acción, sin contar dos veces una misma línea de venta. No se atribuye a ninguna acción.",
+      "contributionKnown": "Contribución conocida",
+      "netSales": "Ventas netas (importe, no contribución)",
+      "associated": "Asociado temporalmente",
+      "associatedShort": "Asociado",
+      "associatedNote": "SOLO lo posterior a la acción registrada (neto de devoluciones posteriores), sin contrafactual. No es beneficio atribuible.",
+      "incremental": "Incremento estimado",
+      "incrementalNote": "Por intención de tratamiento, antes de costos de contacto. Estimación, no causalidad demostrada.",
+      "incrementalInterval": "Intervalo: {low} a {high}",
+      "incrementalNone": "Sin estimación",
+      "incrementalNoneHint": "Requiere un experimento con grupo de control y muestra suficiente.",
+      "perKind": "Por tipo de recomendación, sin total entre tipos",
+      "potentialUnavailable": "La oportunidad potencial se informa por tipo y horizonte, y la API no la entregó por celdas en este informe.",
+      "potentialNone": "No hay recomendaciones accionables en este periodo.",
+      "customerLevelAmount": "Monto de nivel de cliente",
+      "customerLevelNote": "Puede incluir la caída observada del gasto del cliente: no es un pronóstico y no se suma al de otros tipos.",
+      "notAdditive": "No se suma con las otras columnas: lo asociado y lo potencial describen parte de las mismas ventas.",
+      "associatedNotAdditive": "Lo asociado ya está dentro de lo observado: no se suma con ello ni con lo potencial.",
+      "horizonCell": "Horizonte de {days} días · {n} recomendaciones",
+      "potentialNotAdditive": "Las celdas no se suman: ni entre tipos ni entre horizontes (los mismos clientes aparecen en varios horizontes).",
+      "pairsUnknown": "{n} pares cliente × producto sin costo confiable: su contribución no entra en la cifra.",
+      "observedCounts": "{customers} clientes · {lines} líneas de venta · {units} unidades",
+      "associatedCounts": "{recs} recomendaciones atendidas con compra posterior · {customers} clientes · {units} unidades",
+      "netSalesAfter": "Ventas netas posteriores a la acción (importe, no contribución)",
+      "rowsWithoutLineDetail": "{n} resultados sin detalle de líneas se sumaron por recomendación y pueden contar dos veces una misma venta.",
+      "perRecommendation": "Detalle por recomendación (no aditivo)",
+      "perRecommendationNote": "Suma por recomendación: varias recomendaciones pueden observar la misma venta, por eso esta suma no es un total.",
+      "perRecommendationCounts": "{rows} recomendaciones · {units} unidades",
+      "incrementalConversionOnly": "Solo se estimó la conversión",
+      "incrementalConversionOnlyHint": "No hay incremento de contribución en dinero: no se pudo estimar con estos datos (ver el motivo arriba).",
+      "incrementalMultiple": "Varios experimentos u horizontes",
+      "incrementalMultipleHint": "No son aditivos: filtre por tipo y horizonte para ver uno.",
+      "incrementalRestricted": "Hay una estimación por experimento; su detalle solo lo ve quien puede aprobar."
+    },
+    "itt": {
+      "title": "Experimentos (intención de tratamiento)",
+      "note": "Compara el grupo asignado a tratamiento con el de control, se haya contactado o no. Es una estimación con intervalo, no causalidad demostrada.",
+      "none": "No hay experimentos registrados.",
+      "status": {
+        "estimated": "Con estimación",
+        "insufficient_sample": "Muestra insuficiente",
+        "no_control_group": "Sin grupo de control",
+        "no_treatment_group": "Sin grupo de tratamiento",
+        "heterogeneous_control_fraction": "Fracción de control no única",
+        "not_analysed": "Sin experimento atribuible"
+      },
+      "sample": "Clientes: {treatment} en tratamiento y {control} en control (mínimo por grupo: {min}, a aprobar en el piloto).",
+      "conversion": "Conversión: tratamiento {treatment}, control {control}; diferencia {diff} (intervalo {low} a {high}).",
+      "incremental": "Incremento de contribución",
+      "noContribution": "La contribución monetaria no se pudo estimar: no hay cifra en dinero.",
+      "noEstimate": "Sin estimación: no hay base para afirmar un incremento.",
+      "contamination": "{n} clientes de control tienen una acción registrada (contaminación).",
+      "noContributionMin": "La contribución monetaria no se pudo estimar: se necesitan al menos {n} compradores por grupo (a aprobar en el piloto). La conversión sí se estimó.",
+      "noContributionReason": "La contribución monetaria no se pudo estimar: no hay cifra en dinero. Motivo: {reason}.",
+      "unattributed": "Unidades sin experimento atribuible",
+      "srmMismatch": "Aviso: la proporción de clientes en control no coincide con la fracción registrada al asignar (p = {p}). La asignación pudo romperse o perderse unidades de forma desigual: lea el estimado con cautela.",
+      "buyers": "Compradores: {treatment} en tratamiento y {control} en control.",
+      "intervalMethod": "Intervalo monetario: bootstrap percentil ({resamples} remuestreos, semilla registrada).",
+      "dropped": {
+        "repeat_customer": "Descartados por cliente repetido: {treatment} en tratamiento y {control} en control.",
+        "unverified_assignment": "Descartados por asignación no verificable: {treatment} en tratamiento y {control} en control.",
+        "conflicting_groups": "Descartados por grupos contradictorios: {treatment} en tratamiento y {control} en control."
+      }
+    },
+    "funnel": {
+      "title": "Embudo de oportunidades",
+      "identified": "Identificadas",
+      "attended": "Atendidas",
+      "measured": "Medidas",
+      "actionRate": "Tasa de acción",
+      "responseRate": "Tasa de respuesta",
+      "responseNote": "Asociación temporal, no efecto de la acción.",
+      "pending": "Previsto, aún sin medir: {open} con ventana abierta, {settling} en espera de documentos tardíos, {ready} medibles sin medir."
+    },
+    "classification": {
+      "title": "Resultados por clasificación",
+      "forecast": "Previsto",
+      "observed": "Observado",
+      "temporally_associated": "Asociado temporalmente",
+      "incremental_estimated": "Incremental estimado",
+      "causally_attributable": "Atribuible causalmente",
+      "countsInList": "Los conteos por clasificación se consultan en la lista de resultados medidos (filtro «Clasificación»).",
+      "notes": {
+        "forecast": "Previsto, aún sin observar: la ventana no cerró o espera documentos tardíos. Es una oportunidad potencial, atribución no demostrada.",
+        "observed": "Se observó lo ocurrido en la ventana. No se atribuye a ninguna acción.",
+        "temporally_associated": "La compra ocurrió después de la acción registrada. Sin contrafactual no se puede decir que la acción la causó."
+      },
+      "rowsNote": "Una fila de resultado es «observado» o «asociado temporalmente». El incremento estimado sale solo del análisis por experimento, nunca de una fila."
+    },
+    "actions": {
+      "contacted": "Contactada",
+      "executed": "Ejecutada",
+      "not_contacted": "No contactada",
+      "not_executed": "No ejecutada",
+      "rejected": "Rechazada",
+      "expired": "Caducada",
+      "held": "Retenida para medición"
+    },
+    "events": {
+      "purchase": "Compra",
+      "no_purchase": "Sin compra",
+      "product_sales": "Ventas del producto",
+      "stockout": "Quiebre",
+      "no_sell_through": "Sin salida de existencias"
+    },
+    "costs": {
+      "title": "Costos",
+      "contact": "Costo de contacto",
+      "contactUnknown": "Costo de contacto no configurado",
+      "contactActions": "{n} acciones atendidas",
+      "contactPartial": "{n} acciones sin costo configurado: el total es parcial (un costo desconocido no es cero).",
+      "usage": "Uso de la plataforma",
+      "usageUnknown": "Costo de uso no estimado",
+      "metric": "Métrica",
+      "quantity": "Cantidad",
+      "unitPrice": "Precio unitario",
+      "cost": "Costo",
+      "noPrice": "Sin precio"
+    },
+    "usageReasons": {
+      "no_usage_records": "No hay registros de uso en el periodo.",
+      "no_price_model": "La empresa no configuró precios de uso: no se convierte en dinero."
+    },
+    "breakdown": {
+      "title": "Desglose",
+      "empty": "Sin datos para desglosar.",
+      "groupBy": {
+        "kind": "Tipo",
+        "horizon": "Horizonte",
+        "segment": "Segmento",
+        "owner": "Responsable"
+      },
+      "partial": "{n} sin costo confiable",
+      "notAdditive": "Las filas no se suman entre sí: cada una está sin doble conteo dentro de su grupo, pero una misma venta puede aparecer en dos grupos (por ejemplo, en los horizontes de 30 y de 60 días)."
+    },
+    "outcomes": {
+      "title": "Resultados medidos",
+      "notMeasuredYet": "Solo aparecen los resultados cuya ventana ya cerró y esperó los documentos tardíos. Lo demás es previsto.",
+      "empty": "Aún no hay resultados medidos con estos filtros.",
+      "cols": {
+        "recommendation": "Recomendación",
+        "window": "Ventana",
+        "action": "Acción",
+        "observed": "Observado",
+        "contribution": "Contribución",
+        "contactCost": "Costo de contacto",
+        "classification": "Clasificación"
+      },
+      "sort": {
+        "desc_measured_at": "Medidos más recientemente",
+        "desc_window_to": "Ventana más reciente",
+        "desc_observed_net_amount": "Mayor venta neta",
+        "desc_contribution": "Mayor contribución"
+      },
+      "knownUntil": "ventas conocidas hasta {date}",
+      "units": "{n} unidades",
+      "noPurchase": "Sin compra",
+      "costNotConfigured": "Costo no configurado",
+      "evidence": "Qué afirma y qué no",
+      "fingerprint": "Huella de ventas leídas: {hash}",
+      "lateLines": "{n} líneas tardías no contadas",
+      "wholeWindow": "ventana completa",
+      "afterAction": "Tras la acción registrada",
+      "noPurchaseAfterAction": "Sin compra posterior a la acción",
+      "lateReturned": "{n} unidades devueltas tardías no descontadas",
+      "returnsAfterWindow": "Devoluciones posteriores a la ventana, ya descontadas: {units} unidades ({lines} líneas)"
+    },
+    "heavyTail": "El intervalo monetario es solo indicativo: pocos compradores concentran el importe y el intervalo puede cubrir bastante menos que su nivel nominal con esta muestra."
+  },
+  "entAdmin": {
+    "title": "Administración",
+    "subtitle": "Modelos y aprobaciones, calidad de datos, uso por empresa y auditoría.",
+    "scope": "Cada acción se ofrece solo si su rol tiene la habilidad; el servidor decide siempre y registra quién hizo qué.",
+    "tabs": {
+      "modelos": "Modelos y aprobaciones",
+      "calidad": "Calidad de datos",
+      "uso": "Uso y costos",
+      "auditoria": "Auditoría"
+    },
+    "models": {
+      "title": "Modelos y aprobaciones",
+      "text": "Un modelo pasa de candidato a validado, aprobado y producción. La aprobación es separada: quien lo publicó o disparó su entrenamiento no puede aprobarlo.",
+      "published": "Publicado por",
+      "approved": "Aprobado por",
+      "notApproved": "Sin aprobación",
+      "history": "Historial",
+      "youPublished": "Usted publicó este modelo: lo decide otra persona.",
+      "segregation": "La aprobación es separada: si usted publicó el modelo o disparó su entrenamiento, el servidor rechazará la acción.",
+      "actions": {
+        "validate": "Validar",
+        "approve": "Aprobar",
+        "reject": "Rechazar",
+        "promote": "Promover a producción"
+      },
+      "hint": {
+        "validate": "Valida el modelo {version} con las compuertas automáticas. Validar no lo vuelve servible: falta la aprobación.",
+        "approve": "Aprueba el modelo {version}. Quedará disponible para promoverse a producción.",
+        "reject": "Rechaza el modelo {version}. El motivo es obligatorio y queda en el historial.",
+        "promote": "Promueve el modelo {version} a producción y retira al anterior del mismo alcance."
+      },
+      "done": {
+        "validate": "Modelo validado.",
+        "approve": "Modelo aprobado.",
+        "reject": "Modelo rechazado.",
+        "promote": "Modelo promovido a producción."
+      },
+      "basis": {
+        "approved": "Servido: aprobado por otra persona",
+        "legacy_pipeline": "Servido: pipeline propio (legado)",
+        "not_approved": "No se sirve: sin aprobación"
+      },
+      "promotionDecision": "Decisión de promoción de la política {policy}: {decision}",
+      "transition": "De «{from}» a «{to}»",
+      "created": "Registrado como «{to}»"
+    },
+    "usage": {
+      "title": "Uso y costos",
+      "plan": "Consumo frente al plan",
+      "platform": "Uso de la plataforma registrado",
+      "platformText": "Son cantidades medidas. Solo se convierten en dinero con precios que la empresa configure; sin precios el costo no se estima.",
+      "unit": "cantidades de uso"
+    }
   }
 }

@@ -39,6 +39,8 @@ export interface ApiErrorBody {
   max?: number
   required_ability?: string
   details?: Record<string, unknown>
+  /** Contexto de un 403/409 del servidor (p. ej. `roles` en la segregación de funciones, `current_version` en un conflicto de versión). */
+  context?: Record<string, unknown>
 }
 
 export type Granularity = 'day' | 'week' | 'month'
@@ -860,6 +862,13 @@ export interface ModelRegistryEntry {
   training_data_from: ISODate | null
   training_data_to: ISODate | null
   series_count: number
+  /** V2.5 · W4: publicación y aprobación separada (quién publicó y quién aprobó). */
+  published_by?: number | null
+  published_at?: ISODateTime | null
+  approved_by?: number | null
+  approved_at?: ISODateTime | null
+  rejected_reason?: string | null
+  promotion_decision_id?: number | null
 }
 
 // ─── Inventario y alertas ──────────────────────────────────────────────────
@@ -1043,3 +1052,5 @@ export interface AdminPlan {
 
 // ─── Etapa 2 ───────────────────────────────────────────────────────────────
 export * from './types.v2'
+// ─── V2.5 · W5-E: Radar, Decision Engine, Outcomes y ROI, ciclo de vida de modelos ──
+export * from './types.w5'

@@ -34,6 +34,12 @@ export const routes: RouteRecordRaw[] = [
       { path: 'importaciones/nueva', name: 'import-new', component: () => import('@/views/ImportWizardView.vue'), meta: { requiresTenant: true, ability: 'imports.manage', title: 'Importar datos' } },
       { path: 'importaciones/:id(\\d+)', name: 'import-detail', component: () => import('@/views/ImportWizardView.vue'), props: true, meta: { requiresTenant: true, ability: 'data.view', title: 'Importación' } },
       { path: 'alertas', name: 'alerts', component: () => import('@/views/AlertsView.vue'), meta: { requiresTenant: true, ability: 'alerts.view', title: 'Alertas' } },
+      // V2.5 · W5-E: vistas Enterprise (ADR-V25-22). La habilidad de cada ruta es la que exige la API; el servidor sigue siendo la autoridad.
+      { path: 'resumen-ejecutivo', name: 'executive-overview', component: () => import('@/views/ExecutiveOverviewView.vue'), meta: { requiresTenant: true, ability: 'forecast.view', title: 'Resumen ejecutivo' } },
+      { path: 'radar-comercial/:tab?', name: 'radar', component: () => import('@/views/RevenueRadarView.vue'), props: true, meta: { requiresTenant: true, ability: 'forecast.view', title: 'Revenue Radar' } },
+      { path: 'centro-de-decisiones/:id(\\d+)?', name: 'decision-center', component: () => import('@/views/DecisionCenterView.vue'), props: true, meta: { requiresTenant: true, ability: 'decisions.view', title: 'Centro de decisiones' } },
+      { path: 'roi-y-resultados', name: 'roi-outcomes', component: () => import('@/views/RoiOutcomesView.vue'), meta: { requiresTenant: true, ability: 'decisions.view', title: 'ROI y resultados' } },
+      { path: 'administracion/:tab?', name: 'enterprise-admin', component: () => import('@/views/EnterpriseAdminView.vue'), props: true, meta: { requiresTenant: true, ability: 'models.approve', title: 'Administración' } },
       { path: 'configuracion/:tab?', name: 'settings', component: () => import('@/views/SettingsView.vue'), props: true, meta: { requiresTenant: true, title: 'Configuración' } },
       { path: 'sin-permiso', name: 'forbidden', component: () => import('@/views/ForbiddenView.vue'), meta: { requiresTenant: true, title: 'Sin permiso' } },
     ],
