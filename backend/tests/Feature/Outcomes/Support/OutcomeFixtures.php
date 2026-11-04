@@ -67,7 +67,7 @@ trait OutcomeFixtures
         $branch = (int) DB::table('branches')->where('tenant_id', $tenant->id)->value('id');
         $saleId = (int) DB::table('sales')->insertGetId([
             'tenant_id' => $tenant->id, 'branch_id' => $branch, 'customer_id' => $customerId, 'document_type' => $docType,
-            'document_number' => '002-001-'.str_pad((string) (100000 + $this->documentCounter + random_int(0, 99999)), 9, '0', STR_PAD_LEFT),
+            'document_number' => '002-001-'.$this->nextDocumentNumber(),
             'status' => $status, 'issued_at' => $issuedAt ?? $date.' 12:00:00-05', 'sale_date' => $date, 'currency' => 'USD', 'source_hash' => str_repeat('b', 64),
             'ingestion_mode' => $knownFrom === null ? 'backfill' : 'incremental', 'version_known_from' => $knownFrom, 'created_at' => now(), 'updated_at' => now(),
         ]);

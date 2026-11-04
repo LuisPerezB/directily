@@ -24,6 +24,16 @@ trait DecisionFixtures
 
     private int $documentCounter = 0;
 
+    /** Serie aleatoria por instancia + contador: único dentro de la prueba (antes contador + azar podía repetirse) y distinto entre instancias que confirman datos. */
+    private ?int $documentSeries = null;
+
+    private function nextDocumentNumber(): string
+    {
+        $this->documentSeries ??= random_int(1, 9999);
+
+        return sprintf('%09d', $this->documentSeries * 100000 + $this->documentCounter);
+    }
+
     /**
      * @return array{tenant: Tenant, owner: User, admin: User, analyst: User, analyst2: User, viewer: User, cat: array, run: int, asOf: string}
      */
@@ -57,7 +67,7 @@ trait DecisionFixtures
     {
         $this->documentCounter++;
         $saleId = (int) DB::table('sales')->insertGetId([
-            'tenant_id' => $tenant->id, 'branch_id' => $branch, 'document_type' => 'invoice', 'document_number' => '001-001-'.str_pad((string) (900000 + $this->documentCounter + random_int(0, 99999)), 9, '0', STR_PAD_LEFT),
+            'tenant_id' => $tenant->id, 'branch_id' => $branch, 'document_type' => 'invoice', 'document_number' => '001-001-'.$this->nextDocumentNumber(),
             'status' => $status, 'issued_at' => $date.' 12:00:00', 'sale_date' => $date, 'currency' => 'USD', 'source_hash' => str_repeat('a', 64),
             'version_known_from' => $knownFrom, 'created_at' => now(), 'updated_at' => now(),
         ]);
