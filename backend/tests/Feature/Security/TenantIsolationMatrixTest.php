@@ -611,6 +611,7 @@ final class TenantIsolationMatrixTest extends TestCase
         $reviewed = [
             'Services/Plans/PlanLimitService.php' => 'clave plans:active_series:{empresa}:{día}',
             'Services/Conversation/AssistantLimiter.php' => 'claves tenant:{empresa}:assistant:…',
+            'Services/Conversation/Channels/CacheDraftStore.php' => 'claves tenant:{empresa}:gateway:draft:… y se verifica tenant_id al leer',
             'Services/Outcomes/BootstrapInterval.php' => 'clave = SHA-256 de las entradas numéricas del remuestreo (direccionada por contenido; sin identificadores ni datos de empresa)',
             'Services/Bridge/BridgeDeviceService.php' => 'clave por dispositivo (id único global, fila con alcance de empresa)',
             'Services/Auth/Mfa/MfaStepUp.php' => 'clave por token o por persona (la persona es global: el segundo factor es de la persona)',

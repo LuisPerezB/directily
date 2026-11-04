@@ -5717,6 +5717,268 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/Validation'
+  /gateway/channels/{channel}:
+    get:
+      tags:
+      - Asistente
+      summary: Canal de mensajería (solo contrato) y sus plantillas como borrador
+      description: 'WhatsApp es SOLO un contrato: Predictily no incluye ningún proveedor ni envía mensajes. Sin
+        un proveedor registrado y habilitado el canal NO EXISTE y esta ruta (y las de borradores y confirmación)
+        responden 404 `channel_not_available`. Las plantillas son borradores no sometidos a aprobación del proveedor.
+
+
+        Habilidad requerida: `decisions.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: channel
+        in: path
+        required: true
+        schema:
+          type: string
+          example: whatsapp
+      responses:
+        '200':
+          description: El canal y sus plantillas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MessagingChannelInfo'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`channel_not_available`: el canal no existe (sin proveedor registrado o deshabilitado)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-ability: decisions.view
+  /gateway/channels/{channel}/drafts:
+    post:
+      tags:
+      - Asistente
+      summary: Crear un borrador de mensaje desde una plantilla (no envía nada)
+      description: 'Una persona crea un BORRADOR para un cliente de su alcance comercial. No se envía nada: queda
+        pendiente de la confirmación humana explícita del texto exacto (`body_sha256`). Caduca (`conversation.channels.<canal>.draft_ttl_minutes`).
+        Un cliente inexistente y uno fuera del alcance comercial dan la misma respuesta 404.
+
+
+        Habilidad requerida: `decisions.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: channel
+        in: path
+        required: true
+        schema:
+          type: string
+          example: whatsapp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                template:
+                  type: string
+                  example: opportunity_follow_up
+                customer_id:
+                  type: integer
+                  minimum: 1
+                variables:
+                  type: object
+                  additionalProperties:
+                    type: string
+                    maxLength: 80
+                  description: Exactamente los marcadores de la plantilla; cada valor, una línea de hasta 80 caracteres,
+                    sin enlaces ni llaves dobles
+              required:
+              - template
+              - customer_id
+              - variables
+      responses:
+        '201':
+          description: Borrador creado (pendiente de confirmación)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MessagingDraft'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`channel_not_available`, plantilla o cliente no encontrados (en el alcance del usuario)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: decisions.manage
+  /gateway/channels/{channel}/drafts/{draft}/confirm:
+    post:
+      tags:
+      - Asistente
+      summary: Confirmación humana explícita de un borrador y entrega al canal
+      description: 'Confirma el texto EXACTO del borrador por su SHA-256: solo entonces el mensaje se entrega al
+        canal, una sola vez. Falla sin entregar si el texto no coincide (422 `draft_content_changed`), si caducó
+        (404/410), si ya se confirmó (409 `draft_already_confirmed`) o si la persona no tiene la habilidad. Si el
+        proveedor falla responde 502 `channel_send_failed` y NO reintenta. El asistente no tiene ninguna herramienta
+        que cree ni confirme borradores.
+
+
+        Habilidad requerida: `decisions.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: channel
+        in: path
+        required: true
+        schema:
+          type: string
+          example: whatsapp
+      - name: draft
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body_sha256:
+                  type: string
+                  minLength: 64
+                  maxLength: 64
+                  pattern: ^[A-Fa-f0-9]{64}$
+                  description: SHA-256 del texto del borrador que la persona revisó
+              required:
+              - body_sha256
+      responses:
+        '200':
+          description: Confirmado y entregado al canal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MessagingReceipt'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`channel_not_available` o `draft_not_found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: '`draft_already_confirmed`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: '`draft_expired`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '502':
+          description: '`channel_send_failed`: el proveedor del canal no aceptó el mensaje'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-ability: decisions.manage
+  /gateway/tool-calls:
+    get:
+      tags:
+      - Asistente
+      summary: Auditoría de las llamadas a herramientas del Intelligence Gateway
+      description: 'Una fila por llamada a una herramienta del asistente, permitida o no: herramienta, decisión
+        (`allowed`, `denied_ability`, `denied_policy`, `blocked_injection`, `error`), canal, usuario, argumentos
+        MINIMIZADOS (los no textuales tal cual; del texto libre solo su longitud; de lo rechazado solo el nombre
+        de la clave), resumen del resultado sin valores de negocio y latencia. Sin PII. Solo lectura y de la empresa
+        activa. La tabla es de solo inserción también para la base de datos (disparadores de PostgreSQL): la única
+        ruta de borrado es la retención/supresión explícita y la cascada del borrado de la empresa.
+
+
+        Habilidad requerida: `audit.view`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: decision
+        in: query
+        schema:
+          type: string
+          enum:
+          - allowed
+          - denied_ability
+          - denied_policy
+          - blocked_injection
+          - error
+      - name: tool
+        in: query
+        schema:
+          type: string
+          maxLength: 60
+      - name: channel
+        in: query
+        schema:
+          type: string
+          enum:
+          - web
+          - api
+          - whatsapp
+      - name: user_id
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Llamadas auditadas, de la más reciente a la más antigua
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GatewayToolCall'
+                  meta:
+                    type: object
+                    properties:
+                      current_page:
+                        type: integer
+                      per_page:
+                        type: integer
+                      total:
+                        type: integer
+                      last_page:
+                        type: integer
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: audit.view
   /import-fields/{entityType}:
     parameters:
     - name: entityType
@@ -19527,9 +19789,21 @@ components:
       properties:
         name:
           type: string
+        ability:
+          type: string
+          description: Habilidad que exige la herramienta (la de la ruta de resultados equivalente)
+        data_scope:
+          type: string
+          enum:
+          - operational
+          - customer_portfolio
+          - tenant_management
+          description: operational = sin atribución a clientes; customer_portfolio = por cliente, acotado al alcance
+            comercial del usuario; tenant_management = toda la empresa (ROI, resultados medidos)
         available_to_you:
           type: boolean
-          description: false si su rol o token no tiene la habilidad exigida por la ruta de resultados equivalente
+          description: false si su rol o token no tiene la habilidad exigida
+          o su alcance comercial no permite este tipo de dato: null
     AssistantStatus:
       type: object
       properties:
@@ -19551,6 +19825,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssistantTool'
+        commercial_scope:
+          type: object
+          description: 'Alcance comercial de quien consulta (W6-A). Nunca incluye los identificadores de la cartera.
+            `role: null` = SIN rol comercial (alcance de toda la empresa, `restricted: false`); `restricted: true`
+            = hay un recorte (vendedor siempre; gerente o servicio con cartera, zonas, segmentos o equipo declarados);
+            `role: unresolved` = el alcance no pudo resolverse (sin persona o sin membresía, o un rol comercial
+            guardado que no se reconoce) y se trata como el MÁS restrictivo: solo herramientas operativas.'
+          properties:
+            role:
+              type:
+              - string
+              - 'null'
+              description: gerente | vendedor | servicio | unresolved | null (sin rol comercial)
+            restricted:
+              type: boolean
+            source:
+              type: string
+              description: request | membership | unresolved
         limits:
           type: object
           properties:
@@ -19622,6 +19914,8 @@ components:
           - ok
           - no_data
           - forbidden
+          - scope_denied
+          - channel_denied
           - plan_limit
           - invalid_arguments
           - not_found
@@ -19637,6 +19931,15 @@ components:
           - 'null'
           additionalProperties: true
           description: Cifras tal como las devolvió la herramienta (servicio interno de resultados)
+        guard:
+          type: object
+          description: Solo si el gateway retuvo campos de los datos por contener posibles instrucciones inyectadas
+            (los datos son datos, nunca instrucciones). La llamada queda auditada como `blocked_injection`.
+          properties:
+            quarantined_fields:
+              type: integer
+            notice:
+              type: string
         envelope:
           anyOf:
           - $ref: '#/components/schemas/ResultEnvelope'
@@ -19692,6 +19995,145 @@ components:
               type: integer
         notice:
           type: string
+    GatewayToolCall:
+      type: object
+      description: Una llamada auditada a una herramienta del Intelligence Gateway (sin PII).
+      properties:
+        id:
+          type: integer
+        user_id:
+          type:
+          - integer
+          - 'null'
+        channel:
+          type: string
+          enum:
+          - web
+          - api
+          - whatsapp
+        tool:
+          type: string
+          description: Nombre de la herramienta; «(invalid)» si el modelo propuso un nombre que no tiene forma de
+            identificador
+        decision:
+          type: string
+          enum:
+          - allowed
+          - denied_ability
+          - denied_policy
+          - blocked_injection
+          - error
+        arguments:
+          type: object
+          additionalProperties: true
+          description: 'Minimizados: valores no textuales tal cual; del texto libre {chars: n}; de lo rechazado,
+            rejected_keys con solo los nombres'
+        result_summary:
+          type: object
+          additionalProperties: true
+          description: Estado, procedencia (core, as_of, quality_status), tamaños y, si hubo retención por inyección,
+            injection {flagged_fields, patterns, paths}; nunca texto ni cifras de negocio
+        latency_ms:
+          type:
+          - integer
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+    MessageTemplate:
+      type: object
+      description: Plantilla de mensaje como BORRADOR; su aprobación por el proveedor del canal es un trámite del
+        propietario (no sometida).
+      properties:
+        key:
+          type: string
+        version:
+          type: integer
+        locale:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+        provider_approval:
+          type: string
+          enum:
+          - not_submitted
+        body:
+          type: string
+          description: Texto con marcadores {{nombre}}
+        placeholders:
+          type: array
+          items:
+            type: string
+    MessagingChannelInfo:
+      type: object
+      properties:
+        channel:
+          type: string
+        confirmation_required:
+          type: boolean
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageTemplate'
+        notice:
+          type: string
+    MessagingDraft:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending_confirmation
+        requires_confirmation:
+          type: boolean
+        template:
+          type: object
+          properties:
+            key:
+              type: string
+            version:
+              type: integer
+        customer_id:
+          type: integer
+        body:
+          type: string
+        body_sha256:
+          type: string
+          description: SHA-256 del texto; es lo que la persona debe confirmar
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        notice:
+          type: string
+    MessagingReceipt:
+      type: object
+      properties:
+        draft_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - confirmed_and_handed_to_channel
+        receipt:
+          type: object
+          properties:
+            provider_message_id:
+              type: string
+            status:
+              type: string
     PromotionRevision:
       type: object
       properties:

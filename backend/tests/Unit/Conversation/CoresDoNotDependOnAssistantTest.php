@@ -21,6 +21,7 @@ final class CoresDoNotDependOnAssistantTest extends TestCase
         'app/Http/Controllers/Api/Conversation/',
         'app/Http/Requests/Conversation/',
         'routes/api/platform.php',          // registro de las dos rutas /assistant
+        'routes/api/gateway.php',           // V2.5 · W6-D: auditoría del gateway y contrato del canal de mensajería (misma capa conversacional)
         'config/conversation.php',
     ];
 

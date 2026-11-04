@@ -9,6 +9,7 @@ use App\Enums\TenantRole;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Auth\Commercial\CommercialSurfaces;
+use App\Services\Conversation\Gateway\Scope\MembershipCommercialScopeResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Route as LaravelRoute;
 use Illuminate\Support\Facades\DB;
@@ -151,5 +152,33 @@ final class CommercialSurfacesTest extends TestCase
         $this->as($w['a'], $w)->getJson('/api/v1/decisions/settings')->assertOk();
         // Sin rol comercial, todo igual que antes.
         $this->as($w['user'], $w)->getJson('/api/v1/customer/reconciliation')->assertOk();
+    }
+
+    // ── L4: el gateway lee el rol comercial igual que la API ─────────────────────────────────────────────────────────────────────────────────
+
+    public function test_l4_the_gateway_scope_resolver_closes_on_blank_or_unexpected_roles_like_the_api(): void
+    {
+        $w = $this->world();
+        $resolver = app(MembershipCommercialScopeResolver::class);
+        $user = $this->addUserToTenant($w['tenant'], TenantRole::Admin);
+        $resolve = fn () => $resolver->resolve($w['tenant'], $user->refresh(), TenantRole::Admin);
+
+        // Solo NULL es «sin rol comercial»: resuelto y sin restricción.
+        $none = $resolve();
+        $this->assertTrue($none->resolved);
+        $this->assertFalse($none->isRestricted());
+        // La cadena vacía, los espacios y las variantes de mayúsculas NO abren el alcance (antes la cadena vacía se leía como «sin rol»): sin resolver = el más restrictivo.
+        foreach (['', ' ', "\t", 'Vendedor', ' vendedor', 'director'] as $raw) {
+            DB::table('tenant_users')->where('user_id', $user->id)->update(['commercial_role' => $raw]);
+            $scope = $resolve();
+            $this->assertFalse($scope->resolved, var_export($raw, true));
+            $this->assertTrue($scope->isRestricted(), var_export($raw, true));
+        }
+        // Un rol reconocido con su cartera se resuelve y restringe.
+        $this->setCommercial($w['tenant'], $user, CommercialRole::Vendedor, ['customer_ids' => [$w['c1']]]);
+        $vendedor = $resolve();
+        $this->assertTrue($vendedor->resolved);
+        $this->assertTrue($vendedor->isRestricted());
+        $this->assertSame('vendedor', $vendedor->role());
     }
 }

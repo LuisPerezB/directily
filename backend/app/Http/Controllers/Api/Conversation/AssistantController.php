@@ -9,31 +9,28 @@ use App\Http\Requests\Conversation\AssistantMessageRequest;
 use App\Services\Conversation\AssistantLimiter;
 use App\Services\Conversation\AssistantReply;
 use App\Services\Conversation\AssistantService;
+use App\Services\Conversation\Gateway\IntelligenceGateway;
 use App\Services\Conversation\Tools\ToolContext;
-use App\Services\Conversation\Tools\ToolRegistry;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Asistente conversacional OPCIONAL (ADR-V2-12). Las rutas exigen `data.view`; cada herramienta exige además la habilidad de
- * la ruta de resultados equivalente. Su disponibilidad no afecta a ninguna otra ruta de la API.
+ * Asistente conversacional OPCIONAL (ADR-V2-12) sobre el Intelligence Gateway (ADR-V25-17). Las rutas exigen `data.view`; cada herramienta exige además la habilidad de
+ * la ruta de resultados equivalente y un alcance comercial que permita su tipo de dato. Su disponibilidad no afecta a ninguna otra ruta de la API.
  */
 class AssistantController extends Controller
 {
-    /** GET /assistant/status — disponibilidad, herramientas que el usuario puede usar y límites vigentes. */
-    public function status(Request $request, AssistantService $service, ToolRegistry $tools, AssistantLimiter $limiter): JsonResponse
+    /** GET /assistant/status — disponibilidad, herramientas que el usuario puede usar (con su habilidad y alcance de datos) y límites vigentes. */
+    public function status(Request $request, AssistantService $service, IntelligenceGateway $gateway, AssistantLimiter $limiter): JsonResponse
     {
         $tenant = app(TenantContext::class)->require();
         $context = ToolContext::fromRequest($request, $tenant);
         $availability = $service->availability($tenant);
-        $available = array_map(fn ($t) => $t->name(), $tools->availableFor($context));
 
         return response()->json(['data' => $availability + [
-            'tools' => array_values(array_map(fn (string $name) => [
-                'name' => $name,
-                'available_to_you' => in_array($name, $available, true),
-            ], array_values(array_filter($tools->names(), fn (string $n) => $tools->has($n))))),
+            'tools' => $gateway->describe($context),
+            'commercial_scope' => $gateway->scopeFor($context)->describe(),
             'limits' => [
                 'max_message_chars' => (int) config('conversation.limits.max_message_chars'),
                 'max_history_messages' => (int) config('conversation.limits.max_history_messages'),

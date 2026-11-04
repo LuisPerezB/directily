@@ -37,6 +37,12 @@ class AssistantApiTest extends TestCase
 
     private const CUTOFF = '2026-10-20';
 
+    /** Lista blanca completa, en el orden del catálogo (V2.5 · W6-D agregó las seis últimas). */
+    private const TOOLS = [
+        'dashboard_summary', 'product_forecast', 'forecast_accuracy', 'inventory_recommendations', 'customer_predictions', 'supply_plan',
+        'radar_opportunities', 'explain_recommendation', 'decisions_summary', 'outcomes', 'roi_summary', 'model_quality',
+    ];
+
     private function basicPlanId(): int
     {
         return (int) DB::table('plans')->insertGetId([
@@ -119,7 +125,7 @@ class AssistantApiTest extends TestCase
         $res = $this->actingAsTenantUser($viewer, $tenant)->getJson('/api/v1/assistant/status')->assertOk()->assertJsonPath('data.enabled', true)->assertJsonPath('data.model', 'fake-model');
         $tools = collect($res->json('data.tools'))->pluck('available_to_you', 'name')->all();
         $this->assertSame(
-            ['dashboard_summary', 'product_forecast', 'forecast_accuracy', 'inventory_recommendations', 'customer_predictions', 'supply_plan'],
+            self::TOOLS,
             array_keys($tools),
         );
         $this->assertNotContains(false, $tools);
@@ -172,7 +178,7 @@ class AssistantApiTest extends TestCase
 
         // Al proveedor solo se le ofrecen las herramientas de la lista blanca, con esquema cerrado.
         $this->assertSame(
-            ['dashboard_summary', 'product_forecast', 'forecast_accuracy', 'inventory_recommendations', 'customer_predictions', 'supply_plan'],
+            self::TOOLS,
             array_column($provider->calls[0]['tools'], 'name'),
         );
         foreach ($provider->calls[0]['tools'] as $tool) {

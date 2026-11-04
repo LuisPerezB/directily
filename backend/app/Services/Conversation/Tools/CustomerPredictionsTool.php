@@ -6,6 +6,7 @@ namespace App\Services\Conversation\Tools;
 
 use App\Http\Resources\Customer\CustomerPredictionResource;
 use App\Models\CustomerPrediction;
+use App\Services\Conversation\Gateway\DataScope;
 use App\Services\Customer\CustomerEnvelope;
 use App\Services\Customer\CustomerRunService;
 use App\Services\Plans\PlanLimitService;
@@ -15,7 +16,9 @@ use Illuminate\Validation\Rule;
 
 /**
  * Predicciones de compra por comprador × producto (GET /customer/predictions). Los resultados son esperanzas probabilísticas,
- * no ventas confirmadas. Solo expone el código externo del comprador (nunca nombre, correo ni cédula/RUC).
+ * no ventas confirmadas. Solo expone el código externo del comprador (nunca nombre, correo ni cédula/RUC). Alcance por cliente
+ * (V2.5 · W6-D): se acota a los clientes VISIBLES para la persona según su alcance comercial de W6-A (cartera y clientes con recomendaciones asignadas a ella o a su equipo; sin
+ * alcance guardado, toda la empresa, incluido el rol de servicio, que es de solo lectura); un rol comercial desconocido no la ve.
  */
 final class CustomerPredictionsTool extends ReadTool
 {
@@ -24,6 +27,11 @@ final class CustomerPredictionsTool extends ReadTool
     public function isEnabled(): bool
     {
         return (bool) config('conversation.privacy.customer_tools_enabled', true);
+    }
+
+    public function dataScope(): DataScope
+    {
+        return DataScope::CustomerPortfolio;
     }
 
     public function name(): string
@@ -66,6 +74,7 @@ final class CustomerPredictionsTool extends ReadTool
     public function execute(array $arguments, ToolContext $context): ToolResult
     {
         $tenant = $context->tenant;
+        $scope = $context->requireScope();
         app(PlanLimitService::class)->assertCustomer($tenant);   // un plan sin comportamiento de compra (Starter) no lo consulta por el asistente
         $horizon = $this->horizon($arguments, $tenant, HorizonCatalog::customer());
         $run = $this->runs->latestPrediction();
@@ -92,6 +101,8 @@ final class CustomerPredictionsTool extends ReadTool
                 $q->whereHas('product', fn ($p) => $p->where(fn ($w) => $w->where('sku', 'ilike', $term)->orWhere('name', 'ilike', $term)));
             })
             ->when(isset($arguments['min_probability']), fn ($q) => $q->where('purchase_probability', '>=', (float) $arguments['min_probability']));
+
+        $scope->constrainCustomers($query, 'customer_id');   // cartera comercial del usuario (sin recorte: toda la empresa)
 
         $total = (clone $query)->count();
         $rows = $query->with(['customer:id,external_code', 'product:id,sku,name,unit'])

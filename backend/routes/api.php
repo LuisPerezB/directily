@@ -34,6 +34,8 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/decision.php';
     // V2.5 · W6-A: seguridad Enterprise (MFA TOTP, tokens con alcance, roles comerciales, política de seguridad y revocación de dispositivos del Bridge).
     require __DIR__.'/api/security.php';
+    // V2.5 · W6-D: Intelligence Gateway (auditoría de llamadas a herramientas y contrato de canal de mensajería; WhatsApp solo contrato: 404 sin proveedor).
+    require __DIR__.'/api/gateway.php';
     // V2.5 · W6-B: Predictily Bridge (registro de dispositivos, latido, URL prefirmada de subida a Bronze, checkpoints y revocación).
     require __DIR__.'/api/bridge.php';
     // V2.5 · W6-C: Auto Mapper (descubrimiento de esquema de solo lectura, propuesta determinista, plantillas versionadas con huella y deriva).
