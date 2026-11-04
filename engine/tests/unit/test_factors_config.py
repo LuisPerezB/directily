@@ -123,15 +123,21 @@ def test_an_enabled_pipeline_without_active_factors_resolves_nothing_either():
         assert pipeline.enabled and resolution.enabled and resolution.reason == "no_active_factors" and resolution.feature_columns == []
 
 
-# ───────────────────────── factors.enabled sin cablear: limitación explícita ─────────────────────────
+# ───────────────────────── factors.enabled: el pipeline está CONECTADO a run_pipeline (W6-E) ─────────────────────────
 
-def test_the_limitation_is_recorded_only_when_the_pipeline_is_enabled_but_not_connected():
+def test_enabling_the_pipeline_no_longer_records_the_not_connected_limitation_but_the_contract_remains(monkeypatch):
+    """W6-E conectó el pipeline: `factor_pipeline_not_connected` ya no se registra. La limitación sigue siendo el contrato si alguien lo desconectara."""
+    from predictily_engine.availability import pipeline as pipeline_module
+
+    assert pipeline_module.PIPELINE_CONNECTED_TO_RUN_PIPELINE is True
     assert factor_pipeline_limitations({}) == [] and factor_pipeline_limitations(None) == []
     assert factor_pipeline_limitations({"factor_activation": {"ipc": {"active": True}}}) == []
-    enabled = factor_pipeline_limitations({"cores": {"factors": {"enabled": True}}})
-    assert [x["code"] for x in enabled] == ["factor_pipeline_not_connected"] and "no está conectado" in enabled[0]["message"]
+    assert factor_pipeline_limitations({"cores": {"factors": {"enabled": True}}}) == []
     broken = factor_pipeline_limitations({"cores": {"factors": {"enabled": True, "indicator_precedence": {"a": "x"}}}})
     assert [x["code"] for x in broken] == ["factors_config_invalid"]
+    monkeypatch.setattr(pipeline_module, "PIPELINE_CONNECTED_TO_RUN_PIPELINE", False)
+    unplugged = factor_pipeline_limitations({"cores": {"factors": {"enabled": True}}})
+    assert [x["code"] for x in unplugged] == ["factor_pipeline_not_connected"] and "no está conectado" in unplugged[0]["message"]
 
 
 @pytest.fixture(scope="module")
@@ -143,14 +149,19 @@ def demand_runs(small_data):
     return {"default": run({}), "enabled": run(enabled)}
 
 
-def test_a_demand_run_with_the_pipeline_enabled_reports_that_it_is_not_connected_and_changes_nothing(demand_runs):
+def test_a_demand_run_with_active_factors_but_no_loaded_data_reports_it_and_changes_nothing(demand_runs):
+    """Encendido y con un factor activado, pero el `TenantData` sin los datos del factor (no se cargaron): limitación explícita
+    (`factors_inputs_not_loaded`) y ni un valor servido cambia."""
     default, enabled = demand_runs["default"], demand_runs["enabled"]
-    assert "factor_pipeline_not_connected" not in {x["code"] for x in default.limitations}
-    assert [x for x in enabled.limitations if x["code"] == "factor_pipeline_not_connected"], "limitación explícita"
+    assert default.factors == {} and "factors" not in default.summary and "factors" not in default.manifest
+    codes = {x["code"] for x in enabled.limitations}
+    assert "factor_pipeline_not_connected" not in codes and "factors_inputs_not_loaded" in codes
+    assert enabled.factors["decision"] == "not_evaluated" and enabled.factors["reason"] == "inputs_not_loaded"
+    assert enabled.factors["factor_model_served"] is False and enabled.factors["used_factors"] == []
     columns = ["node_key", "granularity", "horizon_step", "yhat", "lo_95", "hi_95", "case_label", "quality_status"]
 
     def day(result):
         fv = result.forecast_values
         return fv[fv["granularity"] == "day"][columns].sort_values(["node_key", "horizon_step"]).reset_index(drop=True)
 
-    pd.testing.assert_frame_equal(day(default), day(enabled))      # sin cablear, ningún valor cambia
+    pd.testing.assert_frame_equal(day(default), day(enabled))      # sin datos de factores, ningún valor cambia

@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from predictily_engine.backtest.factor_arm import FactorOutcome, factor_config_record, prepare_factor_arm
 from predictily_engine.backtest.rolling import (
     AsOfWindows,
     BacktestPlan,
@@ -125,6 +126,10 @@ class PipelineResult:
     assumptions: list[str] = field(default_factory=list)
     lifecycle: LifecyclePlan | None = None
     quality: QualityAssessment | None = None  # W2-C: métricas de dataset y gate de calidad de la ejecución
+    # W6-E: pipeline de factores (ADR-V25-16/25). Vacío con el pipeline apagado (por defecto); encendido: qué factores se resolvieron, cómo compitió
+    # el modelo con factores con el LightGBM sin ellos y si se sirve (`backtest/factor_arm.py`).
+    factors: dict[str, Any] = field(default_factory=dict)
+    factor_compat: dict[str, Any] | None = None     # linaje de los factores del modelo SERVIDO (None si no se sirve el modelo con factores): `model_registry.artifact_compat.factors`
     # W3-B: decisiones de ambas políticas por alcance (model_promotion_decisions) y predicciones del challenger (shadow_forecast_values)
     promotion: PromotionOutcome | None = None
     shadow: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=shadow_stage.SHADOW_COLUMNS))
@@ -198,6 +203,11 @@ def run_pipeline(
         "promotion": {"core_config_version": promotion_record["config_version"], "governing_policy": promo_cfg.governing_policy,
                       "policy_versions": promo_cfg.policy_versions()},
     }
+    # W6-E: con el pipeline de factores ENCENDIDO su configuración y la activación de la empresa forman parte de la huella de la ejecución;
+    # apagado (por defecto) la huella es exactamente la de siempre.
+    factors_record = factor_config_record(data.settings, data.sector)
+    if factors_record is not None:
+        effective_config["factors"] = factors_record
     config_version = config_hash(effective_config)
 
     progress("profiling", 10)
@@ -248,7 +258,11 @@ def run_pipeline(
     if windows is not None and features.disabled_features:   # las ventanas as-of reconstruidas aplican la MISMA política del builder
         windows.make_features = lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
                                                           promotion_revisions=data.promotion_revisions, **features.options())
+    # W6-E · pipeline de factores: apagado (por defecto) ⇒ `factor_outcome` es None y nada de lo que sigue cambia. Encendido: resuelve los factores
+    # activos (as-of retroactivo) y arma el brazo con factores, que compite con el LightGBM sin factores solo con las ventanas de selección.
     plan = plan_backtest(panel, max_windows)
+    factor_outcome: FactorOutcome | None = prepare_factor_arm(data, panel, features, horizon_end, core_config,
+                                                              block_days=plan.horizon if plan is not None else None)
     full_ids = eligible_ids(panel, cutoff)
     use_lgbm = 5 <= len(full_ids) <= max_series_lgbm
     if len(full_ids) > max_series_lgbm:
@@ -269,6 +283,12 @@ def run_pipeline(
         bt = pd.DataFrame()
         warnings.append("Historia insuficiente para backtesting (< 70 días): se usa el promedio de la historia "
                         "disponible y los intervalos no están calibrados.")
+    if factor_outcome is not None:
+        # El modelo con factores compite con el LightGBM sin factores (ventanas de selección; el período final nunca decide): si gana,
+        # sus filas y su constructor ocupan el lugar de los de LightGBM; si no, todo sigue exactamente igual que sin factores.
+        bt, features, windows = factor_outcome.compete(panel=panel, features=features, plan=plan, windows=windows, bt=bt, use_lgbm=use_lgbm,
+                                                       seed=seed, n_jobs=n_jobs)
+        limitations.extend(factor_outcome.limitations)
     timings["backtesting"] = time.perf_counter() - t1
 
     progress("selecting", 58)
@@ -297,6 +317,8 @@ def run_pipeline(
                                         segment_source=segment_source, champions_source=champions_source)
         bt, selection, eval_selection = promotion.backtest, promotion.selection, promotion.eval_selection
         limitations.extend(promotion.limitations)
+        if factor_outcome is not None:     # W6-E: ¿la política que gobierna la selección posterior usa el período final? (la heredada sí; la V2.5 no)
+            factor_outcome.note_downstream(promotion.governing, plan is not None and plan.has_holdout)
         if eval_selection is None:
             warnings.append(
                 "La historia no alcanza para reservar un período final independiente: las métricas de precisión "
@@ -333,6 +355,8 @@ def run_pipeline(
     # E2-19: lo que se sirve (y por tanto métricas, intervalos y etiquetas) es la selección con el respaldo
     # en lugar de cualquier familia que falló; el ganador del backtest queda como `planned`.
     served = selection.served(set(failed))
+    if factor_outcome is not None:     # W6-E: ¿el modelo con factores es realmente el que se sirve?
+        factor_outcome.finalize(set(served.winners.values()) | {served.fallback}, set(failed))
     if promotion is not None and failed:    # W3-B: las filas efectivas del registro de decisiones dicen lo REALMENTE servido, no la familia planeada
         promotion.reconcile_served(failed, selection.fallback)
     eval_served = eval_selection.served(set(failed)) if eval_selection is not None else None
@@ -591,7 +615,8 @@ def run_pipeline(
         "Cada ventana del backtest entrena con los datos tal como se conocían en su corte; los reales con que se evalúa son la "
         "verdad disponible al corte final (versión vigente de cada documento a esa fecha).",
     ]
-    snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage)
+    snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage,
+                              factors=factor_outcome.snapshot_block() if factor_outcome is not None else None)
     families_info = _families_info(served, selection, series_fc, bt, active, failed)
     served_info = {
         "fallback_used": bool(failed), "failed_families": failed,
@@ -607,6 +632,8 @@ def run_pipeline(
         has_eval_selection=eval_selection is not None, p50=p50_info, seed=seed, served=served_info,
         day_status=panel.day_summary, knowledge=knowledge)
     manifest["data_quality_gate"] = dq.manifest_block()   # W2-C: resultado del gate de calidad de datos (ADR-V25-05)
+    if factor_outcome is not None:   # W6-E: factores activos, resolución as-of, competencia con el modelo sin factores y decisión
+        manifest["factors"] = factor_outcome.manifest_block()
     if promotion is not None:   # W3-B: ambas políticas (parámetros, huellas, ventanas usadas, ajuste Optuna) y cuál gobernó
         manifest["promotion"] = promotion.manifest_block()
         if manifest.get("selection"):      # el criterio se genera de la política (no la frase fija «≥ 2/3»): con 4 ventanas la heredada exige 3
@@ -629,6 +656,8 @@ def run_pipeline(
         "history_days": history_days, "horizon_days": horizon, "horizons_requested": list(horizons),
         "day_status": panel.day_summary, "knowledge": knowledge, "quality_gate": dq.manifest_block(),
     })
+    if factor_outcome is not None:
+        summary["factors"] = factor_outcome.report()
     summary["segment_metrics"] = seg_metrics.summary_block(evaluations, segment_config if segment_config.enabled else None,
                                                            error=segment_error)   # W3-A (compacto: el detalle está en model_evaluations)
     manifest["segment_metrics"] = seg_metrics.manifest_block(segment_config if segment_config.enabled else None)   # W3-A: definiciones estáticas, una vez
@@ -657,11 +686,14 @@ def run_pipeline(
         cutoff=cutoff.date(), data_from=panel.df["ds"].min().date(), data_to=cutoff.date(), panel=panel,
         readiness=readiness, selection=served, plan=plan, evaluations=evaluations, families=families_info,
         forecast_values=forecast_values, recommendations=recs, summary=summary, warnings=warnings,
-        training_data_hash=training_data_hash(panel), lgbm=lgbm, timings=timings,
+        training_data_hash=(factor_outcome.fold_training_hash(training_data_hash(panel)) if factor_outcome is not None else training_data_hash(panel)),
+        lgbm=lgbm, timings=timings,
         backtest=bt, evaluation_selection=eval_served, planned_selection=selection, failed_families=failed,
         snapshot=snapshot, manifest=manifest, effective_config=effective_config, config_version=config_version,
         horizon_support=support, quality_status=quality, limitations=limitations, assumptions=assumptions,
         lifecycle=lifecycle, quality=dq, promotion=promotion, shadow=shadow_df,
+        factors=factor_outcome.report() if factor_outcome is not None else {},
+        factor_compat=factor_outcome.registry_compat() if factor_outcome is not None else None,
     )
 
 

@@ -292,6 +292,16 @@ def persist_evaluations(conn: Connection, tenant_id: int, run_id: int, evaluatio
     return len(payload)
 
 
+def factor_registry_fields(result: PipelineResult, family: str) -> tuple[str, dict[str, Any] | None]:
+    """`(feature_set_version, artifact_compat.factors)` de una fila del registro de modelos (W6-E · H2). Solo el LightGBM SERVIDO con factores lleva el linaje de
+    los factores (claves, versiones de definición, huella de los valores visibles) y una versión de features con su marca corta; el resto de las filas, y
+    TODAS con el pipeline apagado, quedan exactamente como siempre."""
+    compat = result.factor_compat if family == "lightgbm_global" and result.lgbm is not None else None
+    if compat is None:
+        return FEATURE_SET_VERSION, None
+    return f"{FEATURE_SET_VERSION}+factors:{compat['fingerprint'][:12]}", compat
+
+
 def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int | None, result: PipelineResult,
                     seed: int, duration_ms: int) -> None:
     run = conn.execute(text(
@@ -335,6 +345,9 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         compat = {"input_schema": "demand-panel-v1", "feature_set_version": FEATURE_SET_VERSION, "libraries": versions,
                   "artifact_kind": "mlforecast_joblib" if artifact_path else "statistical_refit",
                   "frequency": "D", "season_length": 7}
+        row_fsv, factor_compat = factor_registry_fields(result, fam)
+        if factor_compat is not None:      # W6-E (H2): el modelo SERVIDO usa factores externos: su linaje (claves, versiones de definición, huella) viaja con el registro
+            compat["factors"] = factor_compat
         if artifact_signature is not None:
             compat["signature"] = artifact_signature      # firma Ed25519 del manifiesto (signed | unsigned), ADR-V25-20
         evaluated = status in ("production", "validated", "candidate") and info.get("evaluated", False)
@@ -356,7 +369,7 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
             "tenant_id": tenant_id, "version": f"t{tenant_id}-r{run['version']}-{fam}", "family": fam,
             "level": info["level"], "demand_class": classes[0] if len(classes) == 1 else None, "status": status,
             "role": role, "evaluated": bool(evaluated), "compat": jdump(compat),
-            "hp": jdump(hp), "fsv": FEATURE_SET_VERSION, "dfrom": result.data_from, "dto": result.data_to,
+            "hp": jdump(hp), "fsv": row_fsv, "dfrom": result.data_from, "dto": result.data_to,
             "hash": result.training_data_hash, "series_count": info["series_count"], "apath": artifact_path,
             "asha": artifact_sha, "libs": jdump(versions), "seed": seed, "job_id": job_id, "run_id": run_id,
             "notes": notes, "promoted": status == "production",

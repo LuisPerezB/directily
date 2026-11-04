@@ -199,11 +199,22 @@ class FactorsRepository:
         unsupported = ~rows["scope"].isin(SUPPORTED_CALENDAR_SCOPES)
         discarded = [{"reason": "scope_unsupported", "scope": str(sc), "rows": int(n)}
                      for sc, n in rows.loc[unsupported, "scope"].value_counts().sort_index().items()]
-        kept = rows[~unsupported]
+        # L2 (W6-E): un evento de alcance `country` o `sector` solo aplica a la empresa de ESE país y ESE sector (un feriado de otro país, o la campaña
+        # de otro rubro, no es una feature de esta empresa); el de alcance `tenant` es solo de la propia empresa.
+        country, sector = self._tenant_country_and_sector()
+        ref_text = rows["scope_ref"].astype("string").str.strip()
+        applies = (((rows["scope"] == "country") & (ref_text.str.upper() == country))
+                   | ((rows["scope"] == "sector") & (ref_text.str.lower() == sector))
+                   | ((rows["scope"] == "tenant") & (rows["tenant_id"] == self.tenant_id))).fillna(False).astype(bool)
+        inapplicable = ~unsupported & ~applies
+        discarded += [{"reason": "scope_not_applicable", "scope": str(sc), "scope_ref": None if pd.isna(ref) else str(ref), "rows": int(n)}
+                      for (sc, ref), n in rows.loc[inapplicable].groupby(["scope", rows["scope_ref"].fillna("")]).size().items()]
+        kept = rows[~unsupported & applies]
         if kept.empty and discarded:
             raise ScopeUnsupportedError(
-                f"Todas las filas del evento {event_code!r} tienen un alcance no soportado "
-                f"({', '.join(d['scope'] for d in discarded)}): scope_unsupported (solo {', '.join(SUPPORTED_CALENDAR_SCOPES)}).")
+                f"Ninguna fila del evento {event_code!r} aplica a esta empresa: " + "; ".join(
+                    f"{d['reason']} ({d['scope']}{'/' + d['scope_ref'] if d.get('scope_ref') else ''})" for d in discarded)
+                + f" — solo {', '.join(SUPPORTED_CALENDAR_SCOPES)} y, para country/sector, el país y el rubro de la empresa.")
         if scope is not None:
             kept = kept[kept["scope"] == scope]
         if scope_ref is not None:
@@ -225,6 +236,14 @@ class FactorsRepository:
         out = kept.drop(columns=["tenant_id"]).reset_index(drop=True)
         out.attrs["discarded"] = discarded
         return out
+
+    def _tenant_country_and_sector(self) -> tuple[str, str]:
+        """País (código ISO en mayúsculas) y rubro (minúsculas) de la empresa, para decidir qué eventos de calendario le aplican."""
+        df = self._read("SELECT country, sector FROM tenants WHERE id = :tenant_id")
+        if df.empty:
+            return "", ""
+        row = df.iloc[0]
+        return str(row["country"] or "").strip().upper(), str(row["sector"] or "").strip().lower()
 
     # ── eventos externos ──
     def events(self, families: list[str] | None = None) -> pd.DataFrame:

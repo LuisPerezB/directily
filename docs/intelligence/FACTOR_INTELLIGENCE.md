@@ -12,7 +12,7 @@
 > Las pruebas están en `backend/tests/Feature/Intelligence/` y se ejecutan con
 > `cd backend && DB_DATABASE=<bd_de_pruebas> php artisan test --filter=Intelligence` (más `OpenApiRoutesTest` y `TenantDataExporterStage2Test`).
 >
-> Documentos hermanos: `PRODUCT_TAXONOMY.md` (taxonomía), `EXTERNAL_SOURCES.md` (estado legal y técnico de cada fuente), `SECTOR_PROFILES.md` (perfiles sectoriales y
+> Documentos hermanos: `FACTOR_PIPELINE.md` (W6-E: pipeline de factores en la demanda, activación, competencia y ablation), `PRODUCT_TAXONOMY.md` (taxonomía), `EXTERNAL_SOURCES.md` (estado legal y técnico de cada fuente), `SECTOR_PROFILES.md` (perfiles sectoriales y
 > los seis escenarios de V2.1 §24.12). Disponibilidad temporal: `docs/data/TEMPORAL_AVAILABILITY.md` (ventas) y los documentos del paquete W2-D del motor
 > (`docs/data/FEATURE_CONTRACTS.md`, `docs/ml/POINT_IN_TIME_VALIDATION.md`).
 
@@ -146,8 +146,10 @@ Lo que la activación **no** hace: no enciende el pipeline de factores del motor
 * *IMPLEMENTADO / VERIFICADO:* roles (`FactorActivationTest::test_owner_and_admin_can_activate_and_the_choice_is_stored_in_tenant_settings_without_touching_the_catalog`,
   `…::test_analyst_and_viewer_cannot_activate`, `…::test_a_read_only_api_token_without_the_ability_cannot_activate`), aislamiento (`…::test_activation_is_isolated_per_company_and_rejects_unknown_or_foreign_keys`),
   no falsificable por `PATCH /tenant` (`…::test_activation_cannot_be_forged_through_the_tenant_settings_endpoint`) y persistencia (`…::test_activation_persists_when_other_settings_are_updated_afterwards`).
-* *DISEÑADO / NO IMPLEMENTADO:* que el motor lea `factor_activation` y la exija junto con `factors.enabled`. El bloque «factors» del motor lo define W2-D (`enabled=false` por defecto); la clave
-  `tenants.settings.factor_activation` es el contrato que debe leer. Hasta entonces la activación **no tiene efecto alguno** en predicciones (y es lo que el campo `engine_effect` declara).
+* *IMPLEMENTADO / VERIFICADO (W6-E):* el motor lee `factor_activation` y la exige junto con `factors.enabled` (bloque «factors» de `platform/config.py`, `enabled=false` por defecto): un factor cuenta solo con las dos
+  condiciones (`FACTOR_PIPELINE.md` §2). **Aun así, activar no cambia lo servido por sí solo:** el modelo con factores debe ganar la competencia con el LightGBM sin factores en las ventanas de selección
+  (`FACTOR_PIPELINE.md` §4); si no gana, la ejecución sirve exactamente lo mismo que sin factores. Con el pipeline de la empresa apagado, la activación no tiene efecto alguno (`engine_effect = none_until_pipeline_enabled`);
+  el backend sigue sin consultar ni modificar el interruptor del motor.
 
 ## 5. Disponibilidad temporal
 
@@ -196,8 +198,13 @@ exigir `verified_at` no nulo y `verified_at <= corte` (y `available_at <= corte`
 
 `factor_evaluations` (baseline vs candidato con holdout intacto y decisión `promote | reject | inconclusive`) existe como modelo aislado por empresa. **IMPLEMENTADO / VERIFICADO:** una evaluación
 `promote` con `holdout_untouched = false` se rechaza (`IntelligenceModelsTest::test_factor_evaluations_are_isolated_and_never_promote_with_a_used_holdout`).
-**DISEÑADO / NO IMPLEMENTADO (P2):** el cálculo de ablation por familia, la comparación baseline vs +factor vs combinaciones, el control de comparaciones múltiples y los reportes. No hay ninguna evaluación
-real ni porcentaje de mejora de ningún factor; no se inventa ninguno. `factor_applicability_rules` (qué factor aplica a qué perfil/categoría/región) también es solo contrato y modelo: sin API ni motor de
+
+**IMPLEMENTADO / VERIFICADO (W6-E, herramienta P2):** `engine/scripts/factor_ablation.py` corre el backtest as-of sin factores, con cada factor y con todos juntos sobre las ventanas de selección —entrenado como se sirve y con el mismo control de
+placebos con semilla y la misma selección hacia delante que el pipeline: una combinación solo se promueve si cada miembro se promovió solo— y entrega las diferencias de métricas por
+horizonte y segmento con los denominadores de W3-A y filas con la forma de `factor_evaluations`. Es de **solo lectura** (no escribe esta tabla ni ninguna otra; un proceso autorizado registraría las filas), no toca el período final
+reservado y solo corre sobre datos ficticios o una base de pruebas. Detalle, salida de ejemplo y límites: `FACTOR_PIPELINE.md` §7. **DISEÑADO / NO IMPLEMENTADO (P2):** el control de comparaciones múltiples más allá de la selección hacia delante con placebos, los reportes por
+familia completa y la escritura de `factor_evaluations` por el proceso autorizado. **No hay ninguna evaluación real ni porcentaje de mejora de ningún factor en datos reales; no se inventa ninguno** (los números del ejemplo de
+`FACTOR_PIPELINE.md` salen de una empresa ficticia con un efecto sembrado). `factor_applicability_rules` (qué factor aplica a qué perfil/categoría/región) también es solo contrato y modelo: sin API ni motor de
 aplicabilidad (DISEÑADO).
 
 ## 8. Pronósticos compartidos entre empresas (`SharedForecastGrant`, V2.1 §10)
@@ -291,7 +298,7 @@ updated|versioned|deleted`, `taxonomy_assignment_created|verified|rejected|updat
 | Elemento | Estado |
 |---|---|
 | Catálogo de 17 familias (20 definiciones), todas inactivas, con metadato completo | **IMPLEMENTADO / VERIFICADO** |
-| Activación por empresa (propietario/administrador), auditada, sin efecto en el motor con el pipeline apagado | **IMPLEMENTADO / VERIFICADO** (el efecto en el motor: **DISEÑADO**, depende de W2-D) |
+| Activación por empresa (propietario/administrador), auditada, sin efecto en el motor con el pipeline apagado | **IMPLEMENTADO / VERIFICADO** (el motor la lee desde W6-E y la exige junto con `factors.enabled`; con el pipeline encendido solo cambia lo servido si el modelo con factores gana la competencia) |
 | Escritura del catálogo público solo por la plataforma (ruta y modelo) | **IMPLEMENTADO / VERIFICADO** |
 | Eventos manuales con procedencia, segregación, vencimiento y alertas informativas | **IMPLEMENTADO / VERIFICADO** |
 | Taxonomía básica, perfiles de relevancia y asignaciones con procedencia (T13 parcial) | **IMPLEMENTADO / VERIFICADO** (ver `PRODUCT_TAXONOMY.md`) |
@@ -299,9 +306,11 @@ updated|versioned|deleted`, `taxonomy_assignment_created|verified|rejected|updat
 | Exportación LOPDP de todo lo anterior | **IMPLEMENTADO / VERIFICADO** |
 | Conectores y fuentes externas (clima, tendencias, competencia, estadísticas, sanidad…) | **BLOQUEADO / P2**: ninguna integración activa; ver `EXTERNAL_SOURCES.md` |
 | Extracción de eventos y clasificación de productos por LLM | **DISEÑADO / NO IMPLEMENTADO** (P2; las columnas de procedencia existen) |
-| Ablation por familia, `FactorApplicabilityEngine`, `FeatureSelectionEvaluator`, reportes baseline vs +factor | **DISEÑADO / NO IMPLEMENTADO** (P2) |
-| Lectura de `factor_activation` por el motor y reconciliación de proyecciones compartidas | **DISEÑADO / NO IMPLEMENTADO** |
-| Pruebas sectoriales T15 (seis casos) | **NO APROBADAS**: P2/P3 (ver `SECTOR_PROFILES.md`) |
+| Herramienta de ablation baseline vs +factor (`scripts/factor_ablation.py`, solo lectura) y pipeline de factores conectado a la demanda | **IMPLEMENTADO / VERIFICADO** (W6-E; datos ficticios y base de pruebas) |
+| `FactorApplicabilityEngine`, `FeatureSelectionEvaluator`, control de comparaciones múltiples más allá de la selección hacia delante con placebos, escritura de `factor_evaluations` y ablation sobre datos reales | **DISEÑADO / NO IMPLEMENTADO** (P2) |
+| Lectura de `factor_activation` por el motor | **IMPLEMENTADO / VERIFICADO** (W6-E) |
+| Reconciliación de proyecciones compartidas | **DISEÑADO / NO IMPLEMENTADO** |
+| Pruebas sectoriales T15 (seis casos) | **`P3_PENDIENTE`**, sin cobertura declarada; datos reales BLOQUEADO (ver `SECTOR_PROFILES.md` y `docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md`) |
 | Red colaborativa entre empresas | **DESACTIVADA** en P0 por decisión (V2.5 §24.10) |
 
 ## 11. Limitaciones conocidas

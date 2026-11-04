@@ -25,13 +25,18 @@ factor debe cubrir `antigüedad al corte + horizonte máximo`, o su estrategia d
 **Ventanas del backtest.** El corte FINAL puede ser vigente; todo corte anterior se evalúa como RETROACTIVO (lo que no puede
 demostrarse conocido no se usa), aunque la resolución del corte final fuera vigente.
 
-NO está conectado a `run_pipeline`: P0 entrega los contratos, el validador y este resolvedor; los conectores y la ablation por
-familia son P2 (ADR-V25-25). Hoy lo consume `FeatureBuilder(factors=...)`. Mientras no esté conectado, `factors.enabled = true`
-registra la limitación `factor_pipeline_not_connected` en la ejecución de demanda (`factor_pipeline_limitations`).
+W6-E: CONECTADO a `run_pipeline` (`backtest/factor_arm.py`). `load_tenant_data` lee los insumos de los factores activos
+(`pipeline.data.load_factor_inputs`), `run_pipeline` los resuelve aquí con el horizonte real y SIEMPRE con la regla retroactiva
+(`retroactive=True`: lo que no puede demostrarse conocido en el corte de cada ventana no entra, tampoco en el corte final de una
+ejecución vigente) y el modelo con factores COMPITE con el LightGBM sin factores en las ventanas de selección (nunca en el período final
+reservado); solo se sirve si gana. Apagado (por defecto) no se consulta nada. Los conectores externos y la ablation por familia sobre
+datos reales son P2 (ADR-V25-25; `scripts/factor_ablation.py` es la herramienta).
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -46,6 +51,7 @@ from predictily_engine.availability.model import (
     ForecastBacktestForbidden,
     Reason,
 )
+from predictily_engine.availability.served import served_series, served_stats
 from predictily_engine.availability.validator import FeatureAvailabilityValidator
 from predictily_engine.availability.visibility import to_date, to_day
 from predictily_engine.db.factors_repository import (
@@ -57,8 +63,10 @@ from predictily_engine.db.factors_repository import (
 )
 
 COLUMN_PREFIX = "factor__"
+DEFINITION_VERSION_FIELDS = ("id", "tenant_id", "family", "key", "availability_class", "storage", "external_indicator_id", "frequency", "missing_strategy",
+                             "max_staleness_days", "schema", "source_key", "license", "unit", "geo_scope")
 ACTIVATION_SETTING = "factor_activation"        # tenants.settings.factor_activation.<clave>.active (backend, W2-F)
-PIPELINE_CONNECTED_TO_RUN_PIPELINE = False       # `run_pipeline` aún no invoca a `FactorPipeline`
+PIPELINE_CONNECTED_TO_RUN_PIPELINE = True        # W6-E: `run_pipeline` resuelve los factores activos (backtest/factor_arm.py)
 
 
 @dataclass
@@ -88,6 +96,18 @@ class FactorResolution:
     _retro: Any = field(default=None, repr=False)
     _retro_prepared: dict[str, Any] = field(default_factory=dict, repr=False)
     _cache: dict[Any, pd.DataFrame] = field(default_factory=dict, repr=False)
+    # W6-E (H1/M1) · modo «tal como se sirve»: con `served_block_days` las columnas de cada corte se arman con los valores que cada fila habría tenido
+    # desde SU origen (bloques hacia atrás desde el corte; ver `availability/served.py`) y un valor vencido es faltante. None = comportamiento de W2-D.
+    served_block_days: int | None = None
+    stats: dict[str, dict[str, Any]] = field(default_factory=dict)          # cómo fue cada factor tal como se sirve (días vencidos, antigüedad máxima…)
+    definitions: dict[str, dict[str, Any]] = field(default_factory=dict)    # metadatos de la definición con que se resolvió cada factor (para la huella de linaje)
+
+    def definition_version(self, key: str) -> str | None:
+        """Huella de la definición del factor tal como se resolvió (clase, almacenamiento, antigüedad, estrategia, esquema…): si cambia, el factor es otro."""
+        definition = self.definitions.get(key)
+        if definition is None:
+            return None
+        return hashlib.sha256(json.dumps(definition, sort_keys=True, default=str).encode()).hexdigest()
 
     @classmethod
     def disabled(cls, reason: str = "disabled") -> "FactorResolution":
@@ -115,7 +135,10 @@ class FactorResolution:
                     if key not in self._retro_prepared:
                         self._retro_prepared[key] = validator.prepare(spec, observations)
                     prepared = self._retro_prepared[key]
-                series = validator.evaluate_series(spec, prepared, self._dates, final_cutoff=day)
+                if self.served_block_days:
+                    series = served_series(validator, spec, prepared, self._dates, day, self.served_block_days)
+                else:
+                    series = validator.evaluate_series(spec, prepared, self._dates, final_cutoff=day)
                 frame[f"{COLUMN_PREFIX}{key}"] = series["value"].to_numpy(dtype=float)
             self._cache[day] = frame
         return self._cache[day]
@@ -126,9 +149,72 @@ class FactorResolution:
 
     def report(self) -> dict[str, Any]:
         """Forma serializable para el manifiesto y las limitaciones de la ejecución."""
-        return {"enabled": self.enabled, "reason": self.reason, "used": list(self.used), "dropped": list(self.dropped),
-                "scenario_only": list(self.scenario_only), "discarded": list(self.discarded), "columns": self.feature_columns,
-                "factors": {k: r.as_dict() for k, r in self.results.items()}}
+        out = {"enabled": self.enabled, "reason": self.reason, "used": list(self.used), "dropped": list(self.dropped),
+               "scenario_only": list(self.scenario_only), "discarded": list(self.discarded), "columns": self.feature_columns,
+               "factors": {k: r.as_dict() for k, r in self.results.items()}}
+        if self.served_block_days:
+            out["served_block_days"] = self.served_block_days
+            out["stats"] = {k: dict(v) for k, v in self.stats.items()}
+        return out
+
+    def select(self, keys: list[str]) -> "FactorResolution":
+        """La MISMA resolución restringida a un subconjunto de factores (selección hacia delante del cableado de demanda): mismas observaciones, mismo
+        validador y corte final; solo las columnas, contratos y entradas de `keys`."""
+        keep = [k for k in self.used if k in set(keys)]
+        columns = self.columns[["ds", *[f"{COLUMN_PREFIX}{k}" for k in keep]]].copy() if "ds" in self.columns else self.columns.copy()
+        return FactorResolution(
+            enabled=self.enabled, reason=self.reason, columns=columns,
+            contracts={c: v for c, v in self.contracts.items() if c in set(columns.columns)}, results={k: v for k, v in self.results.items() if k in keep},
+            used=keep, dropped=list(self.dropped), scenario_only=list(self.scenario_only), discarded=list(self.discarded),
+            _inputs={k: v for k, v in self._inputs.items() if k in keep}, _dates=self._dates, _validator=self._validator, _final=self._final,
+            _retro=self._retro, _retro_prepared={k: v for k, v in self._retro_prepared.items() if k in keep},
+            served_block_days=self.served_block_days, stats={k: v for k, v in self.stats.items() if k in keep},
+            definitions={k: v for k, v in self.definitions.items() if k in keep})
+
+    def shifted(self, shifts: dict[str, int]) -> "FactorResolution":
+        """PLACEBO (W6-E · revisión H1): la misma resolución con las observaciones de cada factor desplazadas `shifts[clave]` días en círculo dentro de su
+        propio rango (período, publicación, disponibilidad, vigencia y emisión se mueven juntos: el rezago de publicación, la distribución, la
+        proporción de faltantes y el patrón de disponibilidad relativo se conservan; solo se rompe la alineación con el objetivo). Una columna
+        que nunca fue verdadera ayuda al modelo no debería superar a su placebo."""
+        validator = self._validator
+        inputs, columns = {}, self.columns[["ds"]].copy()
+        for key in self.used:
+            spec, observations, _ = self._inputs[key]
+            moved = shift_observations(observations, int(shifts.get(key, 0)))
+            prepared = validator.prepare(spec, moved)
+            inputs[key] = (spec, moved, prepared)
+            series = (served_series(validator, spec, prepared, self._dates, self._final, self.served_block_days) if self.served_block_days
+                      else validator.evaluate_series(spec, prepared, self._dates, final_cutoff=self._final))
+            columns[f"{COLUMN_PREFIX}{key}"] = series["value"].to_numpy(dtype=float)
+        return FactorResolution(
+            enabled=self.enabled, reason=self.reason, columns=columns, contracts=dict(self.contracts), results=dict(self.results), used=list(self.used),
+            dropped=list(self.dropped), scenario_only=list(self.scenario_only), discarded=list(self.discarded), _inputs=inputs, _dates=self._dates,
+            _validator=validator, _final=self._final, served_block_days=self.served_block_days, stats=dict(self.stats),
+            definitions=dict(self.definitions))
+
+
+SHIFTED_COLUMNS = ("period_date", "observed_at", "published_at", "ingested_at", "available_at", "valid_from", "valid_to", "issued_at")
+
+
+def shift_observations(observations: Any, days: int) -> pd.DataFrame:
+    """Copia de las observaciones con TODAS sus fechas desplazadas `days` días en círculo sobre el rango de sus períodos (`period_date`): lo que sobrepasa el
+    último período vuelve al inicio con el mismo desfase entre período, publicación, disponibilidad y vigencia. `days = 0` devuelve las mismas fechas."""
+    df = observations.copy() if isinstance(observations, pd.DataFrame) else pd.DataFrame(list(observations or []))
+    if df.empty or "period_date" not in df or not days:
+        return df
+    period = pd.to_datetime(df["period_date"], errors="coerce")
+    lo, hi = period.min(), period.max()
+    span = int((hi - lo).days) + 1
+    if span < 2:
+        return df
+    offset = int(days) % span
+    moved = ((period - lo).dt.days + offset) % span
+    delta = pd.to_timedelta(moved - (period - lo).dt.days, unit="D")          # desplazamiento efectivo de cada fila (con la vuelta)
+    for col in SHIFTED_COLUMNS:
+        if col in df:
+            values = df[col] if pd.api.types.is_datetime64_dtype(df[col]) else pd.to_datetime(df[col], errors="coerce", utc=True)     # sin zona se conserva sin zona
+            df[col] = values + delta
+    return df
 
 
 def factor_config_errors(config: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -196,11 +282,17 @@ class FactorPipeline:
         return active_factor_keys({ACTIVATION_SETTING: self.activation}) if self.enabled else []
 
     def resolve(self, repo: FactorsRepository, dates: Any, cutoff: Any, *, timezone: str | None = None,
-                retroactive: bool = True) -> FactorResolution:
+                retroactive: bool = True, served_block_days: int | None = None) -> FactorResolution:
         """Columnas de factor para `dates` (historia hasta el fin del horizonte) con el corte `cutoff`. APAGADO ⇒ no consulta nada.
 
         `retroactive`: ¿reconstrucción de un corte histórico? Solo el corte final puede ser vigente (`retroactive=False`); los cortes
-        anteriores de las ventanas (`FactorResolution.columns_at`) siempre se evalúan como retroactivos."""
+        anteriores de las ventanas (`FactorResolution.columns_at`) siempre se evalúan como retroactivos.
+
+        `served_block_days` (W6-E · H1/M1/L3): modo «tal como se sirve» (`availability/served.py`): cada fila de entrenamiento recibe el valor visible en
+        SU origen y arrastrado como en la predicción (bloques de esa longitud: el horizonte que se sirve); un valor más viejo que `max_staleness_days` es
+        faltante; un factor solo sale entero si su fuente está vencida EN EL ORIGEN (`disable_feature`/`unavailable`) o por un motivo que no sea la
+        antigüedad del arrastre, la ausencia de valor para un día (`no_value_for_date`) ni un anuncio posterior al corte (`known_after_cutoff`: en una
+        reconstrucción histórica lo que se anunció después del corte se ignora, no descarta el factor). None = el comportamiento de W2-D."""
         if not self.enabled:
             return FactorResolution.disabled("disabled")
         keys = self.active_factors
@@ -210,7 +302,8 @@ class FactorPipeline:
         index = pd.DatetimeIndex(pd.to_datetime(dates)).normalize()
         cutoff_day = to_date(cutoff)
         needed = index >= to_day(cutoff_day)
-        out = FactorResolution(enabled=True, columns=pd.DataFrame({"ds": index}), _dates=index, _validator=validator, _final=cutoff_day)
+        out = FactorResolution(enabled=True, columns=pd.DataFrame({"ds": index}), _dates=index, _validator=validator, _final=cutoff_day,
+                               served_block_days=served_block_days)
         indicator_precedence = (self.config.get("indicator_precedence") or {})
         definition_precedence = (self.config.get("definition_precedence") or {})
         calendar_precedence = (self.config.get("calendar_precedence") or {})
@@ -223,8 +316,12 @@ class FactorPipeline:
             except LookupError as exc:
                 out.dropped.append(_drop(key, "INVALID", "definition_not_found", str(exc)))
                 continue
-            spec = FactorSpec.from_definition(definition, self.config.get("default_max_staleness_days"),
-                                              self.config.get("staleness_days_by_frequency"))
+            try:
+                spec = FactorSpec.from_definition(definition, self.config.get("default_max_staleness_days"),
+                                                  self.config.get("staleness_days_by_frequency"))
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:       # L1: una definición malformada saca a ESE factor, no aborta la demanda
+                out.dropped.append(_drop(key, "INVALID", "invalid_definition", f"La definición del factor es inválida: {type(exc).__name__}: {exc}"[:300]))
+                continue
             if spec.availability_class is AvailabilityClass.USER_SCENARIO:
                 out.scenario_only.append(key)
                 out.results[key] = validator.evaluate(spec, pd.DataFrame(), cutoff_day)
@@ -252,13 +349,30 @@ class FactorPipeline:
                 continue
             for note in getattr(observations, "attrs", {}).get("discarded", []):
                 out.discarded.append({"key": key, **note})
-            prepared = validator.prepare(spec, observations)
-            at_cutoff = validator.evaluate(spec, prepared, cutoff_day)
+            try:
+                prepared = validator.prepare(spec, observations)
+                at_cutoff = validator.evaluate(spec, prepared, cutoff_day)
+                series = (served_series(validator, spec, prepared, index, cutoff_day, served_block_days) if served_block_days
+                          else validator.evaluate_series(spec, prepared, index, final_cutoff=cutoff_day))
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:       # L1: observaciones ilegibles sacan a ESE factor
+                out.dropped.append(_drop(key, "INVALID", "invalid_observations", f"Las observaciones del factor son ilegibles: {type(exc).__name__}: {exc}"[:300],
+                                         fallback=spec.missing_strategy))
+                continue
             out.results[key] = at_cutoff
-            series = validator.evaluate_series(spec, prepared, index, final_cutoff=cutoff_day)
-            # Un día sin valor conocido (`no_value_for_date`: p. ej. un día sin campaña) no es una falla de la fuente: queda en NaN.
-            # Falla de la fuente = no utilizable por cualquier otro motivo (STALE, NOT_YET_AVAILABLE, INVALID…).
-            bad = series[needed & ~series["usable"].to_numpy(dtype=bool) & (series["reason"] != Reason.NO_VALUE_FOR_DATE).to_numpy()]
+            if served_block_days:
+                # Fuente vencida EN EL ORIGEN (cortada): con `disable_feature`/`unavailable` el factor sale entero; con `last_valid_with_age` sigue y sus
+                # días vencidos son faltantes. El arrastre más allá del límite NO descarta un factor con la fuente al día (una serie diaria fresca).
+                stale_row = (series["status"] == AvailabilityStatus.STALE.value).to_numpy(dtype=bool)
+                drop_on_stale = at_cutoff.status is AvailabilityStatus.STALE and spec.missing_strategy != "last_valid_with_age"
+                benign = series["reason"].isin([Reason.NO_VALUE_FOR_DATE, Reason.KNOWN_AFTER_CUTOFF]).to_numpy(dtype=bool) | (stale_row & (not drop_on_stale))
+                # Solo los días FUTUROS se sirven desde el corte; las filas de entrenamiento (incluido el día del corte) leen desde su propio origen y, si ahí
+                # nada era visible todavía, quedan faltantes: no es una falla de la fuente.
+                served_days = (index > to_day(cutoff_day))
+                bad = series[served_days & ~series["usable"].to_numpy(dtype=bool) & ~benign]
+            else:
+                # Un día sin valor conocido (`no_value_for_date`: p. ej. un día sin campaña) no es una falla de la fuente: queda en NaN.
+                # Falla de la fuente = no utilizable por cualquier otro motivo (STALE, NOT_YET_AVAILABLE, INVALID…).
+                bad = series[needed & ~series["usable"].to_numpy(dtype=bool) & (series["reason"] != Reason.NO_VALUE_FOR_DATE).to_numpy()]
             if not bad.empty:
                 first = bad.iloc[0]
                 out.dropped.append(_drop(key, str(first["status"]), str(first["reason"]), at_cutoff.message,
@@ -274,11 +388,18 @@ class FactorPipeline:
             column = f"{COLUMN_PREFIX}{key}"
             out.columns[column] = series["value"].to_numpy(dtype=float)
             out._inputs[key] = (spec, observations, prepared)
+            out.definitions[key] = {k: (None if v is None or (isinstance(v, float) and pd.isna(v)) else v) for k, v in dict(definition).items()
+                                    if k in DEFINITION_VERSION_FIELDS}
+            if served_block_days:
+                out.stats[key] = {**served_stats(series, cutoff_day), "source_stale_at_origin": at_cutoff.status is AvailabilityStatus.STALE,
+                                  "max_staleness_days": spec.max_staleness_days, "missing_strategy": spec.missing_strategy,
+                                  "carry_cap": "los valores más viejos que max_staleness_days son faltantes (NaN)"}
             out.contracts[column] = factor_contract(
                 key, spec.availability_class, source=f"{spec.storage}: {definition.get('name')}",
                 description=f"Factor externo {definition.get('name')} ({spec.family})",
-                assumption="Valor visible al corte arrastrado con su antigüedad." if spec.availability_class is
-                AvailabilityClass.OBSERVED_HISTORICAL else None)
+                assumption=(("Valor visible en el origen de cada bloque, arrastrado hasta la fecha con su antigüedad (≤ max_staleness_days; más viejo = faltante)."
+                             if served_block_days else "Valor visible al corte arrastrado con su antigüedad.")
+                            if spec.availability_class is AvailabilityClass.OBSERVED_HISTORICAL else None))
             out.used.append(key)
         if not out.used and not out.dropped and not out.scenario_only:
             out.reason = "no_active_factors"
@@ -286,8 +407,9 @@ class FactorPipeline:
 
 
 def factor_pipeline_limitations(tenant_settings: Mapping[str, Any] | None, sector: str | None = None) -> list[dict[str, str]]:
-    """Limitaciones de una ejecución de demanda respecto del pipeline de factores. Apagado (por defecto) ⇒ ninguna. Encendido pero sin
-    cablear en `run_pipeline` ⇒ `factor_pipeline_not_connected`: ningún factor entró al modelo aunque haya factores activos. Una
+    """Limitaciones de una ejecución de demanda respecto del pipeline de factores. Apagado (por defecto) ⇒ ninguna. Encendido y conectado
+    (W6-E) ⇒ ninguna aquí: lo que ocurrió con cada factor (usado, descartado con motivo, sin insumos) lo registra `backtest/factor_arm.py`. Si
+    el pipeline estuviera encendido pero sin cablear (`PIPELINE_CONNECTED_TO_RUN_PIPELINE` falsa) ⇒ `factor_pipeline_not_connected`. Una
     configuración de factores inválida no detiene la demanda: se registra `factors_config_invalid` y el pipeline se trata como apagado."""
     try:
         pipeline = FactorPipeline.from_settings(tenant_settings, sector)

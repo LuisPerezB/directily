@@ -239,15 +239,24 @@ class FeatureAvailabilityValidator:
         return in_window | (~windowed & (frame["period"] == ts))
 
     def _evaluate_known_in_advance(self, spec: FactorSpec, valid: pd.DataFrame, c: date, t: date, result: Any) -> AvailabilityResult:
-        cand = valid[self._covers(valid, t)]
-        if cand.empty:
+        covering = valid[self._covers(valid, t)]
+        if covering.empty:
             return result(_ST.NOT_YET_AVAILABLE, Reason.NO_VALUE_FOR_DATE)
-        visible = self._visible(cand, c)
-        hidden = int(len(cand) - len(visible))
-        if visible.empty:
-            status, reason = self._hidden_reason(cand, Reason.KNOWN_AFTER_CUTOFF)
-            return result(status, reason, detail={"hidden_after_cutoff": hidden})
-        row = visible.sort_values(["revision", "avail_eff"], kind="mergesort", na_position="first").iloc[-1]
+        # Primero la ÚLTIMA revisión visible al corte de cada evento (su identidad: el período de su primera fecha); recién después se prueba la
+        # cobertura de la fecha: una revisión posterior que ACORTA o cancela el evento reemplaza a la anterior en TODAS sus fechas (W6-E · M3).
+        visible_all = self._visible(valid, c)
+        latest = (visible_all.sort_values(["period", "revision", "avail_eff"], kind="mergesort", na_position="first")
+                  .groupby("period", sort=False).tail(1)) if len(visible_all) else visible_all
+        chosen = latest[self._covers(latest, t)] if len(latest) else latest
+        visible_covering = self._visible(covering, c)
+        hidden = int(len(covering) - len(visible_covering))
+        if chosen.empty:
+            if visible_covering.empty:
+                status, reason = self._hidden_reason(covering, Reason.KNOWN_AFTER_CUTOFF)
+                return result(status, reason, detail={"hidden_after_cutoff": hidden})
+            # La fecha la cubría una revisión que una posterior (visible al corte) acortó o canceló: ya no hay valor conocido para ese día.
+            return result(_ST.NOT_YET_AVAILABLE, Reason.NO_VALUE_FOR_DATE, detail={"hidden_after_cutoff": hidden, "superseded_revision": True})
+        row = chosen.sort_values(["revision", "avail_eff"], kind="mergesort", na_position="first").iloc[-1]
         detail = {"hidden_after_cutoff": hidden, "lead_days": (t - c).days, "availability_age_days": self._availability_age(row, c)}
         return result(_ST.AVAILABLE, Reason.OK, flags=("known_in_advance",) if t > c else (), detail=detail, **self._describe(row))
 

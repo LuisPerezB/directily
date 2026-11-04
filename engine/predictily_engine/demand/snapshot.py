@@ -94,7 +94,10 @@ def excluded_day_frame(panel: Panel) -> pd.DataFrame | None:
 
 
 def build_snapshot(data: Any, panel: Panel, effective_config: dict[str, Any], knowledge_date: pd.Timestamp,
-                   exceptional_events: pd.DataFrame | None, coverage: dict[str, Any] | None) -> DataSnapshot:
+                   exceptional_events: pd.DataFrame | None, coverage: dict[str, Any] | None, factors: dict[str, Any] | None = None) -> DataSnapshot:
+    """`factors` (W6-E · H2): con el pipeline de factores ENCENDIDO, el componente `external_indicators` lleva por cada factor resuelto su clave, la versión de
+    su definición, la huella de sus valores visibles y su estado; sin él (apagado, por defecto) el componente es `{"enabled": false}` como siempre y la huella
+    de datos no cambia."""
     snap = DataSnapshot(core=SNAPSHOT_CORE, as_of=panel.cutoff.date(), coverage=coverage or {})
     snap.add_frame("sales", data.sales, ["branch_id", "product_id", "ds", "units", "net_amount"],
                    ["branch_id", "product_id", "ds"])
@@ -137,7 +140,7 @@ def build_snapshot(data: Any, panel: Panel, effective_config: dict[str, Any], kn
         events.sort_values(["code", "starts_on"])[["code", "scope", "scope_ref", "starts_on", "ends_on", "known_at",
                                                     "revision"]].astype(str).values.tolist(),
     })
-    snap.add_value("external_indicators", {"enabled": False})
+    snap.add_value("external_indicators", {"enabled": False} if factors is None else factors)
     snap.add_value("supply_inputs", {
         "lead_times": None if data.lead_times is None or data.lead_times.empty else
         data.lead_times.astype(str).values.tolist(),

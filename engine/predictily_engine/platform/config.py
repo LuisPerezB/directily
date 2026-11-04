@@ -251,6 +251,17 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "indicator_precedence": {},
         "calendar_precedence": {},
         "definition_precedence": {},
+        # ── W6-E · cómo COMPITE el modelo con factores (backtest/factor_arm.py): LightGBM con factores vs. LightGBM sin ellos, SOLO con las
+        # ventanas de selección (el período final reservado nunca decide). Misma regla que el LightGBM heredado frente al mejor estadístico:
+        # mejora relativa mínima del WAPE y fracción de ventanas ganadas; sin evidencia suficiente se mantiene el modelo sin factores (ningún uso
+        # forzado). Valores INICIALES de diseño, «a aprobar en el piloto» con datos reales; ninguno es universal.
+        "arm_min_improvement": 0.03,         # mejora relativa mínima del WAPE del modelo con factores sobre el modelo sin ellos
+        "arm_windows_won_fraction": 2 / 3,   # fracción de ventanas de selección que debe ganar (⌈n × fracción⌉; mayoría como mínimo)
+        "arm_min_windows": 2,                # ventanas de selección comparables mínimas (con menos la evidencia es insuficiente)
+        # Control placebo (revisión adversarial H1): cada factor debe superar, con el mismo margen, al MEJOR de K placebos (el mismo factor desplazado en el
+        # tiempo: misma distribución y rezago de publicación, sin relación con el objetivo). 0 desactiva el control (NO recomendado: el ruido puede ganar).
+        "arm_placebo_arms": 5,               # K placebos con semilla por factor (y por combinación)
+        "arm_placebo_seed": 20261103,        # semilla base de los desplazamientos de los placebos (se registra en la evidencia)
     },
     "scenario": {
         "horizon_days": 90,
@@ -394,6 +405,11 @@ del _key, _value
 
 # ── W2-D · factors: rangos (los mapas anidados se validan en availability/pipeline.py, enganchado en `validate_overrides`) ──
 CONFIG_CONSTRAINTS[("factors", "default_max_staleness_days")] = {"min": 1, "max": 3650}
+CONFIG_CONSTRAINTS[("factors", "arm_min_improvement")] = {"min": 0.0, "max": 0.5}       # W6-E: misma escala que demand.min_improvement
+CONFIG_CONSTRAINTS[("factors", "arm_windows_won_fraction")] = {"min": 0.5, "max": 1.0}  # una MAYORÍA como mínimo
+CONFIG_CONSTRAINTS[("factors", "arm_min_windows")] = {"min": 1, "max": 20}
+CONFIG_CONSTRAINTS[("factors", "arm_placebo_arms")] = {"min": 0, "max": 20}
+CONFIG_CONSTRAINTS[("factors", "arm_placebo_seed")] = {"min": 0, "max": 2**31 - 1}
 
 # ── W3-C · customer S05: rangos validados (fracciones en [0, 1]; ventanas y conteos enteros acotados) ──
 CONFIG_CONSTRAINTS.update({

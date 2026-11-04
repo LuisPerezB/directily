@@ -288,13 +288,14 @@ IMPLEMENTADO / VERIFICADO: `test_factors_config.py` (estado apagado por defecto,
 El único interruptor previo de una familia (`demand.exceptional_events_flag`) tiene ahora su prueba del estado apagado
 (`test_exceptional_events_switch.py`: apagado = pronóstico idéntico al de una empresa sin eventos; encendido = mismas cifras, solo etiquetas y calidad).
 
-**NO CONECTADO a `run_pipeline`** — DISEÑADO / NO IMPLEMENTADO: el pipeline de factores existe como API (`FactorPipeline` → `FeatureBuilder(factors=...)`) pero `run_pipeline` no lo invoca
-(`pipeline/data.py` no es de este paquete). Con los valores por defecto ninguna métrica de la demo ni de los E2E cambia porque ningún factor entra al modelo (verificado: las suites existentes de demanda siguen en verde).
-**Con `factors.enabled = true` la ejecución de demanda registra la limitación `factor_pipeline_not_connected`** (`factor_pipeline_limitations`, llamada desde `pipeline/core.py`): ningún factor entró al modelo, con independencia de
-`factor_activation`; una configuración de factores inválida no detiene la demanda, se registra `factors_config_invalid` y se trata como apagado. IMPLEMENTADO / VERIFICADO:
-`test_factors_config.py::test_the_limitation_is_recorded_only_when_the_pipeline_is_enabled_but_not_connected`, `::test_a_demand_run_with_the_pipeline_enabled_reports_that_it_is_not_connected_and_changes_nothing`
-(mismos valores de pronóstico con el pipeline encendido que con él apagado). Una vez conectado, la constante `PIPELINE_CONNECTED_TO_RUN_PIPELINE` debe pasar a verdadera. **BLOQUEADO / P2**: conectores
-reales (INEC, clima, competencia…), ablation por familia y evaluación sectorial — hoy no hay ninguna integración externa activa.
+**CONECTADO a `run_pipeline` (W6-E)** — IMPLEMENTADO / VERIFICADO: `load_tenant_data` lee los insumos de los factores activos (`pipeline/data.py`: `load_factor_inputs`, `FactorInputs`; apagado no consulta ninguna tabla) y
+`run_pipeline` los resuelve con `FactorPipeline` (regla retroactiva siempre) y hace competir al modelo con factores con el LightGBM sin factores solo con las ventanas de selección (`backtest/factor_arm.py`); cada ventana as-of
+reconstruida recibe la política del constructor (`FeatureBuilder.options()`, `backtest/rolling.py`). Las columnas de factor se arman **tal como se sirven** (`availability/served.py`, revisión adversarial H1): una fila de entrenamiento recibe el valor visible en el origen de SU bloque y arrastrado como en la predicción —nunca el del propio día—, un valor más viejo que `max_staleness_days` es faltante (NaN) y cada factor debe superar a sus placebos antes de entrar al modelo servido. Con los valores por defecto ninguna métrica de la demo ni de los E2E cambia (paridad exacta, ver `docs/intelligence/FACTOR_PIPELINE.md`
+§5). La constante `PIPELINE_CONNECTED_TO_RUN_PIPELINE` es ahora verdadera: `factor_pipeline_not_connected` (`factor_pipeline_limitations`) queda solo como contrato si alguien desconectara el pipeline; con factores activos sin
+datos cargados se registra `factors_inputs_not_loaded`; una configuración de factores inválida no detiene la demanda, se registra `factors_config_invalid` y se trata como apagado.
+IMPLEMENTADO / VERIFICADO: `test_factors_config.py::test_enabling_the_pipeline_no_longer_records_the_not_connected_limitation_but_the_contract_remains`, `::test_a_demand_run_with_active_factors_but_no_loaded_data_reports_it_and_changes_nothing`,
+`test_factor_wiring.py`, `test_factor_arm_rule.py`. **BLOQUEADO / P2**: conectores reales (INEC, clima, competencia…) y evaluación sectorial sobre datos reales — hoy no hay ninguna integración externa activa; la ablation es
+`engine/scripts/factor_ablation.py` (`FACTOR_PIPELINE.md` §7).
 
 **Una feature sin contrato no se disfraza de fallo de LightGBM**: `pipeline/core.py` (entrenamiento final) y `backtest/rolling.py` (cada ventana) relanzan `FeatureContractError` en lugar de servir el modelo de respaldo; un fallo real de LightGBM
 sigue tolerándose. IMPLEMENTADO / VERIFICADO: `test_feature_contracts.py::test_a_feature_contract_error_in_a_backtest_window_is_not_disguised_as_a_lightgbm_failure`,
@@ -311,7 +312,8 @@ sigue tolerándose. IMPLEMENTADO / VERIFICADO: `test_feature_contracts.py::test_
 
 | Pendiente | Estado |
 |---|---|
-| Conectar `FactorPipeline` y `confirmed_prices` a `run_pipeline`/`load_tenant_data` (y reenviar `FeatureBuilder.options()` en `asof_windows`) | DISEÑADO / NO IMPLEMENTADO (archivos de otros paquetes) |
+| Conectar `FactorPipeline` a `run_pipeline`/`load_tenant_data` y reenviar `FeatureBuilder.options()` en `asof_windows` | **IMPLEMENTADO / VERIFICADO (W6-E)**, ver `docs/intelligence/FACTOR_PIPELINE.md` |
+| Conectar `confirmed_prices` (precios futuros confirmados de `product_price_history`) a `load_tenant_data` | DISEÑADO / NO IMPLEMENTADO: `run_pipeline` aún no construye el `FeatureBuilder` con ellos (las ventanas ya reenvían la opción si existiera) |
 | Contratos para las features del Customer Core, abastecimiento y costos | DISEÑADO / NO IMPLEMENTADO |
 | Unificar la frontera de `extensions/data_core.py::load_calendar_events` (fin del día UTC) con la medianoche local | DISEÑADO / NO IMPLEMENTADO (decisión del propietario) |
 | Almacenamientos nativos (`sales`, `promotions`, `commercial_commitments`, `inventory_snapshots`) como factores del pipeline | DISEÑADO / NO IMPLEMENTADO: tienen su propia lectura as-of |

@@ -71,10 +71,99 @@ class TenantData:
     coverage_gaps: pd.DataFrame = field(default_factory=pd.DataFrame)
     closures: pd.DataFrame = field(default_factory=pd.DataFrame)
     source_branches: dict[int, list[int]] = field(default_factory=dict)
+    # W6-E · pipeline de factores (ADR-V25-16/25): zona horaria de la empresa (frontera del día local de cada observación) e insumos YA
+    # LEÍDOS de los factores activos (`load_factor_inputs`). None = pipeline apagado o sin factores activos: no se consultó ninguna
+    # tabla de factores y el pipeline puro no resuelve nada.
+    timezone: str | None = None
+    factor_inputs: "FactorInputs | None" = None
 
     @property
     def effective_settings(self) -> dict[str, Any]:
         return {**DEFAULT_SETTINGS, **(self.settings or {})}
+
+
+class FactorReadError(LookupError):
+    """La lectura de un factor falló por un motivo inesperado (p. ej. tabla ausente). El factor queda fuera con el motivo `storage_unreadable`."""
+
+
+@dataclass
+class FactorInputs:
+    """Insumos de los factores ACTIVOS de una empresa, leídos una vez de la base (W6-E · ADR-V25-25).
+
+    El pipeline de demanda es puro (no accede a la base): `load_tenant_data` lee aquí las definiciones y las observaciones de cada factor
+    activo (`factors.enabled` Y `tenants.settings.factor_activation.<clave>.active`) y `FactorPipeline.resolve` las resuelve en memoria
+    con el horizonte REAL de la ejecución. Expone la misma interfaz de lectura que `FactorsRepository` (`resolve_definition`,
+    `observations_for`): lo que falló al leer (definición ausente o ambigua, indicador ambiguo, almacenamiento no soportado) se guarda como
+    excepción y se repite al resolver, de modo que el factor sale con su motivo y el respaldo es el modelo sin él. La precedencia
+    pública/privada ya se aplicó al leer (con la misma configuración efectiva)."""
+
+    keys: list[str]
+    definitions: dict[str, Any] = field(default_factory=dict)       # clave → fila de factor_definitions | excepción de lectura
+    observations: dict[str, Any] = field(default_factory=dict)      # clave → DataFrame de observaciones | excepción de lectura
+
+    def resolve_definition(self, key: str, precedence: str | None = None) -> dict[str, Any]:
+        value = self.definitions.get(key)
+        if value is None:
+            raise LookupError(f"No se cargó la definición del factor {key!r}.")
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def observations_for(self, definition: dict[str, Any], precedence: str | None = None) -> pd.DataFrame:
+        key = str(definition.get("key"))
+        value = self.observations.get(key)
+        if value is None:
+            raise LookupError(f"No se cargaron las observaciones del factor {key!r}.")
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def load_factor_inputs(repo: TenantRepository, tenant: dict[str, Any], keys: list[str] | None = None) -> FactorInputs | None:
+    """Lee los insumos de los factores activos de la empresa. APAGADO (por defecto) o sin factores activos ⇒ None **sin consultar ninguna tabla
+    de factores**. `keys`: lista explícita (la herramienta de ablation evalúa candidatos aunque la empresa no los haya activado todavía).
+
+    Una configuración de factores inválida no detiene la demanda (None): `factor_pipeline_limitations` la registra. Cada lectura va en un
+    SAVEPOINT: un fallo del almacenamiento de un factor no envenena la transacción de lectura de la ejecución."""
+    from predictily_engine.availability.pipeline import FactorPipeline, _precedence_for
+
+    try:
+        pipeline = FactorPipeline.from_settings(tenant.get("settings"), tenant.get("sector"))
+    except ValueError:
+        return None
+    if keys is None:
+        if not pipeline.enabled:
+            return None
+        keys = pipeline.active_factors
+    keys = sorted(dict.fromkeys(str(k) for k in keys))
+    if not keys:
+        return None
+    reader = repo.factors()
+    config = pipeline.config
+    indicator_precedence = config.get("indicator_precedence") or {}
+    definition_precedence = config.get("definition_precedence") or {}
+    calendar_precedence = config.get("calendar_precedence") or {}
+    inputs = FactorInputs(keys=keys)
+    for key in keys:
+        try:
+            with repo.conn.begin_nested():
+                definition = reader.resolve_definition(key, definition_precedence.get(key))
+        except LookupError as exc:                        # incluye AmbiguousDefinitionError
+            inputs.definitions[key] = exc
+            continue
+        except Exception as exc:                          # noqa: BLE001  (tabla ausente, permisos…: el factor sale, la demanda continúa)
+            inputs.definitions[key] = FactorReadError(f"{type(exc).__name__}: {exc}"[:300])
+            continue
+        inputs.definitions[key] = definition
+        try:
+            with repo.conn.begin_nested():
+                inputs.observations[key] = reader.observations_for(
+                    definition, _precedence_for(definition, indicator_precedence, calendar_precedence, definition_precedence))
+        except (LookupError, NotImplementedError) as exc:  # ambigüedad, alcance no soportado, almacenamiento nativo sin lectura de factores
+            inputs.observations[key] = exc
+        except Exception as exc:                          # noqa: BLE001
+            inputs.observations[key] = FactorReadError(f"{type(exc).__name__}: {exc}"[:300])
+    return inputs
 
 
 def _normalize(data: TenantData) -> TenantData:
@@ -165,6 +254,9 @@ def load_tenant_data(repo: TenantRepository, cutoff: date | None = None, live: b
         coverage_gaps=gaps,
         closures=closures,
         source_branches=source_branches,
+        timezone=tenant.get("timezone"),
+        # W6-E: apagado por defecto ⇒ None y ninguna consulta a las tablas de factores (paridad exacta con un motor sin factores).
+        factor_inputs=load_factor_inputs(repo, tenant),
     )
     data.exceptional_events, data.exceptional_stats = _exceptional_events(repo, cutoff)
     return _normalize(data)

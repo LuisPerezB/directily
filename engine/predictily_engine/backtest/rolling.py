@@ -229,9 +229,11 @@ def asof_windows(data: Any, panel: Panel, features: FeatureBuilder, horizon_end:
     versions = getattr(data, "sales_versions", None)
     if versions is None or not versions.has_dynamic:
         return None
+    # W6-E: la política del constructor (`features.options()`: factores, precios confirmados, features deshabilitadas y zona) viaja a cada ventana
+    # reconstruida; con los valores por defecto el constructor de la ventana es el mismo de siempre.
     return AsOfWindows(data, panel, features,
                        lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
-                                                 promotion_revisions=data.promotion_revisions), rules)
+                                                 promotion_revisions=data.promotion_revisions, **features.options()), rules)
 
 
 def run_backtest(

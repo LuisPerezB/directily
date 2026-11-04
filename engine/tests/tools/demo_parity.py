@@ -25,6 +25,45 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# Guarda de la base de PRUEBAS (W6-E · M4). Copia en línea de `predictily_engine/db/safety.py` (esta herramienta corre también contra el árbol BASE de un
+# `git archive`, que no trae ese módulo); `tests/unit/test_db_safety.py` verifica que las copias rechazan lo mismo. Analiza la URL con `make_url`, exige
+# `url.database`, el nombre con «test» como palabra y una cadena de consulta sin `dbname`/`host`/`options`…; después de conectar se comprueba `current_database()`.
+import re as _re
+
+_TEST_NAME = _re.compile(r"(^|[_\-.])test([_\-.]|$)", _re.IGNORECASE)
+_ALLOWED_QUERY = frozenset({"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout", "application_name", "keepalives", "keepalives_idle",
+                            "keepalives_interval", "keepalives_count", "target_session_attrs", "gssencmode", "channel_binding"})
+
+
+def parse_test_database_url(url):
+    from sqlalchemy.engine import make_url
+
+    try:
+        parsed = make_url(url)
+    except Exception as exc:          # noqa: BLE001
+        raise PermissionError(f"URL de base de datos ilegible: {type(exc).__name__}") from exc
+    if not parsed.drivername.startswith("postgresql"):
+        raise PermissionError(f"Solo PostgreSQL: {parsed.drivername!r}.")
+    if not parsed.database:
+        raise PermissionError("La URL no declara la base de datos (url.database vacío): se rechaza.")
+    if not _TEST_NAME.search(parsed.database):
+        raise PermissionError(f"La base «{parsed.database}» no parece de pruebas (su nombre debe contener «test» como palabra).")
+    forbidden = sorted(k for k in parsed.query if k.lower() not in _ALLOWED_QUERY)
+    if forbidden:
+        raise PermissionError(f"La cadena de consulta trae parámetros que pueden redirigir la conexión: {forbidden}.")
+    if "/" in (parsed.host or "") or "," in (parsed.host or ""):
+        raise PermissionError("El host de la URL es ambiguo: se rechaza.")
+    return parsed
+
+
+def assert_connected_to_test_database(conn):
+    from sqlalchemy import text
+
+    name = conn.execute(text("SELECT current_database()")).scalar()
+    if not _TEST_NAME.search(name or ""):
+        raise PermissionError(f"La conexión abierta es a la base «{name}», que no parece de pruebas: se aborta.")
+    return name
+
 
 def main() -> int:
     if len(sys.argv) != 3:
@@ -32,9 +71,10 @@ def main() -> int:
         return 2
     tree, out = sys.argv[1], sys.argv[2]
     url = os.environ.get("ENGINE_TEST_DATABASE_URL", "")
-    database = url.rsplit("/", 1)[-1].split("?")[0]
-    if not url or "test" not in database:
-        print("error: defina ENGINE_TEST_DATABASE_URL con una base de PRUEBAS (su nombre debe contener «test»); este script vacía las empresas.", file=sys.stderr)
+    try:
+        parse_test_database_url(url)
+    except PermissionError as exc:
+        print(f"error: defina ENGINE_TEST_DATABASE_URL con una base de PRUEBAS; este script vacía las empresas. {exc}", file=sys.stderr)
         return 3
     sys.path.insert(0, os.path.join(tree, "tests"))
     os.environ["ENGINE_DATABASE_URL"] = url
@@ -59,6 +99,12 @@ def main() -> int:
 
     print("predictily_engine desde:", predictily_engine.__file__)
     engine = reset_engine(url)
+    with engine.connect() as conn:
+        try:
+            assert_connected_to_test_database(conn)          # la base REAL de la conexión, no la URL declarada
+        except PermissionError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 3
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE tenants, forecast_features RESTART IDENTITY CASCADE"))
     t0 = time.perf_counter()
