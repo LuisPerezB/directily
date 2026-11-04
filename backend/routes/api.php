@@ -36,4 +36,6 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/security.php';
     // V2.5 · W6-B: Predictily Bridge (registro de dispositivos, latido, URL prefirmada de subida a Bronze, checkpoints y revocación).
     require __DIR__.'/api/bridge.php';
+    // V2.5 · W6-C: Auto Mapper (descubrimiento de esquema de solo lectura, propuesta determinista, plantillas versionadas con huella y deriva).
+    require __DIR__.'/api/mapping.php';
 });

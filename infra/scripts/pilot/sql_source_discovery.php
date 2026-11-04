@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Predictily · descubrimiento de esquema de una fuente SQL (piloto; docs/operations/PILOT_RUNBOOK.md §2).
  *
  * SOLO LECTURA: ejecuta consultas SELECT fijas sobre el catálogo del motor de origen (tablas, columnas, filas
- * estimadas, claves). No lee filas de negocio ni datos personales. Usa la fuente registrada en Predictily: las
+ * estimadas, claves; SQL Server con sus consultas propias y PostgreSQL/MySQL con las del Auto Mapper, V2.5 W6-C). No lee filas de negocio ni datos personales. Usa la fuente registrada en Predictily: las
  * credenciales se descifran en memoria y nunca se imprimen; la conexión pasa por SqlHostPolicy (IP fijada,
  * lista blanca) y, en SQL Server, ApplicationIntent=ReadOnly, LOCK_TIMEOUT 5 s y READ UNCOMMITTED (no bloquea
  * escritores del ERP).
@@ -72,7 +72,32 @@ $result = $context->runAs($tenant, function () use ($source): array {
                                    FROM sys.foreign_keys fk JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id ORDER BY 1, 2');
         $out['write_privilege_warnings'] = $connection->dialect()->writePrivilegeWarnings($pdo);
     } else {
-        throw new RuntimeException("Descubrimiento implementado solo para SQL Server (dialecto {$dialect}).");
+        // PostgreSQL y MySQL/MariaDB: las mismas consultas de catálogo fijas del Auto Mapper (V2.5 W6-C; app/Services/DataCore/Mapping/Discovery), sin leer filas de negocio.
+        $schema = app(App\Services\DataCore\Mapping\Discovery\SchemaDiscoveryService::class)->readFromConnection($connection);
+        $info = $connection->describe();
+        $out['server'] = ['version' => $info['server_version'], 'current_db' => (string) $q($dialect === 'pgsql' ? 'SELECT current_database() AS db' : 'SELECT DATABASE() AS db')[0]['db'], 'tz_offset' => '?'];
+        $out['databases'] = [];
+        foreach ($schema->tables() as $table) {
+            $out[$table->kind === 'view' ? 'views' : 'tables'][] = $table->kind === 'view'
+                ? ['schema_name' => $table->schema, 'view_name' => $table->name]
+                : ['schema_name' => $table->schema, 'table_name' => $table->name, 'row_count' => $table->estimatedRows ?? 0, 'modified' => '-'];
+            foreach ($table->columns as $column) {
+                $out['columns'][] = ['schema_name' => $table->schema, 'table_name' => $table->name, 'column_name' => $column->name, 'data_type' => $column->dataType, 'max_length' => $column->maxLength,
+                    'nullable' => $column->nullable ? 'YES' : 'NO', 'position' => $column->position];
+            }
+            foreach ($table->primaryKey as $i => $name) {
+                $out['primary_keys'][] = ['schema_name' => $table->schema, 'table_name' => $table->name, 'column_name' => $name, 'position' => $i + 1];
+            }
+            foreach ($table->foreignKeys as $fk) {
+                foreach ($fk->columns as $i => $name) {
+                    $out['foreign_keys'][] = ['schema_name' => $table->schema, 'table_name' => $table->name, 'column_name' => $name, 'referenced_table' => $fk->refTable, 'referenced_column' => $fk->refColumns[$i] ?? null];
+                }
+            }
+        }
+        foreach (['tables', 'views', 'columns', 'primary_keys', 'foreign_keys'] as $key) {
+            $out[$key] ??= [];
+        }
+        $out['write_privilege_warnings'] = $info['warnings'];
     }
     $connection->close();
 

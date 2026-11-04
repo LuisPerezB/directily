@@ -44,6 +44,7 @@ tags:
 - name: Decision Engine
 - name: Revenue Radar
 - name: Outcomes y ROI
+- name: Auto Mapper
 - name: Seguridad Enterprise
 - name: Bridge
 paths:
@@ -223,6 +224,194 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/Validation'
+      x-ability: superadmin
+  /admin/mapping-templates:
+    get:
+      tags:
+      - Auto Mapper
+      summary: Plantillas públicas de la plataforma (propietario de la plataforma)
+      description: Solo las públicas (`tenant_id` NULL); nunca las de una empresa. Solo el superadministrador, sin
+        empresa activa.
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - proposed
+          - approved
+          - retired
+      - name: entity
+        in: query
+        schema:
+          type: string
+          maxLength: 30
+      responses:
+        '200':
+          description: Plantillas públicas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: superadmin
+    post:
+      tags:
+      - Auto Mapper
+      summary: Crear una plantilla pública (propietario de la plataforma)
+      description: 'Nace `proposed` (versión siguiente de su clave sistema/proveedor/entidad). Se valida igual que
+        una propuesta corregida: estructura (`source_spec`), campos del importador, mapeos de valores y ninguna
+        columna con nombre de dato personal. La huella se calcula del servidor. Solo el superadministrador.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicMappingTemplateInput'
+      responses:
+        '201':
+          description: Plantilla pública propuesta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: superadmin
+  /admin/mapping-templates/{id}:
+    get:
+      tags:
+      - Auto Mapper
+      summary: Detalle de una plantilla pública (propietario de la plataforma)
+      description: Solo el superadministrador. Una plantilla de empresa responde 404.
+      parameters:
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Plantilla pública
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: superadmin
+    patch:
+      tags:
+      - Auto Mapper
+      summary: Corregir una plantilla pública propuesta (propietario de la plataforma)
+      description: Solo en estado `proposed` (409 `template_not_editable`). Mismas reglas que la corrección de una
+        plantilla de empresa. Solo el superadministrador.
+      parameters:
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MappingTemplateEdit'
+      responses:
+        '200':
+          description: Plantilla pública corregida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La plantilla ya no se puede editar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: superadmin
+  /admin/mapping-templates/{id}/approve:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Aprobar una plantilla pública (propietario de la plataforma)
+      description: Desde la aprobación todas las empresas la ven (solo lectura), la aplican o la bifurcan. Aprobar
+        una versión nueva retira la anterior de la misma clave. Exige los campos obligatorios mapeados (422 `template_incomplete`)
+        y, si hay otro superadministrador, que no sea quien la creó (403 `approval_segregation_of_duties`). Queda
+        auditado sin empresa. Solo el superadministrador.
+      parameters:
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Plantilla pública aprobada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La plantilla no está en estado `proposed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: superadmin
+  /admin/mapping-templates/{id}/retire:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Retirar una plantilla pública (propietario de la plataforma)
+      description: Pasa a `retired`; deja de poder aplicarse o bifurcarse. Los mapeos ya aplicados por las empresas
+        no cambian. Solo el superadministrador.
+      parameters:
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Plantilla pública retirada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Ya estaba retirada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       x-ability: superadmin
   /admin/plans:
     get:
@@ -3949,6 +4138,161 @@ paths:
       responses:
         '204':
           description: Revocado
+  /data-sources/{id}/mapping-proposals:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Proponer el mapeo de cada entidad (determinista, sin aprobar)
+      description: 'Descubre el esquema y propone, por entidad (`sales`, `products`, `inventory`, `suppliers`, `lead_times`,
+        `branches`), el mapeo de campos canónicos del importador a columnas del origen. Cada propuesta se guarda
+        como plantilla de la empresa en estado `proposed` (versión nueva; si el contenido es idéntico al de la última
+        versión no se crea otra).
+
+
+        **Determinista, sin LLM**: coincidencia de nombres (léxico del asistente de importación más abreviaturas
+        de ERP en español), compatibilidad de tipo, rol de la tabla y, si `sample` es verdadero, una muestra estadística
+        **acotada**. La `confidence` de cada campo es un **puntaje heurístico entre 0 y 1** (nombre 0,55 · tipo
+        0,25 · tabla 0,10 · muestra 0,10), **no una probabilidad calibrada**; el umbral mínimo (0,60) y el margen
+        de ambigüedad (0,10) son provisionales, a aprobar en el piloto. Un campo bajo el umbral, ambiguo o sin candidato
+        queda **sin mapear** y se lista en `confidence.unmapped` con su motivo (`not_found`, `low_confidence`, `ambiguous`).
+
+
+        **Datos personales**: las columnas con nombre de persona, correo, teléfono, dirección, fecha de nacimiento
+        o dato sensible no se mapean ni se leen (se listan por nombre en `confidence.pii_columns_excluded`); un
+        identificador nacional solo se admite como código de cliente y el importador lo guarda como huella. De las
+        columnas de tipo y estado de documento solo salen valores distintos que pasan una **lista permitida de forma
+        de vocabulario** (letras latinas y dígitos, hasta 2 palabras —hasta 4 si el importador ya las reconoce—,
+        menos de 7 dígitos, sin forma de nombre propio, correo o teléfono), que aparecen en **al menos 5 filas**
+        (`min_value_count`, a aprobar en el piloto) y de a lo sumo 25 valores distintos; si un solo valor no pasa,
+        de esa columna no sale ninguno (`sin_vocabulario`). `value_maps` propone equivalencias para los que el importador
+        no reconoce (una cotización no se mapea a factura; una letra suelta es ambigua). Un campo que identifica
+        registros (código de cliente, SKU, sucursal…) exige un token de código o identificador en el nombre y se
+        descarta si la muestra tiene forma de teléfono, correo, fecha o frase; una identificación nacional de una
+        persona no se propone como código de cliente.
+
+
+        **Nunca aprueba ni sincroniza**: aprobar es una acción humana aparte (`POST /mapping-templates/{template}/approve`).
+
+
+        Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MappingProposeInput'
+      responses:
+        '201':
+          description: Propuestas por entidad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingProposalResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
+  /data-sources/{id}/mapping-templates/{template}/apply:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Aplicar una plantilla aprobada a una fuente (crea el mapeo SQL activo)
+      description: 'Convierte una plantilla **aprobada** en una versión de mapeo SQL (`source_mappings`) que consume
+        el pipeline de importación existente (no hay un segundo importador): genera la consulta SELECT con identificadores
+        entrecomillados y alias canónicos, la valida con `SqlQueryGuard`, la versiona y la deja aprobada y activa
+        como la persona que aplica. **No inicia ninguna sincronización** (`POST /data-sources/{id}/sync` sigue siendo
+        una acción aparte). Si el mapeo activo ya es idéntico, lo reutiliza (200 `reused`).
+
+
+        **Deriva**: antes de aplicar compara la huella de la plantilla con el esquema actual de la fuente. Si una
+        columna usada se quitó o cambió de clase de tipo: 409 `schema_drift_review_required` con el informe; una
+        plantilla de la empresa vuelve a `proposed` (hay que revisarla y aprobarla de nuevo) y una pública queda
+        intacta. Otros códigos: 409 `template_not_approved`, 409 `template_source_mismatch` (la plantilla nació
+        de otra fuente), 422 `sql_query_rejected`, 422 `schema_too_large`, 422 `source_unavailable`.
+
+
+        Habilidades requeridas: `datasources.manage` **y** `settings.manage` (activa una consulta contra el ERP
+        del cliente).'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      responses:
+        '201':
+          description: Mapeo SQL creado y activo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingApplyResult'
+        '200':
+          description: El mapeo activo ya era este (reutilizado)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingApplyResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Plantilla no aprobada, de otra fuente o con deriva de esquema (`schema_drift_review_required`,
+            con `context.drift`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
+  /data-sources/{id}/mapping-templates/{template}/drift:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Revisar la deriva de esquema de una plantilla contra la fuente (sin aplicar)
+      description: 'Descubre el esquema actual de la fuente y lo compara con las columnas que usa la plantilla (la
+        huella `schema_fingerprint` cubre solo esas columnas). Informa con el formato de la deriva de W2: columnas
+        `added` (informativas: no rompen la plantilla), `removed` y `retyped` (clase de tipo distinta; rompen),
+        tablas quitadas y, si existe, el hallazgo `w2_sync_drift` de la última sincronización de la fuente y entidad.
+        No modifica la plantilla (aplicarla sí la invalida si hay deriva que rompe).
+
+
+        Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      responses:
+        '200':
+          description: Informe de deriva
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingDrift'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
   /data-sources/{id}/mappings:
     get:
       tags:
@@ -4137,6 +4481,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      x-ability: datasources.manage
+  /data-sources/{id}/schema/discover:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Descubrir el esquema de una fuente SQL (solo metadatos)
+      description: 'Lee el CATÁLOGO de la fuente (tablas, vistas, columnas con su clase de tipo, claves primarias
+        y foráneas, filas **estimadas** por estadística del catálogo) con consultas fijas por motor (PostgreSQL,
+        MySQL/MariaDB y SQL Server) aisladas de `SqlQueryGuard`: ningún texto del usuario ni del origen entra en
+        ellas. Usa la conexión de solo lectura del conector (política SSRF y lista blanca, IP fijada, transacción
+        de solo lectura; en SQL Server `ApplicationIntent=ReadOnly`, `LOCK_TIMEOUT` y `READ UNCOMMITTED`).
+
+
+        **No devuelve ningún valor de negocio ni dato personal**; solo nombres, tipos y conteos. Las tablas se ordenan
+        por filas estimadas y se limitan a las primeras 300 (`truncated`). Sin `include_columns` cada tabla trae
+        solo el conteo de columnas y sus claves.
+
+
+        Estado por motor: PostgreSQL probado contra una base de pruebas; MySQL/MariaDB y SQL Server implementados
+        y probados con catálogos de ejemplo, sin servidor real (`implemented_untested`).
+
+
+        Habilidad requerida: `datasources.manage`. Una fuente que no es SQL responde 422; la que no se alcanza,
+        422 `source_unavailable`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      - name: include_columns
+        in: query
+        description: Incluye las columnas de cada tabla listada.
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: Esquema descubierto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingDiscoveredSchema'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
       x-ability: datasources.manage
   /data-sources/{id}/sync:
     post:
@@ -7421,6 +7814,316 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
       x-ability: data.view
+  /mapping-templates:
+    get:
+      tags:
+      - Auto Mapper
+      summary: Plantillas de mapeo de la empresa y públicas de la plataforma
+      description: 'Lista las plantillas de la empresa activa y las **públicas** de la plataforma (`scope: platform`,
+        `read_only: true`). Nunca las de otra empresa. Cada versión es una fila; `status`: `proposed`, `approved`
+        o `retired`.
+
+
+        Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: scope
+        in: query
+        schema:
+          type: string
+          enum:
+          - all
+          - tenant
+          - platform
+          default: all
+      - name: entity
+        in: query
+        schema:
+          type: string
+          enum:
+          - sales
+          - products
+          - inventory
+          - suppliers
+          - lead_times
+          - branches
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - proposed
+          - approved
+          - retired
+      - name: vendor
+        in: query
+        schema:
+          type: string
+          maxLength: 80
+      - name: system_kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - erp
+          - pos
+          - crm
+          - spreadsheet
+          - api
+          - bridge
+          - other
+      - name: data_source_id
+        in: query
+        schema:
+          type: integer
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Plantillas visibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MappingTemplate'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
+  /mapping-templates/{template}:
+    get:
+      tags:
+      - Auto Mapper
+      summary: Detalle de una plantilla, con la consulta SELECT que se ejecutaría
+      description: 'Incluye `query` (el texto exacto que ejecutaría la fuente, generado de la estructura; solo metadatos)
+        o `query_error` si la estructura o la política de solo lectura la rechazan. Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      responses:
+        '200':
+          description: Plantilla
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: datasources.manage
+    patch:
+      tags:
+      - Auto Mapper
+      summary: Corrección humana de una plantilla propuesta
+      description: 'Solo una plantilla de la empresa en estado `proposed` (aprobada o retirada: 409 `template_not_editable`;
+        pública: 403 `public_template_read_only`). `field_map`: campo → `alias.columna` (de las tablas de `source_spec`),
+        `{"const": valor}` o `null` para quitarlo; `value_maps`: campo → `{valor_origen: valor_canónico}` o `null`.
+        Se rechaza (422) un campo desconocido, una columna fuera de la estructura, un tipo incompatible, un destino
+        fuera del vocabulario canónico, **cualquier columna con nombre de dato personal** (salvo la identificación
+        nacional como código de cliente, que solo una persona puede asignar) y una constante nula, vacía o puesta
+        en un campo que identifica registros (`document_number`, `product_sku`, `sku`, `code`, `snapshot_date`,
+        `customer_code`…). Lo corregido a mano queda con `band: human`. Recalcula la huella y queda auditado.
+
+
+        Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MappingTemplateEdit'
+      responses:
+        '200':
+          description: Plantilla corregida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La plantilla ya no se puede editar (`template_not_editable`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
+  /mapping-templates/{template}/approve:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Aprobar una plantilla (acción humana auditada)
+      description: 'Aprueba una plantilla de la empresa en estado `proposed`. Exige: que quien aprueba **no sea
+        quien la propuso** si hay otra persona con `settings.manage` en la empresa (403 `approval_segregation_of_duties`;
+        con una sola persona se permite); los campos obligatorios del importador mapeados (una constante nula o
+        vacía no cuenta; 422 `template_incomplete`, con `context.missing_required`); una consulta que pase la política
+        de solo lectura (422 `sql_query_rejected`); y que el esquema ACTUAL de su fuente siga coincidiendo con su
+        huella (409 `schema_drift_review_required`, con `context.drift`; una fuente inalcanzable: 422 `source_unavailable`).
+        Retira la versión aprobada anterior de la misma clave y fuente. Queda en la bitácora con quién, qué versión
+        y el prefijo de la huella.
+
+
+        Una plantilla pública no se aprueba por aquí (403 `public_template_read_only`): la aprueba la plataforma.
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      responses:
+        '200':
+          description: Plantilla aprobada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La plantilla no está en estado `proposed` (`template_not_proposed`) o su fuente cambió de
+            esquema (`schema_drift_review_required`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
+  /mapping-templates/{template}/fork:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Bifurcar una plantilla pública en una propia de la empresa
+      description: 'Copia una plantilla **pública aprobada** como plantilla de la empresa (`proposed`, `forked_from_id`
+        apunta a la pública): hay que aprobarla de nuevo. Una que no es pública: 422 `template_not_public`; una
+        pública no aprobada: 409 `template_not_approved`. Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data_source_id:
+                  type:
+                  - integer
+                  - 'null'
+                  description: Fuente de la empresa a la que se destina la copia.
+      responses:
+        '201':
+          description: Copia de la empresa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La plantilla pública no está aprobada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
+  /mapping-templates/{template}/retire:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Retirar una plantilla de la empresa
+      description: 'Pasa a `retired` (terminal). No cambia los mapeos SQL ya aplicados. Una pública: 403 `public_template_read_only`.
+        Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      responses:
+        '200':
+          description: Plantilla retirada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Ya estaba retirada (`template_already_retired`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-ability: settings.manage
+  /mapping-templates/{template}/revise:
+    post:
+      tags:
+      - Auto Mapper
+      summary: Crear otra versión de una plantilla de la empresa
+      description: 'Copia el contenido, aplica las correcciones opcionales y nace `proposed` (versión siguiente
+        de la misma clave). La anterior no cambia hasta que se apruebe la nueva (entonces se retira). Una pública:
+        403 `public_template_read_only` (use `fork`). Habilidad requerida: `datasources.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/MappingTemplateId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MappingTemplateEdit'
+      responses:
+        '201':
+          description: Versión nueva propuesta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MappingTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: datasources.manage
   /model-evaluations:
     get:
       tags:
@@ -19038,6 +19741,437 @@ components:
           - string
           - 'null'
           format: date-time
+    MappingDiscoveredSchema:
+      type: object
+      description: Metadatos del catálogo de la fuente. Nunca contiene valores de negocio ni datos personales.
+      properties:
+        dialect:
+          type: string
+          enum:
+          - pgsql
+          - mysql
+          - sqlsrv
+        schema_fingerprint:
+          type: string
+          description: 'SHA-256 de TODAS las columnas visibles y su clase de tipo (informativa: «cambió algo en
+            la base»). La huella que protege una plantilla cubre solo las columnas que ella usa.'
+        tables_total:
+          type: integer
+        columns_total:
+          type: integer
+        truncated:
+          type: boolean
+          description: El catálogo superó el tope de tablas o columnas, o la respuesta lista solo las primeras 300
+            tablas (por filas estimadas).
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              schema:
+                type:
+                - string
+                - 'null'
+                description: Esquema (PostgreSQL, SQL Server); null en MySQL/MariaDB.
+              name:
+                type: string
+              kind:
+                type: string
+                enum:
+                - table
+                - view
+              estimated_rows:
+                type:
+                - integer
+                - 'null'
+                description: Estimación del catálogo (no es un COUNT(*)).
+              column_count:
+                type: integer
+              primary_key:
+                type: array
+                items:
+                  type: string
+              foreign_keys:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    columns:
+                      type: array
+                      items:
+                        type: string
+                    ref_schema:
+                      type:
+                      - string
+                      - 'null'
+                    ref_table:
+                      type: string
+                    ref_columns:
+                      type: array
+                      items:
+                        type: string
+              columns:
+                type: array
+                description: Solo con include_columns.
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    data_type:
+                      type: string
+                      description: Tipo nativo del motor.
+                    type_class:
+                      type: string
+                      enum:
+                      - text
+                      - integer
+                      - decimal
+                      - date
+                      - datetime
+                      - boolean
+                      - binary
+                      - other
+                    nullable:
+                      type: boolean
+                    position:
+                      type: integer
+                    max_length:
+                      type:
+                      - integer
+                      - 'null'
+    MappingProposeInput:
+      type: object
+      properties:
+        entities:
+          type: array
+          description: 'Por omisión, todas. Los clientes no tienen importador propio: se proponen dentro de las
+            ventas.'
+          items:
+            type: string
+            enum:
+            - sales
+            - products
+            - inventory
+            - suppliers
+            - lead_times
+            - branches
+        sample:
+          type: boolean
+          default: true
+          description: false = no se lee ninguna fila del origen (solo nombres, tipos y claves).
+        system_kind:
+          type: string
+          enum:
+          - erp
+          - pos
+          - crm
+          - spreadsheet
+          - api
+          - bridge
+          - other
+          description: Por omisión, el de la fuente o erp.
+        vendor:
+          type:
+          - string
+          - 'null'
+          maxLength: 80
+          description: Proveedor o producto de origen (se guarda en minúsculas). Por omisión, el de la fuente.
+    MappingProposalResult:
+      type: object
+      properties:
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/MappingDiscoveredSchema'
+        proposals:
+          type: array
+          items:
+            type: object
+            properties:
+              entity:
+                type: string
+              created:
+                type: boolean
+                description: false = el contenido era idéntico al de la última versión (no se crea otra; una propuesta
+                  sin aprobar refresca su evidencia).
+              complete:
+                type: boolean
+                description: Todos los campos obligatorios del importador están mapeados. Sin esto la plantilla
+                  no se puede aprobar.
+              missing_required:
+                type: array
+                items:
+                  type: string
+              warnings:
+                type: array
+                items:
+                  type: string
+              template:
+                $ref: '#/components/schemas/MappingTemplate'
+    MappingTemplate:
+      type: object
+      description: 'Versión de una plantilla de mapeo. `field_map` guarda campo canónico → `alias.columna` (el alias
+        se resuelve en `source_spec`) o `{"const": valor}`. `confidence` es un PUNTAJE HEURÍSTICO (no una probabilidad
+        calibrada). En una plantilla pública, `approved_by` y `created_by` son null para las empresas (la identidad
+        del personal de la plataforma solo la ve el superadministrador).'
+      properties:
+        id:
+          type: integer
+        scope:
+          type: string
+          enum:
+          - tenant
+          - platform
+        read_only:
+          type: boolean
+          description: true en las públicas de la plataforma.
+        system_kind:
+          type: string
+        vendor:
+          type:
+          - string
+          - 'null'
+        entity:
+          type: string
+          enum:
+          - sales
+          - products
+          - inventory
+          - suppliers
+          - lead_times
+          - branches
+        version:
+          type: integer
+        status:
+          type: string
+          enum:
+          - proposed
+          - approved
+          - retired
+        schema_fingerprint:
+          type: string
+          description: SHA-256 del dialecto y de las columnas que usa la plantilla con su clase de tipo.
+        data_source_id:
+          type:
+          - integer
+          - 'null'
+        forked_from_id:
+          type:
+          - integer
+          - 'null'
+        field_map:
+          type: object
+          additionalProperties: true
+        value_maps:
+          type: object
+          additionalProperties: true
+          description: 'campo → {valor de origen: valor canónico}; los consume el pipeline de importación (W2-A).'
+        confidence:
+          type: object
+          description: method heuristic_v1, kind heuristic_score, fields (score 0..1 ≤ 0,99, band high|medium|low|human,
+            evidence, source), unmapped (field, reason not_found|low_confidence|ambiguous|removed_by_user, required,
+            candidates), value_maps (entradas con puntaje, sin resolver, reconocidos), pii_columns_excluded (columna
+            → tipo), warnings, alternatives.
+          additionalProperties: true
+        source_spec:
+          type: object
+          description: dialect, tables (alias, schema, name, kind, columns nombre→clase, join {from,type,kind,on})
+            y since.
+          additionalProperties: true
+        drift:
+          type:
+          - object
+          - 'null'
+          additionalProperties: true
+          description: Informe que invalidó la plantilla (agregadas, quitadas, cambio de tipo, huellas).
+        invalidated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        complete:
+          type: boolean
+        missing_required:
+          type: array
+          items:
+            type: string
+        approved_by:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        approved_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_by:
+          type:
+          - integer
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        query:
+          type:
+          - string
+          - 'null'
+          description: 'Solo en el detalle: el SELECT que se ejecutaría (solo metadatos del origen).'
+        query_error:
+          type:
+          - string
+          - 'null'
+    MappingTemplateEdit:
+      type: object
+      properties:
+        field_map:
+          type: object
+          description: 'campo → `alias.columna`, `{"const": valor}` o null (quitar).'
+          additionalProperties: true
+        value_maps:
+          type: object
+          description: 'campo → {valor de origen: valor canónico} o null (quitar). En ventas, los destinos de document_type
+            y status pertenecen al vocabulario canónico.'
+          additionalProperties: true
+    PublicMappingTemplateInput:
+      type: object
+      required:
+      - system_kind
+      - vendor
+      - entity
+      - source_spec
+      - field_map
+      properties:
+        system_kind:
+          type: string
+          enum:
+          - erp
+          - pos
+          - crm
+          - spreadsheet
+          - api
+          - bridge
+          - other
+        vendor:
+          type: string
+          maxLength: 80
+        entity:
+          type: string
+          enum:
+          - sales
+          - products
+          - inventory
+          - suppliers
+          - lead_times
+          - branches
+        source_spec:
+          type: object
+          additionalProperties: true
+        field_map:
+          type: object
+          additionalProperties: true
+        value_maps:
+          type: object
+          additionalProperties: true
+    MappingDrift:
+      type: object
+      description: 'Mismo formato que la deriva de W2 (SchemaDrift): columnas agregadas, quitadas y con tipo cambiado.'
+      properties:
+        template_id:
+          type: integer
+        data_source_id:
+          type: integer
+        status:
+          type: string
+          enum:
+          - proposed
+          - approved
+          - retired
+        matches:
+          type: boolean
+          description: false si se quitó una columna usada, cambió su clase de tipo o el dialecto no coincide. Las
+            columnas agregadas no rompen.
+        expected_fingerprint:
+          type: string
+        actual_fingerprint:
+          type: string
+        dialect_mismatch:
+          type: boolean
+        added:
+          type: array
+          items:
+            type: string
+          description: Columnas nuevas en las tablas usadas (informativas).
+        removed:
+          type: array
+          items:
+            type: string
+        retyped:
+          type: array
+          items:
+            type: string
+        tables_removed:
+          type: array
+          items:
+            type: string
+        w2_sync_drift:
+          type:
+          - object
+          - 'null'
+          description: Hallazgo de deriva de la última sincronización de la fuente y entidad (W2), si existe.
+          properties:
+            source_sync_id:
+              type: integer
+            added:
+              type: array
+              items:
+                type: string
+            removed:
+              type: array
+              items:
+                type: string
+            retyped:
+              type: array
+              items:
+                type: string
+    MappingApplyResult:
+      type: object
+      properties:
+        template_id:
+          type: integer
+        reused:
+          type: boolean
+        source_mapping:
+          type: object
+          properties:
+            id:
+              type: integer
+            data_source_id:
+              type: integer
+            entity:
+              type: string
+            version:
+              type: integer
+            is_active:
+              type: boolean
+            approved_at:
+              type:
+              - string
+              - 'null'
+              format: date-time
+            query:
+              type: string
+        next_step:
+          type: string
     IntelligenceDataLocation:
       type: object
       description: Dónde vive el dato de una familia (sin segundo almacén de features).
