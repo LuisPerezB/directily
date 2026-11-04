@@ -1,8 +1,8 @@
 <?php
 
+use App\Http\Middleware\AuthenticateSessionWithRevocation;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
-use Laravel\Sanctum\Http\Middleware\AuthenticateSession;
 use Laravel\Sanctum\Sanctum;
 
 return [
@@ -79,7 +79,8 @@ return [
     */
 
     'middleware' => [
-        'authenticate_session' => AuthenticateSession::class,
+        // V2.5 · W6-A: además de la contraseña de la sesión, rechaza sesiones emitidas antes de `users.sessions_valid_after` (revocación al activar/desactivar MFA o restablecerlo).
+        'authenticate_session' => AuthenticateSessionWithRevocation::class,
         'encrypt_cookies' => EncryptCookies::class,
         'validate_csrf_token' => ValidateCsrfToken::class,
     ],

@@ -10,6 +10,7 @@ use App\Http\Requests\Decision\DecisionIndexRequest;
 use App\Http\Requests\Decision\DecisionTransitionRequest;
 use App\Http\Resources\Decision\DecisionRecommendationResource;
 use App\Models\DecisionRecommendation;
+use App\Services\Auth\Commercial\CommercialScopeContext;
 use App\Services\Decision\DecisionSettings;
 use App\Services\Decision\Workflow;
 use App\Support\Tenancy\TenantContext;
@@ -38,7 +39,7 @@ final class DecisionController extends Controller
         '-as_of' => ['as_of', 'desc'],
     ];
 
-    public function __construct(private readonly Workflow $workflow, private readonly TenantContext $context) {}
+    public function __construct(private readonly Workflow $workflow, private readonly TenantContext $context, private readonly CommercialScopeContext $commercial) {}
 
     public function index(DecisionIndexRequest $request): AnonymousResourceCollection
     {
@@ -48,6 +49,7 @@ final class DecisionController extends Controller
         if (! ($role->can('decisions.approve') && $request->boolean('include_control'))) {
             $query->actionable();
         }
+        $this->commercial->current()->restrictRecommendations($query);   // W6-A: un vendedor solo ve lo asignado a él y lo sin asignar de su cartera
         $this->filter($query, $request);
         [$column, $direction] = self::SORTS[$request->query('sort', '-score')] ?? ['score', 'desc'];
         $column === 'score' || $column === 'expires_at'
@@ -79,7 +81,12 @@ final class DecisionController extends Controller
     {
         $role = $this->role($request);
         $settings = DecisionSettings::forTenant($this->context->require());
-        $base = fn (): Builder => DecisionRecommendation::query()->actionable();
+        $base = function (): Builder {
+            $query = DecisionRecommendation::query()->actionable();
+            $this->commercial->current()->restrictRecommendations($query);   // W6-A: los conteos son de lo visible para esta persona
+
+            return $query;
+        };
         $count = fn (string $column) => $base()->selectRaw("{$column} AS k, COUNT(*) AS n")->groupBy($column)->pluck('n', 'k')->map(fn ($n) => (int) $n)->all();
         $now = CarbonImmutable::now();
         $awaiting = $base()->where('status', 'reviewed')->tap(fn (Builder $q) => $this->requiresApprovalFilter($q, $settings, true))->count();
@@ -94,7 +101,9 @@ final class DecisionController extends Controller
             'attribution_note' => 'Las recomendaciones son oportunidades potenciales con atribución no demostrada; no son ingresos recuperados.',
         ];
         if ($role->can('decisions.approve')) {
-            $data['control_group_units'] = DecisionRecommendation::query()->where('experiment_group', 'control')->count();
+            $control = DecisionRecommendation::query()->where('experiment_group', 'control');
+            $this->commercial->current()->restrictRecommendations($control);
+            $data['control_group_units'] = $control->count();
         }
 
         return response()->json(['data' => $data]);
@@ -104,9 +113,10 @@ final class DecisionController extends Controller
     private function detail(Request $request, int $id): array
     {
         $role = $this->role($request);
-        $rec = Workflow::withApprover(Workflow::withVersion(DecisionRecommendation::query()))
-            ->with(['customer:id,external_code', 'product:id,sku,name,unit', 'branch:id,code,name', 'events' => fn ($q) => $q->orderBy('id')])
-            ->find($id) ?? throw new NotFoundHttpException('Recomendación no encontrada.');
+        $query = Workflow::withApprover(Workflow::withVersion(DecisionRecommendation::query()))
+            ->with(['customer:id,external_code', 'product:id,sku,name,unit', 'branch:id,code,name', 'events' => fn ($q) => $q->orderBy('id')]);
+        $this->commercial->current()->restrictRecommendations($query);   // W6-A
+        $rec = $query->find($id) ?? throw new NotFoundHttpException('Recomendación no encontrada.');
         // Las de control no se muestran a quien no aprueba: no se revela quién queda fuera del contacto.
         if ($rec->experiment_group === 'control' && ! $role->can('decisions.approve')) {
             throw new NotFoundHttpException('Recomendación no encontrada.');

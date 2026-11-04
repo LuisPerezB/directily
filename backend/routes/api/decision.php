@@ -32,7 +32,8 @@ Route::middleware(['auth:sanctum', 'throttle:api', 'tenant'])->prefix('decisions
     });
     Route::put('settings', [DecisionSettingsController::class, 'update'])->middleware('tenant.ability:settings.manage')->name('settings.update');
     Route::post('{id}/transition', [DecisionController::class, 'transition'])->whereNumber('id')
-        ->middleware(['tenant.ability:decisions.manage', 'throttle:120,1'])->name('transition');
+        // V2.5 · W6-A: aprobar o rechazar formalmente (to_status approved|rejected) exige un segundo factor fresco a quien tiene MFA activo.
+        ->middleware(['tenant.ability:decisions.manage', 'mfa.step_up:approval', 'throttle:120,1'])->name('transition');
 });
 
 // >>> W5-C outcomes y ROI (rutas de outcomes: las agrega W5-C debajo de esta línea)

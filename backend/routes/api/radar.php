@@ -9,7 +9,9 @@
 |   forecast.view  leer resumen, oportunidades, agenda, ficha del comprador, pronósticos agregados y preparación de abastecimiento;
 |   decisions.manage  registrar seguimiento (feedback) de una oportunidad (analista, administrador, propietario; el viewer no). Es la habilidad de W5-B para gestionar decisiones;
 |   forecast.run   proponer al Decision Engine las oportunidades de la predicción vigente.
-| TODO(W6): los roles gerente/vendedor (alcance por cartera) llegan en W6; hoy un vendedor es un usuario con rol existente y `seller_id` es solo un filtro.
+| Alcance comercial (V2.5 · W6-A, antes TODO(W6)): el vendedor ve y toca solo su cartera y lo que le asignaron. Las listas, el resumen y la agenda se acotan en PredictiveSalesAgenda
+| (CommercialScope); las rutas con id (oportunidad, ficha del comprador) responden 404 fuera del alcance (middleware EnforceCommercialScope, que corre tras `tenant`) y la
+| materialización es de equipo (403 con alcance restringido). `seller_id` es solo un filtro que se compone con el alcance. Ver docs/security/ENTERPRISE_SECURITY.md.
 | /models/evaluations ya existe (W3-D, analytics.php) y se reutiliza tal cual. Se usan ids explícitos (no route-model binding): la empresa se fija en el middleware.
 | Predictily no envía mensajes ni escribe en el ERP: toda gestión es humana y queda auditada.
 */
@@ -41,5 +43,6 @@ Route::middleware(['auth:sanctum', 'tenant'])->name('radar.')->group(function ()
     Route::post('radar/opportunities/materialize', [RadarOpportunityController::class, 'materialize'])
         ->middleware(['tenant.ability:forecast.run', 'throttle:10,1'])->name('opportunities.materialize');
     Route::post('radar/opportunities/{id}/feedback', [RadarOpportunityController::class, 'feedback'])->whereNumber('id')
-        ->middleware(['tenant.ability:decisions.manage', 'throttle:60,1'])->name('opportunities.feedback');
+        // V2.5 · W6-A: «descartado» sobre una oportunidad revisada la rechaza formalmente (decisions.approve): con MFA activo exige un segundo factor fresco.
+        ->middleware(['tenant.ability:decisions.manage', 'mfa.step_up:approval', 'throttle:60,1'])->name('opportunities.feedback');
 });

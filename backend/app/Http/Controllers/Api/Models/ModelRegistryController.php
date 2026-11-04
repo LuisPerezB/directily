@@ -10,6 +10,9 @@ use App\Http\Requests\Models\RejectModelRequest;
 use App\Http\Resources\Models\ModelRegistryDetailResource;
 use App\Models\ModelRegistry;
 use App\Models\Tenant;
+use App\Services\Auth\Mfa\MfaException;
+use App\Services\Auth\Mfa\MfaStepUp;
+use App\Services\Models\Exceptions\MissingAbilityException;
 use App\Services\Models\ModelApprovalService;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -29,7 +32,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 final class ModelRegistryController extends Controller
 {
-    public function __construct(private readonly ModelApprovalService $service) {}
+    public function __construct(private readonly ModelApprovalService $service, private readonly MfaStepUp $stepUp) {}
 
     public function show(int $id): ModelRegistryDetailResource
     {
@@ -40,7 +43,14 @@ final class ModelRegistryController extends Controller
 
     public function validateModel(ModelDecisionRequest $request, int $id): JsonResponse
     {
-        return $this->respond($this->service->validate($this->tenant(), $request->user(), $id, $request->reason(), $request->attributes->get('tenant_role')?->can('models.approve') === true)->getKey());
+        // V2.5 · W6-A: validar un modelo que NO entró por la publicación es una acción de la clase «aprobar» (`models.approve`): con MFA activo exige un segundo factor fresco.
+        $roleCan = $request->attributes->get('tenant_role')?->can('models.approve') === true;
+        $canApprove = $this->stepUp->approveClassAllowed($request, $roleCan);
+        try {
+            return $this->respond($this->service->validate($this->tenant(), $request->user(), $id, $request->reason(), $canApprove)->getKey());
+        } catch (MissingAbilityException $e) {
+            throw $roleCan && ! $canApprove ? MfaException::stepUpRequired() : $e;
+        }
     }
 
     public function approve(ModelDecisionRequest $request, int $id): JsonResponse

@@ -22,7 +22,7 @@ in_progress → executed` no envía ninguna petición HTTP, correo ni notificaci
 |---|---|---|
 | Aprobación explícita de las acciones sensibles | IMPLEMENTADO / VERIFICADO | Reposición, inventario-demanda, presupuesto, escenarios, lo «sobre presupuesto» y lo que la empresa configure (por tipo o por umbral de costo) no pasan de `reviewed` a `in_progress` sin `approved` (409 `decision_approval_required`) |
 | Segregación de funciones | IMPLEMENTADO / VERIFICADO | Quien propone o debe ejecutar no aprueba su propia acción; quien aprobó no la ejecuta (403 `decision_segregation_of_duties`) |
-| Habilidad por rol | IMPLEMENTADO / VERIFICADO | `decisions.view`, `decisions.manage` (asignar, revisar, descartar, ejecutar, cerrar) y `decisions.approve` (aprobar, rechazar); los roles comerciales gerente/vendedor llegan en W6 |
+| Habilidad por rol | IMPLEMENTADO / VERIFICADO | `decisions.view`, `decisions.manage` (asignar, revisar, descartar, ejecutar, cerrar) y `decisions.approve` (aprobar, rechazar); los roles comerciales gerente/vendedor/servicio (W6-A) se suman al rol de acceso y acotan lo que cada persona ve y toca; aprobar o rechazar exige además segundo factor fresco con MFA activo |
 | Idempotencia | IMPLEMENTADO / VERIFICADO | Una transición repetida con la misma `idempotency_key` no repite efectos |
 | Bloqueo optimista | IMPLEMENTADO / VERIFICADO | Dos acciones concurrentes sobre la misma recomendación no se pisan: `expected_version` es obligatorio en toda transición humana (`decision_version_conflict`); los comentarios del sistema no cuentan para la versión |
 | Auditoría | IMPLEMENTADO / VERIFICADO | Cada transición en `decision_events` y `audit_logs`; el sistema deja eventos propios (vencimiento, reemplazo) |

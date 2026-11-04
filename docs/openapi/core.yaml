@@ -54,7 +54,8 @@ paths:
     post:
       tags: [Autenticación]
       summary: Iniciar sesión (sesión SPA o token Bearer si no hay sesión)
-      description: 5 intentos por minuto por correo + IP. Éxitos y fallos se auditan.
+      description: |-
+        5 intentos por minuto por correo + IP. Éxitos y fallos se auditan. Si la persona tiene el segundo factor (MFA TOTP) activo, una contraseña correcta NO inicia sesión: responde 202 `mfa_required` con un desafío de un solo uso y corta vida (`data.challenge`); la sesión o el token se emiten al completar `POST /auth/mfa/challenge` (V2.5 · W6-A). El token Bearer caduca según `security.tokens.default_ttl_days` (30 días por defecto).
       security: []
       requestBody:
         required: true
@@ -69,6 +70,22 @@ paths:
                 remember: {type: boolean}
       responses:
         '200': {$ref: '#/components/responses/LoginResponse'}
+        '202':
+          description: 'Contraseña correcta; falta el segundo factor (`code` = `mfa_required`)'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  code: {type: string, example: mfa_required}
+                  data:
+                    type: object
+                    properties:
+                      mfa_required: {type: boolean}
+                      challenge: {type: string, description: 'Desafío opaco de un solo uso; se envía a POST /auth/mfa/challenge'}
+                      expires_in: {type: integer, description: Segundos de vigencia}
+                      methods: {type: array, items: {type: string, enum: [totp, recovery_code]}}
         '422': {$ref: '#/components/responses/ValidationError'}
         '429': {$ref: '#/components/responses/Error'}
   /auth/logout:
@@ -81,6 +98,7 @@ paths:
     get:
       tags: [Autenticación]
       summary: Usuario actual y sus empresas
+      description: 'Con un token restringido o ligado a una empresa (V2.5 · W6-A) `tenants` incluye SOLO su empresa: no revela las demás de la persona.'
       responses:
         '200':
           description: OK
@@ -99,6 +117,7 @@ paths:
     put:
       tags: [Autenticación]
       summary: Cambiar contraseña
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo (403 `token_scope_insufficient` con otro).'
       requestBody:
         required: true
         content:
@@ -117,6 +136,7 @@ paths:
     get:
       tags: [Empresas]
       summary: Empresas del usuario
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo; un token restringido, de conector o ligado a una empresa recibe 403 `token_scope_insufficient`.'
       responses:
         '200':
           description: OK
@@ -129,6 +149,7 @@ paths:
     post:
       tags: [Empresas]
       summary: Crear empresa (el usuario queda como propietario, plan trial)
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo (403 `token_scope_insufficient` con un token restringido, de conector o ligado a una empresa).'
       requestBody:
         required: true
         content:
@@ -263,6 +284,7 @@ paths:
     get:
       tags: [Usuarios]
       summary: Miembros (users.manage)
+      description: 'Cada miembro incluye `commercial_role`, `commercial_role_label`, `commercial_scope`, `commercial_role_unexpected` (dato dañado: alcance cerrado y solo lectura hasta corregirlo) (V2.5 · W6-A; se asignan con PUT /tenant/users/{user}/commercial-role) y `mfa_enabled`. Es sensible: con MFA activo exige el segundo factor fresco.'
       responses:
         '200': {description: OK}
     post:
@@ -749,6 +771,7 @@ components:
         email: {type: string}
         locale: {type: string}
         is_superadmin: {type: boolean}
+        mfa_enabled: {type: boolean, description: 'Segundo factor TOTP activo (V2.5 · W6-A)'}
         last_login_at: {type: [string, 'null'], format: date-time}
     TenantSummary:
       type: object
@@ -784,8 +807,10 @@ components:
         allow_shared_training: {type: boolean}
         shared_training_consented_at: {type: [string, 'null']}
         data_retention_months: {type: integer}
-        role: {$ref: '#/components/schemas/Role'}
+        role: {$ref: '#/components/schemas/Role', description: 'Rol EFECTIVO: el rol comercial «servicio» pone un techo de solo lectura (viewer)'}
         role_label: {type: string}
+        access_role: {$ref: '#/components/schemas/Role', description: 'Rol de acceso guardado (V2.5 · W6-A); el comercial se suma a él'}
+        commercial_role: {type: [string, 'null'], enum: [gerente, vendedor, servicio, null], description: 'Rol comercial de la persona en esta empresa (V2.5 · W6-A)'}
         abilities: {type: array, items: {type: string}}
         plan: {type: object, properties: {code: {type: string}, name: {type: [string, 'null']}, limits: {type: object}}}
         onboarding:

@@ -8,6 +8,7 @@ use App\Models\CoreRun;
 use App\Models\Customer;
 use App\Models\DecisionRecommendation;
 use App\Models\Product;
+use App\Services\Auth\Commercial\CommercialScopeContext;
 use App\Services\Customer\CustomerRunService;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -29,8 +30,11 @@ use Illuminate\Support\Facades\DB;
  *   (ni pedido recibido ni descartado). Con `state` se ve exactamente ese estado heredado (NULL = pendiente); con `status` exactamente ese estado de workflow.
  * - La agenda de una fecha agrega: ya vigente a esa fecha, sin vencer, y las pospuestas solo reaparecen desde su `snoozed_until`.
  *
- * TODO(W6): el rol vendedor (alcance por cartera, `customer_assignments`) llega en W6. Diseño: un vendedor solo ve las oportunidades con `assigned_user_id` = él y
- * de clientes de su cartera, lista vacía sin cartera; hoy los roles owner/admin/analyst/viewer ven toda la empresa y `seller_id` es solo un filtro.
+ * Alcance comercial (V2.5 · W6-A; ADR-V25-15; antes TODO(W6)): TODA consulta de esta clase pasa por `base()`/`find()`, que aplican el `CommercialScope` de la persona de la petición
+ * (lo fija `ResolveTenant`). Un vendedor ve solo las oportunidades asignadas a él y las SIN asignar de clientes de su cartera (clientes, zonas o segmentos de
+ * `tenant_users.commercial_scope`), y la lista queda vacía sin cartera ni asignaciones; un gerente o servicio con alcance ve su cartera y a su equipo; sin rol comercial (owner/admin/
+ * analyst/viewer) se ve toda la empresa. El resumen, los conteos por estado, el valor potencial y la agenda se calculan sobre lo VISIBLE (un vendedor nunca recibe totales que
+ * incluyan clientes ajenos). `seller_id` sigue siendo solo un filtro: se compone con el alcance (no lo amplía). Los comandos programados no tienen persona y operan sobre toda la empresa.
  */
 final class PredictiveSalesAgenda
 {
@@ -38,6 +42,7 @@ final class PredictiveSalesAgenda
         private readonly OpportunityPresenter $presenter,
         private readonly CustomerRunService $runs,
         private readonly TenantContext $context,
+        private readonly CommercialScopeContext $commercial,
     ) {}
 
     // ── Consultas base ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -81,6 +86,8 @@ final class PredictiveSalesAgenda
                     ->where('cp.segment', $f->modelSegment);
             });
         }
+        // W6-A: alcance comercial de la persona (cartera y asignaciones). Sin restricción no hace nada.
+        $this->commercial->current()->restrictRecommendations($q);
 
         return $q;
     }
@@ -184,7 +191,10 @@ final class PredictiveSalesAgenda
 
     public function find(int $id): ?DecisionRecommendation
     {
-        return $this->withoutControl(DecisionRecommendation::query()->whereIn('kind', RadarPolicy::KINDS))->find($id);
+        $q = $this->withoutControl(DecisionRecommendation::query()->whereIn('kind', RadarPolicy::KINDS));
+        $this->commercial->current()->restrictRecommendations($q);   // W6-A: una oportunidad fuera del alcance no existe para esta persona (404)
+
+        return $q->find($id);
     }
 
     // ── Resumen ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

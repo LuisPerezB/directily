@@ -51,7 +51,9 @@ async function del(url: string, body?: unknown): Promise<void> {
 // ─── Autenticación ─────────────────────────────────────────────────────────
 export const authApi = {
   me: () => getData<T.MeResponse>('/auth/me'),
-  login: (payload: T.LoginPayload) => postData<{ user: T.User }>('/auth/login', payload),
+  // V2.5 · W6-A: con el segundo factor activo responde 202 `mfa_required` con un desafío (sin sesión) que se completa con `mfaChallenge`.
+  login: (payload: T.LoginPayload) => postData<T.LoginResult>('/auth/login', payload),
+  mfaChallenge: (payload: T.MfaChallengePayload) => postData<{ user: T.User; mfa_method: 'totp' | 'recovery' }>('/auth/mfa/challenge', payload),
   register: (payload: T.RegisterPayload) => postData<{ user: T.User }>('/auth/register', payload),
   logout: () => http.post('/auth/logout').then(() => undefined),
 }

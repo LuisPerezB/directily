@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Middleware\EnforceCommercialScope;
 use App\Http\Middleware\EnsureSuperadmin;
 use App\Http\Middleware\EnsureTenantAbility;
+use App\Http\Middleware\RequireFreshMfa;
+use App\Http\Middleware\RequireFullLogin;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SecurityHeaders;
 use App\Services\Intelligence\SharedGrants\EnsureSharedForecastGrantsEnabled;
@@ -31,16 +34,26 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // SPA en el mismo dominio (cookies de sesión + CSRF de Sanctum).
         $middleware->statefulApi();
-        $middleware->api(append: [SecurityHeaders::class]);
+        // V2.5 · W6-A: el alcance comercial por id (recomendación o cliente fuera de la cartera → 404) se aplica a TODA ruta de empresa sin editar cada archivo de rutas; solo actúa
+        // cuando ResolveTenant fijó un alcance restringido y corre justo después de él (ver la lista de prioridad abajo).
+        $middleware->api(append: [SecurityHeaders::class, EnforceCommercialScope::class]);
         $middleware->alias([
             'tenant' => ResolveTenant::class,
             'tenant.ability' => EnsureTenantAbility::class,
             'superadmin' => EnsureSuperadmin::class,
+            'mfa.step_up' => RequireFreshMfa::class,
+            'account.full' => RequireFullLogin::class,
         ]);
         // La empresa debe resolverse ANTES del route model binding (global scope fail-closed).
         $middleware->prependToPriorityList(
             before: SubstituteBindings::class,
             prepend: ResolveTenant::class,
+        );
+        // El alcance comercial corre justo DESPUÉS de resolver la empresa y ANTES del enlace de modelos: así una ruta de equipo responde 403 aunque el id no exista (sin oráculo de
+        // existencia) y una por id responde 404 igual exista o no. (Los `prepend` se aplican en el orden en que se declaran: ResolveTenant, luego este, ambos antes de SubstituteBindings.)
+        $middleware->prependToPriorityList(
+            before: SubstituteBindings::class,
+            prepend: EnforceCommercialScope::class,
         );
         // V2.5 · W2-F: con la bandera de concesiones apagada las rutas «no existen» (404) incluso sin sesión: el interruptor corre ANTES que Authenticate.
         $middleware->prependToPriorityList(

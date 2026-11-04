@@ -73,6 +73,21 @@
     "createAccount": "Crear cuenta",
     "acceptTerms": "Acepto los términos del servicio y la política de privacidad. Mis datos se tratan conforme a la Ley Orgánica de Protección de Datos Personales del Ecuador.",
     "tooManyAttempts": "Demasiados intentos. Espere un momento antes de volver a intentar.",
+    "mfa": {
+      "title": "Verificación en dos pasos",
+      "subtitle": "Ingrese el código de 6 dígitos de su aplicación autenticadora para terminar de iniciar sesión.",
+      "code": "Código de verificación",
+      "codeHint": "Seis dígitos; cambia cada 30 segundos.",
+      "recoveryCode": "Código de recuperación",
+      "recoveryHint": "Uno de los códigos que guardó al activar la verificación. Cada uno sirve una sola vez.",
+      "useRecovery": "Usar un código de recuperación",
+      "useCode": "Usar el código de la aplicación",
+      "verify": "Verificar",
+      "back": "Volver",
+      "invalidCode": "El código no es válido. Revíselo e intente de nuevo.",
+      "locked": "Demasiados intentos fallidos: la verificación quedó bloqueada unos minutos. Vuelva a iniciar sesión más tarde.",
+      "expired": "El inicio de sesión venció o ya se usó. Vuelva a escribir su contraseña."
+    },
     "strength": {
       "weak": "Contraseña débil: use más caracteres, números y símbolos.",
       "medium": "Contraseña aceptable.",

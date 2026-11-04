@@ -42,8 +42,9 @@ tags:
 - name: Linaje e identidades
 - name: Factor Intelligence
 - name: Decision Engine
-- name: Outcomes y ROI
 - name: Revenue Radar
+- name: Outcomes y ROI
+- name: Seguridad Enterprise
 paths:
   /accuracy/comparison:
     get:
@@ -374,6 +375,44 @@ paths:
       responses:
         '200':
           description: OK
+  /admin/users/{user}/mfa-reset:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Restablecer el segundo factor de una persona (plataforma)
+      description: 'Solo el superadministrador de la plataforma (con el segundo factor fresco). Camino único cuando
+        se perdieron el dispositivo y los códigos de recuperación: el segundo factor es de la PERSONA, no de la
+        empresa, así que un administrador de empresa no puede quitarlo. Exige un motivo (verificación de identidad
+        realizada), borra el estado del segundo factor y revoca los tokens de inicio de sesión y TODAS las sesiones
+        web de la persona. Se audita como `mfa.reset_by_platform`.'
+      parameters:
+      - name: user
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+      responses:
+        '200':
+          description: Restablecido (`data.mfa_enabled` = false, `data.revoked_login_tokens`)
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
   /alerts:
     get:
       tags:
@@ -530,7 +569,10 @@ paths:
       tags:
       - Autenticación
       summary: Iniciar sesión (sesión SPA o token Bearer si no hay sesión)
-      description: 5 intentos por minuto por correo + IP. Éxitos y fallos se auditan.
+      description: '5 intentos por minuto por correo + IP. Éxitos y fallos se auditan. Si la persona tiene el segundo
+        factor (MFA TOTP) activo, una contraseña correcta NO inicia sesión: responde 202 `mfa_required` con un desafío
+        de un solo uso y corta vida (`data.challenge`); la sesión o el token se emiten al completar `POST /auth/mfa/challenge`
+        (V2.5 · W6-A). El token Bearer caduca según `security.tokens.default_ttl_days` (30 días por defecto).'
       security: []
       requestBody:
         required: true
@@ -552,6 +594,36 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/LoginResponse'
+        '202':
+          description: Contraseña correcta; falta el segundo factor (`code` = `mfa_required`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  code:
+                    type: string
+                    example: mfa_required
+                  data:
+                    type: object
+                    properties:
+                      mfa_required:
+                        type: boolean
+                      challenge:
+                        type: string
+                        description: Desafío opaco de un solo uso; se envía a POST /auth/mfa/challenge
+                      expires_in:
+                        type: integer
+                        description: Segundos de vigencia
+                      methods:
+                        type: array
+                        items:
+                          type: string
+                          enum:
+                          - totp
+                          - recovery_code
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -569,6 +641,8 @@ paths:
       tags:
       - Autenticación
       summary: Usuario actual y sus empresas
+      description: 'Con un token restringido o ligado a una empresa (V2.5 · W6-A) `tenants` incluye SOLO su empresa:
+        no revela las demás de la persona.'
       responses:
         '200':
           description: OK
@@ -588,11 +662,371 @@ paths:
                           $ref: '#/components/schemas/TenantSummary'
         '401':
           $ref: '#/components/responses/Error'
+  /auth/mfa:
+    get:
+      tags:
+      - Seguridad Enterprise
+      summary: Estado propio del segundo factor
+      description: 'Ruta de cuenta (403 `token_scope_insufficient` con un token restringido). Si está activo o pendiente
+        de verificar el primer código, cuántos códigos de recuperación quedan (y cuántos están calculados con una
+        clave de la aplicación anterior: `recovery_codes_on_previous_key`; regenerarlos antes de retirar `APP_PREVIOUS_KEYS`),
+        el bloqueo vigente, si una política (empresa o plataforma) lo hace obligatorio (`required_by_policy`: entonces
+        no se puede desactivar) y si el segundo factor de ESTA sesión o token está fresco para las acciones sensibles.
+        Nunca devuelve el secreto ni los códigos.'
+      responses:
+        '200':
+          description: Estado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MfaStatus'
+    delete:
+      tags:
+      - Seguridad Enterprise
+      summary: Desactivar el segundo factor
+      description: Reautenticación con la contraseña y un código TOTP (o de recuperación). Borra el secreto, los
+        códigos de recuperación y el estado de bloqueo, y revoca los demás tokens de inicio de sesión y las demás
+        sesiones web (y cookies «recordarme») de la persona; los tokens de conector se conservan. 409 `mfa_required_by_policy`
+        si una política de la empresa (propietarios y administradores) o de la plataforma (superadministrador) lo
+        exige.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+                code:
+                  type: string
+                recovery_code:
+                  type: string
+      responses:
+        '200':
+          description: Desactivado (`data.enabled` = false, `data.revoked_login_tokens`)
+        '409':
+          description: No está activo (`mfa_not_enabled`) o una política lo exige (`mfa_required_by_policy`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '423':
+          description: Bloqueo por intentos fallidos (`mfa_locked`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/mfa/challenge:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Completar el inicio de sesión con el segundo factor
+      description: 'Segundo paso de `POST /auth/login` cuando la persona tiene MFA activo (el primero responde 202
+        `mfa_required` con un `challenge` de un solo uso y corta vida, 5 minutos por defecto). Se envía el desafío
+        y un código TOTP de 6 dígitos (RFC 6238, ventana de ±1 paso) o un código de recuperación. La respuesta es
+        la de un inicio de sesión normal (sesión con cookie en la SPA; token Bearer en clientes API) y el acceso
+        nace con el segundo factor «fresco».
+
+
+        Un código TOTP no se acepta dos veces (el paso usado queda registrado). Cada intento, correcto o no, se
+        cuenta antes de comprobarse, en tres niveles: 5 fallos seguidos desde una IP bloquean esa combinación persona
+        + IP 15 minutos (423 `mfa_locked`, con `Retry-After`; la víctima, desde su IP, sigue pudiendo entrar), 30
+        fallos de cualquier persona desde una IP bloquean la IP, y 15 fallos seguidos de la persona desde varias
+        IP la bloquean en todas partes. Durante un bloqueo ni un código correcto se acepta. Un desafío inexistente,
+        vencido o ya usado responde 422 `mfa_challenge_invalid`; un desafío que otra petición está verificando en
+        ese instante, 409 `mfa_challenge_busy` (se completa una sola vez, aunque se envíe en paralelo). Ninguna
+        respuesta ni registro incluye el secreto o un código.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - challenge
+              properties:
+                challenge:
+                  type: string
+                  maxLength: 100
+                code:
+                  type: string
+                  description: Código TOTP de 6 dígitos. Obligatorio si no se envía recovery_code.
+                recovery_code:
+                  type: string
+                  description: Código de recuperación de un solo uso (AAAA-BBBB-CCCC-DDDD).
+      responses:
+        '200':
+          description: Inicio de sesión completado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+                      token:
+                        type: string
+                        description: Solo para clientes sin sesión (no SPA).
+                      token_type:
+                        type: string
+                      expires_at:
+                        type:
+                        - string
+                        - 'null'
+                        format: date-time
+                      mfa_method:
+                        type: string
+                        enum:
+                        - totp
+                        - recovery
+                      recovery_codes_remaining:
+                        type: integer
+                        description: Solo cuando se usó un código de recuperación.
+        '409':
+          description: Otra petición está verificando este mismo desafío (`mfa_challenge_busy`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Código incorrecto (`mfa_invalid_code`), desafío vencido o ya usado (`mfa_challenge_invalid`)
+            o datos faltantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '423':
+          description: Bloqueo por intentos fallidos (`mfa_locked`, con `retry_after` y `Retry-After`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/Error'
+  /auth/mfa/confirm:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Verificar el primer código y activar el segundo factor
+      description: Con un código TOTP válido activa el segundo factor, entrega los 10 códigos de recuperación (de
+        un solo uso; se muestran UNA vez y se guardan solo como hash con clave de la aplicación), deja el segundo
+        factor fresco y revoca los demás tokens de inicio de sesión y las demás sesiones web de la persona, que
+        se emitieron sin segundo factor (la sesión o el token actual se conserva). Exige la contraseña actual. 409
+        `mfa_not_pending` si no hay activación pendiente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              - password
+              properties:
+                code:
+                  type: string
+                  description: Código TOTP de 6 dígitos
+                password:
+                  type: string
+                  description: Contraseña ACTUAL (422 `mfa_invalid_password` si no es correcta)
+      responses:
+        '200':
+          description: Activado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MfaRecoveryCodes'
+        '409':
+          description: Sin activación pendiente (`mfa_not_pending`) o ya activo (`mfa_already_enabled`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Código incorrecto (`mfa_invalid_code`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '423':
+          description: Bloqueo por intentos fallidos (`mfa_locked`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/mfa/recovery-codes:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Generar códigos de recuperación nuevos
+      description: Exige la contraseña actual y un código TOTP vigente (no basta la sesión). Los códigos anteriores
+        dejan de valer. Se muestran una sola vez.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              - password
+              properties:
+                code:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Códigos nuevos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MfaRecoveryCodes'
+        '409':
+          description: MFA no activo (`mfa_not_enabled`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Código incorrecto (`mfa_invalid_code`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '423':
+          description: Bloqueo por intentos fallidos (`mfa_locked`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/mfa/setup:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Iniciar la activación del segundo factor (secreto TOTP)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+                  description: 'Contraseña ACTUAL: quien solo tiene una sesión o un token no puede enrolar su propio
+                    autenticador. Un error cuenta contra el mismo bloqueo que los códigos (422 `mfa_invalid_password`).'
+      description: Ruta de cuenta. Genera un secreto aleatorio de 160 bits (Base32) y la URI `otpauth://` para la
+        aplicación autenticadora. El secreto se guarda CIFRADO con la clave de la aplicación y se devuelve SOLO
+        aquí; el segundo factor aún no está activo hasta verificar el primer código (`/auth/mfa/confirm`). Repetir
+        la llamada con la activación pendiente reemplaza el secreto. 409 `mfa_already_enabled` si ya está activo.
+        Se audita como `mfa.enrolment_started` (sin el secreto).
+      responses:
+        '201':
+          description: Secreto de activación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MfaSetup'
+        '409':
+          description: Ya está activo (`mfa_already_enabled`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/mfa/step-up:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Verificar el segundo factor para acciones sensibles (step-up)
+      description: 'Quien tiene MFA activo debe haberlo verificado hace menos de 10 minutos (`security.mfa.step_up_ttl_seconds`)
+        para las acciones sensibles: ajustes y política de seguridad de la empresa, usuarios y roles comerciales,
+        fuentes de datos, tokens y dispositivos del Bridge, aprobación y promoción de modelos, aprobación o rechazo
+        de decisiones, exportaciones, consentimiento, eliminación de la empresa y las modificaciones de plataforma.
+        Sin él esas rutas responden 403 `mfa_step_up_required`. La marca vive en la sesión (SPA) o atada al token
+        (cliente API) y desaparece con ellos.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                recovery_code:
+                  type: string
+      responses:
+        '200':
+          description: Verificado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      verified:
+                        type: boolean
+                      method:
+                        type: string
+                        enum:
+                        - totp
+                        - recovery
+                      fresh_until:
+                        type:
+                        - string
+                        - 'null'
+                        format: date-time
+        '409':
+          description: MFA no activo (`mfa_not_enabled`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Código incorrecto o repetido (`mfa_invalid_code`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '423':
+          description: Bloqueo por intentos fallidos (`mfa_locked`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /auth/password:
     put:
       tags:
       - Autenticación
       summary: Cambiar contraseña
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo
+        (403 `token_scope_insufficient` con otro).'
       requestBody:
         required: true
         content:
@@ -654,6 +1088,129 @@ paths:
           $ref: '#/components/responses/LoginResponse'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /auth/tokens:
+    get:
+      tags:
+      - Seguridad Enterprise
+      summary: Mis tokens de API
+      description: Ruta de cuenta (403 `token_scope_insufficient` con un token restringido, de conector o ligado
+        a una empresa). Los tokens de la persona (inicio de sesión, conector y personales) con su tipo, habilidades,
+        empresa, último uso y caducidad. Nunca devuelve el valor del token.
+      responses:
+        '200':
+          description: Tokens propios
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApiTokenSummary'
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Emitir un token personal con alcance mínimo y caducidad
+      description: 'Ruta de cuenta: solo con una sesión o un token de inicio de sesión completo (403 `token_scope_insufficient`
+        con cualquier otro: un token NUNCA emite otro con más alcance que el suyo ni para otra empresa). El token
+        nace ATADO a una empresa de la que la persona es miembro (404 si no), con habilidades EXPLÍCITAS que no
+        superan las de su rol efectivo en ella (nunca `*`; 422 con la lista de las no permitidas) y con caducidad
+        (30 días por defecto; `expires_in_days` hasta 365). Máximo 25 tokens personales activos. Quien tiene MFA
+        activo necesita el segundo factor fresco (403 `mfa_step_up_required`). El valor se muestra UNA vez; se guarda
+        solo su hash. Revocarlo (`DELETE /auth/tokens/{id}`) surte efecto en la siguiente petición.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - tenant
+              - name
+              - abilities
+              properties:
+                tenant:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 80
+                abilities:
+                  type: array
+                  minItems: 1
+                  maxItems: 40
+                  items:
+                    type: string
+                    example: data.view
+                expires_in_days:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+      responses:
+        '201':
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ApiTokenCreated'
+        '403':
+          description: Token restringido (`token_scope_insufficient`) o segundo factor no fresco (`mfa_step_up_required`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /auth/tokens/revoke-others:
+    post:
+      tags:
+      - Seguridad Enterprise
+      summary: Revocar todos mis demás tokens
+      description: 'Cierra «las otras sesiones» de clientes API: revoca todos los tokens propios salvo el actual.
+        Los de conector se conservan salvo `include_connectors`.'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                include_connectors:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Cantidad revocada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      revoked:
+                        type: integer
+  /auth/tokens/{id}:
+    delete:
+      tags:
+      - Seguridad Enterprise
+      summary: Revocar un token propio
+      description: 'Borra el token: la siguiente petición con él responde 401 (Sanctum lo relee de la base en cada
+        petición; no hay caché). El id de un token ajeno responde 404.'
+      parameters:
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Revocado
+        '404':
+          $ref: '#/components/responses/NotFound'
   /branches:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -10200,6 +10757,65 @@ paths:
           description: Firma inválida o vencida
         '404':
           $ref: '#/components/responses/NotFound'
+  /tenant/security-policy:
+    get:
+      tags:
+      - Seguridad Enterprise
+      summary: Política de seguridad de la empresa
+      description: 'Si el MFA es obligatorio para propietarios y administradores y cuántos de ellos aún no lo tienen
+        activo. Habilidad requerida: `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Política vigente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SecurityPolicy'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: settings.manage
+    put:
+      tags:
+      - Seguridad Enterprise
+      summary: Hacer obligatorio el MFA para propietarios y administradores
+      description: 'Con `mfa_required_for_privileged` = true, propietarios y administradores sin segundo factor
+        pueden iniciar sesión y activarlo (`/auth/mfa/*`) pero no operar la empresa (403 `mfa_enrollment_required`)
+        hasta hacerlo, y no pueden desactivarlo después. Quien activa la política debe tener ya su propio MFA (422
+        `mfa_required_to_enable_policy`): no se bloquea a sí mismo. Se audita. Habilidad requerida: `settings.manage`
+        (sensible).'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - mfa_required_for_privileged
+              properties:
+                mfa_required_for_privileged:
+                  type: boolean
+      responses:
+        '200':
+          description: Política vigente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SecurityPolicy'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: settings.manage
   /tenant/shared-training-consent:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -10221,6 +10837,49 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/TenantResponse'
+  /tenant/tokens:
+    get:
+      tags:
+      - Seguridad Enterprise
+      summary: Tokens ligados a la empresa (administración)
+      description: 'Los tokens con `tenant_id` = la empresa activa, de cualquier persona (conectores y personales),
+        con su dueño, habilidades y caducidad. Nunca devuelve el valor. Habilidad requerida: `users.manage` (sensible:
+        segundo factor fresco si tiene MFA).'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Tokens de la empresa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TenantTokenSummary'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      x-ability: users.manage
+  /tenant/tokens/{id}:
+    delete:
+      tags:
+      - Seguridad Enterprise
+      summary: Revocar un token de la empresa (administración)
+      description: 'Revocación inmediata de un token ligado a la empresa activa (el de otra empresa, o uno de inicio
+        de sesión sin empresa, responde 404). Se audita con `by: admin`. Habilidad requerida: `users.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Revocado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-ability: users.manage
   /tenant/usage:
     parameters:
     - $ref: '#/components/parameters/TenantId'
@@ -10241,6 +10900,9 @@ paths:
       tags:
       - Usuarios
       summary: Miembros (users.manage)
+      description: 'Cada miembro incluye `commercial_role`, `commercial_role_label`, `commercial_scope`, `commercial_role_unexpected`
+        (dato dañado: alcance cerrado y solo lectura hasta corregirlo) (V2.5 · W6-A; se asignan con PUT /tenant/users/{user}/commercial-role)
+        y `mfa_enabled`. Es sensible: con MFA activo exige el segundo factor fresco.'
       responses:
         '200':
           description: OK
@@ -10309,11 +10971,62 @@ paths:
       responses:
         '204':
           description: Eliminado
+  /tenant/users/{user}/commercial-role:
+    put:
+      tags:
+      - Seguridad Enterprise
+      summary: Asignar el rol comercial y su alcance a un miembro
+      description: 'El rol comercial (`gerente`, `vendedor`, `servicio`) se SUMA al rol de acceso y nunca lo reemplaza.
+        **vendedor**: ve y actúa solo sobre las recomendaciones asignadas a él y las SIN asignar de los clientes
+        de su cartera (clientes, zonas o segmentos de `commercial_scope`); lo asignado a otra persona nunca se muestra
+        y sin cartera ni asignaciones no ve nada. **gerente**: ve todo el equipo; con alcance, solo su cartera y
+        la de su equipo. Las vistas de EQUIPO (outcomes, ROI, materialización, compromisos, conciliación y entrenamiento
+        del Customer Core) responden 403 `commercial_scope_forbidden` a un alcance restringido; alias y cambio de
+        código de un cliente solo se admiten sobre clientes visibles (404 si no, también en las escrituras); una
+        ruta de clientes sin clasificar en el registro responde 403 (falla cerrado). **servicio**: solo lectura
+        (techo de habilidades del rol de consulta, cualquiera sea su rol de acceso). El alcance solo referencia
+        clientes, segmentos y personas de la misma empresa (422 si no). Solo un propietario modifica a otro propietario;
+        «servicio» no se asigna a un propietario (422 `commercial_role_not_allowed`). `commercial_role: null` lo
+        quita y limpia el alcance. Solo se admiten esos tres valores o null (cualquier otro, en cualquier mayúscula,
+        es 422); un valor guardado inesperado (dato dañado) se lee como el alcance MÁS restrictivo —sin clientes
+        y en solo lectura— y nunca como «sin rol comercial». Habilidad requerida: `users.manage` (sensible).'
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: user
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommercialRoleUpdate'
+      responses:
+        '200':
+          description: Rol comercial vigente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CommercialRoleResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+      x-ability: users.manage
   /tenants:
     get:
       tags:
       - Empresas
       summary: Empresas del usuario
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo;
+        un token restringido, de conector o ligado a una empresa recibe 403 `token_scope_insufficient`.'
       responses:
         '200':
           description: OK
@@ -10330,6 +11043,8 @@ paths:
       tags:
       - Empresas
       summary: Crear empresa (el usuario queda como propietario, plan trial)
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo
+        (403 `token_scope_insufficient` con un token restringido, de conector o ligado a una empresa).'
       requestBody:
         required: true
         content:
@@ -10713,8 +11428,8 @@ components:
     RadarFilterSeller:
       name: seller_id
       in: query
-      description: Vendedor = usuario asignado a la oportunidad (miembro de la empresa activa). El alcance por cartera
-        del rol vendedor llega en W6.
+      description: 'Vendedor = usuario asignado a la oportunidad (miembro de la empresa activa). Es un FILTRO: se
+        compone con el alcance comercial del rol vendedor (W6-A), no lo amplía.'
       schema:
         type: integer
     RadarFilterSegmentId:
@@ -10963,6 +11678,9 @@ components:
           type: string
         is_superadmin:
           type: boolean
+        mfa_enabled:
+          type: boolean
+          description: Segundo factor TOTP activo (V2.5 · W6-A)
         last_login_at:
           type:
           - string
@@ -11056,8 +11774,22 @@ components:
           type: integer
         role:
           $ref: '#/components/schemas/Role'
+          description: 'Rol EFECTIVO: el rol comercial «servicio» pone un techo de solo lectura (viewer)'
         role_label:
           type: string
+        access_role:
+          $ref: '#/components/schemas/Role'
+          description: Rol de acceso guardado (V2.5 · W6-A); el comercial se suma a él
+        commercial_role:
+          type:
+          - string
+          - 'null'
+          enum:
+          - gerente
+          - vendedor
+          - servicio
+          - null
+          description: Rol comercial de la persona en esta empresa (V2.5 · W6-A)
         abilities:
           type: array
           items:
@@ -19998,6 +20730,273 @@ components:
         rows_with_known_contribution:
           type: integer
         rows_with_unknown_contribution:
+          type: integer
+        note:
+          type: string
+    MfaStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        pending:
+          type: boolean
+          description: Hay un secreto generado aún sin verificar
+        enabled_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        recovery_codes_remaining:
+          type: integer
+        recovery_codes_on_previous_key:
+          type: integer
+          description: 'Códigos sin usar calculados con una clave de la aplicación anterior (APP_PREVIOUS_KEYS):
+            regenerar antes de retirarla'
+        locked_until:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: Bloqueo vigente por intentos fallidos
+        required_by_policy:
+          type: boolean
+          description: Una política de la empresa o de la plataforma exige mantenerlo activo
+        step_up:
+          type: object
+          properties:
+            fresh:
+              type: boolean
+              description: Esta sesión/token verificó el segundo factor dentro de la ventana
+            fresh_until:
+              type:
+              - string
+              - 'null'
+              format: date-time
+            ttl_seconds:
+              type: integer
+    MfaSetup:
+      type: object
+      properties:
+        secret:
+          type: string
+          description: Secreto Base32 (160 bits). Se muestra solo en esta respuesta.
+        otpauth_uri:
+          type: string
+          description: URI otpauth://totp/… para el código QR
+        issuer:
+          type: string
+        digits:
+          type: integer
+          example: 6
+        period:
+          type: integer
+          example: 30
+        algorithm:
+          type: string
+          example: SHA1
+    MfaRecoveryCodes:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        recovery_codes:
+          type: array
+          items:
+            type: string
+            example: ABCD-EFGH-JKMN-PQRS
+          description: En claro SOLO en esta respuesta; la base guarda únicamente su hash
+        recovery_codes_note:
+          type: string
+        revoked_login_tokens:
+          type: integer
+    ApiTokenSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum:
+          - login
+          - connector
+          - personal
+          - other
+        name:
+          type: string
+        tenant:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        abilities:
+          type: array
+          items:
+            type: string
+        current:
+          type: boolean
+          description: Es el token con el que se hizo esta petición
+        expired:
+          type: boolean
+        last_used_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    ApiTokenCreated:
+      type: object
+      properties:
+        token:
+          type: string
+          description: 'Valor del token (Authorization: Bearer …). Se muestra una sola vez.'
+        token_type:
+          type: string
+          example: Bearer
+        token_note:
+          type: string
+        id:
+          type: integer
+        name:
+          type: string
+        tenant:
+          type: string
+          format: uuid
+        abilities:
+          type: array
+          items:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+    TenantTokenSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum:
+          - login
+          - connector
+          - personal
+          - other
+        name:
+          type: string
+        user:
+          type:
+          - object
+          - 'null'
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+            email:
+              type: string
+        abilities:
+          type: array
+          items:
+            type: string
+        expired:
+          type: boolean
+        last_used_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    CommercialScope:
+      type: object
+      description: Cartera del rol comercial. La cartera de clientes es la unión de los clientes listados, los de
+        las zonas comerciales y los de los segmentos. Todo de la misma empresa.
+      properties:
+        customer_ids:
+          type: array
+          maxItems: 500
+          items:
+            type: integer
+        zones:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            maxLength: 80
+        segment_ids:
+          type: array
+          maxItems: 100
+          items:
+            type: integer
+        team_user_ids:
+          type: array
+          maxItems: 200
+          items:
+            type: integer
+          description: 'Gerente: personas cuyas asignaciones ve'
+    CommercialRoleUpdate:
+      type: object
+      required:
+      - commercial_role
+      properties:
+        commercial_role:
+          type:
+          - string
+          - 'null'
+          enum:
+          - gerente
+          - vendedor
+          - servicio
+          - null
+        commercial_scope:
+          $ref: '#/components/schemas/CommercialScope'
+    CommercialRoleResult:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        access_role:
+          $ref: '#/components/schemas/Role'
+        commercial_role:
+          type:
+          - string
+          - 'null'
+          enum:
+          - gerente
+          - vendedor
+          - servicio
+          - null
+        commercial_role_label:
+          type:
+          - string
+          - 'null'
+        commercial_scope:
+          $ref: '#/components/schemas/CommercialScope'
+    SecurityPolicy:
+      type: object
+      properties:
+        mfa_required_for_privileged:
+          type: boolean
+        privileged_members:
+          type: integer
+          description: Propietarios y administradores de la empresa
+        privileged_without_mfa:
           type: integer
         note:
           type: string

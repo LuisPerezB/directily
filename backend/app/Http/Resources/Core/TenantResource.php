@@ -40,6 +40,9 @@ final class TenantResource extends JsonResource
             'created_at' => $this->created_at?->toIso8601String(),
             'role' => $role?->value,
             'role_label' => $role?->label(),
+            // V2.5 · W6-A: `role` es el rol EFECTIVO (el comercial «servicio» tiene techo de solo lectura); `access_role` es el guardado y `commercial_role` se SUMA a él.
+            'access_role' => ($request->attributes->get('access_role') ?? $role)?->value,
+            'commercial_role' => $request->attributes->get('commercial_role')?->value,
             'abilities' => $role?->abilities() ?? [],
             'plan' => [
                 'code' => $plan?->code ?? config('predictily.default_plan'),

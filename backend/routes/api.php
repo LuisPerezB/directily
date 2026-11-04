@@ -32,4 +32,6 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/radar.php';
     // V2.5 · W5-B: Decision Engine y workflow (recomendaciones, transiciones con segregación e idempotencia, parámetros de la empresa).
     require __DIR__.'/api/decision.php';
+    // V2.5 · W6-A: seguridad Enterprise (MFA TOTP, tokens con alcance, roles comerciales, política de seguridad y revocación de dispositivos del Bridge).
+    require __DIR__.'/api/security.php';
 });

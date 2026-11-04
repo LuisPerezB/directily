@@ -50,6 +50,13 @@
         <env name="ENGINE_TRUSTED_PUBLIC_KEYS" value="" force="true"/>
         <env name="ENGINE_ALLOW_UNSIGNED_ARTIFACTS" value="false" force="true"/>
         <env name="ENGINE_ARTIFACTS_DIR" value="" force="true"/>
+        <!-- W6-A: seguridad Enterprise hermética: RLS apagado, MFA del superadministrador no obligatorio y vigencias de tokens por defecto, aunque el .env de desarrollo diga otra cosa. -->
+        <env name="PREDICTILY_RLS_ENABLED" value="false" force="true"/>
+        <env name="PREDICTILY_MFA_SUPERADMIN_REQUIRED" value="false" force="true"/>
+        <env name="PREDICTILY_MFA_STEP_UP_TTL" value="600" force="true"/>
+        <env name="PREDICTILY_TOKEN_DEFAULT_TTL_DAYS" value="30" force="true"/>
+        <env name="PREDICTILY_TOKEN_MAX_TTL_DAYS" value="365" force="true"/>
+        <env name="PREDICTILY_CONNECTOR_TOKEN_TTL_DAYS" value="365" force="true"/>
         <env name="PREDICTILY_XLSX_MAX_ENTRIES" value="1000" force="true"/>
         <env name="PREDICTILY_XLSX_MAX_ENTRY_MB" value="512" force="true"/>
         <env name="PREDICTILY_XLSX_MAX_TOTAL_MB" value="1024" force="true"/>
@@ -65,6 +72,12 @@
         <server name="ENGINE_TRUSTED_PUBLIC_KEYS" value="" force="true"/>
         <server name="ENGINE_ALLOW_UNSIGNED_ARTIFACTS" value="false" force="true"/>
         <server name="ENGINE_ARTIFACTS_DIR" value="" force="true"/>
+        <server name="PREDICTILY_RLS_ENABLED" value="false" force="true"/>
+        <server name="PREDICTILY_MFA_SUPERADMIN_REQUIRED" value="false" force="true"/>
+        <server name="PREDICTILY_MFA_STEP_UP_TTL" value="600" force="true"/>
+        <server name="PREDICTILY_TOKEN_DEFAULT_TTL_DAYS" value="30" force="true"/>
+        <server name="PREDICTILY_TOKEN_MAX_TTL_DAYS" value="365" force="true"/>
+        <server name="PREDICTILY_CONNECTOR_TOKEN_TTL_DAYS" value="365" force="true"/>
         <server name="PREDICTILY_XLSX_MAX_ENTRIES" value="1000" force="true"/>
         <server name="PREDICTILY_XLSX_MAX_ENTRY_MB" value="512" force="true"/>
         <server name="PREDICTILY_XLSX_MAX_TOTAL_MB" value="1024" force="true"/>

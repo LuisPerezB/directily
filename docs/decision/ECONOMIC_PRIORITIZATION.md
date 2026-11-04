@@ -217,7 +217,7 @@ evolución mensual de 12 meses (los meses sin compras salen con cero porque ahí
 | Proponer oportunidades al Decision Engine | `forecast.run` | sí | sí | sí | **403** |
 
 Aislamiento por empresa en modelo (global scope fail-closed): una oportunidad o un comprador de otra empresa responde 404; un id de otra empresa en un filtro, 422; la cabecera de una empresa donde no se es miembro, 404. Plan sin Customer: 402 `features.customer`. Verificado en cada clase de `backend/tests/Feature/Radar`.
-**DISEÑADO / NO IMPLEMENTADO (W6):** los roles comerciales **gerente** y **vendedor** (el vendedor solo vería las oportunidades asignadas a él y de clientes de su cartera —`customer_assignments`—, con lista vacía sin cartera). Hoy `seller_id` es un filtro y no un alcance; el punto de enganche está marcado `TODO(W6)` en `PredictiveSalesAgenda` y `routes/api/radar.php`.
+**IMPLEMENTADO / VERIFICADO (W6-A):** los roles comerciales **gerente**, **vendedor** y **servicio** (`tenant_users.commercial_role` y `commercial_scope`; se suman al rol de acceso). El vendedor ve solo las oportunidades asignadas a él y las SIN asignar de los clientes de su cartera (clientes, zonas o segmentos), nunca las asignadas a otra persona, con lista vacía sin cartera ni asignaciones; el resumen, el valor potencial, los estados y la agenda se calculan sobre lo visible. `seller_id` sigue siendo un filtro y se compone con el alcance. Se aplica en `PredictiveSalesAgenda` (el antiguo punto `TODO(W6)`), en el Decision Engine y, por id, en `EnforceCommercialScope` (404 fuera del alcance). Detalle, límites y pruebas: `docs/security/ENTERPRISE_SECURITY.md` §7 (`CommercialRolesTest`).
 
 ### 9.8 Estado de los requisitos (`V25-AGD-*`)
 
@@ -226,13 +226,13 @@ Aislamiento por empresa en modelo (global scope fail-closed): una oportunidad o 
 | 001 servicios reutilizables | IMPLEMENTADO / VERIFICADO | `CommercialOpportunityService` (productor), `PredictiveSalesAgenda` (consumidor); `CommercialOpportunityServiceTest` |
 | 002–004 summary, opportunities, agenda | IMPLEMENTADO / VERIFICADO | `RadarAgendaAndSummaryApiTest`, `RadarOpportunitiesApiTest` |
 | 005, 006, 007, 020 feedback, estados, mapeo, historial | IMPLEMENTADO / VERIFICADO (el hook al workflow lo conectó W5-B; el trigger de inmutabilidad en la base sigue DISEÑADO, ver 9.4) | `RadarFeedbackApiTest`, `AgendaStatusMapTest` |
-| 008, 009 filtros | IMPLEMENTADO / VERIFICADO; vendedor = usuario asignado (cartera: W6) | `RadarOpportunitiesApiTest::test_filters_…` |
+| 008, 009 filtros | IMPLEMENTADO / VERIFICADO; vendedor = usuario asignado (el alcance por cartera del rol vendedor se compone con el filtro: W6-A, `CommercialRolesTest`) | `RadarOpportunitiesApiTest::test_filters_…` |
 | 010–013 ficha, predictions, demand, products | IMPLEMENTADO / VERIFICADO | `CustomerFichaApiTest` |
 | 014 `/demand/forecasts` | IMPLEMENTADO / VERIFICADO (alias) | `DemandForecastAliasTest` |
 | 015 `/supply/readiness` | IMPLEMENTADO / VERIFICADO | `SupplyReadinessApiTest` |
 | 016 `/models/evaluations` | IMPLEMENTADO / VERIFICADO (W3-D; sin copia) | `ModelQualityApiTest` |
 | 017, 018 sin duplicados, compatibilidad | IMPLEMENTADO / VERIFICADO | `DemandForecastAliasTest`, `CustomerFichaApiTest`, [`LEGACY_API_COMPATIBILITY.md`](../product/LEGACY_API_COMPATIBILITY.md), `OpenApiRoutesTest` |
 | 019 `MessageDraft` con confirmación humana | DISEÑADO / NO IMPLEMENTADO; **ningún envío automático** IMPLEMENTADO / VERIFICADO | `test_no_message_is_ever_sent_by_the_radar` |
-| 021 autorizaciones y aislamiento | IMPLEMENTADO / VERIFICADO con las habilidades existentes; roles gerente/vendedor y cartera: DISEÑADO (W6) | pruebas de roles y de aislamiento de cada clase |
+| 021 autorizaciones y aislamiento | IMPLEMENTADO / VERIFICADO con las habilidades existentes; roles gerente/vendedor/servicio y cartera: IMPLEMENTADO / VERIFICADO (W6-A, `CommercialRolesTest`) | pruebas de roles y de aislamiento de cada clase |
 | Piloto con datos reales (utilidad frente a lo que el vendedor ya haría) | **BLOQUEADO** | requiere clientes reales y el piloto prospectivo (Gate E) |
 

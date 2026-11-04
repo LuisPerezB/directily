@@ -108,10 +108,10 @@ final class DataSourceController extends Controller
     {
         $tenant = $this->context->require();
         $this->plans->assertFeature($tenant, 'api_access');
-        $data = $request->validate(['expires_in_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:730']]);
+        $data = $request->validate(['expires_in_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:365']]);   // V2.5 · W6-A: tope de 365 días (antes 730)
         /** @var User $user */
         $user = $request->user();
-        $new = $user->createToken('datasource:'.$dataSource->id, ['imports.manage', 'data.view'], isset($data['expires_in_days']) ? now()->addDays((int) $data['expires_in_days']) : now()->addYear());
+        $new = $user->createToken('datasource:'.$dataSource->id, ['imports.manage', 'data.view'], now()->addDays(isset($data['expires_in_days']) ? (int) $data['expires_in_days'] : max(1, min(365, (int) config('security.tokens.connector_default_ttl_days', 365)))));
         $new->accessToken->forceFill(['tenant_id' => $tenant->id])->save();
         $this->audit->log('datasource.token_created', $dataSource, ['token_id' => $new->accessToken->id]);
 

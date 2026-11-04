@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Tenancy;
 
 use App\Models\Tenant;
+use App\Services\Tenancy\TenantRls;
 use App\Support\Tenancy\Exceptions\TenantNotResolvedException;
 
 /**
@@ -21,6 +22,7 @@ final class TenantContext
     public function set(?Tenant $tenant): void
     {
         $this->tenant = $tenant;
+        TenantRls::sync($tenant?->getKey());   // W6-A: RLS de PostgreSQL (bandera apagada por defecto: no hace nada)
     }
 
     public function get(): ?Tenant
@@ -56,15 +58,18 @@ final class TenantContext
     {
         $previous = $this->tenant;
         $this->tenant = $tenant;
+        TenantRls::sync($tenant->getKey());
         try {
             return $callback();
         } finally {
             $this->tenant = $previous;
+            TenantRls::sync($previous?->getKey());
         }
     }
 
     public function forget(): void
     {
         $this->tenant = null;
+        TenantRls::sync(null);
     }
 }

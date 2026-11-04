@@ -14,10 +14,17 @@
  *   resto sigue disponible en /customer/predictions.
  * - `recovery_min_purchases`: compras previas mínimas de la relación para hablar de «recuperación» cuando su ventana de recompra está atrasada (con menos
  *   historia un atraso no es información).
+ * - `seller_scope` (V2.5 · W6-A; ADR-V25-15): alcance comercial del VENDEDOR sobre las oportunidades y decisiones (App\Services\Auth\Commercial\CommercialScope). Un vendedor
+ *   ve siempre lo asignado a él; `unassigned_in_portfolio` decide si además ve lo SIN asignar de los clientes de su cartera (clientes, zonas o segmentos de
+ *   `tenant_users.commercial_scope`). Verdadero por defecto: si fuera falso, nada llegaría a un vendedor hasta que alguien se lo asigne. Lo asignado a OTRA persona nunca se
+ *   muestra, aunque el cliente esté en su cartera. Es una decisión de visibilidad, no estadística: a aprobar con el propietario en el piloto.
  */
 return [
     'rules_version' => 'radar-v1',
     'min_probability' => 0.20,
     'max_per_kind_horizon' => 100,
     'recovery_min_purchases' => 3,
+    'seller_scope' => [
+        'unassigned_in_portfolio' => true,
+    ],
 ];

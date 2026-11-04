@@ -6,8 +6,8 @@ namespace App\Services\Radar;
 
 /**
  * Filtros compartidos de /radar/summary, /radar/opportunities y /radar/agenda (V25-AGD-008 y -009): cliente, SKU, horizonte, vendedor, segmento, zona,
- * categoría y estado. «Vendedor» es el usuario asignado a la recomendación (`assigned_user_id`); la cartera de clientes por vendedor llega con el rol
- * vendedor en W6 (ver docs/decision/ECONOMIC_PRIORITIZATION.md, sección Revenue Radar).
+ * categoría y estado. «Vendedor» es el usuario asignado a la recomendación (`assigned_user_id`). Es un FILTRO: el alcance por cartera del rol comercial vendedor (W6-A) lo aplica
+ * `PredictiveSalesAgenda` con el CommercialScope de la persona, y el filtro se compone con él (no lo amplía).
  */
 final class RadarFilters
 {

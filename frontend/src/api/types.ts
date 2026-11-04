@@ -1054,3 +1054,4 @@ export interface AdminPlan {
 export * from './types.v2'
 // ─── V2.5 · W5-E: Radar, Decision Engine, Outcomes y ROI, ciclo de vida de modelos ──
 export * from './types.w5'
+export * from './types.w6a'

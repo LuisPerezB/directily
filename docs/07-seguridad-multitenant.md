@@ -36,7 +36,7 @@
 | 6. Archivos y artefactos | Rutas `tenants/{tenant_id}/imports|exports/...` en disco privado (no público); artefactos de modelos en `artifacts/{tenant_id}/...`; descargas mediante URL temporal firmada tras verificar permisos. | Servicios de importación/exportación, motor |
 | 7. Caché y colas | Claves de caché prefijadas con `tenant:{id}:`; nunca se cachean respuestas entre empresas. | Servicios |
 | 8. Pruebas | Pruebas automatizadas: un usuario de A no puede leer, modificar, importar, pronosticar ni exportar datos de B por ningún endpoint; el motor no lee datos de B al ejecutar A. | `tests/Feature/*Isolation*`, `engine/tests` |
-| 9. Endurecimiento futuro | **Row Level Security** de PostgreSQL con `SET app.tenant_id` por conexión y rol dedicado de solo lectura/escritura para el motor. | Backlog F4 |
+| 9. Endurecimiento adicional | **Row Level Security** de PostgreSQL con `app.tenant_id` por conexión en las tablas de ventas, detrás de la bandera `PREDICTILY_RLS_ENABLED` (apagada por defecto; V2.5 · W6-A): ver `docs/architecture/TENANT_ISOLATION.md` §4 (límites incluidos). Rol dedicado de solo lectura/escritura para el motor: pendiente. | `TenantRls`, `RowLevelSecurityTest`; rol del motor: backlog F4 |
 
 ## 3. Autenticación y sesiones
 
@@ -49,7 +49,7 @@
   revocables y mostrados una sola vez; se guarda solo su hash.
 - Limitación de intentos: nginx (10/min por IP en login/registro) + `RateLimiter` de Laravel por
   usuario/IP; bloqueo temporal tras fallos consecutivos; `auth.failed` en auditoría.
-- **Futuro:** 2FA TOTP para propietarios y administradores, SSO (OIDC/SAML) para planes empresariales.
+- **2FA TOTP (V2.5 · W6-A):** implementado (RFC 6238, códigos de recuperación, segundo factor fresco en acciones sensibles, política por empresa, obligatorio para el superadministrador en producción): `docs/security/ENTERPRISE_SECURITY.md` §5. **Futuro:** SSO (OIDC/SAML) para planes empresariales.
 
 ## 4. Roles y capacidades
 
