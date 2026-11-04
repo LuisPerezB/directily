@@ -710,11 +710,11 @@
   {
    "id": "V25-FAC-001",
    "status": "PARCIAL",
-   "gap": "Los contratos, tablas, servicios y rutas existen, pero el pipeline de factores no está cableado en run_pipeline (solo registra factor_pipeline_not_connected), no hay conectores ni fuentes externas, la evaluación/ablation (T12) y el motor de aplicabilidad son solo tablas y la propuesta de eventos por LLM no existe.",
+   "gap": "Los contratos, tablas, servicios y rutas existen, pero el pipeline de factores no está cableado en run_pipeline (en W2 solo registraba factor_pipeline_not_connected), no hay conectores ni fuentes externas, la evaluación/ablation (T12) y el motor de aplicabilidad son solo tablas y la propuesta de eventos por LLM no existe.",
    "evidence": [
     "backend/tests/Feature/Intelligence/IntelligenceModelsTest.php::test_every_table_of_the_contract_migration_has_its_model",
     "backend/tests/Feature/Intelligence/FactorCatalogTest.php::test_seeder_catalogs_the_17_families_all_inactive_with_complete_metadata",
-    "engine/tests/unit/test_factors_config.py::test_a_demand_run_with_the_pipeline_enabled_reports_that_it_is_not_connected_and_changes_nothing",
+    "engine/tests/unit/test_factors_config.py::test_a_demand_run_with_active_factors_but_no_loaded_data_reports_it_and_changes_nothing (renombrada en W6-E al conectar el pipeline: en W2 afirmaba que una ejecución de demanda con el pipeline encendido registraba factor_pipeline_not_connected y no cambiaba ningún valor servido)",
     "engine/tests/integration/test_factors_t11_integration.py::test_with_the_pipeline_on_only_usable_factors_enter_and_the_rest_fall_back_to_the_model_without_them",
     "backend/app/Services/Intelligence/; engine/predictily_engine/availability/; engine/predictily_engine/db/factors_repository.py; docs/intelligence/FACTOR_INTELLIGENCE.md"
    ],

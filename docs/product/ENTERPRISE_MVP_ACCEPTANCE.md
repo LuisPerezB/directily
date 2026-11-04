@@ -197,3 +197,38 @@ Además se escribieron 27 mutantes propios para las correcciones de la ronda ant
 - Componentes: `frontend/src/components/{enterprise,radar,decisions,outcomes,admin}/`.
 - Lógica pura: `frontend/src/utils/{enterprise,decisions,radar,outcomes}.ts`; tipos: `frontend/src/api/types.w5.ts`; cliente: `radarApi`, `decisionApi`, `outcomeApi` y `modelLifecycleApi` en `frontend/src/api/index.ts`.
 - Ediciones mínimas en archivos compartidos: `frontend/src/router/index.ts` (cinco rutas), `frontend/src/components/layout/AppSidebar.vue` (grupo «Enterprise»), `frontend/src/locales/es.json` (claves `nav.*` nuevas y los bloques `enterprise`, `exec`, `radar`, `decisions`, `roi` y `entAdmin` al final; nada reordenado), `frontend/src/utils/abilities.ts`, `frontend/src/api/types.ts` (`context` en `ApiErrorBody`, campos de publicación/aprobación en `ModelRegistryEntry` y la reexportación de `types.w5`).
+
+## 9. Cómo correr el E2E V2.5 (W6-F, paso 1)
+
+`e2e/v25_acceptance.py` es la prueba de aceptación de punta a punta de la V2.5 (§23.5–7 y §26 de la especificación). Recorre la **API pública real** con el motor y el worker de colas activos, como lo haría un cliente, con empresas, personas y datos **nuevos y ficticios** que crea el propio script. No modifica los E2E heredados: reutiliza `e2e/mvp_acceptance.py` y `e2e/stage2_acceptance.py` por importación (cliente HTTP, importaciones, esperas, esquema del ERP ficticio y convenciones de salida).
+
+**Requisitos.** Backend + `queue:work` (colas `imports`, `forecasting`, `default`) + motor activos; datos demo en `data/demo/`; PostgreSQL con un rol que pueda crear bases (por defecto `predictily`/`secret` en `127.0.0.1`; se cambia con `E2E_PG_HOST`, `E2E_PG_PORT`, `E2E_PG_USER`, `E2E_PG_PASSWORD`). Crea y recrea en cada ejecución la base de prueba local `predictily_erp_source_v25e2e` («ERP de origen» ficticio). Un solo intérprete: `engine/.venv` (httpx, psycopg y cryptography); la firma del Bridge usa el código del propio agente (`bridge/src/predictily_bridge/crypto.py`). Cada ejecución hace **un solo** registro público (el registro está limitado a 10 por hora y por IP): el aprobador y el vendedor se crean como miembros con `POST /tenant/users`. Los códigos TOTP se calculan en el script (RFC 6238) a partir del secreto de `/auth/mfa/setup`; ni el secreto, ni los códigos, ni las contraseñas temporales, ni los tokens se imprimen.
+
+```bash
+# desde la raíz del repositorio, con la pila local en marcha
+engine/.venv/bin/python e2e/v25_acceptance.py --api http://127.0.0.1:8000/api/v1 \
+    --engine-dir engine --log <directorio de evidencias>/v25-acceptance.log
+# opcionales: --engine-url http://127.0.0.1:8100 (comprobación de /health) · --workdir <dir> (archivos temporales)
+```
+
+**Qué demuestra cada bloque.**
+
+| Bloque | Qué demuestra |
+|---|---|
+| 0 · Preparación | Registro del propietario y empresa A con sucursales, catálogo, ventas, inventario y plazos por **CSV**; la administración agrega un aprobador (administrador) y un vendedor (analista); el aprobador crea su empresa **B**; el propietario crea la empresa **C** (historia corta) |
+| 1 · Seguridad (W6-A) | **MFA TOTP**: alta con verificación del primer código y 10 códigos de recuperación; con MFA la contraseña sola responde 202 `mfa_required`; código incorrecto, desafío reutilizado y código repetido se rechazan. **Tokens con alcance**: un token restringido no emite otro (ni más amplio ni igual), no entra a rutas de cuenta, solo hace lo concedido, sigue atado a su empresa aunque se envíe otro `X-Tenant-ID`; habilidades fuera del rol y `*` → 422; revocación inmediata (401) |
+| 2 · Datos (W2) | CSV con errores: hallazgos por fila e informe de calidad; **la confirmación se bloquea** (409 `has_errors`); con `skip_invalid_rows` los documentos inválidos van a **cuarentena** (liberar uno inválido → 422; descarte con motivo). **Fuente SQL** (ERP ficticio PostgreSQL): solo lectura, consultas de escritura rechazadas, mapeo aprobado antes de sincronizar, estado y tipo fuera del vocabulario en cuarentena, liberación con mapeo de valores, re-sincronización sin duplicados, original en Bronze |
+| 3 · Modelos (W2-C, W4) | Entrenamiento que pasa los **gates de calidad**; **aprobación separada** (quien entrenó no aprueba, el analista no tiene la habilidad, sin segundo factor fresco → 403 `mfa_step_up_required`, otra persona con step-up aprueba; el evento guarda firma `verified` y gate de datos ≠ BLOCK; un no aprobado no se promueve); **firma** de artefactos verificada de forma independiente (SHA-256 y manifiesto Ed25519); **inferencia** de demanda y compradores; **fallo de calidad que bloquea** (empresa C con 20 días: BLOCK `dq_demand_insufficient_history`, sin modelo servido); **reversión** de demanda con artefactos verificados |
+| 4 · Radar y decisiones (W5) | Revenue Radar materializado por el Decision Engine (idempotente, potencial no probado); **workflow** asignar → revisar → aprobar (step-up) → iniciar → ejecutar con segregación de funciones (quien propone o ejecuta no aprueba; quien aprueba no ejecuta), bloqueo optimista, idempotencia y auditoría completa; seguimiento de la agenda idempotente; **outcome** «previsto» mientras la ventana está abierta, sin resultado inventado ni causalidad |
+| 5 · Vendedor (W6-A) | El rol comercial «vendedor» ve **exactamente** lo asignado a él y lo sin asignar de su cartera (Radar, resumen, detalle, decisiones, predicciones); lo ajeno es 404; vistas de equipo → 403 `commercial_scope_forbidden` |
+| 6 · Bridge (W6-B) | Registro del dispositivo con par Ed25519 local y código de un solo uso (prueba de posesión inválida y código reutilizado rechazados); **latido firmado** 200; repetición (nonce), cuerpo alterado, reloj fuera de ±5 min, otra clave y token de usuario → 401; revocación inmediata (`device_revoked`) |
+| 7 · Gateway (W6-D) | Catálogo de herramientas tipadas; WhatsApp sin proveedor → 404; con el asistente activo verifica la fila de `gateway_tool_calls`; sin clave de proveedor, 503 `assistant_disabled` sin filas de auditoría (**AVISO**) |
+| 8 · Aislamiento | **Cambio de empresa** con la misma sesión: el aprobador ve los recursos de A en A (200) y, con B activa, ninguno (404) ni en sus listados; el propietario cambia de A a C sin ver nada de A; quien no es miembro no usa el `X-Tenant-ID` de otra empresa (404) |
+
+**Convenciones.** `[OK ]` cumplido · `[FALLA]` criterio no cumplido (el script sigue con el siguiente) · `[AVISO]` observación que no es un fallo (límite conocido, dependencia del entorno o bloqueo declarado). Código de salida 0 solo sin FALLA; al final, tiempos por bloque y `Resumen: N de M verificaciones OK · F FALLA · A AVISO`.
+
+**AVISOS esperados en la pila local.** (1) La clasificación medida del outcome (`observed` / `temporally_associated`) la escribe el comando programado `predictily:outcomes-measure`, que no tiene ruta pública, y la ventana de la decisión (as_of + horizonte + 3 días de margen) no cierra durante la prueba. (2) Sin `CONVERSATION_API_KEY` el asistente está desactivado y no hay llamada a herramienta que auditar. (3) AWS (línea siguiente).
+
+**AWS: BLOQUEADO** — el E2E corre en la pila local (sin cuenta AWS del propietario): S3 real, inferencia en AWS y despliegue no se verifican aquí; el script lo declara al inicio y en el resumen.
+
+**Última ejecución** (3-nov-2026, código del commit `aa82db1`, pila local): `Resumen: 160 de 160 verificaciones OK · 0 FALLA · 3 AVISO`, 607 s.

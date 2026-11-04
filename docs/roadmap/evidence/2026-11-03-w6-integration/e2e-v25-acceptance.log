@@ -1,0 +1,218 @@
+Predictily · aceptación E2E V2.5 · 2026-11-03 22:26 (America/Guayaquil) · API http://127.0.0.1:8000/api/v1
+AWS: BLOQUEADO — esta ejecución usa la pila local (sin cuenta AWS del propietario: S3, inferencia y despliegue en AWS no se verifican aquí)
+
+══ 0 · Preparación (empresa A por CSV, miembros, empresas B y C) ══
+[OK ] backend responde (/up)
+[OK ] motor responde (/health) — HTTP 200
+[OK ] [A] 1. Registro de empresario
+[OK ] [A] 1. Empresa creada — 71f0c210-f7a3-4d61-a80e-98ddab346e2e
+[OK ] [A] 2. Configura negocio y sucursales — 3 sucursales
+[OK ] [A] importa products por CSV — 62 filas válidas (5 s acumulados)
+[OK ] [A] importa sales por CSV — 99334 filas válidas, 44269 documentos (49 s acumulados)
+[OK ] [A] importa inventory por CSV — 133302 filas válidas (88 s acumulados)
+[OK ] [A] importa lead_times por CSV — 79 filas válidas (92 s acumulados)
+[OK ] [A] la administración agrega a Aprobador E2E V2.5 (ficticio) con rol admin (cuenta nueva con contraseña temporal mostrada una vez) — HTTP 201 usuario 46
+[OK ] [A] la administración agrega a Vendedor E2E V2.5 (ficticio) con rol analyst (cuenta nueva con contraseña temporal mostrada una vez) — HTTP 201 usuario 47
+[OK ] [U2] inicia sesión con la contraseña temporal (token Bearer) — HTTP 200
+[OK ] [U3] inicia sesión con la contraseña temporal (token Bearer) — HTTP 200
+[OK ] [A] GET /tenant/users lista a los tres miembros con su rol de acceso — 3 miembros
+[OK ] [B] el aprobador crea su propia empresa B (es propietario de B y administrador de A) — cd9e5a1d-e122-4145-98f3-a1eb2e56a267
+[OK ] [C] el propietario de A crea una segunda empresa C (historia corta, para el gate que bloquea) — b83d8ce5-b00c-44b3-8500-a7f3eef965b1
+        asistente: enabled=False reason=missing_api_key
+   (95 s)
+
+══ 1 · Seguridad Enterprise: MFA, step-up y tokens con alcance (W6-A) ══
+[OK ] [MFA] alta: /auth/mfa/setup con la contraseña actual devuelve secreto Base32 y URI otpauth (RFC 6238: SHA1, 6 dígitos, 30 s) — HTTP 201; emisor Predictily
+[OK ] [MFA] antes de verificar el primer código el segundo factor NO está activo (pendiente) — {"enabled": false, "pending": true}
+[OK ] [MFA] confirmación con el primer código: activo y 10 códigos de recuperación de un solo uso (mostrados una vez) — HTTP 200; 10 códigos
+[OK ] [MFA] GET /auth/mfa: activo, 10 códigos restantes, sin exponer el secreto — {"enabled": true, "recovery_codes_remaining": 10}
+[OK ] [MFA] con MFA activo, la contraseña correcta NO inicia sesión: 202 mfa_required con desafío y sin token — HTTP 202 mfa_required
+[OK ] [MFA] un código incorrecto no completa el inicio de sesión (422 mfa_invalid_code, sin token) — HTTP 422 mfa_invalid_code {"message":"El c\u00f3digo de verificaci\u00f3n no es v\u00e1lido.","code":"mfa_invalid_code"}
+[OK ] [MFA] desafío + código TOTP válido → inicio de sesión completo (token Bearer) — HTTP 200
+[OK ] [MFA] el desafío es de un solo uso (reutilizarlo → 422 mfa_challenge_invalid) — HTTP 422 mfa_challenge_invalid {"message":"El desaf\u00edo de inicio de sesi\u00f3n venci\u00f3 o no es v\u00e1lido. Inicie sesi\u00f3n de nuevo.","code":"mfa_challenge_invalid"}
+[OK ] [MFA] un código TOTP ya aceptado no se acepta otra vez (repetición → 422) — HTTP 422 mfa_invalid_code {"message":"El c\u00f3digo de verificaci\u00f3n no es v\u00e1lido.","code":"mfa_invalid_code"}
+[OK ] [MFA] la administración ve mfa_enabled=true del aprobador (GET /tenant/users, acción sensible con segundo factor fresco) — HTTP 200
+[OK ] [Tokens] el aprobador (con MFA fresco) emite un token personal atado a A con habilidades explícitas — HTTP 201
+[OK ] [Tokens] un token restringido no puede verificar el segundo factor (step-up → 403 token_scope_insufficient) — HTTP 403 token_scope_insufficient {"message":"Esta acci\u00f3n es de la cuenta y exige un inicio de sesi\u00f3n completo: un token restringido, de conector o ligado a una empresa no puede hacerl
+[OK ] [Tokens] emisión con alcance mínimo: habilidades explícitas, atado a la empresa, caducidad pedida (1 día), valor mostrado una vez — HTTP 201; caduca en 1.0 días
+[OK ] [Tokens] un token restringido NO emite otro token, ni más amplio ni igual (403 token_scope_insufficient) — más amplio: HTTP 403 token_scope_insufficient {"message":"Esta acci\u00f3n es de la cuenta y exige un inicio de sesi\u00f3n completo: un token restringido, de conector o ligado a una empresa no puede hacerl; igual: HTTP 403 token_scope_insufficient {"message":"Esta acci\u00f3n es de la cuenta y exige un inicio de sesi\u00f3n completo: un token restringido, de conector o ligado a una empresa no puede hacerl
+[OK ] [Tokens] un token restringido no lista ni crea empresas (ruta de cuenta → 403 token_scope_insufficient) — HTTP 403 token_scope_insufficient {"message":"Esta acci\u00f3n es de la cuenta y exige un inicio de sesi\u00f3n completo: un token restringido, de conector o ligado a una empresa no puede hacerl
+[OK ] [Tokens] el token solo hace lo concedido: lee el dashboard (200) pero no ejecuta un pronóstico (403) — lectura HTTP 200; escritura HTTP 403 forbidden {"message":"No tiene permisos para realizar esta acci\u00f3n.","code":"forbidden","required_ability":"forecast.run"}
+[OK ] [Tokens] el token atado a A no opera la otra empresa del mismo dueño: con X-Tenant-ID de C sigue en A (la cabecera se ignora) y /auth/me solo muestra A — GET /tenant con la cabecera de C → HTTP 200 empresa servida A; /auth/me 1 empresa(s)
+[OK ] [Tokens] no se emiten habilidades fuera del rol (analista con models.approve → 422) ni el comodín «*» (422) — HTTP 422  {"message":"Habilidades no permitidas para su rol en esta empresa: models.approve.","errors":{"abilities":["Habilidades no permitidas para su rol en esta empres; HTTP 422  {"message":"Habilidad no v\u00e1lida.","errors":{"abilities.0":["Habilidad no v\u00e1lida."]}}
+[OK ] [Tokens] el listado de tokens propios muestra el token sin su valor — 2 tokens
+[OK ] [Tokens] revocación inmediata: la siguiente petición con el token revocado → 401 — revocar HTTP 204; después HTTP 401  {"message":"Unauthenticated."}
+   (31 s)
+
+══ 2 · Datos: CSV y fuente SQL, calidad y cuarentena (W2) ══
+[OK ] [Calidad] el CSV con errores se valida con hallazgos por fila (código estable, columna, fila) e informe de calidad con puntaje — 8 filas con error; códigos ['currency_mismatch', 'duplicate_in_file', 'future_date', 'invalid_date', 'invalid_number', 'negative_price', 'negative_quantity', 'net_amount_mismatch', 'required']; puntaje 90.49
+[OK ] [Calidad] FALLO QUE BLOQUEA (carga): con errores y sin skip_invalid_rows la confirmación se rechaza (409 has_errors) — HTTP 409 has_errors {"message":"La importaci\u00f3n tiene filas con errores. Corr\u00edjalas o active la opci\u00f3n de importar solo filas v\u00e1lidas.","code":"has_errors","cont
+[OK ] [Cuarentena] CSV: con skip_invalid_rows los documentos con hallazgos de revisión/inválidos quedan en cuarentena (no se descartan) y el resto se escribe — proyectados 8; 8 registros pendientes; códigos ['currency_mismatch', 'duplicate_in_file', 'future_date', 'invalid_date', 'invalid_number', 'negative_price', 'required', 'unknown_branch']; documentos 43267 → 43269
+[OK ] [Cuarentena] detalle del registro con su carga, objeto Bronze y hallazgos — invoice|001-001-999000003 · Bronze 230
+[OK ] [Cuarentena] liberar un documento que sigue inválido → 422 quarantine_still_invalid (no se escribe nada) — HTTP 422 quarantine_still_invalid {"message":"El registro sigue sin ser v\u00e1lido con los mapeos vigentes: corrija el origen, agregue el mapeo de valores o desc\u00e1rtelo.","code":"quarantine
+[OK ] [Cuarentena] descarte con motivo (200 discarded) y un descarte no se repite (409) — HTTP 200; repetido HTTP 409 invalid_state {"message":"El registro ya fue resuelto.","code":"invalid_state","context":{"status":"discarded"}}
+[OK ] [SQL] base «ERP de origen» ficticia creada (8 documentos, 10 líneas; incluye un estado y un tipo fuera del vocabulario) — predictily_erp_source_v25e2e
+[OK ] [SQL] fuente creada; prueba de conexión OK en transacción de solo lectura; las credenciales no se devuelven — servidor 15.17 (Homebrew); fuga de credenciales: False
+[OK ] [SQL] consultas con escritura, varias sentencias o efectos laterales → 422 sql_query_rejected y el origen no cambia — HTTP 422 sql_query_rejected, HTTP 422 sql_query_rejected, HTTP 422 sql_query_rejected
+[OK ] [SQL] el mapeo nace sin aprobar y no sincroniza (409 mapping_not_approved) — HTTP 409 mapping_not_approved {"message":"No hay un mapeo aprobado y activo para \u00absales\u00bb. Defina y apruebe una consulta primero.","code":"mapping_not_approved"}
+[OK ] [SQL] sincronización completa: 10 líneas extraídas; 6 documentos válidos escritos (con anulada y nota de crédito) y 2 en cuarentena — estado completed, 10 filas, nuevos 6, documentos 43269 → 43273; cuarentena ['invoice|902-001-000000007', 'unknown|902-001-000000008']; stats {"documents_quarantined": 2, "rows_error": 2, "documents_unchanged": 0}
+[OK ] [Cuarentena] SQL: estado y tipo fuera del vocabulario retenidos con su código (unknown_document_status / unknown_document_type), enlazados a la sincronización y a Bronze — {'unknown|902-001-000000008': ['unknown_document_type'], 'invoice|902-001-000000007': ['unknown_document_status']}
+[OK ] [Cuarentena] sin mapeo de valores el estado desconocido sigue en revisión (422 quarantine_still_invalid) — HTTP 422 quarantine_still_invalid {"message":"El registro sigue sin ser v\u00e1lido con los mapeos vigentes: corrija el origen, agregue el mapeo de valores o desc\u00e1rtelo.","code":"quarantine
+[OK ] [Cuarentena] liberación con mapeo de valores (RECHAZADA → anulada): 200 released y el documento se escribe como anulado — HTTP 200; escritura new; venta [('902-001-000000007', 'voided')]
+[OK ] [Cuarentena] la proforma se descarta con motivo (no entra a Silver) — HTTP 200
+[OK ] [SQL] re-sincronizar no duplica: 0 documentos nuevos y el total de documentos no cambia — estado completed, nuevos 0, sin cambios 6, documentos 43273 → 43273; cuarentena tras re-sincronizar 0
+[OK ] [Linaje] el original de la sincronización está en Bronze con su SHA-256 (antes de normalizar) — HTTP 200 sha256 f2eedbb444b9…
+   (23 s)
+
+══ 3 · Modelos: gates, aprobación separada, firma, inferencia, bloqueo y reversión (W2-C, W4) ══
+        pronóstico H=30: trabajo 455 succeeded en 86 s
+[OK ] [Demanda] ejecución con horizonte 30 completada — run 106 v1 en 86 s 
+[OK ] [Gates] el entrenamiento de demanda pasó los gates de calidad (no BLOCK): calidad declarada y limitaciones listadas — calidad ok, limitaciones ['coverage_undeclared', 'days_missing_source', 'days_missing_source_inferred', 'days_not_imputable', 'p50_not_published'], avisos ['[dq_demand_ingestion_lag_high] El p90 del desfase entre la v', '1 series con historia escasa o menos de 28 días usan respald', '1 series sin inventario registrado: sin recomendación de aba']
+        pronóstico H=30: trabajo 456 succeeded en 111 s
+[OK ] [Demanda] ejecución con horizonte 30 completada — run 107 v2 en 111 s 
+[OK ] [Registro] segunda ejecución vigente (versión +1) — v1 → v2
+[OK ] [Inferencia] demanda: serie a 30 días servida por la ejecución vigente, con respaldo por horizonte — 30 puntos, respaldo ok
+        comprador train: trabajo 457 succeeded en 146 s
+[OK ] [Compradores] train completado — run 183 calidad degraded 
+        comprador predict: trabajo 458 succeeded en 11 s
+[OK ] [Compradores] predict completado — run 184 calidad degraded 
+[OK ] [Inferencia] compradores: predicciones a 30 días con envoltura (calidad, incertidumbre) y probabilidades en (0, 1) — 15444 filas; calidad degraded; limitaciones None
+        registro de A: 20 modelos; con artefacto 13; estados [('customer', 'production'), ('customer', 'validated'), ('demand', 'production'), ('demand', 'validated')]
+[OK ] [Firma] demand lightgbm_global (modelo 1280, production): artefacto firmado (Ed25519) y su manifiesto coincide con el registro (SHA-256, empresa, corrida, clave) — verificación independiente — lightgbm_global.joblib: firma signed, clave k-local-2026-11, manifiesto lightgbm_global.joblib.manifest.json, sha e211f3444e8e…
+[OK ] [Firma] customer customer_quantity_reference (modelo 1296, validated): artefacto firmado (Ed25519) y su manifiesto coincide con el registro (SHA-256, empresa, corrida, clave) — verificación independiente — h90_quantity_reference.joblib: firma signed, clave k-local-2026-11, manifiesto h90_quantity_reference.joblib.manifest.json, sha 29ecf03de0ed…
+        modelo para la aprobación separada: 1286 customer customer_probability_logistic (validated, artefacto sí, base legacy_pipeline)
+[OK ] [Aprobación] el modelo elegido no está en producción ni tiene aprobación registrada — validated · legacy_pipeline
+[OK ] [MFA] antes de decidir sobre el modelo: step-up con un código TOTP nuevo → 200 (segundo factor fresco, con vencimiento) — HTTP 200 hasta 2026-11-04T03:44:50+00:00
+[OK ] [Aprobación] un modelo NO aprobado no se promueve a producción, ni con la habilidad y el segundo factor (409) — HTTP 409 model_transition_not_allowed {"message":"Solo un modelo aprobado puede pasar a producci\u00f3n (estado actual \u00abvalidated\u00bb).","code":"model_transition_not_allowed","context":{"mode
+[OK ] [Aprobación] segregación de funciones: quien disparó el entrenamiento no puede aprobarlo (403 approval_segregation_of_duties) — HTTP 403 approval_segregation_of_duties {"message":"No puede aprobar este modelo: usted lo public\u00f3 o dispar\u00f3 su entrenamiento. Lo debe decidir otra persona con la habilidad models.approve.",
+[OK ] [Aprobación] un analista no tiene models.approve (403) — HTTP 403 forbidden {"message":"No tiene permisos para realizar esta acci\u00f3n.","code":"forbidden","required_ability":"models.approve"}
+[OK ] [MFA] acción sensible (aprobar un modelo) sin segundo factor fresco → 403 mfa_step_up_required — HTTP 403 mfa_step_up_required {"message":"Esta acci\u00f3n exige verificar su segundo factor de autenticaci\u00f3n.","code":"mfa_step_up_required","mfa_step_up":true}
+[OK ] [Aprobación] otra persona (administrador con step-up) aprueba: validated → approved, con aprobador registrado — HTTP 200
+[OK ] [Aprobación] el evento de aprobación guarda las compuertas: firma (verified o not_applicable sin artefacto) y gate de datos ≠ BLOCK — firma verified, gate de datos PASS (run_report), eventos [(None, 'validated', 'system'), ('validated', 'approved', 'user')]
+[OK ] [Aprobación] promoción del aprobado: approved → production con serving_basis = approved (retira al del mismo alcance) — HTTP 200; retirados [1285]
+[OK ] [Reversión] revertir a la ejecución vigente → 409 rollback_already_current — HTTP 409 rollback_already_current {"message":"Esa ejecuci\u00f3n ya es la vigente.","code":"rollback_already_current"}
+[OK ] [Reversión] reversión de la ejecución vigente a la anterior (modelos restaurados y retirados en la misma transacción) — HTTP 200 v2 → v1, artefactos verificados: True {"verified": true, "status": "verified", "registered": 1, "checked": 1, "reason": null, "message": "SHA-256 verificado e
+[OK ] [Reversión] tras revertir, la vigente única es la anterior y la serie y los modelos en producción apuntan a ella — vigente 106; producción de [106]
+[OK ] [Reversión] «avanzar» con rollback a una ejecución más nueva → 409 rollback_target_not_previous — HTTP 409 rollback_target_not_previous {"message":"Solo se puede volver a una ejecuci\u00f3n anterior a la vigente; para una m\u00e1s nueva genere un pron\u00f3stico.","code":"rollback_target_not_pre
+[OK ] [C] importa solo 20 días de ventas — 1278 documentos desde 2026-10-07
+        pronóstico H=7 con 20 días de historia: trabajo 460 failed en 3 s — Calidad de datos insuficiente (gate demand: BLOCK). dq_demand_insufficient_history: La historia de la empresa es de 20 días y el mínimo configurado es 28: no hay datos suficientes para pronosticar.
+[OK ] [Gates] FALLO DE CALIDAD QUE BLOQUEA (entrenamiento): con < 28 días de historia el gate BLOCK detiene el pronóstico con código estable y sin modelo servido — run failed, calidad insufficient_data, mensaje: Calidad de datos insuficiente (gate demand: BLOCK). dq_demand_insufficient_history: La historia de la empresa es de 20 días y el mínimo configurado es 28: no hay datos suficientes para pronosticar. Calidad de datos insuf
+[OK ] [Gates] la empresa bloqueada no tiene modelos de demanda en producción — 0 en producción
+   (367 s)
+
+══ 4 · Revenue Radar, decisión con workflow y outcome (W5) ══
+[OK ] [Radar] materializa las oportunidades de la predicción vigente por el Decision Engine (propone, no escribe por su cuenta) — completed: candidatos 100, creadas 100, existentes 0, fallidas 0, horizontes [90]
+[OK ] [Radar] materializar otra vez con los mismos insumos no duplica (idempotente) — creadas 0, existentes 100
+[OK ] [Radar] lista de trabajo y resumen sobre lo materializado (sin nombres: solo el código del comprador) — 100 oportunidades; resumen {"opportunities": 100, "customers": 89, "unit": "relaciones distintas (tipo, cliente, producto) sin repetir por horizonte"}
+[OK ] [Decisión] la oportunidad es una recomendación del Decision Engine: potencial NO probado, sin incremental, con fórmula y proponente (quien materializó) — contact h90 · potential_unproven · propuesta por {'kind': 'user', 'user_id': 45}
+[OK ] [Vendedor] la administración asigna el rol comercial «vendedor» con su cartera (se suma al rol de acceso analista) — HTTP 200
+[OK ] [Vendedor] solo gerente/vendedor/servicio o null se escriben (otra mayúscula → 422) — HTTP 422  {"message":"El valor seleccionado en commercial role no es v\u00e1lido.","errors":{"commercial_role":["El valor seleccionado en commercial role no es v\u00e1lid
+[OK ] [Decisión] asignar al vendedor (suggested → assigned) — HTTP 200
+[OK ] [Decisión] bloqueo optimista: una versión desfasada → 409 decision_version_conflict — HTTP 409 decision_version_conflict {"message":"La recomendaci\u00f3n cambi\u00f3 desde que la ley\u00f3 (versi\u00f3n 110 \u2192 210). Vuelva a cargarla y repita la acci\u00f3n.","code":"decision
+[OK ] [Decisión] el vendedor asignado revisa (assigned → reviewed); repetir con la misma clave no repite la transición — HTTP 200; repetición HTTP 200 meta {'idempotent_replay': True, 'event_id': 211}
+[OK ] [Decisión] segregación: quien propuso (materializó a mano) no aprueba (403 decision_segregation_of_duties) — HTTP 403 decision_segregation_of_duties {"message":"No puede aprobar esta recomendaci\u00f3n: usted la propuso o es quien debe ejecutarla. Debe decidirla otra persona con la habilidad decisions.approv
+[OK ] [Decisión] el vendedor (analista, ejecutor) no aprueba (403) — HTTP 403 forbidden {"message":"No tiene permisos para esta acci\u00f3n (approve): exige la habilidad decisions.approve.","code":"forbidden","required_ability":"decisions.approve"}
+[OK ] [MFA] acción sensible (aprobar una decisión) sin segundo factor fresco → 403 mfa_step_up_required — HTTP 403 mfa_step_up_required {"message":"Esta acci\u00f3n exige verificar su segundo factor de autenticaci\u00f3n.","code":"mfa_step_up_required","mfa_step_up":true}
+[OK ] [MFA] antes de aprobar la decisión: step-up con un código TOTP nuevo → 200 (segundo factor fresco, con vencimiento) — HTTP 200 hasta 2026-11-04T03:45:02+00:00
+[OK ] [Decisión] el aprobador (administrador, con step-up) aprueba (reviewed → approved) — HTTP 200
+[OK ] [Decisión] quien aprobó no ejecuta (403 decision_segregation_of_duties) — HTTP 403 decision_segregation_of_duties {"message":"No puede ejecutar una acci\u00f3n que usted mismo aprob\u00f3: la debe ejecutar otra persona.","code":"decision_segregation_of_duties","context":{"r
+[OK ] [Decisión] el asignado inicia y registra la ejecución (approved → in_progress → executed; Predictily no ejecuta nada) — HTTP 200; HTTP 200
+[OK ] [Decisión] auditoría: cada transición deja un evento con estado previo, nuevo y autor — eventos [(None, 'suggested', 45), ('suggested', 'assigned', 45), ('assigned', 'reviewed', 47), ('reviewed', 'approved', 46), ('approved', 'in_progress', 47), ('in_progress', 'executed', 47)]
+[OK ] [Outcome] una persona no puede declarar «measured» (lo pone solo la medición del sistema) — HTTP 409 decision_transition_not_allowed {"message":"La transici\u00f3n \u00abexecuted\u00bb \u2192 \u00abmeasured\u00bb no est\u00e1 permitida.","code":"decision_transition_not_allowed","context":{"re
+[OK ] [Decisión] se asignan o3 (cliente fuera de la cartera) al vendedor y o4 (cliente de su cartera) al aprobador — HTTP 200; HTTP 200
+[OK ] [Radar] seguimiento de la agenda auditable e idempotente: 201 la primera vez, 200 replayed al repetir, 409 con la misma clave y otro contenido — HTTP 201; HTTP 200; HTTP 409 idempotency_key_reused {"message":"La clave de idempotencia ya se us\u00f3 con otro contenido en esta oportunidad.","code":"idempotency_key_reused"}
+[OK ] [Outcome] la decisión ejecutada queda «prevista» (forecast) mientras su ventana está abierta: ningún resultado inventado ni causalidad — ventana 2026-11-03 + 90 d (hasta 2027-02-01); pendientes {'window_open': 100, 'settling': 0, 'measurable_not_yet_measured': 0, 'total': 100}; medidas 0; método {'id': 'outcomes-roi-v1', 'version': 'outcomes-v1', 'summary': 'Cada recomendación se mide en su ventana fija (as_of + 1 … as_of + horizonte) una vez cerrada más un margen de espera, leyendo las ventas tal como se conocían a ese corte. La contribución usa el costo unitario confiable (W5-B); sin él es NULL. El incremento solo se estima con un experimento de control analizado por intención de tratamiento.', 'classification': {'forecast': 'Previsto', 'observed': 'Observado', 'temporally_associated': 'Asociado temporalmente', 'incremental_estimated': 'Incremental estimado', 'causally_attributable': 'Atribuible causalmente'}, 'settings': {'method_version': 'outcomes-v1', 'settling_lag_days': 3, 'confidence_level': 0.95, 'min_group_size': 30, 'min_buyers_per_arm': 10, 'bootstrap_resamples': 2000, 'usage_prices_configured': [], 'status': 'Valores provisionales: a aprobar en el piloto con el retraso real de ingestión y el tamaño de cada experimento.'}, 'estimators': {'conversion': 'Diferencia de tasas tratamiento − control, intervalo de Newcombe (Wilson híbrido)', 'contribution': 'Diferencia de medias por unidad (con ceros), intervalo percentil bootstrap con semilla registrada (Welch solo como diagnóstico)'}, 'causally_attributable': 'No se produce en esta versión (diseño pre-registrado DISEÑADO; ver OUTCOME_MEASUREMENT.md).'}; roi {"proven": false, "causal_claims": 0, "currency": "USD", "status": "potential_unproven", "label": "Oportunidad potencial
+[OK ] [Outcome] el informe de ROI declara su método y sus limitaciones (no hay ROI probado) — 12 limitaciones
+[AVISO] [Outcome] la clasificación medida (observed / temporally_associated) la escribe el comando programado predictily:outcomes-measure — no hay ruta pública que mida; la ventana de la decisión cierra el 2027-02-01 + 3 d de margen: el E2E verifica el estado «previsto» y que no se inventa ningún resultado
+   (3 s)
+
+══ 5 · Vendedor: solo su cartera (W6-A) ══
+[OK ] [Vendedor] Radar: ve exactamente lo asignado a él y lo SIN asignar de su cartera (nada de otros clientes ni lo asignado a otra persona) — ve 2 de 100; esperado 2; diferencia []
+[OK ] [Vendedor] el resumen del Radar se calcula sobre lo visible (no incluye totales de clientes ajenos) — vendedor {"opportunities": 2, "customers": 2, "unit": "relaciones distintas (tipo, cliente, producto) sin repetir por horizonte"}
+[OK ] [Vendedor] detalle por id: lo suyo 200; un cliente ajeno o lo asignado a otra persona → 404 (sin oráculo de existencia) — {"o1": 200, "o2": 404, "o3": 200, "o4": 404}
+[OK ] [Vendedor] escribir seguimiento sobre una oportunidad fuera de su alcance → 404 y no cambia nada — HTTP 404 not_found {"message":"Recurso no encontrado.","code":"not_found"}
+[OK ] [Vendedor] decisiones: la lista solo trae lo visible (asignado a él o sin asignar de su cartera) — 2 decisiones visibles; fuera de alcance []
+[OK ] [Vendedor] vistas de EQUIPO cerradas (outcomes, ROI, materializar → 403 commercial_scope_forbidden) — {"/decisions/outcomes": 403, "/decisions/roi": 403}; materializar HTTP 403 commercial_scope_forbidden {"message":"Esta vista es de toda la empresa y su rol comercial solo permite ver su cartera.","code":"commercial_scope_forbidden"}
+[OK ] [Vendedor] predicciones de compradores: exige un cliente visible (403 sin filtro, 200 su cliente, 404 un cliente ajeno) — 403/200/404
+[OK ] [Vendedor] el asistente informa el alcance comercial restringido sin revelar los ids de la cartera — {"role": "vendedor", "restricted": true, "source": "request"}
+   (1 s)
+
+══ 6 · Predictily Bridge: registro y latido firmado (W6-B) ══
+[OK ] [Bridge] fuente «Predictily Bridge» creada inactiva hasta registrar un dispositivo — fuente 26 inactive
+[OK ] [Bridge] código de registro de un solo uso (BRG-…), con vencimiento — vence 2026-11-04T04:05:04+00:00
+[OK ] [Bridge] registro con prueba de posesión inválida → 422 invalid_proof (el código no se consume) — HTTP 422 invalid_proof {"message":"La prueba de posesi\u00f3n de la clave no es v\u00e1lida.","code":"invalid_proof"}
+[OK ] [Bridge] registro del dispositivo con par Ed25519 generado localmente: solo viaja la clave pública; el token se devuelve una vez — HTTP 201
+[OK ] [Bridge] el código ya canjeado no sirve otra vez (respuesta sin oráculo) — HTTP 422 invalid_enrolment_code {"message":"El c\u00f3digo de registro no es v\u00e1lido, ya fue usado o venci\u00f3.","code":"invalid_enrolment_code"}
+[OK ] [Bridge] latido firmado (token + firma Ed25519 de método, ruta, marca de tiempo, nonce y SHA-256 del cuerpo) → 200 con el contrato del servidor — HTTP 200 entidades ['sales', 'products', 'inventory', 'commitments', 'branches', 'suppliers', 'lead_times', 'promotions', 'calendar_events', 'unit_conversions', 'warehouses']
+[OK ] [Bridge] repetir exactamente la misma petición (mismo nonce) → 401 device_replay — HTTP 401 device_replay {"message":"Petici\u00f3n repetida.","code":"device_replay"}
+[OK ] [Bridge] cuerpo alterado después de firmar → 401 device_signature_invalid — HTTP 401 device_signature_invalid {"message":"La firma de la petici\u00f3n no es v\u00e1lida.","code":"device_signature_invalid"}
+[OK ] [Bridge] marca de tiempo fuera de ±5 min → 401 device_clock_skew — HTTP 401 device_clock_skew {"message":"El reloj del dispositivo difiere demasiado del del servidor.","code":"device_clock_skew","context":{"server_time":1793763305}}
+[OK ] [Bridge] firma con una clave distinta de la registrada → 401 device_signature_invalid (un token robado sin la clave privada no sirve) — HTTP 401 device_signature_invalid {"message":"La firma de la petici\u00f3n no es v\u00e1lida.","code":"device_signature_invalid"}
+[OK ] [Bridge] un token de USUARIO no sirve en las rutas del agente (401 device_unauthorized) — HTTP 401 device_unauthorized {"message":"Credencial del dispositivo ausente o no v\u00e1lida.","code":"device_unauthorized"}
+[OK ] [Bridge] el token del dispositivo no sirve en el resto de la API (401) — HTTP 401  {"message":"Unauthenticated."}
+[OK ] [Bridge] la administración ve el dispositivo activo con su huella (SHA-256 de la clave pública), último contacto y salud reportada — active, huella 7883c94f61ac…, visto 2026-11-04T03:35:05+00:00
+[OK ] [Bridge] checkpoints del dispositivo (GET firmado, sin cuerpo) — HTTP 200
+[OK ] [Bridge] revocación inmediata: la siguiente petición del dispositivo → 401 device_revoked — revocar HTTP 200; latido HTTP 401 device_revoked {"message":"Este dispositivo fue revocado: no puede enviar datos.","code":"device_revoked"}
+   (1 s)
+
+══ 7 · Intelligence Gateway (W6-D) ══
+[OK ] [Gateway] catálogo de herramientas tipadas con habilidad y alcance de datos por herramienta — 12 herramientas; habilitado False (missing_api_key)
+[OK ] [Gateway] canal de mensajería sin proveedor: no existe (404 channel_not_available) — HTTP 404 channel_not_available {"message":"El canal solicitado no est\u00e1 disponible.","code":"channel_not_available"}
+[OK ] [Gateway] sin proveedor el asistente responde 503 assistant_disabled y no ejecuta herramientas (sin filas nuevas de auditoría) — HTTP 503 assistant_disabled {"message":"El asistente conversacional no est\u00e1 disponible. Los resultados de Predictily siguen disponibles en el resto de la aplicaci\u00f3n.","code":"ass; filas 0 → 0
+[AVISO] [Gateway] asistente desactivado (sin clave de proveedor LLM): no hay llamada a herramienta que auditar en gateway_tool_calls — motivo missing_api_key; con CONVERSATION_API_KEY configurada el E2E verifica la fila de auditoría de la llamada
+   (0 s)
+
+══ 8 · Cambio de empresa sin filtraciones (aislamiento) ══
+[OK ] [MFA] antes de cambiar de empresa (rutas sensibles como dispositivos y fuentes): step-up con un código TOTP nuevo → 200 (segundo factor fresco, con vencimiento) — HTTP 200 hasta 2026-11-04T03:45:05+00:00
+[OK ] [B] importa sus propias ventas e inventario — 18708 documentos
+        pronóstico H=7: trabajo 462 succeeded en 36 s
+[OK ] [Demanda] ejecución con horizonte 7 completada — run 109 v1 en 36 s 
+[OK ] [B] pronóstico propio (versión 1, vigente) con otro tenant_id — ejecución 109
+[OK ] [Cambio de empresa] el aprobador, en el contexto de A, sí ve los recursos de A (200: existen y le pertenecen) — {"ejecución de demanda": 200, "trabajo de entrenamiento": 200, "modelo aprobado": 200, "predicción de compradores": 200, "importación CSV": 200, "mapeos de la fuente SQL": 200, "sincronización": 200, "registro en cuarentena": 200, "decisión": 200, "oportunidad del Radar": 200, "dispositivo Bridge": 200, "ficha de un comprador de A": 200}
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a ejecución de demanda de A — GET /forecast-runs/107 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a trabajo de entrenamiento de A — GET /jobs/456 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a modelo aprobado de A — GET /models/1286 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a predicción de compradores de A — GET /customer/runs/184 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a importación CSV de A — GET /imports/329 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a mapeos de la fuente SQL de A — GET /data-sources/25/mappings → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a sincronización de A — GET /syncs/36 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a registro en cuarentena de A — GET /data-quality/quarantine/19 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a decisión de A — GET /decisions/101 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a oportunidad del Radar de A — GET /radar/opportunities/121 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a dispositivo Bridge de A — GET /bridge/devices/2 → 404
+[OK ] [Cambio de empresa] misma sesión con la empresa B activa: no accede a ficha de un comprador de A de A — GET /customers/667066/overview → 404
+[OK ] [Cambio de empresa] el listado de ejecuciones de B no incluye nada de A — A 2 · B 1
+[OK ] [Cambio de empresa] el listado de modelos de B no incluye nada de A — A 28 · B 8
+[OK ] [Cambio de empresa] el listado de importaciones de B no incluye nada de A — A 7 · B 2
+[OK ] [Cambio de empresa] el listado de fuentes de B no incluye nada de A — A 2 · B 0
+[OK ] [Cambio de empresa] el listado de decisiones de B no incluye nada de A — A 100 · B 0
+[OK ] [Cambio de empresa] el listado de oportunidades de B no incluye nada de A — A 100 · B 0
+[OK ] [Cambio de empresa] el listado de cuarentena de B no incluye nada de A — A 10 · B 0
+[OK ] [Cambio de empresa] el listado de dispositivos Bridge de B no incluye nada de A — A 1 · B 0
+[OK ] [Cambio de empresa] el listado de auditoría del gateway de B no incluye nada de A — A 0 · B 0
+[OK ] [Cambio de empresa] /auth/me: cada persona ve solo sus empresas (aprobador A+B, vendedor A, propietario A+C) — 2/1/2
+[OK ] [Aislamiento] quien no es miembro no puede usar el X-Tenant-ID de otra empresa (vendedor→B, propietario de A→B, aprobador→C: 404) — 404/404/404
+[OK ] [Cambio de empresa] el propietario cambia de A a C: el listado de ejecuciones de C no incluye nada de A — A 2 · C 1
+[OK ] [Cambio de empresa] el propietario cambia de A a C: el listado de importaciones de C no incluye nada de A — A 7 · C 1
+[OK ] [Cambio de empresa] el propietario cambia de A a C: el listado de fuentes de C no incluye nada de A — A 2 · C 0
+[OK ] [Cambio de empresa] el propietario cambia de A a C: el listado de decisiones de C no incluye nada de A — A 100 · C 0
+[OK ] [Aislamiento] tras todos los intentos, la empresa A conserva su ejecución vigente y su fuente — vigente 106
+   (86 s)
+[AVISO] AWS: BLOQUEADO — el E2E corre en la pila local; S3 real, inferencia en AWS y despliegue quedan sin verificar (sin cuenta del propietario)
+
+══ Tiempos por bloque ══
+      95 s  0 · Preparación (empresa A por CSV, miembros, empresas B y C)
+      31 s  1 · Seguridad Enterprise: MFA, step-up y tokens con alcance (W6-A)
+      23 s  2 · Datos: CSV y fuente SQL, calidad y cuarentena (W2)
+     367 s  3 · Modelos: gates, aprobación separada, firma, inferencia, bloqueo y reversión (W2-C, W4)
+       3 s  4 · Revenue Radar, decisión con workflow y outcome (W5)
+       1 s  5 · Vendedor: solo su cartera (W6-A)
+       1 s  6 · Predictily Bridge: registro y latido firmado (W6-B)
+       0 s  7 · Intelligence Gateway (W6-D)
+      86 s  8 · Cambio de empresa sin filtraciones (aislamiento)
+     607 s  TOTAL
+
+Resumen: 160 de 160 verificaciones OK · 0 FALLA · 3 AVISO
+  [AVISO] [Outcome] la clasificación medida (observed / temporally_associated) la escribe el comando programado predictily:outcomes-measure — no hay ruta pública que mida; la ventana de la decisión cierra el 2027-02-01 + 3 d de margen: el E2E verifica el estado «previsto» y que no se inventa ningún resultado
+  [AVISO] [Gateway] asistente desactivado (sin clave de proveedor LLM): no hay llamada a herramienta que auditar en gateway_tool_calls — motivo missing_api_key; con CONVERSATION_API_KEY configurada el E2E verifica la fila de auditoría de la llamada
+  [AVISO] AWS: BLOQUEADO — el E2E corre en la pila local; S3 real, inferencia en AWS y despliegue quedan sin verificar (sin cuenta del propietario)

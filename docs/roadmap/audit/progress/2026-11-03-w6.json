@@ -1,0 +1,1713 @@
+{
+ "meta": {
+  "wave": "W6",
+  "date": "2026-11-03",
+  "commit": "778622d · 6b1bd89 · e7fbc37 · 5c51090 · aa82db1",
+  "summary": "Plataforma de W6 (W6-E pipeline de factores conectado a la demanda, entrenado como se sirve y con control placebo, ablation de solo lectura y contratos sectoriales preservados; W6-A seguridad Enterprise con MFA TOTP, tokens con alcance y revocación inmediata, roles comerciales con alcance por cartera, matriz de aislamiento sobre el router real y RLS experimental; W6-B Predictily Bridge de solo lectura con firma por dispositivo, checkpoints confirmados por el servidor y búfer cifrado; W6-C Auto Mapper con descubrimiento de esquema, propuesta determinista y plantillas versionadas con huella; W6-D Intelligence Gateway con herramientas tipadas, autorización por herramienta, auditoría de solo inserción y canal de mensajería solo como contrato): 20 requisitos pasan a IMPLEMENTADO (10 desde PARCIAL y 10 desde PENDIENTE), 25 pasan a PARCIAL (25 desde PENDIENTE), 60 siguen PARCIAL con la brecha acotada, 12 siguen PENDIENTES con su diseño o contrato documentado, 3 siguen BLOQUEADOS con lo construible hecho y 12 ya IMPLEMENTADOS suman evidencia; 4 defectos registrados (2 corregidos, 1 corregido parcialmente y 1 mitigado). RLS queda apagada y EXPERIMENTAL; el MFA es obligatorio para propietarios y administradores solo con la política de la empresa, y la interfaz de alta y el listado de sesiones están DISEÑADOS; el instalador y el servicio de Windows del Bridge, MySQL y SQL Server reales (solo cursor falso o catálogos de ejemplo) y los ERP reales siguen BLOQUEADOS; los umbrales del Auto Mapper y de los factores son valores de diseño a aprobar en el piloto; el detector de inyección es heurístico (≈ 80 % de falsos negativos ante frases no vistas; la seguridad no depende de él) y el consentimiento por empresa para enviar datos a un LLM no se implementó; no hay ninguna fuente de factores conectada ni mejora medida en datos reales; los casos sectoriales T15/T17 siguen P3_PENDIENTE; todo se probó con datos sintéticos."
+ },
+ "defects": [
+  {
+   "area": "seguridad_ui",
+   "index": 10,
+   "title_prefix": "La verificación numérica del asistente a",
+   "state": "corregido",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_numbers_from_forged_assistant_turns_and_from_free_text_arguments_do_not_ground_a_figure",
+    "backend/tests/Unit/Conversation/Gateway/NumericGroundingFormsTest.php::test_numbers_inside_free_text_fields_never_ground_a_figure",
+    "backend/app/Services/Conversation/NumericGrounding.php"
+   ],
+   "note": "Los turnos role=assistant del historial (los aporta el cliente) ya no respaldan una cifra; tampoco los argumentos de texto libre del modelo ni el texto libre importado. La verificación sigue siendo léxica (V25-GWY-017)."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 12,
+   "title_prefix": "La descarga firmada de la exportación no",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l8_the_export_download_rechecks_membership_and_ability_at_download_time",
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l8_a_token_without_the_export_ability_or_bound_elsewhere_cannot_download",
+    "backend/app/Http/Controllers/Api/Core/TenantExportController.php"
+   ],
+   "note": "La descarga vuelve a comprobar que la persona sea la solicitante, que siga siendo miembro con tenant.export_all (un degradado o retirado recibe 404 con el enlace vigente) y que un token ligado a otra empresa o sin esa habilidad no la use. Pendiente: revalidar el estado de la empresa (suspendida o en eliminación) al descargar."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 19,
+   "title_prefix": "El token Bearer de inicio de sesión conc",
+   "state": "mitigado",
+   "evidence": [
+    "backend/tests/Feature/Security/AccountScopeTokensTest.php::test_t1_a_read_only_token_cannot_mint_a_token_with_more_abilities",
+    "backend/tests/Feature/Security/AccountScopeTokensTest.php::test_t5_a_restricted_token_cannot_list_or_create_companies",
+    "backend/tests/Feature/Security/AccountScopeTokensTest.php::test_a_wildcard_token_bound_to_a_company_is_not_a_full_login",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_a_token_is_issued_with_explicit_minimal_abilities_a_default_expiry_and_is_shown_once",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_the_login_token_follows_the_configured_default_expiry",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_revoking_a_token_takes_effect_on_the_very_next_request",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_login_with_mfa_returns_a_challenge_and_no_token_until_the_code_is_verified"
+   ],
+   "note": "El token de inicio de sesión sigue llevando todas las habilidades y sin empresa, pero ya no es la única forma: los tokens personales se emiten con habilidades explícitas dentro del rol, ligados a una empresa, con caducidad por defecto y tope, y se revocan de inmediato; las rutas de cuenta (tokens, MFA, contraseña, empresas) exigen un inicio de sesión completo, la caducidad del de inicio de sesión es configurable y, con MFA, no se emite sin el segundo factor. Pendiente: emitirlo con alcance mínimo y vida corta, con rotación y revocación por dispositivo."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 21,
+   "title_prefix": "Los límites de cómputo del asistente no ",
+   "state": "corregido",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_the_number_of_tool_rounds_is_bounded_and_the_last_round_offers_no_tools",
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_the_number_of_tool_calls_per_round_is_bounded",
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_an_oversized_tool_result_is_cut_down_before_it_reaches_the_model",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_conversation_deadline_is_checked_before_executing_tools_and_before_every_provider_call",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_a_second_tool_call_of_the_same_response_is_not_executed_once_the_deadline_has_passed"
+   ],
+   "note": "Los límites de rondas, llamadas por ronda y tamaño del resultado tienen prueba, y el plazo total se comprueba antes de cada llamada al proveedor y entre herramientas (ya no solo después de cada respuesta); además hay un plazo por herramienta. La llamada al proveedor en curso sigue acotada por su propio timeout."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "V25-SEC-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_member_of_company_a_gets_404_on_every_route_when_naming_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_without_credentials_every_company_route_is_401",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_every_route_without_user_authentication_is_a_reviewed_one",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_the_token_only_does_what_it_was_granted_and_only_in_its_company",
+    "docs/architecture/TENANT_ISOLATION.md"
+   ],
+   "note": "La matriz de W6-A recorre las rutas del router real: con la credencial de una persona de A y el encabezado de B, cada ruta de empresa responde 404 tenant_not_found; sin credenciales, 401; toda ruta sin autenticación de persona está en una lista revisada (una nueva rompe la prueba). Un token de integración queda ligado a SU empresa e ignora el encabezado."
+  },
+  {
+   "id": "V25-SEC-003",
+   "status": "PARCIAL",
+   "gap": "Un escaneo de app/Jobs/** exige tenantId y SetTenantContext en cada trabajo (y ninguna clase ShouldQueue vive fuera de app/Jobs), y un trabajo real por empresa (QUEUE_CONNECTION=sync) solo ve sus filas, restaura el contexto del llamador y falla cerrado sin el middleware (probado). Falta: un worker real sobre Redis con trabajos de dos empresas intercalados en procesos distintos (DISEÑADO, no verificado), la firma del tenantId en la carga del trabajo y cuotas o equidad por empresa y cola de mensajes fallidos en las colas.",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_queued_job_for_company_a_never_reads_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_job_restores_the_callers_company_and_never_leaks_its_own",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_nested_and_interleaved_company_contexts_never_mix",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_job_without_the_company_middleware_fails_closed_and_a_forged_company_is_not_found",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_job_of_company_a_cannot_write_a_record_of_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_every_queued_job_of_the_application_carries_its_company_and_restores_the_context",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_no_queued_class_lives_outside_app_jobs",
+    "docs/architecture/TENANT_ISOLATION.md §3"
+   ],
+   "note": "La empresa viaja como public int $tenantId y SetTenantContext la restablece y restaura la anterior al terminar; un trabajo nuevo sin empresa rompe el escaneo."
+  },
+  {
+   "id": "V25-SEC-004",
+   "status": "PARCIAL",
+   "gap": "El almacén genera las claves bajo tenants/<uuid>/ y rechaza las de otra empresa (W4), un inventario de los usos de Storage::/File:: obliga a revisar cada ruta nueva, y la única URL prefirmada que existe —la de subida del Bridge, firmada por el backend— queda ligada a empresa, dispositivo, entidad, SHA-256, tamaño, tipo y vencimiento (probado). Falta: URLs prefirmadas de S3 (DISEÑADO, V25-UPL-003), la integración de la aplicación con el rol ABAC por empresa (DISEÑADO) y todo lo de AWS real: BLOQUEADO (sin cuenta del propietario).",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_object_store_keys_live_under_the_company_prefix_and_company_b_cannot_reach_them",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_every_use_of_the_file_store_in_the_application_is_reviewed",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_url_is_bound_to_content_type_signature_and_ttl",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_upload_url_signature_is_the_servers_and_cannot_be_forged_by_a_device",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_presigned_url_authorisation_checks_the_tenant_of_the_device_itself"
+   ],
+   "note": "La URL no sustituye la autorización: al usarla se vuelve a comprobar el dispositivo, y uno revocado no sube nada aunque su URL siga vigente."
+  },
+  {
+   "id": "V25-SEC-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_cache_entries_of_company_a_are_never_served_to_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_the_assistant_daily_limit_and_rate_are_counted_per_company",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_every_use_of_the_cache_in_the_application_has_a_reviewed_key_scope",
+    "backend/tests/Unit/Conversation/Gateway/CacheDraftStoreTest.php::test_keys_carry_the_tenant_prefix_and_another_tenant_cannot_find_the_draft"
+   ],
+   "note": "W6-A agrega un inventario de cada uso de Cache::/RateLimiter:: con la razón por la que su clave no mezcla empresas: un uso nuevo rompe la prueba hasta revisarlo. Los borradores del canal de mensajería (W6-D) llevan tenant:{id}: en la clave."
+  },
+  {
+   "id": "V25-SEC-007",
+   "status": "PARCIAL",
+   "gap": "Cada dispositivo del Bridge tiene credencial propia (par Ed25519 generado en el equipo, token guardado solo como hash y firma de cada petición) y queda ligado a una empresa y a UNA fuente: la empresa y la fuente salen del dispositivo, nunca de un parámetro, y un dispositivo de otra empresa no ve ni confirma nada de ésta (probado). Falta: el vínculo con una sucursal (hoy es por fuente; la sucursal la da la fila o default_branch_code de la fuente, V25-BRG-040) y que el intento rechazado de un dispositivo ajeno o revocado quede en la bitácora (se responde 401/403; solo la revocación se audita).",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_device_of_another_company_never_touches_this_companys_data",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_token_without_the_device_key_is_useless",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls",
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_checkpoint_cannot_cite_a_batch_of_another_source_or_company_or_entity",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_other_company_cannot_issue_codes_list_show_revoke_or_reset_devices",
+    "backend/tests/Feature/Security/BridgeRevocationSecurityTest.php::test_a_user_token_is_not_a_device_credential_and_a_device_token_is_not_a_user_token",
+    "backend/app/Services/Bridge/BridgeDeviceAuthenticator.php; backend/app/Http/Middleware/AuthenticateBridgeDevice.php"
+   ],
+   "note": "Revocar un dispositivo corta todas sus rutas y la URL prefirmada ya emitida en la siguiente petición."
+  },
+  {
+   "id": "V25-SEC-011",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_the_lopdp_export_of_company_a_contains_nothing_of_company_b",
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l8_the_export_download_rechecks_membership_and_ability_at_download_time",
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l8_a_token_without_the_export_ability_or_bound_elsewhere_cannot_download",
+    "backend/app/Http/Controllers/Api/Core/TenantExportController.php"
+   ],
+   "note": "Faltaba probar «ser el solicitante»: otra persona (aun propietaria de la misma empresa), quien fue degradado o quitado de la empresa y un token sin tenant.export_all o ligado a otra empresa reciben 404 con un enlace vigente, y solo la descarga legítima queda auditada (data.exported). El aislamiento y la ausencia de credenciales ya estaban probados (TenantDataExporterStage1/2Test). La expiración del enlace por tiempo se sigue en V25-SEC-054."
+  },
+  {
+   "id": "V25-SEC-013",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_company_never_reaches_another_companys_opportunities_decisions_or_outcomes",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_the_model_cannot_choose_the_company_the_user_or_the_abilities",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditTest.php::test_the_audit_rows_belong_to_the_company_of_the_request"
+   ],
+   "note": "Con el Intelligence Gateway (W6-D) las 12 herramientas se ejecutan con la empresa y el alcance comercial de la petición; las claves reservadas (tenant_id, user_id, abilities…) se rechazan antes de ejecutar y cada llamada se audita en la empresa de la petición."
+  },
+  {
+   "id": "V25-SEC-014",
+   "status": "PARCIAL",
+   "gap": "Existe el contrato del canal (interfaz MessagingChannel con resolveIdentity y verifyWebhook): los borradores viven por empresa (uno ajeno es 404) y la confirmación exige que quien confirma tenga al cliente en su alcance (probado). Falta lo que resuelve la empresa desde una identidad: la vinculación verificada número ↔ persona (V25-GWY-020) y la entrada de mensajes por webhook (V25-GWY-019), ambas DISEÑADAS; sin proveedor el canal no existe (BLOQUEADO, V25-GWY-024).",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_a_draft_of_another_company_does_not_exist_for_this_one",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_customer_must_exist_and_be_inside_the_users_commercial_scope",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_without_a_provider_the_channel_does_not_exist_and_every_route_answers_404",
+    "backend/tests/Unit/Conversation/Gateway/CacheDraftStoreTest.php::test_keys_carry_the_tenant_prefix_and_another_tenant_cannot_find_the_draft",
+    "backend/tests/Unit/Conversation/Gateway/CacheDraftStoreTest.php::test_an_entry_stored_under_another_tenants_key_is_ignored_even_if_the_key_collides",
+    "docs/architecture/INTELLIGENCE_GATEWAY.md §10"
+   ],
+   "note": "Hoy no entra ningún mensaje de WhatsApp: no hay contenido de mensaje del que se pueda tomar una empresa."
+  },
+  {
+   "id": "V25-SEC-015",
+   "status": "PARCIAL",
+   "gap": "Los roles comerciales gerente, vendedor y servicio existen y se suman al rol de acceso (mapa de habilidades 4 × 4 probado): el vendedor solo ve su cartera, el gerente su equipo y servicio queda en solo lectura; el Bridge tiene identidad de dispositivo propia (token + firma, revocable). Falta: un rol de acceso de vendedor sin las demás habilidades del analista (DISEÑADO), que el rol comercial acote las listas por empresa que no hablan de clientes (/sales, /alerts, /inventory, exportaciones CSV; DISEÑADO), una matriz rol × ruta para los roles comerciales (la matriz automática cubre los cuatro roles de acceso) y una restricción CHECK sobre commercial_role en la base (DISEÑADO: solo se valida al escribir por la API).",
+   "evidence": [
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_ability_mapping_of_access_role_by_commercial_role",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_a_vendedor_sees_only_their_portfolio_in_the_list_the_summary_and_the_agenda",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_gerente_sees_the_whole_team_and_a_regional_scope_narrows_it",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_servicio_is_read_only_whatever_the_access_role",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_only_the_three_commercial_roles_or_null_can_be_written",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_an_unexpected_stored_role_fails_closed_never_open",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_role_without_the_ability_is_forbidden_on_every_company_route_and_nothing_is_written",
+    "backend/tests/Feature/Security/BridgeRevocationSecurityTest.php::test_a_user_token_is_not_a_device_credential_and_a_device_token_is_not_a_user_token",
+    "backend/app/Enums/CommercialRole.php; backend/app/Services/Auth/Commercial/CommercialScope.php"
+   ],
+   "note": "El rol comercial nunca concede habilidades; un valor guardado inesperado cierra el alcance (sin clientes y en solo lectura) en vez de abrirlo. La ingestión de máquina la hace el dispositivo del Bridge, no el rol servicio (que es de consulta operativa)."
+  },
+  {
+   "id": "V25-SEC-016",
+   "status": "PARCIAL",
+   "gap": "El segundo factor TOTP (RFC 6238, verificado con los vectores del RFC) está implementado en la API: alta con la contraseña actual y el primer código, códigos de recuperación de un solo uso guardados como HMAC, inicio de sesión en dos pasos sin sesión ni token hasta el código, segundo factor fresco en 17 familias de acciones sensibles, bloqueo por fuerza bruta en tres niveles y sin secretos en registros (probado). Falta: (1) que sea obligatorio por defecto para propietarios y administradores: lo es solo cuando la empresa activa la política (apagada por defecto) y, para el superadministrador, en producción; (2) la interfaz de alta (QR, códigos de recuperación, pantalla de step-up): DISEÑADA, hoy solo se activa por la API (la SPA sí muestra el paso del código al iniciar sesión); (3) el aviso a la persona al activar, desactivar o restablecer: solo queda en la auditoría (no hay canal de correo). Los valores de bloqueo y frescura (5/30/15 intentos, 15 y 10 minutos) son hipótesis de endurecimiento a aprobar en el piloto con el propietario.",
+   "evidence": [
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_enrolment_stores_the_secret_encrypted_and_activates_only_after_a_valid_first_code",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_login_with_mfa_returns_a_challenge_and_no_token_until_the_code_is_verified",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_a_totp_code_cannot_be_replayed",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_codes_one_step_either_side_are_accepted_and_two_steps_are_not",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_recovery_codes_are_shown_once_and_stored_only_as_hashes",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_every_sensitive_family_is_protected",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_the_company_policy_makes_mfa_mandatory_for_owners_and_admins",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_the_superadmin_must_have_mfa_where_the_platform_requires_it_and_steps_up_to_change_things",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_no_secret_or_code_reaches_logs_audit_or_later_responses",
+    "backend/tests/Feature/Security/MfaHardeningTest.php::test_m8_enrolment_needs_the_current_password_so_a_token_or_session_holder_cannot_enrol_their_own_authenticator",
+    "backend/tests/Unit/Security/TotpTest.php::test_totp_matches_the_rfc_6238_test_vectors",
+    "frontend/src/views/__tests__/LoginMfa.spec.ts::un 202 mfa_required muestra el paso del código en vez de dar la sesión por iniciada",
+    "backend/app/Services/Auth/Mfa/MfaService.php; backend/app/Services/Auth/Mfa/Totp.php; docs/security/ENTERPRISE_SECURITY.md §5"
+   ],
+   "note": "Con MFA activo una contraseña correcta responde 202 mfa_required con un desafío de un solo uso (el criterio de aceptación decía 401) y un administrador sin MFA bajo la política recibe 403 mfa_enrollment_required."
+  },
+  {
+   "id": "V25-SEC-017",
+   "status": "PARCIAL",
+   "gap": "Activar, desactivar o restablecer el segundo factor cierra las demás sesiones web y las cookies «recordarme» (users.sessions_valid_after), una sesión emitida en el mismo instante del corte queda cerrada y la frescura del segundo factor vence en la sesión de la SPA (probado). Falta: expiración por inactividad y tiempo máximo absoluto probados, cerrar las sesiones web al cambiar la contraseña (hoy se revocan solo los tokens de inicio de sesión), el listado y cierre de sesiones web individuales (DISEÑADO) y que la cookie Secure no dependa del override de producción.",
+   "evidence": [
+    "backend/tests/Feature/Security/MfaHardeningTest.php::test_l2_enrolling_disabling_and_the_platform_reset_close_the_other_web_sessions_and_remember_cookies",
+    "backend/tests/Feature/Security/MfaHardeningTest.php::test_l2_a_session_issued_exactly_at_the_cutoff_instant_is_closed_and_a_later_one_is_not",
+    "backend/tests/Feature/Security/MfaHardeningTest.php::test_the_second_factor_freshness_expires_on_the_spa_session_path",
+    "backend/app/Services/Auth/SessionRevoker.php; backend/app/Http/Middleware/AuthenticateSessionWithRevocation.php"
+   ],
+   "note": "Migración 2026_03_14_000220: cada sesión guarda su instante de emisión y lo emitido en o antes del corte deja de valer."
+  },
+  {
+   "id": "V25-SEC-018",
+   "status": "PARCIAL",
+   "gap": "Revocar un token propio o de la empresa surte efecto en la siguiente petición, quitar a un miembro revoca sus tokens de la empresa, un token vencido deja de servir sin revocarlo, activar el MFA revoca los demás tokens de inicio de sesión y revocar un dispositivo del Bridge corta todas sus rutas y su URL prefirmada (probado). Falta: listar y cerrar sesiones web activas (DISEÑADO), una revocación de todas las credenciales de una empresa por incidente y cerrar las sesiones web al cambiar la contraseña.",
+   "evidence": [
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_revoking_a_token_takes_effect_on_the_very_next_request",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_an_expired_token_stops_working_without_being_revoked",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_the_company_admin_lists_and_revokes_tenant_tokens_immediately",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_revoke_others_keeps_the_current_login_token_and_the_connectors",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_removing_a_member_revokes_their_company_tokens",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_enabling_mfa_revokes_the_other_login_tokens",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls",
+    "backend/tests/Feature/Security/BridgeRevocationSecurityTest.php::test_revoking_a_device_needs_a_fresh_second_factor_and_is_immediate",
+    "backend/app/Services/Auth/Tokens/TokenService.php"
+   ],
+   "note": "Sanctum comprueba el token contra la base en cada petición: revocar es borrar la fila y no hay caché de tokens."
+  },
+  {
+   "id": "V25-SEC-019",
+   "status": "PARCIAL",
+   "gap": "La regla autor ≠ aprobador se impone en los modelos (W4), en las decisiones (W5) y ahora en las plantillas del Auto Mapper: quien propuso una plantilla no la aprueba si hay otra persona con settings.manage en la empresa (y entre superadministradores para las públicas), y aprobar exige un segundo factor fresco a quien tiene MFA (probado). Falta: la aprobación de un mapeo SQL escrito a mano por la ruta anterior (SourceMapping no registra su autor), una habilidad de reversión distinta de forecast.run con motivo obligatorio y la aprobación de dos personas para operaciones sensibles; con un solo administrador la segregación no aplica (decisión documentada en AUTO_MAPPING.md §10).",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_the_person_who_proposed_cannot_approve_when_someone_else_can_but_a_single_administrator_can",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_with_mfa_enabled_the_sensitive_mapping_actions_need_a_fresh_second_factor",
+    "backend/tests/Feature/Mapping/PublicMappingTemplatesTest.php::test_a_public_template_is_approved_by_another_platform_admin_when_there_is_one",
+    "docs/integrations/AUTO_MAPPING.md §10"
+   ],
+   "note": "Quien corrige o revisa una propuesta ajena no se convierte en su autor: la segregación se mide contra quien la creó."
+  },
+  {
+   "id": "V25-SEC-020",
+   "status": "PARCIAL",
+   "gap": "RLS existe detrás de la bandera PREDICTILY_RLS_ENABLED (apagada por defecto) y es EXPERIMENTAL: en las cuatro tablas de ventas, con políticas FORCE y sin ninguna puerta de sesión, una consulta sin contexto de empresa no devuelve filas ni con SQL escrito a mano, no se inserta para otra empresa y la empresa se vuelve a fijar tras un rollback (probado con el rol de pruebas, no superusuario). No está activa ni es apta para producción: el motor no fija app.tenant_id por transacción, no hay cuenta de aplicación de mínimo privilegio ni un rol aparte con BYPASSRLS para el mantenimiento, un pooler en modo transacción filtraría el valor de sesión, solo cubre cuatro tablas y el costo no se midió con volúmenes reales (a medir en el piloto).",
+   "evidence": [
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_it_is_off_by_default_and_changes_nothing",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_the_flag_defaults_to_off",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_with_the_policies_active_a_query_without_company_context_returns_no_rows",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_with_a_company_context_only_that_companys_rows_are_visible",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_rows_cannot_be_inserted_without_context_or_for_another_company",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_no_session_setting_can_lift_the_policy",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_the_company_is_reasserted_after_a_rollback_reverts_the_set",
+    "backend/tests/Feature/Security/RowLevelSecurityTest.php::test_the_command_reports_status_and_refuses_to_enable_with_the_application_flag_off",
+    "backend/app/Services/Tenancy/TenantRls.php; docs/architecture/TENANT_ISOLATION.md §4"
+   ],
+   "note": "Decisión del arquitecto: RLS queda apagada y EXPERIMENTAL en esta versión. Con la cuenta superusuario de docker-compose no hace nada (la prueba se omite con aviso si el rol de la base lo es)."
+  },
+  {
+   "id": "V25-SEC-021",
+   "status": "PARCIAL",
+   "gap": "El Bridge se autentica con una identidad de dispositivo propia (token guardado como hash + firma Ed25519 de cada petición con marca de tiempo y nonce de un solo uso guardado en la base), revocable, que no sirve en el resto de la API (ni un token de persona sirve en las rutas del agente) (probado). Falta lo demás del requisito: el motor sigue con un único secreto estático compartido por todos los llamadores, sin identidad por servicio ni rotación con solapamiento, y los tokens de integración REST siguen perteneciendo a una persona.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_heartbeat_authenticates_with_token_and_signature_and_updates_last_seen",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_token_without_the_device_key_is_useless",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_signature_covers_method_path_query_and_body",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_replayed_requests_and_clock_skew_are_rejected",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_replay_protection_survives_a_cache_flush",
+    "backend/tests/Feature/Security/BridgeRevocationSecurityTest.php::test_a_user_token_is_not_a_device_credential_and_a_device_token_is_not_a_user_token",
+    "backend/tests/Unit/Bridge/BridgeSignatureVectorsTest.php::test_message_signature_and_fingerprint_match_the_python_agent",
+    "backend/app/Services/Bridge/BridgeSignature.php"
+   ],
+   "note": "La comparación del token es por hash y la firma cubre método, ruta, consulta y SHA-256 del cuerpo."
+  },
+  {
+   "id": "V25-SEC-040",
+   "status": "PARCIAL",
+   "gap": "Sin cambios en lo esencial (W6-D no lo implementó): no hay consentimiento ni autorización por empresa para enviar sus datos a un proveedor externo; basta con que el operador defina CONVERSATION_API_KEY y el asistente está incluido por defecto en todos los planes; el enmascarado es por expresiones regulares (no detecta nombres propios en texto libre ni códigos externos que sean PII) y la EIPD de docs/07 §14.2 no está forzada por el código. Lo agregado: los resultados de las herramientas llegan al proveedor con PiiMasker aplicado y los campos tipo nombre saneados, y la auditoría del gateway nunca guarda valores de negocio ni PII.",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_provider_receives_tool_data_with_personal_data_masked",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_name_fields_reach_the_model_sanitized_even_when_nothing_matches",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditTest.php::test_personal_data_in_the_message_or_the_arguments_never_reaches_the_audit",
+    "docs/architecture/INTELLIGENCE_GATEWAY.md"
+   ],
+   "note": "INTELLIGENCE_GATEWAY.md lo destaca al inicio como DISEÑADO / NO IMPLEMENTADO y pide al operador tratar el envío como decisión suya mientras tanto."
+  },
+  {
+   "id": "V25-SEC-047",
+   "status": "PARCIAL",
+   "gap": "TenantIsolationMatrixTest reúne en una suite las superficies que se pueden probar aquí: todas las rutas del router (401 sin credenciales, 404 con la empresa ajena, 131 pares ruta × rol denegados sin escribir nada), trabajos de cola, caché, almacén de objetos, registro de modelos y exportación LOPDP, con inventarios que fallan ante un trabajo, un uso de caché o de archivos nuevo sin revisar; el Bridge y su URL prefirmada tienen sus propias pruebas negativas. Falta: trabajos y peticiones concurrentes de A y B en procesos distintos (V25-SEC-052), colas reales de Redis o SQS, los registros de plataforma, los respaldos y S3 real (BLOQUEADO); los inventarios son estáticos y no detectan una consulta cruda sin filtro de empresa.",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_member_of_company_a_gets_404_on_every_route_when_naming_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_role_without_the_ability_is_forbidden_on_every_company_route_and_nothing_is_written",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_queued_job_for_company_a_never_reads_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_cache_entries_of_company_a_are_never_served_to_company_b",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_object_store_keys_live_under_the_company_prefix_and_company_b_cannot_reach_them",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_model_of_company_b_cannot_be_read_validated_approved_or_promoted_by_company_a",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_the_lopdp_export_of_company_a_contains_nothing_of_company_b",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_device_of_another_company_never_touches_this_companys_data",
+    "docs/architecture/TENANT_ISOLATION.md §2"
+   ],
+   "note": "Las pruebas siguen siendo secuenciales."
+  },
+  {
+   "id": "V25-SEC-052",
+   "status": "PARCIAL",
+   "gap": "Lo probado es el estado compartido dentro de un proceso: dos contextos de empresa anidados e intercalados no se mezclan, cada trabajo restaura el contexto del llamador y el gateway restaura el alcance comercial tras cada llamada. Sigue sin ninguna prueba con peticiones o trabajadores de A y B en paralelo en procesos distintos (DISEÑADO, no verificado: cada proceso tiene su contexto y su conexión).",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_nested_and_interleaved_company_contexts_never_mix",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_job_restores_the_callers_company_and_never_leaks_its_own",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_commercial_scope_context_is_restored_after_every_call",
+    "docs/architecture/TENANT_ISOLATION.md §3"
+   ],
+   "note": "TENANT_ISOLATION.md §3 lo declara DISEÑADO / NO VERIFICADO."
+  },
+  {
+   "id": "V25-SEC-053",
+   "status": "PARCIAL",
+   "gap": "Revocar un dispositivo (POST /bridge/devices/{id}/revoke, con segundo factor fresco si la persona tiene MFA) corta en la siguiente petición el latido, los checkpoints, la declaración de lotes y la URL prefirmada ya emitida (401 device_revoked; nada llega a Bronze), la revocación queda auditada (bridge.device_revoked) y el agente borra su búfer y se niega a seguir (probado, también con el agente real). Falta que el intento rechazado del dispositivo revocado quede en la bitácora: se responde 401 pero no se registra.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revoking_one_device_does_not_affect_another_of_the_same_source",
+    "backend/tests/Feature/Security/BridgeRevocationSecurityTest.php::test_revoking_a_device_needs_a_fresh_second_factor_and_is_immediate",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_revoked_device_uploads_nothing_and_the_agent_wipes_its_buffer",
+    "bridge/tests/test_agent_resume.py::test_revocation_mid_run_stops_uploading",
+    "backend/app/Http/Controllers/Api/Bridge/BridgeDeviceController.php"
+   ],
+   "note": "El estado del dispositivo se relee en cada petición; revocar el último dispositivo devuelve la fuente a inactive."
+  },
+  {
+   "id": "V25-SEC-054",
+   "status": "PARCIAL",
+   "gap": "La URL prefirmada del Bridge vence a los 10 minutos y cualquier cambio (entidad, tamaño, SHA-256, dispositivo, empresa) la invalida (probado con el reloj avanzado); el enlace de exportación vuelve a comprobar al descargar que la persona sea la solicitante, siga siendo miembro con tenant.export_all y que el token no sea de otra empresa (otro usuario o un retirado reciben 404, probado). Falta: una prueba que avance el reloj más allá del TTL del enlace de exportación (hoy lo vencen la firma temporal y expires_at del registro, sin prueba propia), revalidar el estado de la empresa al descargar y las URLs prefirmadas de S3 (no existen; S3 real BLOQUEADO).",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_url_is_bound_to_content_type_signature_and_ttl",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_device_of_another_company_never_touches_this_companys_data",
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l8_the_export_download_rechecks_membership_and_ability_at_download_time",
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l8_a_token_without_the_export_ability_or_bound_elsewhere_cannot_download"
+   ],
+   "note": "La URL del Bridge es una ruta relativa firmada por el backend: el agente la une a su servidor configurado y no sigue redirecciones."
+  },
+  {
+   "id": "V25-SEC-055",
+   "status": "PARCIAL",
+   "gap": "La matriz automática existe: lee el router real, exige que toda ruta de empresa declare una habilidad que exista (salvo 2 revisadas) y, para las rutas con habilidad y sin enlace implícito de modelo, verifica que cada rol sin la habilidad recibe 403 y no escribe nada (131 pares ruta × rol); las acciones sensibles exigen un segundo factor fresco a quien tiene MFA (17 familias, y una auditoría estática de los controladores que deciden aprobaciones en línea) (probado). Falta: las 74 rutas con enlace implícito de modelo (resuelven el id antes de la habilidad; su 403 lo prueban las suites de cada recurso, no la matriz), la matriz para los roles comerciales y que el MFA sea obligatorio por defecto para los privilegiados (depende de la política de la empresa, V25-SEC-016).",
+   "evidence": [
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_every_route_with_a_company_declares_an_ability_except_the_reviewed_ones",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_every_ability_a_route_requires_exists_and_the_hierarchy_holds",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_role_without_the_ability_is_forbidden_on_every_company_route_and_nothing_is_written",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_role_with_every_ability_is_never_stopped_by_the_ability_check_on_safe_company_routes",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_every_sensitive_family_is_protected",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_sensitive_abilities_need_a_fresh_second_factor_that_expires",
+    "backend/tests/Feature/Security/StepUpBypassModelsTest.php::test_every_controller_that_decides_an_approve_class_action_inline_enforces_the_second_factor"
+   ],
+   "note": "Las habilidades sensibles se imponen en un solo lugar (EnsureTenantAbility, lista security.mfa.sensitive_abilities): una ruta nueva con una habilidad sensible queda protegida sola."
+  },
+  {
+   "id": "V25-SEC-057",
+   "status": "PARCIAL",
+   "gap": "Ahora tienen prueba de que se auditan: el segundo factor (activación, fallos de contraseña, bloqueos, uso de códigos de recuperación, desactivación y restablecimiento por la plataforma con motivo), la emisión y revocación de tokens, el cambio de rol comercial, la aprobación de plantillas y de mapeos SQL (con la huella del esquema), la revocación y el reinicio de checkpoints del Bridge, y cada llamada del gateway (en gateway_tool_calls, de solo inserción y que falla cerrado). Siguen sin prueba las altas y bajas de miembros y el cambio de rol de acceso, el cambio de contraseña, la solicitud de eliminación y las acciones del superadministrador fuera del MFA; la bitácora general (audit_logs) sigue fallando en abierto y sin protección contra UPDATE/DELETE, y no existe acceso de emergencia que registrar (V25-SEC-051).",
+   "evidence": [
+    "backend/tests/Feature/Security/MfaHardeningTest.php::test_m8_enrolment_needs_the_current_password_so_a_token_or_session_holder_cannot_enrol_their_own_authenticator",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_disabling_requires_the_password_and_a_code",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_the_platform_resets_a_lost_second_factor_with_a_reason_and_only_the_platform",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_a_token_is_issued_with_explicit_minimal_abilities_a_default_expiry_and_is_shown_once",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_the_company_admin_lists_and_revokes_tenant_tokens_immediately",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_commercial_role_is_assigned_by_users_manage_audited_and_listed",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_every_human_decision_is_audited_with_who_what_and_the_schema_fingerprint",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls",
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_admin_can_reset_a_checkpoint_to_request_a_full_reload_and_it_is_audited",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditTest.php::test_without_an_audit_row_no_result_is_delivered"
+   ],
+   "note": "La auditoría guarda hechos (activó, falló, bloqueó, aprobó), nunca códigos, secretos, tokens ni valores del origen."
+  },
+  {
+   "id": "V25-AGD-004",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_a_vendedor_sees_only_their_portfolio_in_the_list_the_summary_and_the_agenda",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_assignments_decide_visibility_and_never_leak_to_the_other_vendedor",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_a_portfolio_can_be_defined_by_zone_or_segment_too",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_a_vendedor_without_portfolio_or_assignments_sees_nothing_and_fails_closed",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_filtering_by_another_customer_or_seller_never_widens_the_scope",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_groups_by_customer_and_never_duplicates_a_customer_per_sku",
+    "backend/app/Services/Radar/PredictiveSalesAgenda.php; backend/app/Services/Auth/Commercial/CommercialScope.php"
+   ],
+   "note": "Lo que faltaba era el alcance por cartera (W6-A). La cartera es tenant_users.commercial_scope (clientes, zonas y segmentos), no una tabla customer_assignments: el vendedor ve lo asignado a él y lo sin asignar de los clientes de su cartera, lo asignado a otra persona nunca, y sin cartera ni asignaciones la agenda queda vacía. La regla «lo sin asignar de su cartera» (radar.seller_scope.unassigned_in_portfolio) es una decisión de visibilidad a aprobar con el propietario en el piloto."
+  },
+  {
+   "id": "V25-AGD-009",
+   "status": "PARCIAL",
+   "gap": "En la API los filtros de segmento, zona, categoría, estado y vendedor existen y se componen con el alcance comercial sin ampliarlo, y un vendedor sin cartera obtiene una lista vacía (probado); seller_id sigue filtrando por el usuario asignado, no por la cartera de ese vendedor. En la interfaz faltan el selector de un vendedor cualquiera y el filtro por segmento.",
+   "evidence": [
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_a_vendedor_without_portfolio_or_assignments_sees_nothing_and_fails_closed",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_filtering_by_another_customer_or_seller_never_widens_the_scope",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_filters_by_customer_product_horizon_kind_zone_segment_category_seller_and_model_segment"
+   ],
+   "note": "La cartera se define por clientes, zonas (customers.commercial_zone) o segmentos y se valida contra la empresa al asignarla."
+  },
+  {
+   "id": "V25-AGD-021",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_ids_outside_the_scope_are_not_found_and_nothing_changes",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_team_wide_views_are_closed_to_vendedores_until_they_are_scoped",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_commercial_scope_is_resolved_per_company",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_scope_middleware_runs_after_the_company_is_resolved_on_every_scoped_route",
+    "backend/tests/Feature/Security/CommercialSurfacesTest.php::test_m4_every_route_that_touches_customers_or_recommendations_is_classified_and_the_registry_has_no_stale_entries",
+    "backend/tests/Feature/Security/CommercialSurfacesTest.php::test_s6_customer_core_views_are_scoped_or_team_only_or_free_of_customer_data",
+    "backend/tests/Feature/Security/TenantIsolationMatrixTest.php::test_a_role_without_the_ability_is_forbidden_on_every_company_route_and_nothing_is_written"
+   ],
+   "note": "Lo que faltaba era el alcance por cartera del vendedor (W6-A): las rutas de Radar, decisiones y clientes pasan por un registro único y fail-closed (CommercialSurfaces) y una ruta de clientes sin clasificar se cierra para los alcances restringidos. Las habilidades radar.view / radar.feedback / radar.assign siguen sin definirse por decisión del arquitecto (se reutilizan forecast.view, decisions.manage y forecast.run, cuya matriz rol × ruta prueba TenantIsolationMatrixTest)."
+  },
+  {
+   "id": "V25-DEC-025",
+   "status": "PARCIAL",
+   "gap": "Los roles comerciales gerente y vendedor existen (W6-A) y acotan lo que cada persona ve y puede transicionar en el workflow (listas, conteos, detalle y transiciones fuera del alcance: 404 sin cambios, probado), pero no conceden habilidades: un vendedor que deba gestionar decisiones necesita el rol de acceso analista, y las habilidades granulares decision.assign / review / approve no existen (un rol de acceso de vendedor sin las demás habilidades del analista está DISEÑADO).",
+   "evidence": [
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_decision_lists_and_counts_only_include_what_the_vendedor_can_see",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_ids_outside_the_scope_are_not_found_and_nothing_changes",
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_ability_mapping_of_access_role_by_commercial_role"
+   ],
+   "note": "Aprobar o rechazar una decisión exige además un segundo factor fresco a quien tiene MFA (mfa.step_up:approval)."
+  },
+  {
+   "id": "V25-REG-072",
+   "status": "PARCIAL",
+   "gap": "Existe la habilidad dedicada models.approve con segregación de funciones (W4), y desde W6-A aprobar, rechazar y promover —también promover por la vía de la reversión un aprobado que nunca se sirvió y validar un modelo fuera de la publicación— exigen un segundo factor fresco a quien tiene MFA (probado); existen además los roles comerciales. Faltan: una habilidad models.rollback (la reversión a lo que ya se sirvió sigue bajo forecast.run, sin segundo factor), el motivo obligatorio al aprobar y al revertir, que el MFA sea obligatorio por defecto para los privilegiados (depende de la política de la empresa) y la identidad del publicador de la CLI sigue siendo una declaración del operador.",
+   "evidence": [
+    "backend/tests/Feature/Security/StepUpBypassModelsTest.php::test_m7_promoting_a_never_served_approved_model_through_rollback_needs_a_fresh_second_factor",
+    "backend/tests/Feature/Security/StepUpBypassModelsTest.php::test_m7_restoring_what_already_served_and_people_without_mfa_are_not_affected",
+    "backend/tests/Feature/Security/StepUpBypassModelsTest.php::test_m7_validating_a_model_outside_the_publication_path_needs_a_fresh_second_factor",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_every_sensitive_family_is_protected"
+   ],
+   "note": "Una auditoría estática de los controladores con can('models.approve') impide que una decisión de la clase «aprobar» quede sin segundo factor."
+  },
+  {
+   "id": "V25-SEL-034",
+   "status": "PARCIAL",
+   "gap": "La promoción exige una aprobación auditada por una persona con models.approve distinta de quien publicó o entrenó (W4) y, desde W6-A, un segundo factor fresco a quien tiene MFA (probado); el motivo sigue siendo opcional al aprobar (obligatorio al rechazar) y el pipeline propio sigue promoviendo sin aprobación (legado).",
+   "evidence": [
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_every_sensitive_family_is_protected",
+    "backend/tests/Feature/Security/MfaFlowTest.php::test_sensitive_abilities_need_a_fresh_second_factor_that_expires",
+    "backend/tests/Feature/Security/StepUpBypassModelsTest.php::test_every_controller_that_decides_an_approve_class_action_inline_enforces_the_second_factor"
+   ],
+   "note": "Sin MFA activo en la persona no se pide segundo factor (la política de la empresa decide si es obligatorio)."
+  },
+  {
+   "id": "V25-BRG-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_real_agent_extracts_from_postgres_into_bronze_and_the_pipeline_creates_sales",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_interrupted_agent_resumes_from_the_confirmed_checkpoint_without_duplicate_batches",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_retry_after_network_failure_and_lost_local_state_never_duplicate_batches",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_enrolment_issues_a_single_use_code_stored_only_as_hash_and_returns_the_token_once",
+    "bridge/tests/test_agent_resume.py::test_interruption_and_resume_deliver_every_row_exactly_once",
+    "bridge/tests/test_agent_resume.py::test_crash_between_upload_and_commit_resends_the_same_batch_without_duplicating",
+    "bridge/tests/test_files_adapter.py::test_agent_ships_csv_files_skips_unchanged_ones_and_rereads_changed_ones",
+    "bridge/tests/test_config.py::test_server_url_must_be_https",
+    "bridge/pyproject.toml; bridge/src/predictily_bridge/runner.py; docs/integrations/BRIDGE_WINDOWS.md"
+   ],
+   "note": "Agente Python 3.12 opcional (bridge/, dependencia única cryptography) que solo inicia conexiones salientes: se registra con un código de un solo uso, extrae lotes de PostgreSQL, SQLite, CSV y Excel y los sube por URL prefirmada a Bronze; el checkpoint se confirma solo tras el acuse del servidor y se reanuda sin duplicar. El extremo a extremo ejecuta el agente real como proceso contra un servidor local y un PostgreSQL ficticio (se omite con un mensaje si falta una dependencia); el servidor se exige https salvo localhost explícito de pruebas. Nada se probó contra el ERP de un cliente; el instalador y el servicio de Windows están BLOQUEADOS (V25-BRG-002)."
+  },
+  {
+   "id": "V25-BRG-002",
+   "status": "BLOQUEADO",
+   "gap": "Sigue BLOQUEADO: requiere un host Windows 10/11 o Server y el certificado de firma de código del propietario. Lo construible está hecho: el núcleo del agente no depende del sistema operativo y el bucle de servicio con parada limpia está probado en cualquier sistema; la especificación de PyInstaller y el servicio con pywin32 están escritos como diseño (no construidos ni probados) y BRIDGE_WINDOWS.md §5 da los pasos exactos para el propietario, cuyo criterio de aceptación de portabilidad es correr la suite del agente en Windows.",
+   "evidence": [
+    "bridge/tests/test_cli.py::test_run_service_loops_until_stopped_and_ships_through_the_injected_server",
+    "bridge/packaging/predictily-bridge.spec; bridge/packaging/windows_service.py; docs/integrations/BRIDGE_WINDOWS.md §5"
+   ],
+   "note": "La unidad de systemd para Linux también está DISEÑADA y sin probar."
+  },
+  {
+   "id": "V25-BRG-003",
+   "status": "PARCIAL",
+   "gap": "En el agente Bridge el solo lectura tiene capas probadas para PostgreSQL y SQLite: plantillas SELECT validadas con un puerto del guardia con paridad con SqlQueryGuard (corpus de 187 casos generado con el guardia PHP), la sesión de solo lectura del motor (PostgreSQL rechaza las escrituras en la conexión cruda del agente; SQLite abre en mode=ro con un autorizador) y el origen sin cambios tras extraer. Falta: MySQL/MariaDB y SQL Server solo con un cursor falso (sin servidor de pruebas: BLOQUEADO), SQL Server sin barrera de motor (descansa en la cuenta db_datareader, que el agente comprueba y por defecto exige), y el SqlQueryGuard del servidor sigue evadible en PostgreSQL con identificadores entrecomillados y Unicode-escape (defecto MEDIUM de conectores, sin corregir; el corpus de paridad no incluye esos casos).",
+   "evidence": [
+    "bridge/tests/test_readonly_enforcement.py::test_extraction_executes_only_select_and_leaves_the_source_untouched",
+    "bridge/tests/test_readonly_enforcement.py::test_sqlite_engine_refuses_writes_even_if_the_guard_were_bypassed",
+    "bridge/tests/test_readonly_enforcement.py::test_a_write_template_never_reaches_the_driver",
+    "bridge/tests/test_readonly_enforcement.py::test_base_class_has_no_execution_path_for_plain_text",
+    "bridge/tests/test_postgres_integration.py::test_the_database_itself_refuses_writes_on_the_agents_connection",
+    "bridge/tests/test_postgres_integration.py::test_extraction_from_real_postgres_ships_every_row_once_and_the_source_is_untouched",
+    "bridge/tests/test_sqlguard_parity.py::test_same_verdict_reason_and_text_as_the_php_guard",
+    "backend/tests/Unit/Bridge/SqlGuardParityFixtureTest.php::test_php_guard_still_gives_the_verdict_the_python_port_is_tested_against"
+   ],
+   "note": "W6-B amplió SqlQueryGuard (NEXT VALUE FOR, RECEIVE, sugerencias de bloqueo de T-SQL, toda función *_to_xml* y escritura de objetos grandes)."
+  },
+  {
+   "id": "V25-BRG-004",
+   "status": "PARCIAL",
+   "gap": "El agente Bridge solo inicia conexiones salientes (https obligatorio salvo localhost de pruebas, sin seguir redirecciones; el servidor nunca le envía SQL) y entrega lotes de ventas probados de punta a punta y de productos por la misma vía; las demás entidades permitidas (inventario, sucursales, proveedores…) pasan por el mismo importador pero sin prueba propia del Bridge. Falta la prueba de integración con la entrada de red denegada (espacio de red sin ruta hacia el cliente) y entregar inventario por el agente con prueba.",
+   "evidence": [
+    "bridge/tests/test_transport.py::test_redirects_are_never_followed_so_the_token_cannot_leak_to_another_host",
+    "bridge/tests/test_transport.py::test_upload_goes_to_the_configured_server_only_and_without_credentials",
+    "bridge/tests/test_transport.py::test_plain_http_to_a_remote_host_is_refused_at_construction",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_real_agent_extracts_from_postgres_into_bronze_and_the_pipeline_creates_sales",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_inactive_source_refuses_batches_and_other_entities_import_through_the_same_pipeline"
+   ],
+   "note": "Los conectores SQL leídos por el servidor siguen necesitando alcance de red hacia el ERP (lista blanca o VPN); para una red cerrada existe ahora el Bridge."
+  },
+  {
+   "id": "V25-BRG-007",
+   "status": "PARCIAL",
+   "gap": "El servidor sigue sin haber leído nunca un SQL Server (sin servidor ni pdo_sqlsrv: BLOQUEADO). El agente Bridge agrega un adaptador SQL Server (pyodbc + ODBC Driver 18) implementado contra el mismo contrato y probado solo con un cursor falso: intención de lectura (ApplicationIntent=ReadOnly), sin autocommit, TOP con parámetros tipados y la cuenta con permisos de escritura detectada y, por defecto, rechazada; no hay barrera de motor de solo lectura y no se ejecutó contra un servidor (implemented_untested).",
+   "evidence": [
+    "bridge/tests/test_readonly_enforcement.py::test_sqlserver_connection_is_read_intent_and_never_autocommits",
+    "bridge/tests/test_readonly_enforcement.py::test_sqlserver_pages_use_top_brackets_typed_parameters_and_only_select",
+    "bridge/tests/test_readonly_enforcement.py::test_sqlserver_refuses_non_fixed_statements_and_dangerous_templates",
+    "bridge/tests/test_readonly_enforcement.py::test_sqlserver_describe_flags_writable_accounts",
+    "bridge/tests/test_agent_hardening.py::test_a_writable_sqlserver_or_mysql_account_blocks_extraction_by_default",
+    "docs/integrations/ERP_COMPATIBILITY.md §1"
+   ],
+   "note": "En SQL Server la plantilla debe ser un SELECT simple (sin WITH ni ORDER BY internos): se recomiendan vistas."
+  },
+  {
+   "id": "V25-BRG-009",
+   "status": "PARCIAL",
+   "gap": "Sin servidor MySQL/MariaDB no hay verificación (BLOQUEADO) ni del servidor ni del agente: el adaptador del Bridge (PyMySQL, sesión READ ONLY y transacción de solo lectura por página, cuenta con escritura rechazada por defecto) solo se probó con un cursor falso, y la verificación TLS de MySQL del lado del servidor sigue sin aplicarse.",
+   "evidence": [
+    "bridge/tests/test_readonly_enforcement.py::test_mysql_session_is_read_only_before_any_query_and_pages_roll_back",
+    "bridge/tests/test_agent_hardening.py::test_a_writable_sqlserver_or_mysql_account_blocks_extraction_by_default",
+    "bridge/tests/test_agent_hardening.py::test_require_readonly_account_defaults_to_true_only_for_engines_without_a_robust_read_only_mode"
+   ],
+   "note": "Estado declarado: implemented_untested (ERP_COMPATIBILITY.md)."
+  },
+  {
+   "id": "V25-BRG-010",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "bridge/tests/test_readonly_enforcement.py::test_sqlite_engine_refuses_writes_even_if_the_guard_were_bypassed",
+    "bridge/tests/test_readonly_enforcement.py::test_the_file_is_opened_with_mode_ro_so_even_a_bare_connection_cannot_write",
+    "bridge/tests/test_readonly_enforcement.py::test_authorizer_allows_reads_and_denies_everything_else",
+    "bridge/tests/test_readonly_enforcement.py::test_extraction_executes_only_select_and_leaves_the_source_untouched",
+    "bridge/tests/test_agent_resume.py::test_second_run_is_incremental_and_reads_only_the_window",
+    "bridge/tests/test_agent_resume.py::test_full_extraction_ships_ordered_batches_and_confirms_the_bounded_watermark",
+    "bridge/src/predictily_bridge/adapters/sqlite.py"
+   ],
+   "note": "Vive en el agente Bridge (no en el servidor: nunca lee una ruta del servidor): el archivo se abre con mode=ro, PRAGMA query_only y un autorizador del motor que solo permite lectura (sin ATTACH, PRAGMA de escritura, sqlite_* ni load_extension), con carga completa e incremental, y su SHA-256 no cambia tras extraer. El archivo lo elige el cliente en su configuración local; no se probó con un POS real."
+  },
+  {
+   "id": "V25-BRG-016",
+   "status": "PENDIENTE",
+   "gap": "Sigue siendo un procedimiento, no una herramienta: ERP_COMPATIBILITY.md declara la compatibilidad por motor y formato (no por producto ERP) y fija el criterio para declarar un ERP «probado» (cuenta de solo lectura creada por el cliente, plantillas revisadas y fijadas, test-source sin advertencias de escritura, carga conciliada, corrección, reanudación y revocación), y ENTERPRISE_ONBOARDING.md lo pide en los pasos 1 y 3; no se ha aplicado con ningún cliente ni hay un checklist firmado por el propietario.",
+   "evidence": [
+    "docs/integrations/ERP_COMPATIBILITY.md §4; docs/integrations/ENTERPRISE_ONBOARDING.md §5"
+   ],
+   "note": "Ningún ERP real (Soyoda, Contífico, SAP Business One, Odoo, Dynamics…) se ha probado."
+  },
+  {
+   "id": "V25-BRG-021",
+   "status": "PARCIAL",
+   "gap": "Con el Auto Mapper, una fuente SQL (ERP ficticio PostgreSQL) carga de punta a punta productos, ventas, inventario, proveedores y plazos de abastecimiento con el mismo importador que los archivos (probado). Falta: sucursales por SQL, y la reimportación sin cambios y la incremental con corrección para las entidades distintas de ventas.",
+   "evidence": [
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows"
+   ],
+   "note": "Las consultas las genera el Auto Mapper a partir de la plantilla aprobada y SqlQueryGuard las valida."
+  },
+  {
+   "id": "V25-BRG-023",
+   "status": "PARCIAL",
+   "gap": "En el agente Bridge la extracción pagina por llave (orden total de la plantilla, cursor confirmado por el servidor) con memoria acotada y lotes que cruzan páginas, también en CSV por archivo y fila (probado). En la sincronización SQL del servidor ninguna prueba cruza el límite de página (el tamaño mínimo de 100 lo impide con fixtures pequeñas).",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_full_extraction_ships_ordered_batches_and_confirms_the_bounded_watermark",
+    "bridge/tests/test_agent_resume.py::test_batch_too_big_for_the_server_is_split",
+    "bridge/tests/test_files_adapter.py::test_csv_pages_resume_by_file_and_row_and_end_exactly",
+    "bridge/tests/test_readonly_enforcement.py::test_keyset_predicate_is_parameterised_and_validated"
+   ],
+   "note": "El tamaño de lote (5 000 filas, 32 MB) es un valor inicial a aprobar en el piloto."
+  },
+  {
+   "id": "V25-BRG-024",
+   "status": "PARCIAL",
+   "gap": "Para el Bridge hay límite por IP antes de autenticar (rotar tokens no lo evade), por credencial y una cuota diaria de bytes por empresa (429 con Retry-After; los duplicados no consumen cuota), y el agente respeta 429/Retry-After con un tope (probado); los valores (240/min, 4096 MB/día) son iniciales a aprobar en el piloto y la cuota por dispositivo está DISEÑADA. Del resto del requisito, sin cambios: el limitador de la ingesta REST y el tope de filas o tiempo de la sincronización SQL no tienen prueba, y no hay conectores de API saliente de terceros.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_rotating_bearer_values_does_not_evade_the_ip_rate_limit",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_tenant_daily_quota_stops_new_uploads_with_retry_after_but_not_duplicates",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_device_requests_are_throttled",
+    "bridge/tests/test_transport.py::test_429_retry_after_is_honoured",
+    "bridge/tests/test_retry_cursor_batching.py::test_retry_after_is_honoured_but_bounded"
+   ],
+   "note": "BRIDGE_WINDOWS.md §7 lista las variables de cuota y tasa."
+  },
+  {
+   "id": "V25-BRG-026",
+   "status": "PARCIAL",
+   "gap": "El agente Bridge divide la carga en lotes con checkpoints confirmados por el servidor y un libro por extracción: una interrupción reanuda desde el último lote confirmado sin releer ni duplicar, también tras perder el estado local (probado, con el agente real). La sincronización SQL del servidor sigue siendo un único trabajo que, si falla, empieza de cero, y no hay ventanas históricas (por mes) con avance persistido.",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_interruption_and_resume_deliver_every_row_exactly_once",
+    "bridge/tests/test_agent_resume.py::test_lost_local_state_resumes_from_the_servers_cursor",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_interrupted_agent_resumes_from_the_confirmed_checkpoint_without_duplicate_batches",
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_batches_of_a_run_must_be_contiguous_and_in_their_own_position"
+   ],
+   "note": "La primera extracción completa de la fuente se procesa como backfill y las demás como incremental (ADR-V25-23)."
+  },
+  {
+   "id": "V25-BRG-027",
+   "status": "PARCIAL",
+   "gap": "El agente Bridge reintenta los fallos transitorios (red, 5xx, 429) con retroceso exponencial y jitter completo, un tope de intentos y un nonce nuevo por reintento, sin duplicar lotes (idempotencia por SHA-256) (probado). Las rutas de ingesta del servidor (sincronización SQL, REST, archivos) siguen sin reintento inmediato ante errores transitorios: fallan y esperan la siguiente ejecución.",
+   "evidence": [
+    "bridge/tests/test_retry_cursor_batching.py::test_full_jitter_stays_within_the_exponential_ceiling_and_cap",
+    "bridge/tests/test_retry_cursor_batching.py::test_two_agents_do_not_retry_in_lockstep",
+    "bridge/tests/test_retry_cursor_batching.py::test_run_retries_until_success_then_gives_up_after_max_attempts",
+    "bridge/tests/test_retry_cursor_batching.py::test_non_retryable_errors_are_not_retried",
+    "bridge/tests/test_transport.py::test_retries_use_a_fresh_nonce_and_back_off_with_jitter",
+    "bridge/tests/test_transport.py::test_gives_up_after_the_attempt_limit_and_reports_offline",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_retry_after_network_failure_and_lost_local_state_never_duplicate_batches"
+   ],
+   "note": "Los errores 4xx (salvo 429) no se reintentan y llevan su código."
+  },
+  {
+   "id": "V25-BRG-028",
+   "status": "PARCIAL",
+   "gap": "En el Bridge los checkpoints los confirma el servidor solo si el lote citado está en Bronze, es de la misma empresa, entidad y fuente y no falló; la marca de agua se mueve solo al completar la extracción con el libro de lotes 1…N sin huecos, y el agente reanuda desde lo confirmado (probado). La sincronización SQL del servidor sigue siendo «todo o nada» apoyada en la idempotencia.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_intermediate_checkpoint_requires_an_uploaded_batch_then_run_completion_stores_the_watermark",
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_a_run_with_rows_cannot_move_the_watermark_without_proof",
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_a_checkpoint_for_a_failed_batch_is_refused_and_accepted_after_the_server_reprocesses_it",
+    "bridge/tests/test_agent_resume.py::test_crash_between_upload_and_commit_resends_the_same_batch_without_duplicating"
+   ],
+   "note": "Contrato bridge_checkpoints (migración 2026_03_14_000100) y libro bridge_run_batches (2026_03_14_000310)."
+  },
+  {
+   "id": "V25-BRG-029",
+   "status": "PARCIAL",
+   "gap": "En el agente Bridge la marca de agua es el mínimo entre la última fecha de registro legible y el inicio de la extracción, una fecha futura no la adelanta, no retrocede ante una fila retroactiva dentro del solape y el servidor rechaza una marca futura o que retrocede (probado). En la sincronización SQL del servidor la marca ya está acotada desde W1; falta la alarma por extracciones vacías sostenidas (DISEÑADA) y la cobertura inferida sigue avanzando con consultas vacías.",
+   "evidence": [
+    "bridge/tests/test_agent_hardening.py::test_watermark_is_the_minimum_of_the_latest_record_and_the_extraction_start",
+    "bridge/tests/test_agent_hardening.py::test_watermark_never_moves_back_when_a_backdated_row_appears_inside_the_overlap_window",
+    "bridge/tests/test_agent_resume.py::test_watermark_is_bounded_at_extraction_start_and_future_dates_do_not_advance_it",
+    "backend/tests/Feature/Bridge/BridgeCheckpointTest.php::test_watermark_is_bounded_never_in_the_future_and_never_regresses"
+   ],
+   "note": "El solape de relectura (120 minutos) es un valor inicial a aprobar en el piloto."
+  },
+  {
+   "id": "V25-BRG-039",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "bridge/tests/test_cli.py::test_check_config_prints_template_fingerprints_and_the_pin_line",
+    "bridge/tests/test_cli.py::test_invalid_config_exits_2_without_leaking",
+    "bridge/tests/test_cli.py::test_test_source_reports_the_read_only_mode",
+    "bridge/tests/test_cli.py::test_run_before_enrolment_explains_what_to_do",
+    "bridge/tests/test_cli.py::test_status_has_no_secrets_and_run_refuses_a_revoked_device",
+    "bridge/tests/test_config.py::test_plaintext_secrets_are_refused",
+    "bridge/tests/test_config.py::test_templates_must_pass_the_read_only_guard",
+    "bridge/tests/test_config.py::test_template_pin_detects_changed_queries",
+    "bridge/tests/test_config.py::test_config_file_must_not_be_world_readable",
+    "bridge/packaging/config.example.toml; docs/integrations/BRIDGE_WINDOWS.md §4"
+   ],
+   "note": "Se instala con pip desde el repositorio (no hay paquete publicado) y se configura con un config.toml sin secretos (se rechaza si contiene contraseñas o tokens, si lo pueden leer otros usuarios o si el servidor no es https); check-config --pin valida y fija la huella de las plantillas, test-source informa la versión y el modo de solo lectura efectivo con sus advertencias, y nada depende del cliente en el código. El instalador y el servicio de Windows están BLOQUEADOS (V25-BRG-002) y la unidad de systemd está DISEÑADA."
+  },
+  {
+   "id": "V25-BRG-040",
+   "status": "PARCIAL",
+   "gap": "Cada instancia se registra como dispositivo con un código de un solo uso (solo su SHA-256 en la base, vence, canje atómico y sin oráculo) y prueba de posesión de su clave Ed25519; guarda huella, token con hash, versión y último latido, queda ligada a una empresa y a una fuente y se revoca sola sin afectar a otro dispositivo de la misma fuente (probado). Falta el vínculo con una sucursal: dos dispositivos de la misma empresa en sucursales distintas no quedan limitados a escribir su sucursal (la sucursal la da la fila o default_branch_code de la fuente).",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_enrolment_issues_a_single_use_code_stored_only_as_hash_and_returns_the_token_once",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_code_is_single_use_and_expires_and_replies_do_not_reveal_which",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_enrolment_requires_proof_of_key_possession_and_a_sane_clock",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_device_cannot_be_registered_twice_with_the_same_active_key",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_device_model_hides_token_hash_and_status_reflects_heartbeat",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revoking_one_device_does_not_affect_another_of_the_same_source",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_device_of_another_company_never_touches_this_companys_data"
+   ],
+   "note": "La vigencia del código (60 minutos por defecto, máximo 24 h) es un valor inicial a aprobar en el piloto."
+  },
+  {
+   "id": "V25-BRG-041",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "bridge/tests/test_config.py::test_valid_configuration_parses_and_picks_the_latest_template_version",
+    "bridge/tests/test_config.py::test_file_templates",
+    "bridge/tests/test_config.py::test_password_must_come_from_the_encrypted_store_or_the_environment",
+    "bridge/tests/test_cli.py::test_test_source_reports_the_read_only_mode",
+    "bridge/tests/test_postgres_integration.py::test_bad_credentials_fail_without_leaking_the_password",
+    "bridge/tests/test_postgres_integration.py::test_account_with_write_privileges_is_reported_and_can_be_made_fatal",
+    "bridge/src/predictily_bridge/adapters/__init__.py"
+   ],
+   "note": "El origen (PostgreSQL, SQLite, MySQL, SQL Server, carpeta CSV o Excel) se elige en [source] de la configuración local y test-source lo valida: versión, modo de solo lectura efectivo y advertencias (cuenta con permisos de escritura). No lista las tablas legibles (el descubrimiento de esquema desde el Bridge, V25-BRG-067, está DISEÑADO); las rutas de archivos las fija el cliente en su propio equipo."
+  },
+  {
+   "id": "V25-BRG-043",
+   "status": "PARCIAL",
+   "gap": "El dispositivo informa latido, versión, huellas de las plantillas y salud (advertencias, clave maestra en archivo) y la administración lo ve active, offline (sin latido en 15 minutos) o revoked; un lote cuyo procesamiento falló queda registrado y se reintenta cuando el agente lo reenvía (probado). Falta: alertas (Alert) deduplicadas que se cierren solas ante un fallo de conexión o de sincronización o ante una fuente sin datos nuevos, y un umbral de «fuente obsoleta».",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_heartbeat_authenticates_with_token_and_signature_and_updates_last_seen",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_device_model_hides_token_hash_and_status_reflects_heartbeat",
+    "bridge/tests/test_agent_hardening.py::test_master_key_in_a_file_is_warned_about_in_the_log_and_in_the_health_report",
+    "bridge/tests/test_agent_hardening.py::test_a_validation_error_on_the_health_report_does_not_block_extraction",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_failed_processing_is_recorded_and_retried_when_the_agent_resends_the_batch"
+   ],
+   "note": "El umbral de 15 minutos para offline es un valor inicial a aprobar en el piloto."
+  },
+  {
+   "id": "V25-BRG-044",
+   "status": "PARCIAL",
+   "gap": "Revocar un dispositivo del Bridge corta de inmediato todas sus rutas y su URL prefirmada pendiente, queda auditado y devuelve la fuente a inactive al revocar el último; una fuente del Bridge inactiva rechaza sus lotes; un token revocado responde 401 en la siguiente petición (probado). Sigue abierto lo de la ingesta REST: pausar una fuente REST no detiene POST /sales/batch y el siguiente lote la reactiva (defecto MEDIUM de conectores, sin corregir).",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_inactive_source_refuses_batches_and_other_entities_import_through_the_same_pipeline",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_revoking_a_token_takes_effect_on_the_very_next_request",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_the_company_admin_lists_and_revokes_tenant_tokens_immediately"
+   ],
+   "note": "Revocar un dispositivo exige datasources.manage y un segundo factor fresco a quien tiene MFA."
+  },
+  {
+   "id": "V25-BRG-045",
+   "status": "PARCIAL",
+   "gap": "El búfer local está cifrado con AES-256-GCM (biblioteca cryptography) y acotado por tamaño (spool_max_mb): al llenarse la extracción se detiene sin perder el checkpoint (probado). Falta el tope por antigüedad: a propósito nunca se descarta un lote sin enviar, así que no hay purga por TTL. La clave maestra en archivo (último recurso, advertido) protege contra copias y otros usuarios, no contra quien controla la cuenta del servicio; el almacén del sistema de Windows (DPAPI) queda con el instalador (BLOQUEADO).",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_buffer_is_bounded_and_extraction_pauses_without_losing_data",
+    "bridge/tests/test_agent_resume.py::test_network_outage_buffers_encrypted_and_replays_in_order_when_back",
+    "bridge/tests/test_crypto_store.py::test_seal_unseal_roundtrip_and_tamper_detection",
+    "bridge/tests/test_crypto_store.py::test_nonces_are_never_reused",
+    "bridge/tests/test_crypto_store.py::test_device_home_keeps_token_and_private_key_only_encrypted",
+    "bridge/tests/test_agent_hardening.py::test_spool_put_is_idempotent_by_sha256_and_never_counts_twice_against_the_bound"
+   ],
+   "note": "El tamaño del búfer (512 MB) es un valor inicial a aprobar en el piloto."
+  },
+  {
+   "id": "V25-BRG-046",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_network_outage_buffers_encrypted_and_replays_in_order_when_back",
+    "bridge/tests/test_agent_resume.py::test_crash_between_upload_and_commit_resends_the_same_batch_without_duplicating",
+    "bridge/tests/test_agent_resume.py::test_expired_upload_url_is_redeclared_once",
+    "bridge/tests/test_transport.py::test_retries_use_a_fresh_nonce_and_back_off_with_jitter",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_replayed_batch_is_never_registered_nor_imported_twice",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_retry_after_network_failure_and_lost_local_state_never_duplicate_batches"
+   ],
+   "note": "Cola local de lotes pendientes reenviados en orden con retroceso exponencial y jitter; la entrega es idempotente por SHA-256 en el servidor (un lote nunca se registra ni se importa dos veces). Probado con cortes de red simulados contra un servidor falso y con el agente real contra un servidor local; no en la red de un cliente."
+  },
+  {
+   "id": "V25-BRG-048",
+   "status": "PARCIAL",
+   "gap": "Revocar el dispositivo desde Predictily queda auditado y hace que el agente borre su búfer, marque revoked.flag y se niegue a seguir (probado). Falta un comando de desinstalación que revoque el dispositivo, borre credenciales, configuración y búfer de forma verificable y registre device.uninstalled; hoy la desinstalación es un procedimiento manual documentado (BRIDGE_WINDOWS.md §5) y el servicio de Windows está BLOQUEADO.",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_revocation_stops_everything_purges_the_buffer_and_sets_the_flag",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_revoked_device_uploads_nothing_and_the_agent_wipes_its_buffer",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls"
+   ],
+   "note": "El estado local (state.enc, spool/) se conserva al actualizar; al desinstalar hay que revocar el dispositivo en Predictily."
+  },
+  {
+   "id": "V25-BRG-050",
+   "status": "PARCIAL",
+   "gap": "El agente Bridge detecta la cuenta con permisos de escritura (en PostgreSQL como privilegios efectivos, también los heredados por roles) y, con require_readonly_account —verdadero por defecto en MySQL y SQL Server—, se niega a extraer (probado en PostgreSQL contra la base de pruebas; MySQL y SQL Server con cursor falso). En los conectores SQL del servidor sigue siendo solo una advertencia: no existe la política connectors.require_readonly_account que impida activar una fuente con una cuenta con escritura, y nunca se probó con una cuenta GRANT SELECT mínima.",
+   "evidence": [
+    "bridge/tests/test_postgres_integration.py::test_account_with_write_privileges_is_reported_and_can_be_made_fatal",
+    "bridge/tests/test_postgres_integration.py::test_writable_account_is_detected_through_inherited_role_grants_too",
+    "bridge/tests/test_agent_hardening.py::test_require_readonly_account_defaults_to_true_only_for_engines_without_a_robust_read_only_mode",
+    "bridge/tests/test_agent_hardening.py::test_a_writable_sqlserver_or_mysql_account_blocks_extraction_by_default"
+   ],
+   "note": "La prueba de privilegios heredados necesita un rol con CREATEROLE (TEST_ERP_ADMIN_USERNAME); sin él se omite con un mensaje explícito."
+  },
+  {
+   "id": "V25-BRG-051",
+   "status": "PARCIAL",
+   "gap": "La revocación y la caducidad de los tokens ya tienen prueba (revocado → 401 en la siguiente petición, vencido sin revocar, administración por la empresa), el token de conector tiene tope de 365 días también para su valor configurable y un dispositivo del Bridge se revoca con efecto inmediato (probado). Falta: rotación asistida (crear el nuevo y revocar el anterior sin perder lotes), credenciales de corta vida para dispositivos (el token del dispositivo no vence: solo se revoca) y que el token de conector deje de pertenecer a una persona y de llevar data.view además de imports.manage (limitación conocida, a decidir con el propietario).",
+   "evidence": [
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_revoking_a_token_takes_effect_on_the_very_next_request",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_an_expired_token_stops_working_without_being_revoked",
+    "backend/tests/Feature/Security/TokenLifecycleTest.php::test_the_connector_token_follows_the_configured_default_expiry",
+    "backend/tests/Feature/Security/AccountRoutesHardeningTest.php::test_l9_the_connector_token_lifetime_is_capped_at_365_days",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls"
+   ],
+   "note": "Antes la API admitía tokens de conector de hasta 730 días."
+  },
+  {
+   "id": "V25-BRG-054",
+   "status": "PARCIAL",
+   "gap": "SQLite ya se ejecuta con su controlador exacto (sqlite3 del intérprete, en el agente Bridge) en carga completa, incremental, reanudación y solo lectura, y PostgreSQL además con psycopg desde el agente, incluida una corrección en el origen que llega en la siguiente incremental sin duplicar (probado con fixtures ficticias). Falta el guion T01 completo por motor (reimportación, anulación, nota de crédito y esquema cambiado) con el informe de controlador y versión exactos, y SQL Server (servidor y pdo_sqlsrv: BLOQUEADO).",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_second_run_is_incremental_and_reads_only_the_window",
+    "bridge/tests/test_agent_resume.py::test_interruption_and_resume_deliver_every_row_exactly_once",
+    "bridge/tests/test_postgres_integration.py::test_incremental_run_reads_only_the_window_with_timestamptz_and_source_timezone",
+    "bridge/tests/test_postgres_integration.py::test_interrupt_and_resume_against_postgres_without_duplicates",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_source_correction_flows_through_a_later_incremental_run_without_duplicating"
+   ],
+   "note": "Los datos de prueba son ficticios; ningún ERP de cliente se ha leído."
+  },
+  {
+   "id": "V25-BRG-059",
+   "status": "PARCIAL",
+   "gap": "En el agente Bridge la prueba existe: valor de la marca (mínimo entre lo leído y el inicio), fechas futuras que no la adelantan, llaves de orden NULL rechazadas, cursor por llave (el «offset») y reanudación tras una interrupción sin perder ni duplicar (probado, también con el agente real). En la sincronización SQL del servidor la marca está acotada (W1) pero la reanudación a mitad de ejecución sigue siendo «todo o nada».",
+   "evidence": [
+    "bridge/tests/test_agent_hardening.py::test_watermark_is_the_minimum_of_the_latest_record_and_the_extraction_start",
+    "bridge/tests/test_agent_resume.py::test_watermark_never_exceeds_the_extraction_start",
+    "bridge/tests/test_agent_resume.py::test_interruption_and_resume_deliver_every_row_exactly_once",
+    "bridge/tests/test_readonly_enforcement.py::test_null_order_keys_are_refused",
+    "bridge/tests/test_readonly_enforcement.py::test_cursor_for_another_template_shape_is_refused",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_interrupted_agent_resumes_from_the_confirmed_checkpoint_without_duplicate_batches"
+   ],
+   "note": "El cursor admite hasta 200 caracteres (contrato bridge_checkpoints.checkpoint)."
+  },
+  {
+   "id": "V25-BRG-060",
+   "status": "PARCIAL",
+   "gap": "Con el Auto Mapper, una columna usada que se quita, se renombra o cambia de clase de tipo invalida la plantilla de la empresa, bloquea la aprobación y la aplicación (409 con el informe de deriva) y pide revisión; en el Bridge una columna no declarada en el lote se rechaza y la entidad queda bloqueada hasta cambiar la plantilla (probado). Falta comprobarlo al sincronizar: la sincronización SQL de un mapeo ya activo cuya columna desapareció falla (failed) sin importar, pero no pasa a needs_review con el diff ni ofrece re-mapear (DISEÑADO); los puntos ciegos documentados (renombrar y crear otra columna con el nombre antiguo y la misma clase de tipo) no se detectan.",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_a_renamed_column_blocks_the_apply_invalidates_the_company_template_and_asks_for_review",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_drift_blind_spots_are_the_documented_ones",
+    "bridge/tests/test_agent_resume.py::test_schema_rejection_quarantines_the_batch_and_blocks_the_entity_until_the_template_changes",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_body_whose_first_line_is_not_ndjson_or_uses_undeclared_columns_is_rejected"
+   ],
+   "note": "La huella del Auto Mapper cubre solo las columnas que la plantilla usa: cambios ajenos a ella no la invalidan."
+  },
+  {
+   "id": "V25-BRG-061",
+   "status": "PARCIAL",
+   "gap": "El agente Bridge tolera la desconexión: ante un corte de red guarda los lotes cifrados y los reenvía en orden al volver, un tiempo de espera del servidor de base de datos es un error de la entidad y el agente sigue, y una interrupción reanuda sin duplicados (probado, con un PostgreSQL real de pruebas). En la sincronización SQL del servidor sigue sin prueba la desconexión a mitad de lectura y no hay reintento inmediato.",
+   "evidence": [
+    "bridge/tests/test_agent_resume.py::test_network_outage_buffers_encrypted_and_replays_in_order_when_back",
+    "bridge/tests/test_postgres_integration.py::test_statement_timeout_on_the_real_server_is_an_entity_error_and_the_agent_survives",
+    "bridge/tests/test_postgres_integration.py::test_interrupt_and_resume_against_postgres_without_duplicates",
+    "bridge/tests/test_agent_hardening.py::test_run_forever_survives_unexpected_cycle_failures_logs_redacted_and_backs_off"
+   ],
+   "note": "Los errores del controlador llegan como errores de la fuente con solo el nombre del tipo (sin detalles del origen)."
+  },
+  {
+   "id": "V25-BRG-065",
+   "status": "BLOQUEADO",
+   "gap": "Sigue BLOQUEADO: requiere acceso al ERP real del piloto (Soyoda/Resgasa), credenciales de solo lectura y la autorización del cliente. Lo construible está hecho: el agente Bridge permite leerlo desde la red del cliente sin abrir puertos (V25-BRG-001) y ERP_COMPATIBILITY.md §4 fija el criterio de aceptación por ERP (cuenta de solo lectura, plantillas fijadas, carga conciliada, corrección, reanudación y revocación); ninguno de esos pasos se ha ejecutado con el ERP real.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_real_agent_extracts_from_postgres_into_bronze_and_the_pipeline_creates_sales",
+    "docs/integrations/ERP_COMPATIBILITY.md §4"
+   ],
+   "note": "La ejecución es del propietario con el cliente."
+  },
+  {
+   "id": "V25-BRG-066",
+   "status": "PARCIAL",
+   "gap": "Los cinco documentos existen con las marcas IMPLEMENTADO / VERIFICADO, DISEÑADO / NO IMPLEMENTADO, BLOQUEADO y NO APLICA, la prueba que respalda cada afirmación y comandos reales (CONNECTOR_FRAMEWORK, BRIDGE_WINDOWS y ERP_COMPATIBILITY de W6-B; AUTO_MAPPING y ENTERPRISE_ONBOARDING de W6-C). Falta: una verificación automática de que cada prueba citada exista y reproducir el onboarding en una empresa limpia siguiendo solo los documentos.",
+   "evidence": [
+    "docs/integrations/CONNECTOR_FRAMEWORK.md; docs/integrations/BRIDGE_WINDOWS.md; docs/integrations/ERP_COMPATIBILITY.md; docs/integrations/AUTO_MAPPING.md; docs/integrations/ENTERPRISE_ONBOARDING.md"
+   ],
+   "note": "Todo dato de ejemplo de esos documentos es ficticio."
+  },
+  {
+   "id": "V25-UPL-003",
+   "status": "PARCIAL",
+   "gap": "Existe una URL prefirmada de subida, la del Bridge: ruta relativa firmada por el backend (10 minutos) que fija empresa, dispositivo, entidad, SHA-256, tamaño, tipo y metadatos; otro objeto, tipo, tamaño o dispositivo, o pasado su vencimiento, se rechaza y el cuerpo se corta en el tamaño declarado (probado). Falta lo que pide el requisito para las cargas grandes: una URL prefirmada de S3 (SigV4 con Content-Length, Content-Type y checksum firmados) verificada con los vectores publicados: DISEÑADO; S3 real BLOQUEADO (sin cuenta AWS).",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_url_is_bound_to_content_type_signature_and_ttl",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_upload_url_signature_is_the_servers_and_cannot_be_forged_by_a_device",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_the_body_is_cut_at_the_declared_size_even_without_content_length"
+   ],
+   "note": "El lote se registra en Bronze con el almacén configurado (local o emulador S3)."
+  },
+  {
+   "id": "V25-UPL-004",
+   "status": "PARCIAL",
+   "gap": "Para los lotes del Bridge el servidor compara el SHA-256 y el tamaño declarados con los recibidos (si no coinciden no guarda nada) y valida el lote completo en flujo antes de Bronze: gzip real, columnas declaradas (una columna personal que aparezca solo en la fila 2 se rechaza), valores escalares, filas declaradas y topes contra bombas de compresión (probado). Para los archivos subidos por la interfaz sigue sin checksum declarado por el emisor y la validación de tipo es por extensión.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_checksum_mismatch_and_wrong_size_store_nothing",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_a_body_that_is_not_gzip_is_rejected_before_anything_is_decoded",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_declared_row_count_must_match_the_streamed_rows",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_decompression_ratio_and_size_caps_stop_a_compression_bomb",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_u1_pii_column_that_appears_only_on_row_two_is_rejected_and_nothing_is_stored"
+   ],
+   "note": "Un objeto que llegara a Bronze con contenido inválido queda en cuarentena y no admite checkpoint."
+  },
+  {
+   "id": "V25-UPL-007",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_missing_unknown_or_malformed_credentials_are_rejected",
+    "backend/tests/Feature/Bridge/BridgeDeviceAuthTest.php::test_revocation_is_immediate_for_every_endpoint_and_pending_upload_urls",
+    "backend/tests/Feature/Bridge/BridgeHardeningTest.php::test_presigned_url_authorisation_checks_the_tenant_of_the_device_itself",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_url_is_bound_to_content_type_signature_and_ttl",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_declaration_is_validated_before_a_url_is_issued",
+    "backend/tests/Feature/Bridge/BridgeUploadTest.php::test_checksum_mismatch_and_wrong_size_store_nothing"
+   ],
+   "note": "Se cumple para la única URL prefirmada que existe (la del Bridge): solo la obtiene un dispositivo autenticado con token y firma tras validar la declaración, al usarla se vuelve a comprobar que el dispositivo siga activo y sea de esa empresa (uno revocado no sube nada aunque la URL siga vigente), otro dispositivo o empresa en la ruta invalida la firma y el contenido se revalida antes de Bronze. La URL de S3 no existe (V25-UPL-003)."
+  },
+  {
+   "id": "V25-AWS-031",
+   "status": "PARCIAL",
+   "gap": "El Bridge existe (sin el instalador de Windows): su estado pasa a offline sin latido en 15 minutos, ante un corte de red el agente guarda los lotes cifrados y los reenvía en orden sin duplicar al reconectar, y Predictily no inventa datos (nada entra sin un lote verificado) (probado). Falta lo que exige el criterio: que la cobertura de la fuente deje de avanzar y el producto marque los resultados como desactualizados (el Bridge no declara cobertura; se declara con su API: DISEÑADO) y una alerta de fuente obsoleta.",
+   "evidence": [
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_device_model_hides_token_hash_and_status_reflects_heartbeat",
+    "bridge/tests/test_agent_resume.py::test_network_outage_buffers_encrypted_and_replays_in_order_when_back",
+    "backend/tests/Feature/Bridge/BridgeAgentEndToEndTest.php::test_retry_after_network_failure_and_lost_local_state_never_duplicate_batches"
+   ],
+   "note": "Probado contra un servidor local, no en AWS (BLOQUEADO)."
+  },
+  {
+   "id": "V25-MAP-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_discovery_returns_metadata_only",
+    "backend/tests/Unit/Mapping/CatalogContractTest.php::test_catalog_queries_are_fixed_select_only_and_take_no_input",
+    "backend/tests/Unit/Mapping/CatalogContractTest.php::test_catalog_queries_are_isolated_from_the_user_query_guard",
+    "backend/tests/Unit/Mapping/CatalogContractTest.php::test_sql_server_reads_catalog_in_read_uncommitted_before_any_catalog_query",
+    "backend/tests/Unit/Mapping/CatalogContractTest.php::test_mysql_and_sql_server_fixture_catalogs_are_classified_with_native_types",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_every_human_decision_is_audited_with_who_what_and_the_schema_fingerprint",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_discovery_and_proposals_need_a_read_only_sql_source",
+    "backend/app/Services/DataCore/Mapping/Discovery/SchemaDiscoveryService.php"
+   ],
+   "note": "POST /data-sources/{id}/schema/discover devuelve tablas, vistas, columnas, tipos (nativo y clase), nulabilidad, filas estimadas y llaves, sin ninguna fila ni catálogos del sistema, con consultas de catálogo fijas por dialecto que no aceptan texto del usuario (SQL Server en READ UNCOMMITTED con intención de lectura), y queda auditado (mapping.discovery_run). Verificado contra un ERP ficticio PostgreSQL; MySQL/MariaDB y SQL Server solo con catálogos de ejemplo (sin servidor ni driver: implemented_untested, V25-BRG-007/-009)."
+  },
+  {
+   "id": "V25-MAP-002",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_discovery_returns_metadata_only",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_spanish_erp_with_header_detail_product_and_customer_joins",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_legacy_uppercase_abbreviations_without_declared_foreign_keys_infer_the_join_and_say_so",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_hop_limit_and_ambiguous_foreign_keys_do_not_join_blindly"
+   ],
+   "note": "El descubrimiento reporta llaves primarias y foráneas (detalle → cabecera, detalle → artículo); la propuesta une documento, línea, producto y cliente por ellas y la consulta generada trae documentos completos; sin llaves declaradas la unión se infiere por el nombre y se advierte para verificarla, y las llaves ambiguas no se unen a ciegas."
+  },
+  {
+   "id": "V25-MAP-003",
+   "status": "PARCIAL",
+   "gap": "En el descubrimiento y la propuesta las muestras están acotadas y minimizadas: solo valores con forma de vocabulario corto, frecuentes (umbral provisional de 5 filas, a aprobar en el piloto) y hasta un tope; las columnas con nombre o contenido personal se listan solo por nombre y no se leen ni se mapean; ningún valor personal ni de negocio sale por respuestas, plantillas, auditoría o registros (probado). Falta la vista previa de un mapeo SQL (POST /data-sources/{id}/mappings/{id}/preview, anterior a W6-C): sigue enmascarando solo el código de cliente y su enmascarado no tiene prueba propia.",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_no_personal_or_business_value_leaves_the_source_through_any_response_template_audit_or_log",
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_personal_columns_are_listed_by_name_only_and_never_mapped_or_read",
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_values_that_appear_in_few_rows_are_not_returned_and_frequent_vocabulary_is",
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_at_most_the_cap_of_values_is_persisted_and_one_more_makes_the_column_a_non_vocabulary",
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_without_sampling_no_row_is_read_and_the_proposal_says_so",
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_sampled_queries_are_read_only_bounded_and_the_source_is_unchanged",
+    "backend/tests/Unit/Mapping/SampleMaskingTest.php::test_values_that_look_like_personal_data_or_free_text_never_leave"
+   ],
+   "note": "Con sample: false la propuesta no lee ninguna fila."
+  },
+  {
+   "id": "V25-MAP-004",
+   "status": "PARCIAL",
+   "gap": "Para fuentes SQL la propuesta es determinista (independiente del orden del catálogo) y usa nombres, sinónimos en español e inglés, abreviaturas heredadas, tipos, llaves y una muestra estadística; genera la consulta SELECT validada por SqlQueryGuard y el field_map por entidad, y deja sin mapear lo ambiguo o con tipo incompatible (probado sobre esquemas sintéticos variados y nombres hostiles). Falta medirla contra esquemas reales de ERP (precisión y cobertura por campo): no hay mapeos reales y los umbrales (0,60 / 0,10) y los pesos son provisionales, a aprobar en el piloto. El sugeridor de columnas de archivos (ColumnMatcher) no cambió.",
+   "evidence": [
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_proposal_is_deterministic_and_independent_of_catalog_order",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_english_names_and_snake_case_without_prefixes",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_ambiguous_columns_are_left_unmapped_and_flagged_for_review",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_concepts_that_share_words_are_not_confused",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_hostile_column_and_table_names_do_not_break_or_steer_the_proposal",
+    "backend/tests/Unit/Mapping/SourceQueryAndFingerprintTest.php::test_generated_queries_use_the_dialect_quotes_pass_the_read_only_guard_and_alias_to_canonical_names",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows"
+   ],
+   "note": "Propone ventas, productos, inventario, proveedores, plazos y sucursales; clientes viajan dentro de ventas (no hay importador customers) y las órdenes de compra no tienen importador."
+  },
+  {
+   "id": "V25-MAP-005",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_confidence_is_declared_as_a_heuristic_score_and_never_certainty",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_weak_generic_names_alone_do_not_reach_the_threshold_without_table_context",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows"
+   ],
+   "note": "Cada propuesta lleva confidence.kind = heuristic_score (método heuristic_v1) con la nota fija «NO es una probabilidad calibrada», nunca llega a 1,00 y los nombres genéricos sin contexto puntúan bajo. Los umbrales y pesos son provisionales, a aprobar en el piloto con los primeros mapeos reales."
+  },
+  {
+   "id": "V25-MAP-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_proposing_never_approves_or_syncs_anything",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_only_a_proposed_template_can_be_approved_and_a_retired_one_never_comes_back",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_the_person_who_proposed_cannot_approve_when_someone_else_can_but_a_single_administrator_can",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_every_human_decision_is_audited_with_who_what_and_the_schema_fingerprint",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_human_corrections_are_validated_and_recorded",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_incomplete_proposals_cannot_be_approved_and_name_the_missing_required_fields"
+   ],
+   "note": "Lo que faltaba era probar que la aprobación queda auditada: la de la plantilla (mapping.template_approved con quién, versión y prefijo de la huella) y la del mapeo SQL que se crea al aplicarla (datasource.mapping_approved). Nada sincroniza sin aprobar y quien propuso no aprueba si hay otra persona con settings.manage (con un solo administrador se permite y queda registrado). Un mapeo SQL escrito a mano por la ruta anterior sigue sin registrar su autor (V25-SEC-019)."
+  },
+  {
+   "id": "V25-MAP-007",
+   "status": "PARCIAL",
+   "gap": "Las plantillas son versionadas por clave (sistema, proveedor, entidad, alcance) y llevan la huella del esquema; son de la empresa o públicas de la plataforma (solo lectura para las empresas, que pueden aplicarlas o bifurcarlas), aisladas entre empresas y con una sola aprobada por clave (restricción en la base) (probado). Falta: aplicar una plantilla de la empresa a otra fuente (una nacida de una fuente solo se aplica a esa: 409 template_source_mismatch; la reutilización entre fuentes es por plantilla pública o copia), el diff entre versiones y la reversión asistida (una versión retirada no vuelve).",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_database_constraints_keep_versions_unique_and_one_approved_per_key",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_other_companies_cannot_see_or_touch_templates_sources_or_proposals",
+    "backend/tests/Feature/Mapping/PublicMappingTemplatesTest.php::test_companies_see_approved_public_templates_read_only_and_can_apply_or_fork_them",
+    "backend/tests/Feature/Mapping/PublicMappingTemplatesTest.php::test_approving_a_newer_public_version_retires_the_previous_one_and_the_company_template_is_unaffected",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_proposals_are_idempotent_and_a_changed_schema_creates_the_next_version",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_a_template_from_another_source_cannot_be_applied_and_unreachable_sources_report_source_unavailable"
+   ],
+   "note": "Una plantilla pública no revela a las empresas quién de la plataforma la creó o aprobó."
+  },
+  {
+   "id": "V25-MAP-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_new_columns_and_changes_inside_the_same_type_class_are_informative_and_do_not_break_the_template",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_a_dropped_table_is_reported_as_removed",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_w2_schema_drift_findings_of_the_latest_sync_are_included_when_they_exist",
+    "backend/tests/Unit/Mapping/SourceQueryAndFingerprintTest.php::test_diff_reports_removed_retyped_and_added_columns_in_the_shape_of_the_w2_drift",
+    "backend/tests/Unit/Mapping/SourceQueryAndFingerprintTest.php::test_fingerprint_depends_on_the_columns_the_template_uses_not_on_the_rest_of_the_schema"
+   ],
+   "note": "W6-C agrega la comparación contra el catálogo del origen (no solo contra las columnas que devuelve la consulta): huella de las columnas que usa la plantilla y diff de agregadas, quitadas y con otro tipo en el formato de W2, que incluye el hallazgo de la última sincronización."
+  },
+  {
+   "id": "V25-MAP-009",
+   "status": "PARCIAL",
+   "gap": "Al aprobar, al aplicar y a demanda, una deriva incompatible (columna usada quitada o con otra clase de tipo, o dialecto distinto) no aprueba ni aplica (409 con el informe), devuelve la plantilla de la empresa a proposed y pide revisión; una pública no se modifica y el intento se audita (probado). Falta lo del momento de sincronizar: la comprobación de deriva programada y en cada sincronización está DISEÑADA; el mapeo SQL ya activo sigue y falla en la sincronización (failed, sin importar nada), sin pasar a needs_review, sin detener la programación y sin un diff en la interfaz.",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_a_renamed_column_blocks_the_apply_invalidates_the_company_template_and_asks_for_review",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_approval_compares_the_template_with_the_current_schema_of_its_source",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_the_drift_endpoint_reports_without_applying_or_invalidating",
+    "backend/tests/Feature/Mapping/MappingSchemaDriftTest.php::test_a_public_template_is_never_modified_by_drift_but_the_attempt_is_audited"
+   ],
+   "note": "ENTERPRISE_ONBOARDING.md §4 da el procedimiento manual cuando el esquema cambia."
+  },
+  {
+   "id": "V25-MAP-011",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Mapping/MappingPrivacyTest.php::test_hostile_names_in_the_source_catalog_cannot_inject_sql_or_break_the_flow",
+    "backend/tests/Unit/Mapping/EntityProposerTest.php::test_hostile_column_and_table_names_do_not_break_or_steer_the_proposal",
+    "backend/tests/Unit/Mapping/SourceQueryAndFingerprintTest.php::test_quote_characters_inside_identifiers_are_doubled_so_a_hostile_name_stays_one_identifier",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_no_tool_writes_data_or_reaches_the_messaging_channel"
+   ],
+   "note": "El Auto Mapper no usa ningún LLM: la consulta se arma solo con palabras clave fijas, identificadores del catálogo entrecomillados y alias canónicos, y SqlQueryGuard la vuelve a validar al aprobar y al aplicar; los nombres hostiles del catálogo no inyectan SQL. Las 12 herramientas del gateway son de solo lectura."
+  },
+  {
+   "id": "V25-ONB-001",
+   "status": "PARCIAL",
+   "gap": "ENTERPRISE_ONBOARDING.md describe los 20 pasos con cómo se hace (llamada o comando), quién (agente, propietario, cliente) y su estado, y el checklist operativo de §22; los pasos con herramienta citan sus pruebas. Falta: el comando predictily:onboarding-status que reporte los pasos por empresa, ejecutar el flujo con un cliente real (no se ha incorporado ninguno) y los pasos 12–14 en AWS (BLOQUEADO); los pasos 1 y 18 son manuales.",
+   "evidence": [
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows",
+    "docs/integrations/ENTERPRISE_ONBOARDING.md"
+   ],
+   "note": "Los umbrales de los pasos 4, 5 y 8 son provisionales y se aprueban en el piloto."
+  },
+  {
+   "id": "V25-ONB-002",
+   "status": "PARCIAL",
+   "gap": "El paso 2 suma los roles comerciales (gerente, vendedor, servicio) y el MFA de W6-A, y el paso 3 tiene el Bridge con registro de dispositivo por código de un solo uso (W6-B) además de la fuente SQL de solo lectura (probado). Falta: registrar el contrato, la autorización de tratamiento y los permisos (paso 1, manual; V25-SEC-041 BLOQUEADO), invitaciones por correo, un tablero o comando con el estado de los pasos por empresa y el Bridge en Windows (BLOQUEADO).",
+   "evidence": [
+    "backend/tests/Feature/Security/CommercialRolesTest.php::test_the_commercial_role_is_assigned_by_users_manage_audited_and_listed",
+    "backend/tests/Feature/Bridge/BridgeEnrolmentTest.php::test_enrolment_issues_a_single_use_code_stored_only_as_hash_and_returns_the_token_once",
+    "docs/integrations/ENTERPRISE_ONBOARDING.md §1"
+   ],
+   "note": "Nada de los pasos 1–3 exige cambiar código por cliente."
+  },
+  {
+   "id": "V25-ONB-003",
+   "status": "PARCIAL",
+   "gap": "El paso 4 tiene descubrimiento de esquema y el 5 propuesta, corrección y aprobación de mapeos por otra persona (segregación), con el ERP ficticio PostgreSQL (probado). Falta: la reconciliación origen → Bronze → Silver → Gold (V25-DQE-027) y los gates configurables (V25-DQE-022) siguen PARCIALES, y la conciliación con datos reales del piloto está BLOQUEADA (V25-DQE-031).",
+   "evidence": [
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_discovery_returns_metadata_only",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_the_person_who_proposed_cannot_approve_when_someone_else_can_but_a_single_administrator_can"
+   ],
+   "note": "ENTERPRISE_ONBOARDING.md §3 lista qué revisar antes de aprobar (campos obligatorios sin mapear, ambiguos, uniones inferidas, valores sin resolver)."
+  },
+  {
+   "id": "V25-ONB-016",
+   "status": "PARCIAL",
+   "gap": "Sin código por empresa (todo vive en datos: plantillas, mapeos, ajustes y roles), y ENTERPRISE_ONBOARDING.md separa lo automatizado de lo MANUAL con comandos y la matriz de responsables (§0, §6). Falta registrar la ejecución real de cada paso con su salida en un entorno local y el informe final de gates del cierre (W6-F).",
+   "evidence": [
+    "docs/integrations/ENTERPRISE_ONBOARDING.md §6"
+   ],
+   "note": "Lo no repetible hoy (propuesta sin medir contra ERP reales, MySQL y SQL Server sin servidor, Bridge Windows y AWS) está declarado en el mismo documento."
+  },
+  {
+   "id": "V25-GWY-001",
+   "status": "PARCIAL",
+   "gap": "El IntelligenceGateway (el PredictilyIntelligenceGateway de ADR-V25-17) es el único camino de ejecución de herramientas sobre la interfaz ConversationProvider existente; sigue habiendo un solo adaptador real (Ollama Cloud): ni segundo proveedor ni runtime privado (OpenAI-compatible/vLLM) probados.",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_the_gateway_is_only_reachable_through_the_assistant_and_the_audit_and_channel_routes",
+    "backend/app/Services/Conversation/Gateway/IntelligenceGateway.php"
+   ],
+   "note": "No se agregó ninguna dependencia ni proveedor nuevo."
+  },
+  {
+   "id": "V25-GWY-003",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Conversation/Gateway/ArgumentSchemaTest.php::test_invalid_arguments_are_rejected",
+    "backend/tests/Unit/Conversation/Gateway/ArgumentSchemaTest.php::test_reserved_keys_are_detected_case_insensitively",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_arguments_are_validated_against_the_json_schema_before_anything_runs",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_unknown_or_disabled_tools_are_denied_and_the_audit_keeps_only_a_safe_name",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_every_tool_schema_is_closed_without_reserved_keys_and_matches_its_validation_rules",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_tool_name_lookup_is_exact"
+   ],
+   "note": "El catálogo pasa a 12 herramientas con esquema JSON cerrado (sin coerción, additionalProperties: false) validado antes de ejecutar; el nombre se busca exacto y los mensajes de error nunca repiten el valor recibido."
+  },
+  {
+   "id": "V25-GWY-005",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_salesperson_sees_only_their_portfolio_and_assignments_in_every_customer_tool",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_company_never_reaches_another_companys_opportunities_decisions_or_outcomes",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_control_group_of_an_experiment_is_never_explained_counted_or_listed",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_lists_the_materialized_opportunities_with_the_contract_fields",
+    "backend/app/Services/Conversation/Tools/RadarOpportunitiesTool.php"
+   ],
+   "note": "radar_opportunities lee la lista de trabajo del Revenue Radar (PredictiveSalesAgenda y OpportunityPresenter de W5-A, los mismos de GET /radar/opportunities) con su rótulo «oportunidad potencial, atribución no demostrada», acotada a la cartera del vendedor y sin el grupo de control. El nombre literal get_opportunities de §13 no se creó (DISEÑADO): ADR-V25-17 lo asigna a radar_opportunities (+ customer_predictions)."
+  },
+  {
+   "id": "V25-GWY-007",
+   "status": "PARCIAL",
+   "gap": "La herramienta explain_recommendation existe y lee la recomendación persistida del Decision Engine (el LLM no calcula), con decisions.view, alcance comercial y la misma respuesta para un id ajeno, inexistente o del grupo de control a quien no puede aprobar (probado). Falta una prueba que afirme el contenido de la explicación que recibe el modelo (insumos, supuestos y versión de la fórmula).",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_company_never_reaches_another_companys_opportunities_decisions_or_outcomes",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_control_group_of_an_experiment_is_never_explained_counted_or_listed",
+    "backend/app/Services/Conversation/Tools/ExplainRecommendationTool.php"
+   ],
+   "note": "INTELLIGENCE_GATEWAY.md §4 describe el contenido; aquí se exige la prueba que lo afirme."
+  },
+  {
+   "id": "V25-GWY-008",
+   "status": "PARCIAL",
+   "gap": "Las herramientas outcomes y roi_summary leen los resultados medidos de W5-C con su clasificación honesta (sin experimentos ni grupo de control) y son de equipo: un alcance comercial restringido recibe scope_denied, igual que la API (probado). Falta una prueba de que roi_summary entrega separados la oportunidad potencial, lo observado y el incremento estimado (sin experimento no hay cifra de ROI); los resultados por cartera del vendedor están DISEÑADOS.",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_control_group_of_an_experiment_is_never_explained_counted_or_listed",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_salesperson_sees_only_their_portfolio_and_assignments_in_every_customer_tool",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_manager_with_a_declared_portfolio_is_limited_to_it_and_one_without_sees_the_whole_company",
+    "backend/app/Services/Conversation/Tools/OutcomesTool.php; backend/app/Services/Conversation/Tools/RoiSummaryTool.php"
+   ],
+   "note": "El nombre literal get_outcomes de §13 corresponde a outcomes (+ roi_summary) según ADR-V25-17."
+  },
+  {
+   "id": "V25-GWY-009",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_every_tool_is_denied_without_its_ability_and_each_denial_is_audited",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_token_with_only_the_needed_ability_can_use_exactly_those_tools",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_the_commercial_role_decides_which_tools_exist_for_the_user",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_a_service_user_is_capped_to_read_only_and_follows_their_stored_scope",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_commercial_scope_permission_matrix"
+   ],
+   "note": "Además de la habilidad del rol efectivo y del token, cada herramienta declara su alcance de datos y se cruza con el alcance comercial de W6-A (vendedor, gerente, servicio); un rol comercial guardado desconocido cierra igual por HTTP y por el resolvedor."
+  },
+  {
+   "id": "V25-GWY-010",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_the_number_of_tool_rounds_is_bounded_and_the_last_round_offers_no_tools",
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_the_number_of_tool_calls_per_round_is_bounded",
+    "backend/tests/Feature/Conversation/Gateway/GatewayLimitsAndDisabledTest.php::test_an_oversized_tool_result_is_cut_down_before_it_reaches_the_model",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_the_conversation_deadline_is_checked_before_executing_tools_and_before_every_provider_call",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_a_second_tool_call_of_the_same_response_is_not_executed_once_the_deadline_has_passed",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_a_tool_that_exceeds_its_timeout_is_discarded_and_audited_as_a_timeout",
+    "backend/tests/Feature/Conversation/AssistantApiTest.php::test_rate_per_user_and_daily_quota_per_company_are_enforced"
+   ],
+   "note": "Lo que faltaba eran las pruebas de los límites de cómputo y un plazo duro: rondas (3), llamadas por ronda (3), tamaño del resultado (12 000 caracteres), plazo total (45 s, comprobado antes de cada llamada al proveedor y entre herramientas) y por herramienta (10 s con statement_timeout); los tokens de salida ya se fijaban en la petición al proveedor. El plazo por herramienta corta las consultas a PostgreSQL pero no interrumpe el tiempo de CPU en PHP (descarta el resultado)."
+  },
+  {
+   "id": "V25-GWY-011",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditTest.php::test_each_tool_call_writes_one_row_with_context_latency_minimized_arguments_and_a_summary_without_business_values",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditTest.php::test_without_an_audit_row_no_result_is_delivered",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditTest.php::test_the_audit_is_insert_only",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditImmutabilityTest.php::test_a_direct_update_is_refused_by_the_database",
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuditImmutabilityTest.php::test_a_direct_delete_is_refused_by_the_database"
+   ],
+   "note": "Cada llamada a una herramienta (permitida o no) deja una fila en gateway_tool_calls con argumentos minimizados, latencia real y decisión, sin valores de negocio ni PII; si la fila no se escribe no se entrega el resultado, y la tabla es de solo inserción con disparadores (protege contra código descuidado, no contra SQL arbitrario ni contra el dueño de la tabla). El plazo de retención está DISEÑADO."
+  },
+  {
+   "id": "V25-GWY-015",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_no_tool_writes_data_or_reaches_the_messaging_channel",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_a_model_that_obeys_the_injection_cannot_leave_its_company_its_whitelist_or_its_arguments",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_assistant_cannot_create_confirm_or_send_messages"
+   ],
+   "note": "Las 12 herramientas siguen siendo de solo lectura (prueba estructural sobre el código de Tools/) y cada una corre en una transacción de solo lectura; herramientas como run_sql o send_whatsapp que un modelo pidiera se niegan y se auditan."
+  },
+  {
+   "id": "V25-GWY-016",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_an_injected_product_name_never_reaches_the_model_and_the_call_is_recorded_as_blocked_injection",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_a_model_that_obeys_the_injection_cannot_leave_its_company_its_whitelist_or_its_arguments",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_an_injected_customer_zone_is_withheld_from_the_radar_tool",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_tool_data_travels_only_in_tool_messages_marked_as_data_and_the_rules_say_so",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_the_users_own_message_is_not_treated_as_retrieved_data_and_cannot_widen_permissions",
+    "backend/tests/Unit/Conversation/Gateway/InjectionCorpusTest.php::test_the_unseen_set_documents_the_residual_risk_without_pretending_coverage",
+    "backend/tests/Unit/Conversation/Gateway/InjectionCorpusTest.php::test_the_160_legitimate_names_stay_under_5_percent_false_positives"
+   ],
+   "note": "La garantía es ESTRUCTURAL y no depende de adivinar si un texto es una instrucción: el dato viaja solo en mensajes de rol tool marcados como datos, el modelo no elige empresa, usuario ni habilidades, las herramientas son de solo lectura y los campos tipo nombre se sanean siempre. Encima hay un detector heurístico que retiene el campo sospechoso y registra blocked_injection: NO es una garantía; ante paráfrasis no vistas detecta alrededor de una de cada cinco (≈ 80 % de falsos negativos, medido una vez sobre 30 frases) con 0 % de falsos positivos sobre 160 nombres legítimos, y no se evaluó con un corpus externo ni con un modelo real (sin clave de proveedor)."
+  },
+  {
+   "id": "V25-GWY-017",
+   "status": "PARCIAL",
+   "gap": "Solo respaldan una cifra los valores numéricos de las herramientas, los números de fechas e identificadores conocidos, los argumentos numéricos del modelo y el mensaje del usuario; ya no la respaldan los turnos role=assistant del historial ni el texto libre importado, y el formato (espacios, otras escrituras, sufijos, cifras con letras en español e inglés) no elude la comprobación (probado). Falta la verificación semántica (unidad, entidad, horizonte: una cifra real atribuida a la entidad equivocada pasaría), DISEÑADA; además puede rechazar de más y no cubre otros idiomas ni números romanos.",
+   "evidence": [
+    "backend/tests/Unit/Conversation/Gateway/NumericGroundingFormsTest.php::test_an_invented_figure_is_reported_whatever_its_format",
+    "backend/tests/Unit/Conversation/Gateway/NumericGroundingFormsTest.php::test_numbers_inside_free_text_fields_never_ground_a_figure",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_numbers_from_forged_assistant_turns_and_from_free_text_arguments_do_not_ground_a_figure",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_an_invented_figure_in_a_disguised_format_is_rejected_end_to_end",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_a_number_hidden_in_an_imported_zone_cannot_back_a_figure"
+   ],
+   "note": "Riesgo residual documentado: quien controla un nombre puede hacer que el modelo lo cite entero con una cifra dentro."
+  },
+  {
+   "id": "V25-GWY-019",
+   "status": "PENDIENTE",
+   "gap": "Sigue sin webhook: no hay ruta de entrada, ni verificación hub.challenge, ni protección contra repetición con ids de entrega vistos (DISEÑADO). Existe y está probada la utilidad de firma WebhookSignature (HMAC-SHA256 de X-Hub-Signature-256 en tiempo constante; rechaza firmas alteradas, de otro algoritmo o con secreto vacío) como parte del contrato del canal.",
+   "evidence": [
+    "backend/tests/Unit/Conversation/Gateway/ChannelContractUnitTest.php::test_webhook_signature_accepts_only_the_exact_hmac_of_the_raw_body",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_webhook_contract_helpers_are_part_of_the_channel_interface"
+   ],
+   "note": "Construible sin cuenta de Meta; no se construyó en W6-D."
+  },
+  {
+   "id": "V25-GWY-021",
+   "status": "PARCIAL",
+   "gap": "El catálogo por canal existe en el gateway y en la configuración: web y api con las 12 herramientas, whatsapp con solo cuatro de lectura (nunca ROI ni calidad de modelos) y un canal desconocido con ninguna (probado). Falta el canal que lo use: no entra ningún mensaje de WhatsApp (webhook e identidad DISEÑADOS, V25-GWY-019/-020) y el proveedor está BLOQUEADO (V25-GWY-024).",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayAuthorizationTest.php::test_the_channel_restricts_the_tool_catalog"
+   ],
+   "note": "conversation.gateway.channel_tools en backend/config/conversation.php."
+  },
+  {
+   "id": "V25-GWY-023",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_only_the_exact_confirmed_text_is_handed_to_the_channel_and_only_once",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_human_confirmation_step_rejects_expired_drafts_and_roles_without_the_ability",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_an_expired_draft_cannot_be_confirmed_over_http",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_a_provider_failure_is_a_502_that_is_not_retried_automatically",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_assistant_cannot_create_confirm_or_send_messages",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_only_the_human_confirmation_step_can_issue_a_confirmed_message",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_issuing_a_confirmed_message_from_anywhere_else_fails_at_runtime",
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_whoever_confirms_a_draft_must_also_have_the_customer_in_their_scope"
+   ],
+   "note": "Contrato: ninguna entrega sin un ConfirmedMessage, que solo emite HumanConfirmation tras la confirmación explícita del texto exacto (SHA-256), de uso único frente a carreras, que caduca, por alguien con decisions.manage y con el cliente en su alcance; el asistente no tiene vía al canal. La confirmación es por la API/web; la confirmación con un código dentro del chat está DISEÑADA y no hay canal de entrada (V25-GWY-019)."
+  },
+  {
+   "id": "V25-AGD-019",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_creating_a_draft_sends_nothing",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_only_the_exact_confirmed_text_is_handed_to_the_channel_and_only_once",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_creating_and_confirming_require_the_ability_to_manage_decisions",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_without_a_provider_the_channel_does_not_exist_and_every_route_answers_404",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_assistant_cannot_create_confirm_or_send_messages",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_only_the_human_confirmation_step_can_issue_a_confirmed_message",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_no_message_is_ever_sent_by_the_radar",
+    "backend/app/Services/Conversation/Channels/HumanConfirmation.php"
+   ],
+   "note": "Lo que faltaba era el contrato de mensajería (W6-D): borrador → confirmación humana explícita sobre el texto exacto (SHA-256), de uso único, por alguien con decisions.manage y con el cliente en su alcance → entrega. Crear un borrador no envía nada, sin proveedor configurado el canal no existe (404) y la aplicación no registra ninguno; tampoco existe envío de correos. El envío real por WhatsApp está BLOQUEADO (V25-GWY-024)."
+  },
+  {
+   "id": "V25-GWY-024",
+   "status": "BLOQUEADO",
+   "gap": "Sigue BLOQUEADO: requiere la cuenta de WhatsApp Business Platform, el número verificado, la verificación de la empresa y plantillas aprobadas por el proveedor (propietario). Lo construible está hecho: la interfaz MessagingChannel, un canal simulado etiquetado «mock» solo en pruebas, plantillas en borrador (provider_approval = not_submitted) con variables filtradas, la confirmación humana y las pruebas del contrato; sin proveedor registrado el canal no existe (404).",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_application_ships_no_provider_and_the_channel_is_off_by_default",
+    "backend/tests/Feature/Conversation/Gateway/ChannelContractTest.php::test_the_channel_lists_its_templates_as_drafts_not_approved_by_any_provider",
+    "backend/tests/Unit/Conversation/Gateway/ChannelContractUnitTest.php::test_every_builtin_template_is_a_draft_not_approved_by_any_provider",
+    "backend/tests/Unit/Conversation/Gateway/ChannelContractUnitTest.php::test_rendering_rejects_variables_that_could_carry_links_numbers_or_extra_sentences",
+    "backend/app/Services/Conversation/Channels/Contracts/MessagingChannel.php"
+   ],
+   "note": "El envío real queda sin construir a propósito."
+  },
+  {
+   "id": "V25-GWY-025",
+   "status": "PARCIAL",
+   "gap": "El descubrimiento de esquema de un origen autorizado y la propuesta de mapa para revisión humana existen como servicio DETERMINISTA (Auto Mapper de W6-C: consultas de catálogo fijas, muestras minimizadas, nunca SQL arbitrario ni aprobación automática) (probado). Falta el agente: exponerlo como herramienta del gateway o con un LLM opcional que proponga equivalencias con solo metadatos (V25-MAP-010) está DISEÑADO.",
+   "evidence": [
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_discovery_returns_metadata_only",
+    "backend/tests/Feature/Mapping/AutoMapperEndToEndTest.php::test_the_full_flow_imports_the_expected_canonical_rows",
+    "backend/tests/Unit/Mapping/CatalogContractTest.php::test_catalog_queries_are_fixed_select_only_and_take_no_input",
+    "backend/tests/Feature/Mapping/MappingTemplateAccessTest.php::test_proposing_never_approves_or_syncs_anything"
+   ],
+   "note": "Sin clave de proveedor el flujo determinista funciona igual: no usa ningún LLM."
+  },
+  {
+   "id": "V25-GWY-026",
+   "status": "PARCIAL",
+   "gap": "Las herramientas cubren ya oportunidades (radar_opportunities), decisiones (decisions_summary, explain_recommendation), resultados medidos (outcomes) y ROI honesto (roi_summary), además de pronóstico, precisión, inventario y abastecimiento, todas con procedencia y de solo lectura. Falta el informe ejecutivo estructurado como un solo artefacto (riesgos, oportunidades, acciones y beneficio observado): DISEÑADO.",
+   "evidence": [
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_the_catalog_has_the_twelve_typed_tools_with_unique_stable_names",
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_every_tool_requires_a_real_ability_declares_a_data_scope_and_summarizes_without_business_values",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_clean_business_data_is_never_blocked_by_any_tool"
+   ],
+   "note": "El asistente sigue desactivado sin clave de proveedor (503 assistant_disabled)."
+  },
+  {
+   "id": "V25-FAC-019",
+   "status": "PARCIAL",
+   "gap": "El gateway existe con el nombre y el contrato de ADR-V25-17 (IntelligenceGateway sobre el ConversationProvider existente, sin proveedor ni dependencia nueva), pero solo con herramientas de lectura de resultados: no hay herramientas tipadas para factores ni para extraer o verificar eventos (DISEÑADO).",
+   "evidence": [
+    "backend/tests/Unit/Conversation/Gateway/GatewayContractTest.php::test_the_catalog_has_the_twelve_typed_tools_with_unique_stable_names",
+    "backend/tests/Unit/Conversation/CoresDoNotDependOnAssistantTest.php::test_backend_cores_never_reference_the_conversation_layer"
+   ],
+   "note": "Los extractores de eventos (V25-FAC-011) no existen."
+  },
+  {
+   "id": "V25-FAC-040",
+   "status": "PARCIAL",
+   "gap": "La verificación de cifras se endureció (formatos disfrazados, turnos de historial falsos y texto libre importado ya no respaldan una cifra; probado), pero sigue cubriendo solo números y probabilidades: no hay contraste de hechos categóricos (alertas oficiales, certificaciones, sanciones) porque no existe una fuente de eventos contra la que verificarlos.",
+   "evidence": [
+    "backend/tests/Feature/Conversation/Gateway/GatewayReviewFixesTest.php::test_an_invented_figure_in_a_disguised_format_is_rejected_end_to_end",
+    "backend/tests/Feature/Conversation/Gateway/GatewayInjectionTest.php::test_numbers_from_forged_assistant_turns_and_from_free_text_arguments_do_not_ground_a_figure"
+   ],
+   "note": "Ver V25-GWY-017 para los límites de la verificación léxica."
+  },
+  {
+   "id": "V25-FAC-001",
+   "status": "PARCIAL",
+   "gap": "El pipeline de factores ya está cableado en run_pipeline y en cada ventana del backtest (apagado por defecto; apagado no consulta ninguna tabla de factores y la ejecución es idéntica a la de un motor sin factores) y los cores Demand, Customer y Supply no dependen de él (probado). Falta: no hay ningún conector ni fuente externa (clima, tendencias, competencia…: BLOQUEADO / P2), el motor de aplicabilidad (factor_applicability_rules) sigue siendo solo tabla, no hay propuesta de eventos por LLM y no hay mejora medida de ningún factor sobre datos reales.",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_with_the_pipeline_off_the_run_is_exactly_the_one_of_an_engine_without_factors",
+    "engine/tests/unit/test_factor_wiring.py::test_a_factor_needs_both_the_company_switch_and_its_own_activation",
+    "engine/tests/unit/test_factor_wiring.py::test_each_window_reads_the_factor_as_known_at_its_own_origin_through_the_as_of_windows",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_a_switched_off_pipeline_runs_no_query_on_the_factor_tables_even_with_activations_and_data",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_activating_factors_that_do_not_win_serves_exactly_what_the_same_company_served_before",
+    "engine/tests/unit/test_factors_config.py::test_enabling_the_pipeline_no_longer_records_the_not_connected_limitation_but_the_contract_remains",
+    "engine/predictily_engine/pipeline/data.py; engine/predictily_engine/backtest/factor_arm.py; docs/intelligence/FACTOR_PIPELINE.md"
+   ],
+   "note": "La paridad apagado se verificó además contra el commit base d46f839 sobre la demo ficticia (forecast_values, evaluaciones, recomendaciones y registro de modelos idénticos columna por columna). La limitación factor_pipeline_not_connected ya no se registra, pero sigue siendo el contrato si alguien lo desconectara."
+  },
+  {
+   "id": "V25-FAC-002",
+   "status": "PARCIAL",
+   "gap": "El pipeline se apaga o enciende por empresa (tenants.settings.cores.factors.enabled, con la precedencia core → perfil → empresa) y cada factor exige además la activación de la empresa; apagado no consulta nada y la ejecución es idéntica a la de un motor sin factores, y encendido queda en effective_config y en la huella de la ejecución (probado). Falta: una API que cambie ese interruptor y lo deje en audit_logs (factors no está entre los cores configurables de PUT /tenant/core-config; la activación por factor sí se audita desde W2-F) y que la bandera de plan external_indicators tenga efecto (defecto MEDIUM de factores, abierto).",
+   "evidence": [
+    "engine/tests/unit/test_factors_config.py::test_the_factors_core_is_off_by_default_and_declares_its_keys",
+    "engine/tests/unit/test_factors_config.py::test_a_company_enables_the_pipeline_with_the_usual_precedence_and_the_run_records_it",
+    "engine/tests/unit/test_factors_config.py::test_a_switched_off_pipeline_resolves_nothing_and_never_queries",
+    "engine/tests/unit/test_factor_wiring.py::test_with_the_pipeline_off_the_run_is_exactly_the_one_of_an_engine_without_factors",
+    "engine/tests/unit/test_factor_arm_rule.py::test_the_run_fingerprint_records_the_factor_config_only_when_the_pipeline_is_on"
+   ],
+   "note": "Con el pipeline encendido y factores activados, lo servido cambia solo si algún factor gana la competencia con el modelo sin factores."
+  },
+  {
+   "id": "V25-FAC-004",
+   "status": "PARCIAL",
+   "gap": "Un factor cuya fuente está vencida en el origen, ilegible o con una definición malformada sale de la ejecución con su motivo registrado (factors_dropped / factors_stale) y la demanda sigue con el modelo sin ese factor (probado). Sigue sin un proveedor externo real que caiga: no hay conectores, así que no se simula un timeout ni un 500 de una API.",
+   "evidence": [
+    "engine/tests/unit/test_factor_served.py::test_a_fresh_daily_series_is_kept_with_its_stale_days_missing_and_a_dead_source_is_dropped_or_kept_by_strategy",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_native_storages_and_unreadable_factors_are_kept_as_drops_and_the_transaction_stays_usable",
+    "engine/tests/unit/test_factor_wiring.py::test_unusable_factors_are_dropped_with_their_reason_and_never_reach_the_model"
+   ],
+   "note": "Un fallo inesperado de la resolución de factores nunca detiene la demanda."
+  },
+  {
+   "id": "V25-FAC-005",
+   "status": "PARCIAL",
+   "gap": "Existe la comparación reproducible con y sin cada factor (engine/scripts/factor_ablation.py, de solo lectura, con placebos y el período final intacto) y el pipeline compite cada factor contra el modelo sin factores, pero solo se ejecutó con una empresa ficticia (campañas con efecto sembrado y un «clima» de ruido) o una base de pruebas: no hay piloto, ni datos reales, ni un factor externo válido (sin fuentes conectadas), y los factores nativos (precio, promociones) no pasan por este pipeline. Los umbrales de la regla son valores de diseño a aprobar en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_factor_ablation.py::test_the_sown_campaign_effect_is_promoted_and_the_noise_factor_is_not",
+    "engine/tests/unit/test_factor_ablation.py::test_the_final_holdout_is_never_trained_or_measured_to_decide",
+    "engine/tests/unit/test_factor_wiring.py::test_the_campaign_wins_on_its_own_and_the_noise_is_left_out_by_forward_selection",
+    "engine/scripts/factor_ablation.py"
+   ],
+   "note": "Las cifras de ejemplo de FACTOR_PIPELINE.md §7 salen de la empresa ficticia y no son un resultado de negocio."
+  },
+  {
+   "id": "V25-FAC-012",
+   "status": "PARCIAL",
+   "gap": "En el pipeline de factores un evento de calendario de alcance country aplica solo a la empresa de ese país y uno de alcance sector solo a la de ese rubro; los demás se descartan con scope_not_applicable, y los de sucursal, producto, categoría o región con scope_unsupported (probado). Falta el motor de aplicabilidad por factor (factor_applicability_rules con prioridad y ámbito: sin API ni motor) y el marcado de eventos excepcionales del ciclo de vida de la demanda (event_series) sigue ignorando scope_ref (defecto MEDIUM de factores, abierto).",
+   "evidence": [
+    "engine/tests/integration/test_factors_wiring_integration.py::test_calendar_events_of_another_country_or_sector_do_not_apply_to_the_company"
+   ],
+   "note": "Un factor por sucursal o producto está DISEÑADO: hoy una columna de factor tiene un valor por fecha para toda la empresa."
+  },
+  {
+   "id": "V25-FAC-013",
+   "status": "PARCIAL",
+   "gap": "Las observaciones de factores ya llegan al FeatureBuilder como columnas factor__<clave>: cada ventana las recalcula con lo visible en su corte (rezago de publicación y disponibilidad respetados), las fechas futuras usan el valor visible en el origen, el entrenamiento recibe el valor servido desde el origen de su bloque (nunca el de su propio día), lo desconocido es NaN y no cero, y un valor más viejo que max_staleness_days es faltante (probado). Falta una interfaz FeatureTransformer única con transformaciones declaradas por factor (hoy la columna es el valor visible tal cual) y las columnas de factor no entran al catálogo forecast_features ni al paquete firmado de mlops (DISEÑADO).",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_training_rows_get_the_value_served_from_their_origin_never_the_one_of_their_own_day",
+    "engine/tests/unit/test_factor_wiring.py::test_a_known_in_advance_factor_is_missing_not_zero_when_it_was_announced_after_the_cutoff",
+    "engine/tests/unit/test_factor_wiring.py::test_each_window_reads_the_factor_as_known_at_its_own_origin_through_the_as_of_windows",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_loaded_inputs_never_expose_what_was_published_after_each_cutoff",
+    "engine/tests/unit/test_factor_served.py::test_the_vectorized_path_equals_evaluating_every_date_from_its_origin"
+   ],
+   "note": "El contrato de cada columna vive en evaluation_manifest.factors.feature_contracts y, para el modelo servido, en model_registry.artifact_compat.factors."
+  },
+  {
+   "id": "V25-FAC-015",
+   "status": "PARCIAL",
+   "gap": "Cada ejecución de demanda registra en summary.factors y en el manifiesto qué factores estaban activos, cuáles se usaron, cuáles ganaron y cuáles quedaron fuera con su motivo, con la regla y su versión y la evidencia de cada brazo y de sus placebos, y la huella de datos lleva la versión de la definición y la huella de los valores visibles de cada factor (probado). Falta registrar la versión de la FUENTE (source_versions; hoy no hay fuentes externas) y una prueba que repita la ejecución con el mismo corte y compare la lista.",
+   "evidence": [
+    "engine/tests/integration/test_factors_wiring_integration.py::test_the_run_records_what_happened_with_each_factor_and_the_run_before_records_nothing",
+    "engine/tests/unit/test_factor_wiring.py::test_the_data_lineage_changes_with_the_factor_data_and_the_served_model_carries_it",
+    "engine/tests/unit/test_factor_arm_rule.py::test_the_report_says_what_happened_even_when_nothing_was_selected",
+    "engine/tests/unit/test_factor_arm_rule.py::test_the_report_is_compact_and_the_manifest_adds_the_per_factor_detail"
+   ],
+   "note": "Solo el modelo servido con factores pliega su huella en training_data_hash, feature_set_version y artifact_compat."
+  },
+  {
+   "id": "V25-FAC-025",
+   "status": "PARCIAL",
+   "gap": "Los eventos de calendar_events llegan al modelo por el pipeline de factores con su inicio y fin, solo si se anunciaron antes del corte (lo anunciado después es faltante, no cero), con la revisión que acorta un evento reemplazando a la anterior y con el alcance country/sector comparado con la empresa (probado). Pero solo con el pipeline encendido (apagado por defecto), el factor activado y si gana la competencia; el marcado de eventos excepcionales del ciclo de vida sigue ignorando scope_ref y los alcances por sucursal, producto, categoría o región no están soportados (scope_unsupported).",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_a_known_in_advance_factor_is_missing_not_zero_when_it_was_announced_after_the_cutoff",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_an_announcement_made_after_the_cutoff_is_missing_for_that_cutoff_not_zero",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_calendar_events_of_another_country_or_sector_do_not_apply_to_the_company",
+    "engine/tests/unit/test_factor_served.py::test_a_later_revision_that_shortens_a_known_in_advance_event_supersedes_the_previous_one_on_every_date",
+    "engine/tests/unit/test_factor_served.py::test_an_announcement_after_the_cutoff_is_ignored_in_a_historical_run_without_dropping_the_factor"
+   ],
+   "note": "El calendario determinista de feriados (W2) sigue entrando como antes."
+  },
+  {
+   "id": "V25-FAC-034",
+   "status": "PARCIAL",
+   "gap": "En el pipeline de factores un valor USER_SCENARIO nunca entra al modelo ni al backtest (queda en scenario_only con la ejecución), así que no toca las métricas de precisión (probado). Falta: corridas de escenario que usen esos valores (los escenarios siguen actuando aguas abajo sobre un pronóstico ya calculado) y una prueba sobre model_evaluations y forecast_actuals.",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_unusable_factors_are_dropped_with_their_reason_and_never_reach_the_model"
+   ],
+   "note": "Las demás clases que no pueden usarse (no_issuance_history, unknown_availability, stale, storage_unreadable) salen con su motivo en la misma prueba."
+  },
+  {
+   "id": "V25-FAC-042",
+   "status": "PARCIAL",
+   "gap": "La herramienta de ablation hace los pasos 1 a 3 del protocolo por empresa, horizonte y segmento sobre las ventanas de selección (sin factores, cada factor por separado y la combinación de los que pasaron solos), entrenada como se sirve y con el mismo control placebo que el pipeline, sin entrenar ni medir en el período final (probado). Falta: un FeatureSelectionEvaluator como servicio por empresa × segmento × horizonte × corte (hoy es un guion con un corte por ejecución), la confirmación única del candidato final en el período reservado (DISEÑADA) y la escritura de factor_evaluations por un proceso autorizado (la herramienta es de solo lectura).",
+   "evidence": [
+    "engine/tests/unit/test_factor_ablation.py::test_the_final_holdout_is_never_trained_or_measured_to_decide",
+    "engine/tests/unit/test_factor_ablation.py::test_the_holdout_flag_is_computed_from_the_trained_origins_not_a_constant",
+    "engine/tests/unit/test_factor_ablation.py::test_metrics_per_horizon_and_segment_carry_the_w3a_denominators_and_states",
+    "engine/tests/unit/test_factor_ablation.py::test_the_rows_have_the_shape_of_factor_evaluations_and_are_not_written",
+    "engine/tests/unit/test_factor_wiring.py::test_the_ablation_tool_and_the_pipeline_reach_the_same_evidence_for_the_same_factor"
+   ],
+   "note": "En modo base de datos la herramienta exige una base cuyo nombre contenga «test» y abre cada transacción en solo lectura (db/safety.py)."
+  },
+  {
+   "id": "V25-FAC-043",
+   "status": "PARCIAL",
+   "gap": "El reporte de ablation trae WAPE (con denominador y estado), MAE, MASE y sesgo por horizonte y segmento con las definiciones de W3-A, la decisión por conjunto con su razón, los factores descartados con su motivo y el costo de cómputo (segundos y entrenamientos; llamadas a API = 0); los segmentos con pocas observaciones salen sin cifras (probado). Falta: cobertura y calibración de los intervalos, métricas de decisión por factor, el costo de API (no hay fuentes) y una prueba de que ningún porcentaje del informe salga de fuera del cálculo; todo se ejecutó con datos ficticios.",
+   "evidence": [
+    "engine/tests/unit/test_factor_ablation.py::test_metrics_per_horizon_and_segment_carry_the_w3a_denominators_and_states",
+    "engine/tests/unit/test_factor_ablation.py::test_the_markdown_summary_lists_each_set_with_its_decision",
+    "engine/tests/unit/test_factor_ablation.py::test_the_command_line_validates_its_input_and_writes_only_what_it_is_asked",
+    "engine/tests/unit/test_factor_ablation.py::test_the_tool_only_reads_and_says_so",
+    "engine/predictily_engine/backtest/factor_ablation.py"
+   ],
+   "note": "La semilla de los placebos (arm_placebo_seed) queda en la evidencia."
+  },
+  {
+   "id": "V25-FAC-044",
+   "status": "PARCIAL",
+   "gap": "Un factor solo se promueve si mejora al modelo sin factores con margen mínimo, en suficientes ventanas comparables y con denominador suficiente, y además supera al mejor de 5 placebos con semilla; una combinación solo si cada miembro pasó solo (selección hacia delante); una mejora en una sola ventana o igual a la de su placebo no se promueve (probado). Calibrado con ruido sobre empresas ficticias: 0 de 330 promociones con choques de fecha ocultos (antes 2 de 90), con los guiones de la revisión, no con una prueba de la suite. Falta: el control de comparaciones múltiples sobre muchas familias a la vez más allá de la selección hacia delante con placebos (DISEÑADO) y la detección de cambios de distribución (un cambio de régimen tras la selección solo se reporta: factor_model_worse_on_holdout); los umbrales son valores de diseño a aprobar en el piloto.",
+   "evidence": [
+    "engine/tests/unit/test_factor_arm_rule.py::test_a_global_improvement_that_is_not_stable_across_windows_is_not_enough",
+    "engine/tests/unit/test_factor_arm_rule.py::test_too_few_comparable_windows_or_a_tiny_denominator_is_insufficient_evidence_not_a_win",
+    "engine/tests/unit/test_factor_arm_rule.py::test_the_real_arm_must_beat_the_best_placebo_by_the_margin_and_in_enough_windows",
+    "engine/tests/unit/test_factor_arm_rule.py::test_a_factor_as_good_as_its_placebo_is_noise_and_is_not_promoted",
+    "engine/tests/unit/test_factor_arm_rule.py::test_forward_selection_keeps_only_the_factors_that_pass_individually",
+    "engine/tests/unit/test_factor_arm_rule.py::test_a_combination_is_promoted_only_if_every_member_passed_and_the_combination_passes_too",
+    "docs/intelligence/FACTOR_PIPELINE.md §4.1"
+   ],
+   "note": "Con 330 pruebas la cota superior del 95 % es ≈ 0,9 %; no mide la tasa de falsas promociones en datos reales."
+  },
+  {
+   "id": "V25-FAC-052",
+   "status": "PARCIAL",
+   "gap": "Cuando un factor no se puede usar (fuente vencida en el origen, ilegible, sin historial de emisiones o con una definición malformada) la ejecución sigue con el modelo sin ese factor y lo declara en sus limitaciones (factors_dropped, factors_stale) con el motivo (probado). Falta: un estado UNAVAILABLE de la fuente (no hay fuentes externas), su registro en audit_logs (hoy queda en el resumen de la ejecución) y la medición del impacto frente a la última ejecución con el factor.",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_unusable_factors_are_dropped_with_their_reason_and_never_reach_the_model",
+    "engine/tests/unit/test_factor_served.py::test_a_fresh_daily_series_is_kept_with_its_stale_days_missing_and_a_dead_source_is_dropped_or_kept_by_strategy",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_native_storages_and_unreadable_factors_are_kept_as_drops_and_the_transaction_stays_usable"
+   ],
+   "note": "La estrategia de ausencia (disable_feature, unavailable o last_valid_with_age) decide si el factor sale entero o se queda con sus días vencidos faltantes."
+  },
+  {
+   "id": "V25-FAC-053",
+   "status": "PARCIAL",
+   "gap": "En el pipeline de factores un valor arrastrado más viejo que max_staleness_days es faltante (NaN) y se reporta (factors_stale, con la fracción de días vencidos y la antigüedad máxima), nunca un valor viejo presentado como vigente, y lo desconocido no es cero (probado). Falta el adaptador heredado as_of_series, que sigue propagando el último valor sin tolerancia (defecto MEDIUM de factores, corregido parcialmente en W2).",
+   "evidence": [
+    "engine/tests/unit/test_factor_served.py::test_a_value_older_than_the_staleness_limit_is_missing_and_reported_never_presented_as_current",
+    "engine/tests/unit/test_factor_wiring.py::test_a_known_in_advance_factor_is_missing_not_zero_when_it_was_announced_after_the_cutoff"
+   ],
+   "note": "max_staleness_days es un valor por factor a aprobar en el piloto."
+  },
+  {
+   "id": "V25-FAC-054",
+   "status": "PARCIAL",
+   "gap": "El lector de factores del motor filtra por empresa: los factores privados de otra empresa no existen para ésta, y un indicador público y uno privado con el mismo código exigen una precedencia declarada y nunca se mezclan (probado con base de datos). Falta del lado de Laravel: los indicadores externos (ExternalIndicator y sus observaciones) siguen sin alcance de empresa ni FK compuesta (defectos MEDIUM de factores y de datos, abiertos).",
+   "evidence": [
+    "engine/tests/integration/test_factors_wiring_integration.py::test_a_company_never_loads_the_factor_rows_of_another_company",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_public_and_private_indicators_with_the_same_code_need_a_declared_precedence_and_are_never_mixed"
+   ],
+   "note": "Los eventos derivados por LLM no existen."
+  },
+  {
+   "id": "V25-FAC-064",
+   "status": "PARCIAL",
+   "gap": "La tabla existe para cualquier conjunto de factores: sin factores, con cada factor y con la combinación, con métricas por horizonte y segmento, costo de cómputo y el período final intacto; sin evidencia la decisión es inconclusive o reject y el factor no llega a lo servido (probado). Falta ejecutarla para una familia piloto con datos reales (solo ficticios o una base de pruebas) y la compuerta de activación (V25-FAC-068).",
+   "evidence": [
+    "engine/tests/unit/test_factor_ablation.py::test_the_sown_campaign_effect_is_promoted_and_the_noise_factor_is_not",
+    "engine/tests/unit/test_factor_ablation.py::test_a_set_with_no_usable_factor_is_not_evaluable_and_costs_no_training",
+    "engine/tests/unit/test_factor_ablation.py::test_a_global_improvement_with_a_regression_in_a_protected_segment_is_inconclusive_not_promoted",
+    "engine/tests/unit/test_factor_wiring.py::test_active_factors_that_do_not_beat_the_rule_change_nothing_that_is_served"
+   ],
+   "note": "Una mejora global con una regresión mayor al 10 % en un segmento crítico es inconclusive, no promote (valor a aprobar en el piloto)."
+  },
+  {
+   "id": "V25-FAC-068",
+   "status": "PARCIAL",
+   "gap": "La compuerta actúa en cada ejecución, no al activar: un factor activado solo llega a lo servido si pasa la validación temporal (lo no disponible al corte sale con motivo) y gana la competencia con el modelo sin factores y sus placebos en las ventanas de selección; si no gana, se sirve exactamente lo mismo que sin factores (probado). Falta lo que pide el requisito: rechazar la activación de un factor sin corridas T11/T12 aprobadas para la empresa (409/422) y registrar esa evidencia (ids de las corridas) en audit_logs y en effective_config.",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_active_factors_that_do_not_beat_the_rule_change_nothing_that_is_served",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_activating_factors_that_do_not_win_serves_exactly_what_the_same_company_served_before",
+    "engine/tests/unit/test_factor_arm_rule.py::test_a_factor_arm_that_fails_or_cannot_cover_the_holdout_keeps_the_plain_model"
+   ],
+   "note": "Ninguna garantía ex ante cubre un cambio de régimen posterior a la selección: se reporta (factor_model_worse_on_holdout)."
+  },
+  {
+   "id": "V25-FAC-035",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_unusable_factors_are_dropped_with_their_reason_and_never_reach_the_model",
+    "engine/tests/unit/test_factor_wiring.py::test_the_run_resolves_factors_with_the_retroactive_rule_even_when_the_final_cutoff_is_live"
+   ],
+   "note": "Desde W6-E run_pipeline sí invoca el pipeline de factores (apagado por defecto): un pronóstico de tercero sin historial de emisiones sale con no_issuance_history y no entra al backtest de la ejecución. El origen real sigue BLOQUEADO (V25-FAC-063)."
+  },
+  {
+   "id": "V25-AVL-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_factor_wiring.py::test_unusable_factors_are_dropped_with_their_reason_and_never_reach_the_model",
+    "engine/tests/unit/test_factor_wiring.py::test_the_run_resolves_factors_with_the_retroactive_rule_even_when_the_final_cutoff_is_live"
+   ],
+   "note": "Desde W6-E run_pipeline invoca el pipeline de factores (apagado por defecto), de modo que la prohibición rige en una ejecución real de demanda: un pronóstico de tercero sin historial de emisiones sale con no_issuance_history. El origen real sigue BLOQUEADO."
+  },
+  {
+   "id": "V25-FAC-061",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_factors_wiring_integration.py::test_loaded_inputs_never_expose_what_was_published_after_each_cutoff",
+    "engine/tests/integration/test_factors_wiring_integration.py::test_an_announcement_made_after_the_cutoff_is_missing_for_that_cutoff_not_zero"
+   ],
+   "note": "W6-E conectó el pipeline a run_pipeline: los estados de T11 gobiernan ya qué factores entran en una ejecución real de demanda (con el pipeline encendido). El origen real sigue BLOQUEADO (V25-FAC-063)."
+  },
+  {
+   "id": "V25-SCT-001",
+   "status": "PENDIENTE",
+   "gap": "Sigue sin perfil Manufacturing / Industry: P3_PENDIENTE (el registro solo trae perfiles SINTÉTICOS y no hay módulo Export, Industry ni Agro; una prueba falla si apareciera uno sin actualizar el estado) y datos reales BLOQUEADO (V25-SCT-006). Existen insumos nativos (ventas, capacidad, recetas con rendimiento, compromisos) y el contrato de demanda retail autorizada (desactivado). W6-E fijó el contrato de aceptación del sector en docs/product/INDUSTRY_SECTOR_ACCEPTANCE.md.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_registry_of_sector_profiles_only_holds_synthetic_profiles_so_no_sector_case_can_be_claimed",
+    "docs/product/INDUSTRY_SECTOR_ACCEPTANCE.md"
+   ],
+   "note": "El contrato de aceptación no es un informe de cobertura."
+  },
+  {
+   "id": "V25-SCT-002",
+   "status": "PENDIENTE",
+   "gap": "Sigue sin perfil Retail: P3_PENDIENTE (el registro solo trae perfiles SINTÉTICOS y no hay módulo Export, Industry ni Agro; una prueba falla si apareciera uno sin actualizar el estado) y datos reales BLOQUEADO (V25-SCT-006). Competencia, clima y tendencias no tienen fuente; solo existe el perfil sintético synthetic_retail_a. W6-E fijó el contrato de aceptación del sector en docs/product/RETAIL_SECTOR_ACCEPTANCE.md.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_registry_of_sector_profiles_only_holds_synthetic_profiles_so_no_sector_case_can_be_claimed",
+    "docs/product/RETAIL_SECTOR_ACCEPTANCE.md"
+   ],
+   "note": "El contrato de aceptación no es un informe de cobertura."
+  },
+  {
+   "id": "V25-SCT-003",
+   "status": "PENDIENTE",
+   "gap": "Sigue sin perfil Agro: P3_PENDIENTE (el registro solo trae perfiles SINTÉTICOS y no hay módulo Export, Industry ni Agro; una prueba falla si apareciera uno sin actualizar el estado) y datos reales BLOQUEADO (V25-SCT-006). No existen entidades de oferta agrícola; la sanidad vegetal solo admite eventos manuales. W6-E fijó el contrato de aceptación del sector en docs/product/AGRO_SECTOR_ACCEPTANCE.md.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_registry_of_sector_profiles_only_holds_synthetic_profiles_so_no_sector_case_can_be_claimed",
+    "docs/product/AGRO_SECTOR_ACCEPTANCE.md"
+   ],
+   "note": "El contrato de aceptación no es un informe de cobertura."
+  },
+  {
+   "id": "V25-SCT-004",
+   "status": "PENDIENTE",
+   "gap": "Sigue sin perfil Export: P3_PENDIENTE (el registro solo trae perfiles SINTÉTICOS y no hay módulo Export, Industry ni Agro; una prueba falla si apareciera uno sin actualizar el estado) y datos reales BLOQUEADO (V25-SCT-006). No existe un módulo Export; estadísticas de exportación y precios internacionales no tienen fuente. W6-E fijó el contrato de aceptación del sector en docs/product/EXPORT_SECTOR_ACCEPTANCE.md.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_registry_of_sector_profiles_only_holds_synthetic_profiles_so_no_sector_case_can_be_claimed",
+    "docs/product/EXPORT_SECTOR_ACCEPTANCE.md"
+   ],
+   "note": "El contrato de aceptación no es un informe de cobertura."
+  },
+  {
+   "id": "V25-SCT-007",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_sector_documents_list_every_pending_case_with_its_marker_and_never_call_one_covered",
+    "engine/tests/unit/test_sector_contracts.py::test_the_registry_of_sector_profiles_only_holds_synthetic_profiles_so_no_sector_case_can_be_claimed",
+    "engine/tests/unit/test_sector_contracts.py::test_there_is_no_export_industry_or_agro_module_and_the_fictional_companies_are_not_a_t15_case",
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md"
+   ],
+   "note": "Existe la prueba de consistencia que pedía el criterio: cada caso T15/T17 pendiente debe figurar en SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md con P3_PENDIENTE y sin palabras de cobertura; los nueve casos pendientes son pruebas omitidas con ese motivo (aparecen como pendientes, nunca como aprobadas) y el registro solo admite perfiles sintéticos. Aparte y abierto: P3-datos.md sobredeclara las extensiones sectoriales (defecto MEDIUM de factores)."
+  },
+  {
+   "id": "V25-SCT-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_sector_documents_list_every_pending_case_with_its_marker_and_never_call_one_covered",
+    "docs/intelligence/SECTOR_PROFILES.md; docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md"
+   ],
+   "note": "Los dos documentos existen: SECTOR_PROFILES.md con los perfiles de V2.1 y los seis casos con su estado por dimensión (taxonomía, factores, disponibilidad, API caída, mejora) y SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md con lo exigido por caso y la conversión productiva T17; todos los casos están P3_PENDIENTE (ninguno cubierto) y una prueba mantiene la coherencia entre los documentos y las pruebas."
+  },
+  {
+   "id": "V25-SCT-025",
+   "status": "PARCIAL",
+   "gap": "El contrato de extensión (SectorProfile, ExtensionProvider, register_profile) se conserva y una prueba falla si se rompe; lo demás sigue sin cambios: solo overrides llega al pipeline (los proveedores de los perfiles no se ejecutan) y no hay módulo sectorial real que lo use.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_sector_extension_contract_is_preserved"
+   ],
+   "note": "Un perfil real se agregaría con register_profile sin tocar el core."
+  },
+  {
+   "id": "V25-SCT-026",
+   "status": "PENDIENTE",
+   "gap": "Sin cambios en el caso T15.01 (agua embotellada): P3_PENDIENTE (prueba omitida con ese motivo en test_sector_contracts.py, que aparece en cada ejecución como pendiente), sin fixture ni piloto; datos reales BLOQUEADO (V25-SCT-006). W6-E fijó lo que el caso deberá demostrar (SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4) y la herramienta de ablation que lo medirá sobre una copia de pruebas de los datos del piloto.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4"
+   ],
+   "note": "No se declara cobertura por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-SCT-027",
+   "status": "PENDIENTE",
+   "gap": "Sin cambios en el caso T15.02 (alimentos sin gluten): P3_PENDIENTE (prueba omitida con ese motivo en test_sector_contracts.py, que aparece en cada ejecución como pendiente), sin fixture ni piloto; datos reales BLOQUEADO (V25-SCT-006). W6-E fijó lo que el caso deberá demostrar (SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4) y la herramienta de ablation que lo medirá sobre una copia de pruebas de los datos del piloto.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4"
+   ],
+   "note": "No se declara cobertura por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-SCT-028",
+   "status": "PENDIENTE",
+   "gap": "Sin cambios en el caso T15.03 (insumos agrícolas): P3_PENDIENTE (prueba omitida con ese motivo en test_sector_contracts.py, que aparece en cada ejecución como pendiente), sin fixture ni piloto; datos reales BLOQUEADO (V25-SCT-006). W6-E fijó lo que el caso deberá demostrar (SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4) y la herramienta de ablation que lo medirá sobre una copia de pruebas de los datos del piloto.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4"
+   ],
+   "note": "No se declara cobertura por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-SCT-029",
+   "status": "PENDIENTE",
+   "gap": "Sin cambios en el caso T15.04 (retail multisucursal): P3_PENDIENTE (prueba omitida con ese motivo en test_sector_contracts.py, que aparece en cada ejecución como pendiente), sin fixture ni piloto; datos reales BLOQUEADO (V25-SCT-006). W6-E fijó lo que el caso deberá demostrar (SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4) y la herramienta de ablation que lo medirá sobre una copia de pruebas de los datos del piloto.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4"
+   ],
+   "note": "No se declara cobertura por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-SCT-030",
+   "status": "PENDIENTE",
+   "gap": "Sin cambios en el caso T15.05 (productor agrícola): P3_PENDIENTE (prueba omitida con ese motivo en test_sector_contracts.py, que aparece en cada ejecución como pendiente), sin fixture ni piloto; datos reales BLOQUEADO (V25-SCT-006). W6-E fijó lo que el caso deberá demostrar (SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4) y la herramienta de ablation que lo medirá sobre una copia de pruebas de los datos del piloto.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4"
+   ],
+   "note": "No se declara cobertura por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-SCT-031",
+   "status": "PENDIENTE",
+   "gap": "Sin cambios en el caso T15.06 (exportadora de camarón): P3_PENDIENTE (prueba omitida con ese motivo en test_sector_contracts.py, que aparece en cada ejecución como pendiente), sin fixture ni piloto; datos reales BLOQUEADO (V25-SCT-006). W6-E fijó lo que el caso deberá demostrar (SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4) y la herramienta de ablation que lo medirá sobre una copia de pruebas de los datos del piloto.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §4"
+   ],
+   "note": "No se declara cobertura por contar con fixtures sintéticas."
+  },
+  {
+   "id": "V25-SCT-034",
+   "status": "PARCIAL",
+   "gap": "Lo verificado es el marcado que exige el requisito cuando no hay módulo productivo: T17.03–T17.05 figuran como P3_PENDIENTE en la matriz de aceptación, son pruebas omitidas con ese motivo y una prueba de consistencia falla si el documento declarase cobertura sin prueba. El flujo de conversión productiva para Retail, Industry y Agro no existe (sin fixtures sectoriales ni módulo productivo).",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_sector_case_is_covered",
+    "engine/tests/unit/test_sector_contracts.py::test_the_sector_documents_list_every_pending_case_with_its_marker_and_never_call_one_covered",
+    "docs/testing/SECTORAL_FACTOR_INTELLIGENCE_ACCEPTANCE.md §5"
+   ],
+   "note": "T17.01 y T17.02 siguen parciales (V25-SCT-032 y V25-SCT-033)."
+  },
+  {
+   "id": "V25-SCT-035",
+   "status": "PARCIAL",
+   "gap": "Una prueba protege el contrato de extensión de perfiles (SectorProfile, ExtensionProvider, register_profile) y otra impide declarar módulos sectoriales sin actualizar el estado. Falta la guarda que pide el criterio: una verificación que falle si desaparece o se renombra una migración existente o un módulo protegido (recetas y recursos de producción, compromisos, conversiones de unidades, tipos de cambio, calendar_events) y que exija down() reversible.",
+   "evidence": [
+    "engine/tests/unit/test_sector_contracts.py::test_the_sector_extension_contract_is_preserved",
+    "engine/tests/unit/test_sector_contracts.py::test_there_is_no_export_industry_or_agro_module_and_the_fictional_companies_are_not_a_t15_case"
+   ],
+   "note": "Se sigue cumpliendo en el historial: W6 no borró migraciones ni módulos."
+  }
+ ]
+}

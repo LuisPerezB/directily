@@ -1,18 +1,18 @@
 # Predictily V2.5 · Estado actual, pendientes y próximos pasos
 
-**Corte de este informe:** 4-nov-2026, 02:40 UTC (W1 y W2 cerradas el 1-nov, W3 el 1-nov, W4 el 2-nov, W5 el 3-nov; los cinco paquetes de W6
-confirmados el 4-nov) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main` @ `6c679d8`) · **PR:** se abre al terminar
+**Corte de este informe:** 4-nov-2026, 05:00 UTC (W1, W2 y W3 cerradas el 1-nov, W4 el 2-nov, W5 el 3-nov y **W6 con su cierre W6-F el
+4-nov**) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main` @ `6c679d8`) · **PR:** se abre al terminar
 la sesión de trabajo (una rama, commits por paquete).
 **Especificación en la que se basa el trabajo:**
 [`docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md`](docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md)
 (V2.5, en adelante «la especificación»). Plan detallado:
 [`docs/roadmap/V25_IMPLEMENTATION_PLAN.md`](docs/roadmap/V25_IMPLEMENTATION_PLAN.md).
 
-> **En una línea:** **W1 a W5 están cerradas** (cada paquete con revisión adversarial y corrección; suites completas en verde
-> y E2E 32/32 y 256/256 en cada integración). **W6 (plataforma)**: los cinco paquetes (seguridad Enterprise, Bridge, Auto
-> Mapper, Intelligence Gateway y factores) están confirmados tras su corrección; **en curso** la integración en el stack
-> aislado y W6-F (E2E V2.5, documentos de §21/§28, auditoría y evaluación final de gates). El piloto con datos reales
-> espera a que el propietario registre las fuentes SQL Server en la app local. Ningún gate está en GO.
+> **En una línea:** **las seis oleadas de V2.5 están implementadas, revisadas e integradas** (cada paquete con revisión adversarial y
+> corrección). Sobre el último commit: backend 2583 pruebas (2574 aprobadas, 9 omitidas), motor 1496, frontend 749, agente Bridge 344, y los
+> E2E 32/32, 256/256 y el nuevo E2E V2.5 160/160. **Ningún gate está en GO**: no falla ninguna prueba, pero los gates exigen datos reales del
+> cliente, AWS o decisiones del propietario. El siguiente paso es el piloto: falta que el propietario registre las fuentes SQL Server en la
+> app local. La rama está lista para el PR, pero no se ha subido (falta iniciar sesión en GitHub con la cuenta dueña del repositorio).
 ---
 
 ## 1. Dónde se quedó el trabajo (instancia exacta)
@@ -24,7 +24,7 @@ la sesión de trabajo (una rama, commits por paquete).
 | 1 | Inventario de requisitos por versión y matriz de fuentes no recuperadas | ✅ Hecho |
 | 2 | Auditar, ejecutar pruebas, fotografiar métricas de línea base (incluida la política heredada) y clasificar defectos | ✅ Hecho |
 | 3 | Priorizar datos / as-of / fugas / idempotencia / aislamiento antes que tableros o LLM | ✅ **W1 cerrado** (1-nov-2026): 7 de los 13 defectos HIGH corregidos y 6 corregidos parcialmente; lo pendiente de cada uno está en `docs/roadmap/audit/progress/2026-11-01-w1.json` |
-| 4 | Implementar por paquetes verticales con migración aditiva, pruebas y registros | ✅ W2–W5 cerradas (1 al 3-nov-2026) · 🔄 **W6**: paquetes A–E confirmados; integración y cierre W6-F en curso |
+| 4 | Implementar por paquetes verticales con migración aditiva, pruebas y registros | ✅ W2–W6 cerradas (1 al 4-nov-2026), cada una integrada en un stack aislado |
 | 5 | E2E en staging autorizado con 2 tenants, fuente SQL y CSV, entrenamiento validado, Registry/S3, inferencia AWS, Radar/Decisión/Outcome | ⏳ Pendiente; staging AWS **BLOQUEADO** |
 | 6 | Métricas reales sobre holdout y evaluación prospectiva | 🟡 **Acceso disponible** (SQL Server de Soyoda/Resgasa por VPN); falta que el propietario registre la fuente en la app local |
 | 7 | `V25_RELEASE_GATES.md` con GO / GO CONDICIONAL / NO-GO y changelog de lo hecho y lo pendiente | 🟡 Actualizado con el cierre de W1 (todo NO-GO); este documento es el changelog vigente |
@@ -88,22 +88,24 @@ tardías; eso lo cubren las pruebas T02 y lo cubrirá el piloto.
 |---|---|---|
 | Fuentes versionadas | `docs/roadmap/sources/` | V2.5 literal; **V1 recuperado literal**; V2 literal hasta §10. V2.1, V2.2, V2.3, V2.4 y V2.4 Enterprise **no se hallaron** (`RECONSTRUIDO_PARCIALMENTE`) |
 | Auditoría por área con verificación adversarial | `docs/roadmap/audit/2026-10-31/*.json` | 8 áreas, **841 requisitos**, 179 defectos (13 HIGH, 73 MEDIUM, 93 LOW) |
-| Progreso por oleada | `docs/roadmap/audit/progress/` | W1: 20 defectos y 9 requisitos con evidencia `archivo::prueba`; el generador lo valida y lo muestra |
+| Progreso por oleada | `docs/roadmap/audit/progress/` | W1 a W6 con evidencia `archivo::prueba` (el generador valida que cada prueba citada exista) |
 | Línea base | `docs/roadmap/evidence/2026-10-31-baseline/`, `baseline_metrics.json` | Motor 418 · backend 449 · frontend 313 · E2E 32/32 y 256/256 |
 | **W1 cerrado** | commits `11c7086`, `c44076e`, `eea5321` | ventas versionadas con tiempo de conocimiento (ADR-V25-23), lectura as-of del motor y clasificación de días (ADR-V25-03), SSRF, ZIP y firma Ed25519 (ADR-V25-20); evidencia en `docs/roadmap/evidence/2026-11-01-w1-integration/` |
+| **W2 a W6 cerrados** | ver [`docs/roadmap/V25_CHANGELOG.md`](docs/roadmap/V25_CHANGELOG.md) | Data Core P0 (W2), calidad ML (W3), MLOps e IaC (W4), flujo empresarial (W5) y plataforma (W6: seguridad Enterprise, Bridge, Auto Mapper, Gateway, factores); evidencia en `docs/roadmap/evidence/*-integration/` |
+| **E2E V2.5** | `e2e/v25_acceptance.py` | 160/160: dos empresas, CSV y SQL, calidad, entrenamiento con gates, aprobación con firma y segundo factor, inferencia, Radar, decisión, outcome, fallo que bloquea, reversión, MFA, tokens, vendedor, Bridge, Gateway, aislamiento |
+| **Documentos de §21 y §28** | `docs/architecture/ENTERPRISE_ARCHITECTURE.md`, `docs/ml/FEATURE_SELECTION.md`, `docs/operations/OWNER_RESPONSIBILITIES.md`, `docs/product/RETAIL_MVP_ACCEPTANCE.md`, `reports/V25_PILOT_BASELINE.md`, `reports/V25_PROSPECTIVE_VALIDATION.md` | los dos de `reports/` describen el procedimiento del piloto (BLOQUEADO) sin datos reales |
 | Decisiones de arquitectura | `docs/architecture/adr/V25-ADRS.md` | ADR-V25-01 a ADR-V25-25 |
 | Contrato de W2 (**activado**) | `backend/database/migrations/2026_03_03_000100_*`, `2026_03_04_000100_*`, `backend/app/Services/DataCore/Bronze/`, `backend/app/Support/Canonical/`, `docs/data/DATA_QUALITY_ENGINE.md` | migraciones probadas (subida, reversión y subida), `BronzeStore` registrado, tablas nuevas clasificadas en la exportación LOPDP; suite del backend en verde |
 | Herramienta de descubrimiento del piloto | `infra/scripts/pilot/sql_source_discovery.php` | SELECT fijos sobre el catálogo de SQL Server (tablas, columnas, filas estimadas, claves), sin leer filas de negocio; salida a `reports/private/` |
 | Plan, gates y documentos de hoja de ruta | `docs/roadmap/` | regenerables con `python3 infra/scripts/v25_roadmap_docs.py` (`--check` verifica) |
-| Matriz de pruebas T01–T17 | `docs/testing/V25_TEST_MATRIX.md` | 193 casos (actualización de estados pendiente con W2) |
+| Matriz de pruebas T01–T17 | `docs/testing/V25_TEST_MATRIX.md` | 193 casos actualizados con W1–W6 |
 
 ### Estado de los requisitos de la especificación
 
-Base 2026-10-31 más el progreso de W1 (detalle por requisito en
-[`docs/roadmap/V25_GAP_ANALYSIS.md`](docs/roadmap/V25_GAP_ANALYSIS.md) §2.5 y
-[`docs/roadmap/V25_SOURCE_TRACEABILITY.md`](docs/roadmap/V25_SOURCE_TRACEABILITY.md)): 6 requisitos más IMPLEMENTADOS
-y 3 que pasan de PENDIENTE a PARCIAL respecto de la línea base (118 IMPLEMENTADO · 435 PARCIAL · 253 PENDIENTE en la
-base).
+Base 2026-10-31 más el progreso de W1 a W6 (detalle por requisito en
+[`docs/roadmap/V25_GAP_ANALYSIS.md`](docs/roadmap/V25_GAP_ANALYSIS.md) y
+[`docs/roadmap/V25_SOURCE_TRACEABILITY.md`](docs/roadmap/V25_SOURCE_TRACEABILITY.md)): de 841 requisitos, **270 IMPLEMENTADO** · 446 PARCIAL ·
+101 PENDIENTE · 21 BLOQUEADO · 3 NO APLICA (en la base: 118 IMPLEMENTADO · 435 PARCIAL · 253 PENDIENTE).
 
 ---
 
@@ -116,24 +118,25 @@ base).
 | Elemento de §20 | Estado | Dónde se resuelve |
 |---|---|---|
 | Auditoría y trazabilidad | ✅ | W0 (y progreso por oleada desde W1) |
-| Seguridad tenant | 🟡 | W1-B cerrado (SSRF, ZIP, firma); falta W6 · S11 (roles Enterprise, MFA, RLS, pruebas negativas en colas, caché y almacén) y la lista blanca SQL obligatoria en producción |
+| Seguridad tenant | 🟡 | W1-B (SSRF, ZIP, firma) y W6-A (MFA, tokens con alcance, roles comerciales, matriz de aislamiento en rutas, colas, caché y almacén); falta RLS (apagado y experimental), MFA obligatorio por defecto y la lista blanca SQL obligatoria en producción |
 | Fuentes CSV + SQL | 🟡 | CSV/XLSX y PostgreSQL probados; **SQL Server real accesible** (piloto), pendiente de conciliar |
-| Modelo canónico | 🔄 | W2 (contratos versionados, identidades, linaje) |
-| Bridge operativo mínimo | ⏳ | W6 · S12 (instalador Windows **BLOQUEADO**) |
-| Quality Engine | 🔄 | W2-A y W2-C |
-| Reconstrucción temporal | ✅ ventas · 🔄 resto | W1 cerrado para ventas; W2-D (validador de disponibilidad, T11); inventario, catálogo y costos sin versiones |
-| Demand baseline + ML y backtest | 🟡 | backtest as-of por ventana (W1); W2-E (horizonte 15) y W3 · S04 |
-| Customer recompra + cantidad + ventana | 🟡 | W3 · S05 |
-| Registry / CLI local / publicación privada / serving AWS | 🟡 | firma (W1-B); W4 · S06; AWS **BLOQUEADO** |
-| Revenue Radar inicial | ⏳ | W5 · S07 |
-| Testeabilidad y costo | 🟡 | matriz T01–T17; modelo de costos en W4 · S13 |
+| Modelo canónico | ✅ | W2 (contratos versionados, identidades, linaje) |
+| Bridge operativo mínimo | 🟡 | W6-B: agente de solo lectura con firma por dispositivo, probado contra PostgreSQL; instalador Windows, SQL Server y MySQL reales **BLOQUEADOS** |
+| Quality Engine | ✅ | W2-A y W2-C |
+| Reconstrucción temporal | ✅ ventas · 🟡 resto | W1 para ventas; W2-D validador de disponibilidad (T11); W6-E factores entrenados como se sirven; inventario, catálogo y costos sin versiones |
+| Demand baseline + ML y backtest | 🟡 | W1, W2-E y W3: lógica verificada; falta evidencia con datos reales (piloto) |
+| Customer recompra + cantidad + ventana | 🟡 | W3-C: lógica verificada; ventana sin validar en ningún dataset real |
+| Registry / CLI local / publicación privada / serving AWS | 🟡 | firma (W1-B), registro, CLI y serving solo de lo aprobado (W4); AWS **BLOQUEADO** |
+| Revenue Radar inicial | ✅ | W5-A, con alcance por cartera del vendedor (W6-A) |
+| Testeabilidad y costo | 🟡 | matriz T01–T17 al día; modelo de costos (W4) sin costos reales de AWS |
 
-**P1 · Enterprise Pilot:** Decision Engine (W5 · S08), restricciones de Supply (W5 · S10), aprobaciones y tareas
-(W5 · S08), Outcome/ROI (W5 · S09), tablero ejecutivo (W5 · S14), métricas por segmento (W3), controles
-operativos, onboarding repetible y reportes (W6 · S17), **piloto real (en preparación)**.
+**P1 · Enterprise Pilot:** implementados y verificados con datos ficticios: Decision Engine, restricciones de Supply,
+aprobaciones y tareas, Outcome/ROI honesto, tablero ejecutivo y métricas por segmento (W3, W5), onboarding con Auto Mapper
+(W6-C). Falta el **piloto real**: sin él no hay outcomes ni ROI medidos.
 
-**P2 / P3:** Factor Intelligence ampliado, conectores adicionales, agentes/LLM/WhatsApp, verticales Industry, Agro y
-Export; se conservan los contratos y no bloquean el piloto P0/P1.
+**P2 / P3:** factores conectados y probados con datos ficticios (W6-E), Gateway con auditoría y canal de mensajería solo
+como contrato (W6-D); sin fuentes externas reales, proveedor LLM ni WhatsApp; verticales Industry, Agro y Export con contratos
+y casos P3_PENDIENTE. No bloquean el piloto P0/P1.
 
 ### 3.2 Pendientes de W1 que quedan registrados (no bloquean W2)
 
@@ -148,17 +151,18 @@ Export; se conservan los contratos y no bloquean el piloto P0/P1.
 - **Interfaz.** El formulario de fuente SQL Server no expone `encrypt` ni `trust_server_certificate` (en el piloto se
   ajustan en la configuración).
 
-### 3.3 Criterios de salida (§19 y §26)
+### 3.3 Criterios de salida (§19 y §26): evaluación final de W6-F
 
 | Gate | Estado | Qué falta para GO |
 |---|---|---|
-| A · Integridad de datos | NO-GO | W2 (calidad, cuarentena, Bronze, reconciliación por capas) y conciliación mes a mes con la fuente SQL real (piloto) |
-| B · Calidad ML | NO-GO | horizonte 15 (W2-E), métricas por segmento, ventana y número de pedidos en Customer (W3); datos reales |
-| C · Seguridad / ML Ops | NO-GO | pendientes de seguridad de 3.2; CLI completa, aprobación y publicación (W4); AWS |
-| D · Flujo empresarial | NO-GO | Radar, Decision Engine, workflow con aprobaciones, outcomes y ROI (W5) |
+| A · Integridad de datos | NO-GO | conciliación mes a mes con la fuente SQL real (piloto) y totales de control en el origen |
+| B · Calidad ML | NO-GO | backtest y holdout con datos reales; aprobación humana para que gobierne la política V2.5 |
+| C · Seguridad / ML Ops | NO-GO | AWS real (BLOQUEADO), RLS activo, MFA obligatorio por defecto, identidad de servicio del motor, formato sin pickle |
+| D · Flujo empresarial | NO-GO | outcomes y ROI medidos en un piloto con grupo de control |
 | E · Piloto prospectivo | BLOQUEADO | contrato, KPI y ventana de observación con el cliente |
 
-Detalle: [`docs/roadmap/V25_RELEASE_GATES.md`](docs/roadmap/V25_RELEASE_GATES.md).
+Ninguna prueba automatizada falla; cada NO-GO tiene su criterio pendiente, error, riesgo y plan de remediación en
+[`docs/roadmap/V25_RELEASE_GATES.md`](docs/roadmap/V25_RELEASE_GATES.md#evaluación-final-w6-f).
 
 ### 3.4 Bloqueos que dependen del propietario
 
@@ -169,11 +173,17 @@ Detalle: [`docs/roadmap/V25_RELEASE_GATES.md`](docs/roadmap/V25_RELEASE_GATES.md
 | Cuenta AWS, presupuesto y credenciales | T09, Gate C, costos reales | cuenta/organización, presupuesto y alertas; rol de despliegue de mínimo privilegio |
 | Host Windows y certificado de firma de código | instalador del Bridge | equipo Windows 10/11 o Server; certificado |
 | Servidores SQL Server / MySQL de prueba | T01 (3 pruebas omitidas) | instancia de prueba |
-| Clave de proveedor LLM · WhatsApp Business · revisión legal (LOPDP) | P2 · Gates C/D | según el plan |
+| Clave de proveedor LLM · WhatsApp Business · revisión legal (LOPDP) | P2 · Gates C/D | según el plan; consentimiento por empresa para enviar datos al LLM (V25-SEC-040) |
+| **Subir la rama y abrir el PR** | entrega de V2.5 | iniciar sesión en `gh`/git con la cuenta dueña de `LuisPerezB/directily` (hoy el push falla con 403) |
+| Umbrales «a aprobar en el piloto», política de MFA y RLS | Gates B/C | 65 decisiones listadas en [`docs/operations/OWNER_RESPONSIBILITIES.md`](docs/operations/OWNER_RESPONSIBILITIES.md) |
 
 ---
 
-## 4. Próximo a realizar (en este orden)
+## 4. Próximo a realizar
+
+Lo inmediato: **(1)** subir la rama y abrir el PR (acción del propietario, ver 3.4); **(2)** el piloto (Paso 2, abajo) en cuanto
+estén registradas las fuentes; **(3)** las decisiones del propietario de `docs/operations/OWNER_RESPONSIBILITIES.md`. Las
+oleadas W2 a W6 están cerradas; su detalle sigue aquí como historial.
 
 ### Paso 1 · Oleada W2 · Data Core P0 (✅ cerrada el 1-nov-2026)
 
@@ -199,7 +209,7 @@ compartido (fijaba el catálogo anterior). Demo con gate PASS (Ferretería WAPE 
 `fbb1739` (W2 integrado), para que los cambios en curso de W3 no lo afecten: el piloto ya usa Bronze, calidad,
 cuarentena y reconciliación.
 
-### Estado actual (1-nov-2026, tarde)
+### Estado por oleada
 
 - **W3 · ✅ cerrada:** W3-A (`a656521`), W3-B (`562f2b0`), W3-C (`552f6c0`) y W3-D (`7586c57`), cada uno tras revisión
   adversarial y corrección (1 HIGH y 8 MEDIUM en total). Integración sobre `7586c57`: backend 1217 (1209 aprobadas, 8
@@ -218,15 +228,18 @@ cuarentena y reconciliación.
   29 MEDIUM corregidos en las revisiones). Integración en el stack aislado: E2E 32/32 y 256/256, demo idéntica a W4; backend
   1640, motor 1413, frontend 737. Evidencia: `docs/roadmap/evidence/2026-11-03-w5-integration/`; auditoría `2026-11-03-w5.json`
   (IMPLEMENTADO 188 → 250). Outcomes y ROI reales BLOQUEADOS hasta un piloto.
-- **W6 · paquetes confirmados (4-nov):** contrato `d46f839`; W6-E `778622d` (factores conectados a la demanda, entrenados
-  como se sirven, con control placebo; promoción por ruido 0/330), W6-A `6b1bd89` (MFA TOTP, tokens con alcance, roles
-  comerciales y alcance por cartera; RLS apagado y experimental), W6-B `e7fbc37` (agente Bridge de solo lectura con firma
-  por dispositivo), W6-C `5c51090` (Auto Mapper) y W6-D `aa82db1` (Intelligence Gateway). Revisiones corregidas: W6-A 1 HIGH
-  (un token limitado podía emitir tokens más amplios), 5 MEDIUM y 10 LOW; W6-B 13; W6-C 7; W6-D 4 MEDIUM y 6 LOW; W6-E 2 HIGH
-  y 5 MEDIUM. Un commit por paquete: las partes de las pruebas de W6-A que necesitan el Bridge o el Gateway entran con W6-B y
-  W6-D. `dfa2d88` corrige números de documento que podían repetirse en los datos de prueba de W5 (fallos esporádicos), y la
-  prueba de punta a punta del Bridge ya no deja un candado de cola entre corridas. **En curso:** integración en el stack
-  aislado y W6-F (E2E V2.5, documentos de §21/§28, auditoría de W6 y gates finales).
+- **W6 · ✅ cerrada (4-nov):** contrato `d46f839`; W6-E `778622d` (factores conectados a la demanda, entrenados como se sirven,
+  con control placebo; promoción por ruido 0/330), W6-A `6b1bd89` (MFA TOTP, tokens con alcance, roles comerciales y alcance por
+  cartera; RLS apagado y experimental), W6-B `e7fbc37` (agente Bridge de solo lectura con firma por dispositivo), W6-C `5c51090`
+  (Auto Mapper) y W6-D `aa82db1` (Intelligence Gateway). Revisiones corregidas: W6-A 1 HIGH (un token limitado podía emitir
+  tokens más amplios), 5 MEDIUM y 10 LOW; W6-B 13; W6-C 7; W6-D 4 MEDIUM y 6 LOW; W6-E 2 HIGH y 5 MEDIUM. Cada commit probado por
+  separado (A 1798, B 2051, C 2214 pruebas del backend, todas en verde). Integración en el stack aislado sobre `aa82db1`: backend
+  2583 (2574 aprobadas, 9 omitidas), motor 1496, frontend 749, agente Bridge 344; E2E 32/32, 256/256 y V2.5 160/160; demo
+  idéntica a W5. `dfa2d88` corrige números de documento repetidos en datos de prueba de W5. Evidencia:
+  `docs/roadmap/evidence/2026-11-03-w6-integration/`; auditoría `2026-11-03-w6.json` (IMPLEMENTADO 250 → 270).
+- **W6-F · ✅ cierre:** E2E V2.5 (`e2e/v25_acceptance.py`), los seis documentos que faltaban de §21/§28, matriz T01–T17 al día,
+  changelog (`docs/roadmap/V25_CHANGELOG.md`) y evaluación final de gates: ningún gate en GO (A–D NO-GO por falta de datos reales
+  o entorno autorizado; E BLOQUEADO).
 - **Límite de uso:** el 2-nov se alcanzó el límite semanal y los siete agentes se detuvieron; se reanudaron el
   3-nov desde donde quedaron (su trabajo estaba guardado, sin confirmar).
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
@@ -259,7 +272,7 @@ Según [`docs/operations/PILOT_RUNBOOK.md`](docs/operations/PILOT_RUNBOOK.md), e
 Los resultados van **solo** a `reports/private/` (ignorado por git). Resgasa tiene el histórico de ventas más
 actualizado.
 
-### Paso 3 · Oleadas W3 a W6
+### Alcance de las oleadas W3 a W6 (todas cerradas)
 
 - **W3 · Calidad ML P0:** S04 Demand y selección (métricas por horizonte y segmento, política heredada parametrizada y
   política de promoción V2.5, champion/challenger, *shadow mode*, Optuna acotado) y S05 Customer Core (número de
@@ -328,6 +341,9 @@ cd frontend && npm run type-check && npm run lint && npm run test -- --run && np
 # E2E (stack arriba)
 engine/.venv/bin/python e2e/mvp_acceptance.py --api http://127.0.0.1:8000/api/v1
 engine/.venv/bin/python e2e/stage2_acceptance.py --api http://127.0.0.1:8000/api/v1
+engine/.venv/bin/python e2e/v25_acceptance.py --api http://127.0.0.1:8000/api/v1 --engine-dir engine
+# Agente Bridge (TEST_ERP_ADMIN_USERNAME = un rol local con CREATEROLE, solo para la prueba de roles heredados)
+cd bridge && TEST_ERP_DATABASE=predictily_erp_source_p3 .venv/bin/python -m pytest -q
 # Documentos de hoja de ruta
 python3 infra/scripts/v25_roadmap_docs.py && python3 infra/scripts/v25_roadmap_docs.py --check
 ```
