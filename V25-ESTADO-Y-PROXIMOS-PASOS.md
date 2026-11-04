@@ -1,8 +1,8 @@
 # Predictily V2.5 · Estado actual, pendientes y próximos pasos
 
 **Corte de este informe:** 4-nov-2026, 05:00 UTC (W1, W2 y W3 cerradas el 1-nov, W4 el 2-nov, W5 el 3-nov y **W6 con su cierre W6-F el
-4-nov**) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main` @ `6c679d8`) · **PR:** se abre al terminar
-la sesión de trabajo (una rama, commits por paquete).
+4-nov**) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main` @ `6c679d8`) · **PR:** [LuisPerezB/directily#5](https://github.com/LuisPerezB/directily/pull/5)
+(abierto el 4-nov-2026; una rama, commits por paquete).
 **Especificación en la que se basa el trabajo:**
 [`docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md`](docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md)
 (V2.5, en adelante «la especificación»). Plan detallado:
@@ -12,7 +12,7 @@ la sesión de trabajo (una rama, commits por paquete).
 > corrección). Sobre el último commit: backend 2583 pruebas (2574 aprobadas, 9 omitidas), motor 1496, frontend 749, agente Bridge 344, y los
 > E2E 32/32, 256/256 y el nuevo E2E V2.5 160/160. **Ningún gate está en GO**: no falla ninguna prueba, pero los gates exigen datos reales del
 > cliente, AWS o decisiones del propietario. El siguiente paso es el piloto: falta que el propietario registre las fuentes SQL Server en la
-> app local. La rama está lista para el PR, pero no se ha subido (falta iniciar sesión en GitHub con la cuenta dueña del repositorio).
+> app local. La rama está subida y el PR abierto ([#5](https://github.com/LuisPerezB/directily/pull/5)); el repositorio no tiene CI configurado.
 ---
 
 ## 1. Dónde se quedó el trabajo (instancia exacta)
@@ -174,14 +174,14 @@ Ninguna prueba automatizada falla; cada NO-GO tiene su criterio pendiente, error
 | Host Windows y certificado de firma de código | instalador del Bridge | equipo Windows 10/11 o Server; certificado |
 | Servidores SQL Server / MySQL de prueba | T01 (3 pruebas omitidas) | instancia de prueba |
 | Clave de proveedor LLM · WhatsApp Business · revisión legal (LOPDP) | P2 · Gates C/D | según el plan; consentimiento por empresa para enviar datos al LLM (V25-SEC-040) |
-| **Subir la rama y abrir el PR** | entrega de V2.5 | iniciar sesión en `gh`/git con la cuenta dueña de `LuisPerezB/directily` (hoy el push falla con 403) |
+| **Revisar y fusionar el PR** | entrega de V2.5 | revisar [LuisPerezB/directily#5](https://github.com/LuisPerezB/directily/pull/5) y fusionarlo en `main` |
 | Umbrales «a aprobar en el piloto», política de MFA y RLS | Gates B/C | 65 decisiones listadas en [`docs/operations/OWNER_RESPONSIBILITIES.md`](docs/operations/OWNER_RESPONSIBILITIES.md) |
 
 ---
 
 ## 4. Próximo a realizar
 
-Lo inmediato: **(1)** subir la rama y abrir el PR (acción del propietario, ver 3.4); **(2)** el piloto (Paso 2, abajo) en cuanto
+Lo inmediato: **(1)** revisar y fusionar el PR #5 (acción del propietario, ver 3.4); **(2)** el piloto (Paso 2, abajo) en cuanto
 estén registradas las fuentes; **(3)** las decisiones del propietario de `docs/operations/OWNER_RESPONSIBILITIES.md`. Las
 oleadas W2 a W6 están cerradas; su detalle sigue aquí como historial.
 
@@ -243,8 +243,8 @@ cuarentena y reconciliación.
 - **Límite de uso:** el 2-nov se alcanzó el límite semanal y los siete agentes se detuvieron; se reanudaron el
   3-nov desde donde quedaron (su trabajo estaba guardado, sin confirmar).
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
-- **Rama sin subir:** el push a `origin` falla (403) porque `gh`/git en este Mac están autenticados como otra cuenta;
-  el propietario debe iniciar sesión con la cuenta dueña del repositorio para subir la rama y abrir el PR.
+- **Rama subida y PR abierto (4-nov):** tras iniciar sesión con la cuenta dueña del repositorio, la rama se subió y se abrió
+  [LuisPerezB/directily#5](https://github.com/LuisPerezB/directily/pull/5) contra `main` (sin conflictos; sin CI configurado).
 
 ### Paso 1b · Oleada W3 · Calidad ML P0 (✅ cerrada el 1-nov-2026)
 
