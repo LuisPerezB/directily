@@ -1,17 +1,18 @@
 # Predictily V2.5 · Estado actual, pendientes y próximos pasos
 
-**Corte de este informe:** 1-nov-2026, 14:30 UTC (cierre de W1 a las 05:45 UTC y de W2 a las 14:15 UTC) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main`
-@ `6c679d8`) · **PR:** se abre al terminar la sesión de trabajo (una rama, commits por paquete).
+**Corte de este informe:** 4-nov-2026, 02:40 UTC (W1 y W2 cerradas el 1-nov, W3 el 1-nov, W4 el 2-nov, W5 el 3-nov; los cinco paquetes de W6
+confirmados el 4-nov) · **Rama de trabajo:** `v25/w1-cierre-y-w2` (creada desde `main` @ `6c679d8`) · **PR:** se abre al terminar
+la sesión de trabajo (una rama, commits por paquete).
 **Especificación en la que se basa el trabajo:**
 [`docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md`](docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md)
 (V2.5, en adelante «la especificación»). Plan detallado:
 [`docs/roadmap/V25_IMPLEMENTATION_PLAN.md`](docs/roadmap/V25_IMPLEMENTATION_PLAN.md).
 
-> **En una línea:** **W1 y W2 están cerrados**: cada paquete pasó revisión adversarial y corrección, las suites
-> completas están en verde (backend 1082 + 8 omitidas, motor 780, frontend 329) y los E2E dan 32/32 y 256/256. La demo
-> no tiene regresión y sus gates de calidad dan PASS. **W3 (Calidad ML) está en curso**: contrato activado y paquetes A, B
-> y C en implementación. Los contratos de W4 a W6 están listos. El piloto con datos reales tiene acceso por VPN y espera
-> a que el propietario registre la fuente SQL en la app local. Ningún gate está en GO.
+> **En una línea:** **W1 a W5 están cerradas** (cada paquete con revisión adversarial y corrección; suites completas en verde
+> y E2E 32/32 y 256/256 en cada integración). **W6 (plataforma)**: los cinco paquetes (seguridad Enterprise, Bridge, Auto
+> Mapper, Intelligence Gateway y factores) están confirmados tras su corrección; **en curso** la integración en el stack
+> aislado y W6-F (E2E V2.5, documentos de §21/§28, auditoría y evaluación final de gates). El piloto con datos reales
+> espera a que el propietario registre las fuentes SQL Server en la app local. Ningún gate está en GO.
 ---
 
 ## 1. Dónde se quedó el trabajo (instancia exacta)
@@ -23,7 +24,7 @@
 | 1 | Inventario de requisitos por versión y matriz de fuentes no recuperadas | ✅ Hecho |
 | 2 | Auditar, ejecutar pruebas, fotografiar métricas de línea base (incluida la política heredada) y clasificar defectos | ✅ Hecho |
 | 3 | Priorizar datos / as-of / fugas / idempotencia / aislamiento antes que tableros o LLM | ✅ **W1 cerrado** (1-nov-2026): 7 de los 13 defectos HIGH corregidos y 6 corregidos parcialmente; lo pendiente de cada uno está en `docs/roadmap/audit/progress/2026-11-01-w1.json` |
-| 4 | Implementar por paquetes verticales con migración aditiva, pruebas y registros | ✅ W2 cerrado (1-nov-2026) · 🔄 **W3 en curso** (contrato activado en `4eb34f4`) · W4–W6: contratos listos (`docs/roadmap/contracts/w4..w6/`) |
+| 4 | Implementar por paquetes verticales con migración aditiva, pruebas y registros | ✅ W2–W5 cerradas (1 al 3-nov-2026) · 🔄 **W6**: paquetes A–E confirmados; integración y cierre W6-F en curso |
 | 5 | E2E en staging autorizado con 2 tenants, fuente SQL y CSV, entrenamiento validado, Registry/S3, inferencia AWS, Radar/Decisión/Outcome | ⏳ Pendiente; staging AWS **BLOQUEADO** |
 | 6 | Métricas reales sobre holdout y evaluación prospectiva | 🟡 **Acceso disponible** (SQL Server de Soyoda/Resgasa por VPN); falta que el propietario registre la fuente en la app local |
 | 7 | `V25_RELEASE_GATES.md` con GO / GO CONDICIONAL / NO-GO y changelog de lo hecho y lo pendiente | 🟡 Actualizado con el cierre de W1 (todo NO-GO); este documento es el changelog vigente |
@@ -217,8 +218,15 @@ cuarentena y reconciliación.
   29 MEDIUM corregidos en las revisiones). Integración en el stack aislado: E2E 32/32 y 256/256, demo idéntica a W4; backend
   1640, motor 1413, frontend 737. Evidencia: `docs/roadmap/evidence/2026-11-03-w5-integration/`; auditoría `2026-11-03-w5.json`
   (IMPLEMENTADO 188 → 250). Outcomes y ROI reales BLOQUEADOS hasta un piloto.
-- **W6 · en curso:** contrato `d46f839`; W6-A a W6-E implementados y revisados (W6-A 1 HIGH: un token limitado podía emitir
-  tokens más amplios; el resto sin HIGH). En corrección los cinco; después W6-F (cierre, E2E V2.5 y evaluación final de gates).
+- **W6 · paquetes confirmados (4-nov):** contrato `d46f839`; W6-E `778622d` (factores conectados a la demanda, entrenados
+  como se sirven, con control placebo; promoción por ruido 0/330), W6-A `6b1bd89` (MFA TOTP, tokens con alcance, roles
+  comerciales y alcance por cartera; RLS apagado y experimental), W6-B `e7fbc37` (agente Bridge de solo lectura con firma
+  por dispositivo), W6-C `5c51090` (Auto Mapper) y W6-D `aa82db1` (Intelligence Gateway). Revisiones corregidas: W6-A 1 HIGH
+  (un token limitado podía emitir tokens más amplios), 5 MEDIUM y 10 LOW; W6-B 13; W6-C 7; W6-D 4 MEDIUM y 6 LOW; W6-E 2 HIGH
+  y 5 MEDIUM. Un commit por paquete: las partes de las pruebas de W6-A que necesitan el Bridge o el Gateway entran con W6-B y
+  W6-D. `dfa2d88` corrige números de documento que podían repetirse en los datos de prueba de W5 (fallos esporádicos), y la
+  prueba de punta a punta del Bridge ya no deja un candado de cola entre corridas. **En curso:** integración en el stack
+  aislado y W6-F (E2E V2.5, documentos de §21/§28, auditoría de W6 y gates finales).
 - **Límite de uso:** el 2-nov se alcanzó el límite semanal y los siete agentes se detuvieron; se reanudaron el
   3-nov desde donde quedaron (su trabajo estaba guardado, sin confirmar).
 - **Piloto:** sin cambios: falta que el propietario registre las fuentes SQL Server en la app local.
