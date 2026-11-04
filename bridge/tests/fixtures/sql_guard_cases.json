@@ -1,0 +1,1881 @@
+{
+ "_note": "Generado con el guardia PHP (backend/app/Services/Connectors/Sql/SqlQueryGuard.php) para la paridad con el puerto Python. origin=php: lo comprueban las pruebas de ambos lados; origin=python_only: dialecto sqlite, sin paralelo PHP. Para regenerarlo: python3 bridge/tests/tools/make_guard_corpus.py (ver docs/integrations/BRIDGE_WINDOWS.md §Paridad).",
+ "cases": [
+  {
+   "name": "select simple",
+   "dialect": "pgsql",
+   "sql": "SELECT a, b FROM t WHERE x >= :since",
+   "accept": true,
+   "uses_since": true,
+   "rendered": "SELECT a, b FROM t WHERE x >= <SINCE>",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "punto y coma final",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 FROM t;",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1 FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "varios punto y coma finales y comentario",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 FROM t ; ; -- fin\n",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1 FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "cte",
+   "dialect": "pgsql",
+   "sql": "WITH x AS (SELECT id FROM t) SELECT * FROM x",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "WITH x AS (SELECT id FROM t) SELECT * FROM x",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "cadena con palabras peligrosas",
+   "dialect": "pgsql",
+   "sql": "SELECT 'DROP TABLE t; --' AS nota, \"update\" FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 'DROP TABLE t; --' AS nota, \"update\" FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "identificador reservado entrecomillado",
+   "dialect": "pgsql",
+   "sql": "SELECT \"delete\", \"set\" FROM \"do\"",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT \"delete\", \"set\" FROM \"do\"",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario con palabras peligrosas",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 /* DELETE FROM t; */ FROM t -- UPDATE x\n",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1   FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "replace como función",
+   "dialect": "pgsql",
+   "sql": "SELECT replace(a, 'x', 'y') FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT replace(a, 'x', 'y') FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "cast de postgres",
+   "dialect": "pgsql",
+   "sql": "SELECT a::date FROM t WHERE b::int > 3",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT a::date FROM t WHERE b::int > 3",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario anidado de postgres",
+   "dialect": "pgsql",
+   "sql": "/* x /* anidado */ drop table t */ SELECT 1",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "mysql con backticks",
+   "dialect": "mysql",
+   "sql": "SELECT `update`, `set` FROM `t` WHERE f >= :since",
+   "accept": true,
+   "uses_since": true,
+   "rendered": "SELECT `update`, `set` FROM `t` WHERE f >= <SINCE>",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "mysql con comentario #",
+   "dialect": "mysql",
+   "sql": "SELECT 1 # nota; DROP TABLE t\n FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1  \n FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "sql server con corchetes y offset",
+   "dialect": "sqlsrv",
+   "sql": "SELECT [update], b FROM [dbo].[t] ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT [update], b FROM [dbo].[t] ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "palabra que contiene una reservada",
+   "dialect": "pgsql",
+   "sql": "SELECT created_at, updated_at, deleted_by, settings FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT created_at, updated_at, deleted_by, settings FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "porcentaje en like",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t WHERE n LIKE '%x%' AND m % 2 = 0",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT * FROM t WHERE n LIKE '%x%' AND m % 2 = 0",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "unicode en identificadores y cadenas",
+   "dialect": "pgsql",
+   "sql": "SELECT año, \"Descripción\" FROM tabla_ñ WHERE nombre = 'Pérez'",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT año, \"Descripción\" FROM tabla_ñ WHERE nombre = 'Pérez'",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "números y decimales",
+   "dialect": "pgsql",
+   "sql": "SELECT 1.5, .5, 3e10, 2.5E-3 FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1.5, .5, 3e10, 2.5E-3 FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "dolar dentro de un identificador",
+   "dialect": "pgsql",
+   "sql": "SELECT a$b FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT a$b FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "doble comilla escapada en cadena",
+   "dialect": "pgsql",
+   "sql": "SELECT 'it''s' FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 'it''s' FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "doble comilla escapada en identificador",
+   "dialect": "pgsql",
+   "sql": "SELECT \"a\"\"b\" FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT \"a\"\"b\" FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "parametro since repetido",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t WHERE a >= :since AND b >= :since",
+   "accept": true,
+   "uses_since": true,
+   "rendered": "SELECT * FROM t WHERE a >= <SINCE> AND b >= <SINCE>",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "since dentro de cadena no es parametro",
+   "dialect": "pgsql",
+   "sql": "SELECT ':since' AS x FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT ':since' AS x FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario de linea al final sin salto",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 -- fin",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "espacios y saltos de linea",
+   "dialect": "pgsql",
+   "sql": "\n\t  SELECT\n  a ,\n  b\nFROM   t\n",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT\n  a ,\n  b\nFROM   t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "join con alias",
+   "dialect": "pgsql",
+   "sql": "SELECT f.a, l.b FROM f JOIN l ON l.id = f.id LEFT JOIN c c1 ON c1.id = f.cid WHERE f.m >= :since ORDER BY f.id, l.n",
+   "accept": true,
+   "uses_since": true,
+   "rendered": "SELECT f.a, l.b FROM f JOIN l ON l.id = f.id LEFT JOIN c c1 ON c1.id = f.cid WHERE f.m >= <SINCE> ORDER BY f.id, l.n",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "order by y limit",
+   "dialect": "pgsql",
+   "sql": "SELECT a FROM t ORDER BY a LIMIT 10",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT a FROM t ORDER BY a LIMIT 10",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "mysql sin anidar comentario de bloque",
+   "dialect": "mysql",
+   "sql": "SELECT 1 /* a /* b */ FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1   FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "sqlserver comentario anidado",
+   "dialect": "sqlsrv",
+   "sql": "/* a /* b */ c */ SELECT 1 FROM [t]",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1 FROM [t]",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "sqlserver corchete con cierre escapado",
+   "dialect": "sqlsrv",
+   "sql": "SELECT [a]]b] FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT [a]]b] FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "palabra reservada como alias entre comillas",
+   "dialect": "pgsql",
+   "sql": "SELECT a AS \"into\" FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT a AS \"into\" FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "funciones comunes",
+   "dialect": "pgsql",
+   "sql": "SELECT coalesce(a, 0), upper(b), cast(c AS integer), date_trunc('day', d) FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT coalesce(a, 0), upper(b), cast(c AS integer), date_trunc('day', d) FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "sql server top",
+   "dialect": "sqlsrv",
+   "sql": "SELECT TOP (10) a FROM t WITH (NOLOCK)",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT TOP (10) a FROM t WITH (NOLOCK)",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "pg_ dentro de cadena",
+   "dialect": "pgsql",
+   "sql": "SELECT 'pg_shadow' FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 'pg_shadow' FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "information_schema dentro de comentario",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 /* information_schema */ FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT 1   FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "columna llamada sys sin punto",
+   "dialect": "pgsql",
+   "sql": "SELECT sys FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT sys FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "tabla que contiene una reservada como subcadena",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM settings_set",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT * FROM settings_set",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "comillas dobles como cadena en mysql",
+   "dialect": "mysql",
+   "sql": "SELECT \"abc\" FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT \"abc\" FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "with y select mayusculas mixtas",
+   "dialect": "pgsql",
+   "sql": "WiTh x As (SeLeCt 1) SeLeCt * FrOm x",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "WiTh x As (SeLeCt 1) SeLeCt * FrOm x",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "vacía",
+   "dialect": "pgsql",
+   "sql": "   ",
+   "accept": false,
+   "reason": "empty",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "update",
+   "dialect": "pgsql",
+   "sql": "UPDATE t SET a = 1",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "delete",
+   "dialect": "pgsql",
+   "sql": "DELETE FROM t",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "insert",
+   "dialect": "pgsql",
+   "sql": "INSERT INTO t VALUES (1)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "ddl",
+   "dialect": "pgsql",
+   "sql": "CREATE TABLE x AS SELECT 1",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "otra sentencia",
+   "dialect": "pgsql",
+   "sql": "SELECT 1; DROP TABLE t",
+   "accept": false,
+   "reason": "multi_statement",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "otra sentencia tras comentario",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 -- x\n; DELETE FROM t",
+   "accept": false,
+   "reason": "multi_statement",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "cte de escritura",
+   "dialect": "pgsql",
+   "sql": "WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "cte con insert",
+   "dialect": "pgsql",
+   "sql": "WITH i AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM i",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "select into",
+   "dialect": "pgsql",
+   "sql": "SELECT * INTO nueva FROM t",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "select into outfile (mysql)",
+   "dialect": "mysql",
+   "sql": "SELECT * FROM t INTO OUTFILE '/tmp/x'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "bloqueo de filas",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t FOR UPDATE",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "bloqueo compartido",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t FOR SHARE",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lock in share mode",
+   "dialect": "mysql",
+   "sql": "SELECT * FROM t LOCK IN SHARE MODE",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sql server apilado sin punto y coma",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 DROP TABLE t",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sql server exec",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 EXEC xp_cmdshell 'dir'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sql server waitfor",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 WAITFOR DELAY '00:00:10'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sql server openrowset",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM OPENROWSET('SQLNCLI', 'x', 'SELECT 1')",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "función de reposo",
+   "dialect": "pgsql",
+   "sql": "SELECT pg_sleep(30)",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sleep mysql",
+   "dialect": "mysql",
+   "sql": "SELECT SLEEP(30)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lectura de archivo",
+   "dialect": "pgsql",
+   "sql": "SELECT pg_read_file('/etc/passwd')",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "load_file",
+   "dialect": "mysql",
+   "sql": "SELECT LOAD_FILE('/etc/passwd')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "catálogo de credenciales",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM pg_shadow",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "catálogo entrecomillado",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM \"pg_shadow\"",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "information_schema",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM information_schema.tables",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "esquema sys",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM sys.sql_logins",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "mysql.user",
+   "dialect": "mysql",
+   "sql": "SELECT * FROM mysql.user",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "dblink",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM dblink('host=x', 'DELETE FROM t')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "nextval",
+   "dialect": "pgsql",
+   "sql": "SELECT nextval('s')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "set_config",
+   "dialect": "pgsql",
+   "sql": "SELECT set_config('x', 'y', false)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "escape con barra invertida",
+   "dialect": "pgsql",
+   "sql": "SELECT 'a\\' ; DROP TABLE t; --'",
+   "accept": false,
+   "reason": "backslash",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "dollar quoting",
+   "dialect": "pgsql",
+   "sql": "SELECT $$ ; DROP TABLE t $$",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "parámetro posicional",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t WHERE a = $1",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "parámetro interrogante",
+   "dialect": "mysql",
+   "sql": "SELECT * FROM t WHERE a = ?",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "variable de usuario",
+   "dialect": "mysql",
+   "sql": "SELECT @a := 1",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario ejecutable mysql",
+   "dialect": "mysql",
+   "sql": "SELECT /*!50000 1 */ 1",
+   "accept": false,
+   "reason": "executable_comment",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "otro parámetro nombrado",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t WHERE a = :otro",
+   "accept": false,
+   "reason": "parameter",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "cadena sin cerrar",
+   "dialect": "pgsql",
+   "sql": "SELECT 'abc",
+   "accept": false,
+   "reason": "unterminated",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario sin cerrar",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 /* abc",
+   "accept": false,
+   "reason": "unterminated",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "paréntesis que rompe el envoltorio",
+   "dialect": "pgsql",
+   "sql": "SELECT 1) t UNION ALL SELECT secreto FROM otra WHERE (1=1",
+   "accept": false,
+   "reason": "unbalanced",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "tabla temporal sql server",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM #tmp",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "demasiado larga",
+   "dialect": "pgsql",
+   "sql": null,
+   "build": {
+    "prefix": "SELECT ",
+    "unit": "1,",
+    "times": 20000,
+    "suffix": "1"
+   },
+   "accept": false,
+   "reason": "too_long",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "nul",
+   "dialect": "pgsql",
+   "sql": "SELECT 1\u0000",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "solo nul",
+   "dialect": "pgsql",
+   "sql": "\u0000",
+   "accept": false,
+   "reason": "empty",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "solo punto y coma",
+   "dialect": "pgsql",
+   "sql": ";",
+   "accept": false,
+   "reason": "empty",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "solo comentario",
+   "dialect": "pgsql",
+   "sql": "-- nada",
+   "accept": false,
+   "reason": "empty",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "empieza con paréntesis",
+   "dialect": "pgsql",
+   "sql": "(SELECT 1)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "empieza con valores",
+   "dialect": "pgsql",
+   "sql": "VALUES (1)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "show",
+   "dialect": "pgsql",
+   "sql": "SHOW server_version",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "explain",
+   "dialect": "pgsql",
+   "sql": "EXPLAIN SELECT 1",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "truncate",
+   "dialect": "pgsql",
+   "sql": "TRUNCATE t",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "drop",
+   "dialect": "pgsql",
+   "sql": "DROP TABLE t",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "grant",
+   "dialect": "pgsql",
+   "sql": "GRANT ALL ON t TO u",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "copy",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 FROM t WHERE x IN (COPY)",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "set dentro de select",
+   "dialect": "pgsql",
+   "sql": "SELECT a FROM t SET b",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "merge",
+   "dialect": "pgsql",
+   "sql": "MERGE INTO t USING s ON 1=1 WHEN MATCHED THEN DELETE",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "call",
+   "dialect": "pgsql",
+   "sql": "CALL p()",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "do",
+   "dialect": "pgsql",
+   "sql": "DO $$ BEGIN END $$",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "begin",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 BEGIN",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "commit",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 COMMIT",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "vacuum",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 VACUUM",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "use mysql",
+   "dialect": "mysql",
+   "sql": "SELECT 1 USE otra",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "handler mysql",
+   "dialect": "mysql",
+   "sql": "SELECT 1 HANDLER t OPEN",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "declare sqlserver",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 DECLARE @x int",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "print sqlserver",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 PRINT 'x'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "throw sqlserver",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 THROW 50000, 'x', 1",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "xp_ prefijo",
+   "dialect": "sqlsrv",
+   "sql": "SELECT xp_msver()",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sp_ prefijo",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM sp_who",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "fn_ prefijo",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM fn_dblog(NULL, NULL)",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sysobjects",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM sysobjects",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sysusers entrecomillado",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM [sysusers]",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "master.dbo",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM master.dbo.sysdatabases",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "tempdb",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM tempdb.dbo.t",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "msdb",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM msdb.dbo.backupset",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "performance_schema",
+   "dialect": "mysql",
+   "sql": "SELECT * FROM performance_schema.threads",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "model qualifier",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM model.dbo.t",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "get_lock",
+   "dialect": "mysql",
+   "sql": "SELECT GET_LOCK('x', 10)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "benchmark",
+   "dialect": "mysql",
+   "sql": "SELECT BENCHMARK(1000000, MD5('a'))",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lo_import",
+   "dialect": "pgsql",
+   "sql": "SELECT lo_import('/etc/passwd')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "query_to_xml",
+   "dialect": "pgsql",
+   "sql": "SELECT query_to_xml('select 1', true, false, '')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "setval",
+   "dialect": "pgsql",
+   "sql": "SELECT setval('s', 1)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "replace sin paréntesis",
+   "dialect": "pgsql",
+   "sql": "REPLACE INTO t VALUES (1)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "replace mysql insert",
+   "dialect": "mysql",
+   "sql": "SELECT replace FROM t",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "paréntesis sin cerrar",
+   "dialect": "pgsql",
+   "sql": "SELECT (1 FROM t",
+   "accept": false,
+   "reason": "unbalanced",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "paréntesis de más",
+   "dialect": "pgsql",
+   "sql": "SELECT 1) FROM t",
+   "accept": false,
+   "reason": "unbalanced",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "dos puntos solos",
+   "dialect": "pgsql",
+   "sql": "SELECT a : b FROM t",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "param con dos puntos y digito",
+   "dialect": "pgsql",
+   "sql": "SELECT :1",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "almohadilla fuera de mysql",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 # c",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "arroba",
+   "dialect": "pgsql",
+   "sql": "SELECT @x",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "corchete fuera de sqlserver",
+   "dialect": "pgsql",
+   "sql": "SELECT [a] FROM t",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "backtick fuera de mysql",
+   "dialect": "pgsql",
+   "sql": "SELECT `a` FROM t",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "identificador sqlserver sin cerrar",
+   "dialect": "sqlsrv",
+   "sql": "SELECT [abc FROM t",
+   "accept": false,
+   "reason": "unterminated",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "simbolo euro",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 € 2",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario ejecutable M!",
+   "dialect": "mysql",
+   "sql": "SELECT /*M!50000 1 */ 1",
+   "accept": false,
+   "reason": "executable_comment",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "comentario ejecutable en postgres",
+   "dialect": "pgsql",
+   "sql": "SELECT /*! 1 */ 1",
+   "accept": false,
+   "reason": "executable_comment",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "barra invertida en identificador",
+   "dialect": "pgsql",
+   "sql": "SELECT \"a\\b\" FROM t",
+   "accept": false,
+   "reason": "backslash",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "semicolon en medio con select",
+   "dialect": "pgsql",
+   "sql": "SELECT 1; SELECT 2",
+   "accept": false,
+   "reason": "multi_statement",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "select seguido de for no key update",
+   "dialect": "pgsql",
+   "sql": "SELECT * FROM t FOR NO KEY UPDATE",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lock tables",
+   "dialect": "mysql",
+   "sql": "SELECT 1 LOCK TABLES t READ",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "shutdown",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 SHUTDOWN",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "backup",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 BACKUP DATABASE x TO DISK = 'y'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "bulk",
+   "dialect": "sqlsrv",
+   "sql": "SELECT 1 BULK INSERT t FROM 'x'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "kill",
+   "dialect": "mysql",
+   "sql": "SELECT 1 KILL 3",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "load data",
+   "dialect": "mysql",
+   "sql": "SELECT 1 LOAD DATA INFILE 'x'",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "prepare",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 PREPARE x",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "notify",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 NOTIFY x",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "analyze",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 ANALYZE",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "rename",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 RENAME",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "alter",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 ALTER",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "create temp",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 CREATE",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "since sin valor no aplica a validate pero si a render",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 FROM t WHERE a > :since",
+   "accept": true,
+   "uses_since": true,
+   "rendered": "SELECT 1 FROM t WHERE a > <SINCE>",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "next value for (sql server)",
+   "dialect": "sqlsrv",
+   "sql": "SELECT NEXT VALUE FOR dbo.seq_facturas",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "next value for (mariadb)",
+   "dialect": "mysql",
+   "sql": "SELECT NEXT VALUE FOR seq_facturas",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "next value for en minúsculas y con saltos",
+   "dialect": "sqlsrv",
+   "sql": "SELECT next\n  value\tfor dbo.s",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "next value for dentro de una expresión",
+   "dialect": "pgsql",
+   "sql": "SELECT 1 + NEXT VALUE FOR s FROM t",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "fetch next sigue permitido",
+   "dialect": "sqlsrv",
+   "sql": "SELECT a FROM t ORDER BY a OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT a FROM t ORDER BY a OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "columna llamada next sigue permitida",
+   "dialect": "pgsql",
+   "sql": "SELECT next, value FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT next, value FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "next value sin for sigue permitido",
+   "dialect": "pgsql",
+   "sql": "SELECT next value FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT next value FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "receive de service broker",
+   "dialect": "sqlsrv",
+   "sql": "WITH x AS (SELECT 1 AS a) RECEIVE TOP (1) * FROM cola",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sugerencia updlock",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM t WITH (UPDLOCK)",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sugerencia holdlock",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM t WITH (HOLDLOCK)",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sugerencia xlock",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM t WITH (XLOCK, ROWLOCK)",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sugerencia tablockx",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM [t] WITH (TABLOCKX)",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "sugerencia nolock sigue permitida",
+   "dialect": "sqlsrv",
+   "sql": "SELECT * FROM t WITH (NOLOCK)",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT * FROM t WITH (NOLOCK)",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "updlock como identificador fuera de sql server",
+   "dialect": "pgsql",
+   "sql": "SELECT updlock, holdlock, receive FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT updlock, holdlock, receive FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "database_to_xml_and_xmlschema",
+   "dialect": "pgsql",
+   "sql": "SELECT database_to_xml_and_xmlschema(true, true, '')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "table_to_xml_and_xmlschema",
+   "dialect": "pgsql",
+   "sql": "SELECT table_to_xml_and_xmlschema('t', true, true, '')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "schema_to_xml_and_xmlschema",
+   "dialect": "pgsql",
+   "sql": "SELECT schema_to_xml_and_xmlschema('public', true, true, '')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "table_to_xmlschema por patrón",
+   "dialect": "pgsql",
+   "sql": "SELECT table_to_xmlschema('t', true, true, '')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "cursor_to_xmlschema por patrón",
+   "dialect": "pgsql",
+   "sql": "SELECT cursor_to_xmlschema('c', true, true, '')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "función propia con _to_xml por patrón",
+   "dialect": "pgsql",
+   "sql": "SELECT mi_funcion_to_xml(1)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "columna con _to_xml sin llamada sigue permitida",
+   "dialect": "pgsql",
+   "sql": "SELECT fila_to_xml FROM t",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT fila_to_xml FROM t",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "lowrite de objetos grandes",
+   "dialect": "pgsql",
+   "sql": "SELECT lowrite(1, 'abc')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lo_truncate de objetos grandes",
+   "dialect": "pgsql",
+   "sql": "SELECT lo_truncate(1, 0)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lo_truncate64 de objetos grandes",
+   "dialect": "pgsql",
+   "sql": "SELECT lo_truncate64(1, 0)",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "php"
+  },
+  {
+   "name": "lo_get sigue permitido (lectura)",
+   "dialect": "pgsql",
+   "sql": "SELECT lo_get(1)",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT lo_get(1)",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "currval sigue permitido (lectura)",
+   "dialect": "pgsql",
+   "sql": "SELECT currval('s')",
+   "accept": true,
+   "uses_since": false,
+   "rendered": "SELECT currval('s')",
+   "reason": null,
+   "origin": "php"
+  },
+  {
+   "name": "sqlite select simple",
+   "dialect": "sqlite",
+   "sql": "SELECT a FROM t WHERE m >= :since ORDER BY a",
+   "accept": true,
+   "reason": null,
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite pragma",
+   "dialect": "sqlite",
+   "sql": "PRAGMA table_info(t)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite select con pragma",
+   "dialect": "sqlite",
+   "sql": "SELECT 1 PRAGMA x",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite attach",
+   "dialect": "sqlite",
+   "sql": "SELECT 1 ATTACH DATABASE 'x' AS y",
+   "accept": false,
+   "reason": "forbidden_keyword",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite sqlite_master",
+   "dialect": "sqlite",
+   "sql": "SELECT * FROM sqlite_master",
+   "accept": false,
+   "reason": "system_object",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite load_extension",
+   "dialect": "sqlite",
+   "sql": "SELECT load_extension('x')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite readfile",
+   "dialect": "sqlite",
+   "sql": "SELECT readfile('/etc/passwd')",
+   "accept": false,
+   "reason": "forbidden_function",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite corchetes no",
+   "dialect": "sqlite",
+   "sql": "SELECT [a] FROM t",
+   "accept": false,
+   "reason": "invalid_character",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite comentario no anidado",
+   "dialect": "sqlite",
+   "sql": "SELECT 1 /* a /* b */ FROM t",
+   "accept": true,
+   "reason": null,
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite insert",
+   "dialect": "sqlite",
+   "sql": "INSERT INTO t VALUES (1)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite replace into",
+   "dialect": "sqlite",
+   "sql": "REPLACE INTO t VALUES (1)",
+   "accept": false,
+   "reason": "not_select",
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  },
+  {
+   "name": "sqlite cte",
+   "dialect": "sqlite",
+   "sql": "WITH x AS (SELECT 1 AS a) SELECT a FROM x",
+   "accept": true,
+   "reason": null,
+   "uses_since": null,
+   "rendered": null,
+   "origin": "python_only"
+  }
+ ]
+}

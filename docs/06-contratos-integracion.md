@@ -101,6 +101,11 @@ no tiene ninguna fila en `sales` cuando EMPIEZA la escritura (primera carga hist
 validación se muestra como proyección (`stats.ingestion_mode`, `stats.ingestion_mode_basis`); al confirmar se decide con
 las ventas existentes en ese momento y el valor resuelto queda en `import_jobs.options.ingestion_mode` (un reintento del mismo
 import conserva el modo con el que empezó). Un valor inválido, o enviarlo para otra entidad, es 422 `options.ingestion_mode`.
+`value_maps` (solo ventas, ADR-V25-24): `{document_type: {"<crudo>": "<canónico>"}, status: {...}}`, se aplican ANTES del reconocimiento de
+vocabulario (coincidencia exacta y, si no, por clave sin tildes ni mayúsculas); el destino debe ser un valor del vocabulario canónico
+(`factura`, `nota de venta`, `nota de crédito`, `otro` / `completada`, `anulada`, `pendiente`, o sus equivalentes en inglés) o es 422
+`options.value_maps.<campo>`; se registran en `metrics.transformations` y en `rules_version` del informe de calidad. Con `skip_invalid_rows`, un
+documento con hallazgos `REVIEW_REQUIRED` o `QUARANTINED` se retiene en la cuarentena (§3.14.2) en lugar de descartarse.
 
 ### 2.6 Códigos de error/advertencia de importación
 `required`, `invalid_date`, `future_date`, `invalid_number`, `negative_quantity` (warning: devolución),
@@ -109,14 +114,22 @@ import conserva el modo con el que empezó). Un valor inválido, o enviarlo para
 `document_conflict` (misma clave con distinto contenido dentro del archivo),
 `unknown_document_type` y `unknown_document_status` (**error**, `dq_class = REVIEW_REQUIRED`; antes el tipo desconocido era una
 advertencia y se contaba como venta `other`, y el estado desconocido se contaba como completada),
+`document_number_shared_with_unknown_type` (**warning**, sin `dq_class`: un documento reconocido comparte número con filas de tipo no reconocido del mismo
+archivo o lote; el documento reconocido SE ESCRIBE con sus propias líneas —la numeración suele ser por tipo o serie— y las filas de tipo desconocido siguen siendo
+error; se cuenta una vez por documento en `stats.document_number_shared_with_unknown_type`),
 `voided_document` (info), `existing_document_changed` (warning: se actualizará y la versión anterior se archiva),
 `stale_document_skipped` (warning, reporte: documentos con una versión ANTERIOR a la guardada, no se aplican),
-`updated_without_source_order` (info, reporte: actualizaciones sin fecha de registro en la fuente; gana la última carga),
+`updated_without_source_order` (info, reporte: actualizaciones sin fecha de registro en la fuente; gana la última carga; la marca almacenada se conserva),
+`unchanged_mode_mismatch` (info, reporte: documentos sin cambios cuyo modo de ingestión almacenado difiere del declarado; no se reescriben),
 `missing_dates` (reporte: días sin ventas en el rango).
 
 `dq_class` (ADR-V25-05) acompaña a los hallazgos que exigen revisión humana: `REVIEW_REQUIRED` en `unknown_document_type` y
 `unknown_document_status`, y `null` en los demás. No es una columna de `import_errors`: se deriva del código y se entrega en
 `GET /imports/{id}/errors` (`dq_class`), en `errors.csv` (columna `clase_calidad`) y en el detalle de errores de `POST /sales/batch`.
+La clase de TODOS los códigos (cinco clases: `BLOCKER`, `REVIEW_REQUIRED`, `QUARANTINED`, `WARNING`, `AUTO_FIX_SAFE`) está en el catálogo único
+`DataQualityCatalog` y en `data_quality_issues.dq_class` (`docs/data/DATA_QUALITY_ENGINE.md` §2). Códigos nuevos de W2-A: `schema_drift`,
+`date_format_ambiguous`, `documents_quarantined`, `empty_file`, `unreadable_file`, `bronze_capture_failed`, `source_columns_missing` y las normalizaciones
+agregadas `whitespace_trimmed`, `decimal_separator_normalized`, `date_format_normalized`, `code_case_normalized`.
 
 ### 2.7 Datos de demostración
 `data/demo/` contiene datasets **ficticios** generados por `engine/predictily_engine/synthetic`
@@ -240,7 +253,7 @@ Códigos: `known_at_unknown`, `known_after_start`, `scope_ref_ignored`.
 |---|---|---|
 | GET | `/sales` [T] | query `date_from, date_to, branch_id, status, document_type, page` → `[{id, document_type, document_number, status, issued_at, sale_date, branch:{id,code,name}, total, items_count}]` |
 | GET | `/sales/{id}` [T] | con `items` |
-| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
+| POST | `/sales/batch` [T] `imports.manage` | `{ingestion_mode?: backfill\|incremental, documents:[{document_number, document_type?, status?, issued_at, branch_code, currency?, channel?, customer_code?, source_recorded_at?, items:[{product_sku, product_name?, category?, quantity, unit_price, discount?, tax?, unit_cost?, line_number?}]}]}` (máx. 500 docs) → `{data:{created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, bronze_object_id, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}}` — el cuerpo se guarda íntegro en Bronze (`api_batch`) ANTES de normalizar y cada documento escrito lleva `bronze_object_id`, `source_row` (posición en el lote) y `schema_version`; si Bronze no está disponible: 409 `bronze_unavailable` y no se procesa nada. Idempotente por `(document_type, document_number)`. `ingestion_mode` por defecto `incremental` (`ingestion_mode_basis = api_default`); `backfill` declara una carga histórica. Un documento existente con contenido distinto archiva su versión vigente; si `source_recorded_at` es ANTERIOR al almacenado se descarta (`stale_skipped`) sin escribir nada. 422 solo si no hay ningún documento válido ni descartado por versión anterior |
 | GET | `/sales/summary` [T] | query `date_from, date_to, branch_id, category_id, product_id, granularity(day|week|month)` → `{data:{series:[{period, units, revenue, documents}], totals:{units, revenue, documents, returns_units}}}` (excluye anuladas) |
 
 ### 3.6 Importaciones
@@ -255,12 +268,12 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 | PUT | `/imports/{id}/mapping` [T] | `{mapping:{campo: columna|null}, options:{...}}` → 202, pasa a `validating` (Job asíncrono). Repetible para corregir (desde `awaiting_mapping`, `validated` o `failed`) |
 | GET | `/imports/{id}/errors` [T] | query `severity, page` → `[{row_number, column, error_code, severity, message, raw_value, dq_class}]` (`dq_class` = `REVIEW_REQUIRED` en `unknown_document_type` / `unknown_document_status`; `null` en los demás) |
 | GET | `/imports/{id}/errors.csv` [T] | descarga de errores |
-| POST | `/imports/{id}/confirm` [T] | 202 → `importing` (solo desde `validated`; 409 si hay errores y `skip_invalid_rows=false`) |
+| POST | `/imports/{id}/confirm` [T] | 202 → `importing` (solo desde `validated`; 409 `has_errors` si hay errores y `skip_invalid_rows=false`; 409 `blocked_by_quality` si el informe tiene un hallazgo BLOCKER, también con `skip_invalid_rows`) |
 | POST | `/imports/{id}/reject` [T] | → `rejected` |
 | GET | `/import-templates/{entity_type}` | CSV de plantilla con encabezados canónicos |
 | GET | `/import-fields/{entity_type}` | definición de campos (para el asistente): `[{key, label, required, type, description, synonyms}]` |
 
-`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load)}, quality_report:{score, issues:[{code, severity, message, count}]}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
+`ImportJob = {id, entity_type, original_filename, file_format, file_size, status, progress, detected_columns:[string], suggested_mapping:{campo: columna}, column_mapping, options, preview:{headers:[..], rows:[[..]]}, normalized_preview:[{...}], stats:{rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_new, documents_updated, documents_unchanged, voided_documents, return_lines, date_from, date_to, missing_days, products_new, branches_new; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, ingestion_mode, ingestion_mode_basis (declared\|first_load\|subsequent_load); calidad (ADR-V25-24): documents_quarantined}, quality_report:{score, issues:[{code, severity, message, count}], summary}, error_message, created_at, validated_at, finished_at, user:{id,name}}`.
 
 ### 3.7 Fuentes de datos
 | Método | Ruta | Detalle |
@@ -275,19 +288,19 @@ Estados: `uploaded → awaiting_mapping → validating → validated → importi
 ### 3.8 Pronósticos y trabajos  (backend-analytics)
 | Método | Ruta | Detalle |
 |---|---|---|
-| POST | `/forecast-runs` [T] `forecast.run` | `{horizon_days?: 7|14|30|60|90 (def. el mayor que permita el plan), cutoff_date?: date (crea run histórico)}` → 202 `{data: ForecastRun}` (status queued) + `training_job` |
+| POST | `/forecast-runs` [T] `forecast.run` | `{horizon_days?: 7|14|15|30|60|90 (def. el mayor que permita el plan), cutoff_date?: date (crea run histórico)}` → 202 `{data: ForecastRun}` (status queued) + `training_job` |
 | GET | `/forecast-runs` [T] | paginado, más reciente primero |
 | GET | `/forecast-runs/{id}` [T] | `ForecastRun` |
 | GET | `/jobs/{id}` [T] | `TrainingJob = {id, job_type, status, stage, progress, attempts, error_message, queued_at, started_at, finished_at, duration_ms, result, forecast_run_id}`. `attempts` = intentos reales de ejecución: **lo cuenta solo el backend** (una vez por intento de la cola, `TrainingJobRecorder::markAttempt`); el motor nunca lo incrementa (un trabajo ejecutado una vez informa 1; con un reintento, 2) |
 | GET | `/forecasts/series` [T] | ver abajo |
-| GET | `/forecasts/products` [T] | query `run_id?, horizon(7|14|30|60|90), branch_id?, category_id?, search?, sort(change_pct|-change_pct|forecast_units|-forecast_units|revenue), page` → `[{product:{id,sku,name,category}, history_units (mismo nº de días previos), forecast_units, change_pct, trend: up|down|flat, forecast_revenue, lo_80, hi_80, model_family, case_label (etapa 2: caso especial de la serie o null), demand_class, wape (backtest de la serie si existe)}]`; respuesta con `horizon_support` (§3.8.1) |
+| GET | `/forecasts/products` [T] | query `run_id?, horizon(7|14|15|30|60|90), branch_id?, category_id?, search?, sort(change_pct|-change_pct|forecast_units|-forecast_units|revenue), page` → `[{product:{id,sku,name,category}, history_units (mismo nº de días previos), forecast_units, change_pct, trend: up|down|flat, forecast_revenue, lo_80, hi_80, model_family, case_label (etapa 2: caso especial de la serie o null), demand_class, wape (backtest de la serie si existe)}]`; respuesta con `horizon_support` (§3.8.1) |
 | GET | `/forecasts/categories` [T] | igual por categoría |
-| GET | `/dashboard/summary` [T] | query `horizon(7|14|30|60|90, def tenant.default_horizon_days), branch_id?` → ver abajo; añade `horizon_support` |
+| GET | `/dashboard/summary` [T] | query `horizon(7|14|15|30|60|90, def tenant.default_horizon_days), branch_id?` → ver abajo; añade `horizon_support` |
 
 `ForecastRun = {id, version, run_type, status, triggered_by, horizon_days, cutoff_date, data_from, data_to, feature_set_version, is_current, selection, summary, error_message, started_at, completed_at, created_at, training_job:{...}, config_version, data_snapshot_id, effective_config, evaluation_manifest (solo en GET /forecast-runs/{id}), envelope}` — los seis últimos son **aditivos** (etapa 2 · P1).
 
 `GET /forecasts/series` query: `run_id?` (def. vigente), `branch_id?`, `category_id?`, `product_id?`,
-`granularity` (day|week|month, def. day), `horizon` (7|14|30|60|90), `history_days` (def. 90; máx 730).
+`granularity` (day|week|month, def. day), `horizon` (7|14|15|30|60|90), `history_days` (def. 90; máx 730).
 Selección de nodo: sin filtros→`total`; branch→`branch:{b}`; category→`category:{c}`;
 branch+category→`branch_category:{b}:{c}`; product→`product:{p}`; product+branch→`series:{b}:{p}`.
 Respuesta:
@@ -328,7 +341,7 @@ Si no hay pronóstico vigente: `run:null`, KPIs de pronóstico `null` y `data_st
 
 #### 3.8.1 Etapa 2 · P1 Demanda: respaldo por horizonte y envoltura
 
-- **`horizon_support`** (series, productos, categorías y dashboard): `{horizon, status, reasons[{code,message}], history_days,
+- **`horizon_support`** (series, productos, categorías y dashboard): `{horizon, status, reasons[{code, reason_code, message}], history_days,
   required_history_days, backtest_horizon_days, independent_holdout, evaluated_obs}`. `status`: `ok` · `degraded` (sin período final
   independiente) · `insufficient_data` (historia < 2×H o backtest sin ventanas de H días: el número existe pero **no debe presentarse como
   completo**) · `not_computed` (H mayor que el horizonte de la ejecución) · `unknown` (ejecución anterior a la etapa 2).
@@ -346,9 +359,48 @@ Si no hay pronóstico vigente: `run:null`, KPIs de pronóstico `null` y `data_st
 |---|---|---|
 | GET | `/accuracy/summary` [T] | query `run_id?` → `{data:{run, backtest:{selected:{wape,mae,rmse,bias,coverage_80,coverage_95}, baseline:{...}, by_horizon:[{horizon_days, wape, baseline_wape}], by_demand_class:[...], by_branch:[...], models:[{model_family, wape, is_baseline, is_selected}]}, realized:{wape, mae, bias, n_obs, by_run:[{run_id, version, wape, n_obs}]}, explanation:[string], **evaluation_manifest, horizon_support{7..90}, p50** (aditivos)}}`; `backtest.selected|baseline` añaden `mase, rmsse, pinball{p10,p50,p90}, interval_width{80,95}, money{currency,wape,mae,bias,actual_total,forecast_total,n_obs}, sample{n_obs,n_series,n_windows,exclusions}`; `backtest.by_horizon` usa los tramos `h1-7,h8-14,h15-30,h31-60,h61-90` y `backtest.by_horizon_total:[{horizon_days,wape,baseline_wape,bias,mae,money,n_obs}]` el error del total de H días |
 | GET | `/accuracy/comparison` [T] | query `run_id*, branch_id?, category_id?, product_id?` → `{data:{points:[{date, yhat, lo_80, hi_80, actual|null}], metrics:{wape, mae, bias, n_obs}}}` real vs pronosticado de una ejecución pasada |
-| GET | `/model-evaluations` [T] | query `run_id*, evaluation_type?, level? (incl. horizon_total, total)` → filas de `model_evaluations` con `metrics` (jsonb) |
+| GET | `/model-evaluations` [T] | query `run_id*, evaluation_type?, level? (incl. horizon_total, total)` → filas de `model_evaluations` con `metrics` (jsonb). Vista clásica: `level=segment` y `evaluation_type=shadow_prospective` (V2.5 · W3) solo salen si se piden explícitamente; el detalle de calidad está en §3.9.1 |
 | GET | `/models` [T] | `model_registry` de la empresa; query `status?` (nuevo: `candidate|validated|production|retired|failed`, o legado: `fallback|archived|rejected`), `role? (primary|fallback)`, `core?`, `run_id?` → `[{id, version, model_family, strategy_level, status, legacy_status, core, role, demand_class, artifact_sha256, artifact_compat, validated_at, trained_at, training_data_from, training_data_to, series_count}]` |
 | POST | `/models/demand/rollback` [T] `forecast.run` | `{run_id}` → 200 `{data:{from_run_id, to_run_id, to_version, to_cutoff_date, to_data_snapshot_id, to_config_version, restored_model_ids[], retired_model_ids[], artifacts_verified: true|null, artifacts_verification:{verified, status, registered, checked, reason, message}, restored_models[], note}}`. Re-apunta la ejecución **vigente** a una ejecución de **producción, completada y anterior**; restaura sus modelos `retired`→`production` y retira los actuales; auditoría `models.demand_rolled_back`. 404 (ejecución inexistente o de otra empresa), 409 con `code`: `no_current_run`, `rollback_already_current`, `rollback_target_not_production`, `rollback_target_not_previous`, `rollback_target_without_models`, `rollback_target_without_forecasts`, `rollback_artifact_mismatch`; 422 sin `run_id`. No reentrena |
+
+#### 3.9.1 Calidad ML · evaluaciones por segmento, decisiones de promoción y shadow (V2.5 · W3-D; ADR-V25-21)
+Solo lectura, [T], habilidad `forecast.view`, aislada por empresa (`run_id`/`core_run_id` de otra empresa ⇒ **404**), paginada (`per_page` ≤ 100) y acotada por el plan: `core=customer` sin
+`features.customer` ⇒ **402** `features.customer` (y sin `core`, las filas de Customer no salen); un `horizon` fuera del plan ⇒ **402** `horizons` (sin `horizon`, esos horizontes no aparecen). Los filtros booleanos
+(`is_selected`, `is_baseline`, `is_effective`) aceptan `true`/`false` y `1`/`0`; cualquier otro valor ⇒ 422.
+
+| Estado | Qué |
+|---|---|
+| **IMPLEMENTADO / VERIFICADO** (pruebas de API contra PostgreSQL) | Los tres endpoints, sus filtros, paginación, aislamiento entre empresas, límites del plan, booleanos `true`/`false`/`1`/`0`, anulación de cifras con `insufficient_data` y de WAPE inestable (de Demand y del shadow), gates de decisiones, resumen de acuerdo entre políticas sin los alcances informativos, resolución de la ejecución vigente: `ModelQualityApiTest`, `ModelEvaluationConsumersUnchangedTest` (las vistas clásicas no cambian), `CustomerS05ApiTest`, `EffectiveConfigPromotionTest`, `TenantDataExporterW3Test`. |
+| **VERIFICADO contra filas reales del motor** (una vez, a mano, sobre las bases de pruebas de W3-D) | La forma de las filas de segmento, decisiones, shadow evaluado y Customer S05 que escribe el motor coincide con las de las pruebas; no es una prueba automática. |
+| **IMPLEMENTADO** (pruebas de componente con Vitest; **la interfaz NO se revisó en un navegador**) | Las pantallas que consumen estos endpoints (Historial de precisión, Compradores, Configuración). Su aspecto, responsive y accesibilidad con datos reales siguen sin comprobarse visualmente. |
+
+| Método | Ruta | Detalle |
+|---|---|---|
+| GET | `/models/evaluations` | query `core? (demand|customer), run_id? (forecast_run_id), core_run_id?, horizon?, evaluation_type?, level? (incl. segment), dimension? (demand_class|category|branch|volume_tier|series_age|frequency|value|tenure|history; implica level=segment), level_key? (p. ej. demand_class:smooth, h30:expected_orders, window), model_family?, is_selected?, is_baseline?, status? (ok|insufficient_data|calibrated|miscalibrated|validated|not_validated; las dos últimas, de la validación de la ventana de recompra), per_page, page` → `data:[ModelQualityEvaluation]`, `meta`, `links`. Sin `run_id`/`core_run_id`: solo la ejecución de Demand vigente y el último entrenamiento de Customer (si el plan lo incluye); sin ninguna, lista vacía. Las anteriores se piden con `run_id`/`core_run_id` |
+| GET | `/models/promotion-decisions` | query `core?, run_id?, core_run_id?, policy? (legacy|v25), scope?, decision? (promote|reject|keep_champion|publish_baseline|shadow), is_effective?, per_page, page` → `data:[PromotionDecision]`, `run:{id,version,run_type,cutoff_date,is_current}`, `summary:{governing_policy, governing_source: run_config|decisions, policies:{legacy|v25:{policy_version,decisions,effective,by_decision}}, agreement:{scopes_compared,same_served,different:[{scope_key,legacy_served_family,v25_served_family}]}}`. Sin ejecución indicada: la de Demand vigente (sin ninguna vigente, lista vacía y `run = null`; nunca todo el historial); `summary = null` si la ejecución es anterior a W3 (sin decisiones). Los alcances `horizon:<H>` de un horizonte que el plan no incluye no salen (ni en `summary`), y pedirlos con `scope=horizon:<H>` ⇒ **402** `horizons` |
+| GET | `/models/shadow-evaluations` | query `run_id? (por defecto la vigente), horizon?, level? (overall|horizon), model_family?, per_page, page` → `data:[ModelQualityEvaluation]` con `evaluation_type = shadow_prospective`, `run`, `shadow_forecasts:[{forecast_run_id, model_family, model_registry_id, served:false, n_values, n_nodes, first_target_date, last_target_date, status: evaluated|pending, n_obs_evaluated}]` (las fechas son las de las PREDICCIONES; el período evaluado va en `shadow.evaluated`). Nunca devuelve los valores pronosticados del challenger |
+
+**`ModelQualityEvaluation`** = `{id, core, forecast_run_id, core_run_id, model_registry_id, model_family, label, roles[], evaluation_type, level, level_key, segment:{dimension,value}|null, horizon_days, is_baseline,
+is_selected, status, figures_available, wape, mae, rmse, bias, coverage_80, coverage_95, n_obs, n_windows, cutoffs[], quality|null, calibration|null, shadow|null, metrics, extra, created_at}`.
+- `quality` (Demand): `{metrics_version, status, insufficient_reasons[], wape_status: ok|unstable|undefined, wape_unstable, wape_raw, denominator:{sum_actual, unit:'unidades', min_required}, alternative_metric:{name,…,used_because}|null, mase, rmsse,
+  sum_abs_error, pinball{p10,p50,p90}, interval_width{80,95}, sample{n_obs,n_series,n_windows,evaluable_days,excluded_days,total_days,evaluable_share,exclusions{stockout_days,missing_source_days,closed_days,scale_undefined}},
+  stability{status,n_windows,wape_mean,wape_std,wape_cv,unstable_across_windows}, comparison{baseline_family,verdict: better|similar|worse|not_comparable|not_available,metric: wape|aggregate_absolute_error,value,baseline_value,relative_improvement,reason}}`.
+  `comparison` solo viene en la fila del modelo servido (`model_family = selection`); el baseline es `seasonal_naive`. `metrics` es el jsonb del motor sin transformar.
+- **Denominador y cobertura siempre visibles**: `quality.denominator.sum_actual` es la Σ de lo vendido sobre los días evaluables y `quality.sample` dice cuántos días entraron y cuántos se excluyeron por clase (quiebre, fuente ausente y cierre **no son ceros observados**).
+- **Sin cifras donde no hay evidencia**: un WAPE con denominador 0 o menor que `min_required` **nunca** se publica (`wape = null`, `wape_unstable = true` y la métrica alternativa explícita en `alternative_metric`); un segmento con pocas observaciones trae
+  `status = insufficient_data`, `figures_available = false` y todas las cifras de error en `null` (la API las anula aunque la columna las trajera), con los tamaños de muestra y el denominador que explican el motivo (`insufficient_reasons`).
+- `calibration` (Customer, `level = segment`): `{status: calibrated|miscalibrated|insufficient_data, n, n_positive, base_rate, mean_predicted, mean_ratio, brier, log_loss, ece, reference_brier, brier_delta_vs_reference, reason}`; con `insufficient_data` solo quedan `n`, `n_positive` y `reason` (también se anulan `base_rate` y `mean_predicted` y las cifras del `metrics` crudo); `shadow` (evaluación prospectiva): `{served:false, wape_status: ok|unstable|undefined, wape_unstable, denominator:{sum_actual,unit,min_required}, served_wape_same_series_days, relative_improvement_vs_served, n_served_compared, sum_actual, n_series, coverage_80_n, evaluated:{first_date,last_date,n_days,n_series_days,n_series}, exclusions}`.
+  **Misma guarda de estabilidad que los segmentos**: si lo realmente vendido en lo evaluado (`denominator.sum_actual`) es menor que `demand.wape_min_denominator` (30 por defecto; el de la configuración efectiva de la ejecución si lo trae), `wape_unstable = true` y el WAPE, el sesgo, el WAPE del servido y la mejora relativa salen `null`
+  (no un «0 %» ni un «+100 %»). `evaluated` es el período REALMENTE evaluado (el motor lo escribe desde W3-D; en filas anteriores `first_date`, `last_date` y `n_days` son `null`).
+
+**`PromotionDecision`** = `{id, core, forecast_run_id, core_run_id, scope_key, scope:{type,value}, policy: legacy|v25, policy_version (SHA-256 de los parámetros), candidate_family, candidate_label, champion_family, candidate_model_registry_id, champion_model_registry_id,
+decision, is_effective, informational, served_family, planned_family, fallback_applied, gates:{nombre:{status: pass|fail|not_evaluable|not_applicable|pending, blocking, message, evidence}}, gates_summary, failed_gates[], metrics, reason, approval:{status: pending|approved, approved_by, approved_at}, decided_at, created_at}`.
+Alcances: `global`, `class:<clase de demanda>` y `horizon:<H>` (**informativo**: no gobierna lo servido). **Qué gobierna**: la política legacy por defecto (no cambia lo servido ni la demo); la V2.5 se calcula siempre y se registra como «sombra de decisión»
+(`is_effective = false`) salvo que la empresa fije `promotion.governing_policy = v25` con `PUT /tenant/core-config/promotion` (§3.14). `served_family` es lo que la política dejó servido; si el entrenamiento final recurrió a un respaldo, `planned_family` conserva la familia planeada y `fallback_applied = true`.
+La aprobación humana separada (W4 · S06) queda `pending` hasta que otra persona apruebe el modelo asociado.
+
+**Vista clásica intacta.** `GET /model-evaluations`, `GET /exports/accuracy.csv`, `GET /accuracy/summary`, `GET /forecasts/products` y `GET /customer/evaluation` **no cambian su salida** por las filas nuevas del motor: las filas `level = segment` y `evaluation_type = shadow_prospective` solo salen en los endpoints de arriba
+o si se piden explícitamente (`level=segment`, `evaluation_type=shadow_prospective` en `/model-evaluations` y en el CSV), y `/customer/evaluation` conserva su contenido anterior (la calibración por segmento y las métricas de S05 están en `/models/evaluations?core=customer`).
 
 ### 3.10 Inventario, recomendaciones y alertas
 | Método | Ruta | Detalle |
@@ -382,7 +434,7 @@ Semántica (validación 2026-10-28, F1–F3):
 | GET/POST | `/scenarios` [T] | guardar/listar escenarios `{name, horizon_days, filters, assumptions}` |
 | GET/DELETE | `/scenarios/{id}` [T] | |
 
-Petición: `{horizon_days: 7|30|90, filters:{branch_id?, category_id?, product_id?}, assumptions:{price_change_pct: -0.5..1.0, discount_pct: 0..0.9, cost_change_pct: -0.5..1.0, demand_change_pct: -0.9..2.0, lead_time_days?: 1..180, purchase_budget?: number, macro_note?: string}}`.
+Petición: `{horizon_days: 7|14|15|30|60|90, filters:{branch_id?, category_id?, product_id?}, assumptions:{price_change_pct: -0.5..1.0, discount_pct: 0..0.9, cost_change_pct: -0.5..1.0, demand_change_pct: -0.9..2.0, lead_time_days?: 1..180, purchase_budget?: number, macro_note?: string}}`.
 Respuesta:
 ```json
 {"data":{
@@ -418,20 +470,23 @@ conocido × (1+cost_change_pct). Si falta costo para productos, se informa `cost
 | GET/POST | `/data-sources/{id}/mappings`, GET `/{mapping}` [T] `datasources.manage` | consultas autorizadas: `{entity, query, field_map, options}`; cada cambio crea una versión **sin aprobar**. 422 `sql_query_rejected` (`reason`) si no es un único SELECT de solo lectura |
 | POST | `/data-sources/{id}/mappings/{mapping}/preview`, `/approve`, `/deactivate` [T] `datasources.manage` | vista previa de campos canónicos (sin importar); aprobar activa la versión; solo la aprobada sincroniza |
 | POST | `/data-sources/{id}/sync` [T] `datasources.manage` | `{entity, mode: full|incremental, ingestion_mode?: backfill\|incremental}` → 202 `SourceSync`; 409 `mapping_not_approved` / `sync_in_progress`. Job `SyncDataSource` (cola `imports`). `ingestion_mode` (solo `sales`; 422 para otra entidad): solicitud > `source_mappings.options.ingestion_mode` > regla (la primera sincronización de la fuente que trajo datos es `backfill`; las siguientes, `incremental`; una completada con 0 filas no cuenta) |
-| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, stats, error_message, started_at, finished_at}`. `watermark` = mínimo entre el máximo `source_recorded_at` LEGIBLE extraído y el inicio de la sincronización: una fecha futura o ilegible no la adelanta y se cuenta en `stats.future_recorded_at` (con `stats.recorded_at_unreadable` como parte ilegible). En ventas, `stats.ingestion_mode` e `ingestion_mode_basis` (`declared\|first_sync\|subsequent_sync`). Una marca guardada en el futuro se acota también al leerla |
+| GET | `/data-sources/{id}/syncs`, `/syncs/{id}` [T] `datasources.manage` | `SourceSync = {id, data_source_id, entity, mapping_version, mode, status: queued|running|completed|needs_review|failed, since, watermark, rows_extracted, pages, import_job_id, bronze_object_id, stats, error_message, started_at, finished_at}` (`bronze_object_id` = la extracción CRUDA guardada en Bronze antes de normalizar; `stats` incluye `transformations` y `schema`). `watermark` = mínimo entre el máximo `source_recorded_at` LEGIBLE extraído y el inicio de la sincronización: una fecha futura o ilegible no la adelanta y se cuenta en `stats.future_recorded_at` (con `stats.recorded_at_unreadable` como parte ilegible). En ventas, `stats.ingestion_mode` e `ingestion_mode_basis` (`declared\|first_sync\|subsequent_sync`). Una marca guardada en el futuro se acota también al leerla |
 | GET | `/data-coverage` [T] | `{data:[{id, entity, data_source_id, branch_id, complete_from, complete_through, basis: declared|inferred, last_ingested_at, notes}], effective:{entidad:{complete_from, complete_through, rule: declared_by_user|min_over_sources|none, basis}}}` |
 | PUT | `/data-coverage` [T] `imports.manage` | `{entity, complete_from?, complete_through*, data_source_id?, branch_id?, notes?}`; `complete_through` no puede ser futura |
 | GET | `/data-coverage/gaps` [T] `data.view` | huecos INTERNOS de cobertura (ADR-V25-23): query `entity, data_source_id, branch_id, basis, from, to` (huecos que se solapan con el rango), `per_page` → `{data:[{id, entity, data_source_id, branch_id, gap_from, gap_to, days, reason, basis, notes, created_by, created_at}], meta}`. Sus días son `missing_source`, nunca ceros; pueden solaparse (el consumidor toma la unión) |
 | POST | `/data-coverage/gaps` [T] `imports.manage` | `{entity*, gap_from*, gap_to*, data_source_id?, branch_id?, reason?, notes?}` → 201. `entity` ∈ `sales, inventory, purchases, costs, promotions, customers, commitments`; `gap_to` ≥ `gap_from` (ambos incluidos, máx. 3660 días); `data_source_id` y `branch_id` de la MISMA empresa y no dados de baja (422); `reason` ∈ `integration_outage, source_missing, migration, unknown` (defecto `unknown`); `basis` siempre `declared` (enviar `inferred` es 422). Auditoría `data_coverage.gap_declared` |
 | DELETE | `/data-coverage/gaps/{id}` [T] `imports.manage` | 204; un hueco de otra empresa responde 404. Auditoría `data_coverage.gap_deleted` |
 | GET | `/data-quality/extended` [T] | reporte ampliado: `temporal_coverage, sales_days, customer_identity, product_code_changes, price_history, units`; `?persist=1` lo guarda (`data_quality_reports`, scope `data_core`) |
+| GET | `/data-quality/quarantine`, `/data-quality/quarantine/{id}` [T] `data.view` | cuarentena de ingestión (ADR-V25-24): documentos retenidos con hallazgos REVIEW_REQUIRED / QUARANTINED; query `entity, status (pending\|released\|discarded\|superseded), import_job_id, source_sync_id, per_page` → `{data:[{id, entity, record_key, status, issue_codes, rows, import_job_id, source_sync_id, bronze_object_id, resolution, created_at, resolved_by, resolved_at}], meta}`; el detalle agrega `payload` (mínimo, sin nombres de clientes) y `findings`. Otra empresa: 404 |
+| POST | `/data-quality/quarantine/{id}/release` [T] `imports.manage` | `{value_maps?, force?}` revalida con los mapeos de valores vigentes y, si es válido, escribe con `SalesDocumentWriter` en modo `incremental` enlazado a Bronze → 200 `{data:{…, write:{state, documents, states, value_maps_added}}}`; si no, **422 `quarantine_still_invalid`** con `findings:[{source_row, code, dq_class, field, message}]`; 409 `invalid_state` si ya se resolvió o fue **superado** (`status = superseded`: una carga posterior dejó el documento bien); **409 `newer_version_exists`** (`context.current_versions`) si el documento ya está en Silver con otro contenido, escrito DESPUÉS de la cuarentena y sin orden de fuente: se descarta o se libera con `force=true` (auditado, `write.forced`) |
+| POST | `/data-quality/quarantine/{id}/discard` [T] `imports.manage` | `{reason*}` (3–500 caracteres) → 200; no escribe en Silver; auditoría `quarantine.discarded` |
 | GET | `/calendar-events` [T] | query `from, to, scope, category, status, include_public, as_of, limit`; con `as_of` solo revisiones con `known_at` ≤ corte (las de `known_at` desconocido no se devuelven) |
 | POST/PATCH/DELETE | `/calendar-events[/{id}]` [T] `catalog.manage` | alta/edición (nueva **revisión**) / cancelación; solo eventos propios (el calendario público es de solo lectura). Pasan por el importador |
 | GET | `/commitments`, `/commitments/{id}` [T] | filtros `type, status, customer_id, product_id, from, to`; `as_of` reconstruye el estado conocido al corte (`status_at_cutoff`, `pending_total`, `flags`, `known_at` efectivo = `COALESCE(known_at, ingestión)`, `known_basis: declared|ingestion`, `ingested_at`). **`as_of` de solo fecha (AAAA-MM-DD) = fin de ese día en la zona horaria de la empresa** (igual que el motor), no las 00:00 UTC: lo importado hoy sin `known_at` aparece con `as_of` = hoy (fecha local) y no con ayer; con hora explícita manda ese instante (sin zona, la de la empresa). `meta` informa `as_of` (instante efectivo), `timezone` y `as_of_basis` (`end_of_day_company_timezone`\|`instant`) |
 | POST | `/commitments` [T] `imports.manage` | `{commitment_type, external_id, issued_at, …, items:[{product_sku, quantity, quantity_fulfilled?, unit?, unit_price?, …}]}` → 201 `created` / 200 `updated|unchanged`; 422 `validation_failed` con los errores del importador |
 | POST | `/commitments/{id}/cancel` [T] `imports.manage` | `{cancelled_at?, known_at?}` → agrega una revisión; 409 `already_cancelled` |
 | GET/POST | `/warehouses`, `/unit-conversions` [T] | consulta / alta-actualización (importador). `DELETE /unit-conversions/{id}` (`catalog.manage`) |
-| GET | `/tenant/effective-config?core=` [T] | `{core, config_version, profile, precedence:[core,profile,tenant], keys:[{key,value,source}], tenant_overrides}`; 503 `engine_unavailable` |
+| GET | `/tenant/effective-config?core=` [T] | `core ∈ demand|customer|supply|cost|scenario|quality_gates|promotion` → `{core, config_version, profile, precedence:[core,profile,tenant], keys:[{key,value,source}], tenant_overrides}`; 503 `engine_unavailable`. **`promotion`** (V2.5 · W3-B/D, ADR-V25-21): `governing_policy` (`legacy` por defecto | `v25`: qué política decide lo servido) y los umbrales de la política V2.5, del shadow y de Optuna (apagado); todos «a aprobar en el piloto» |
 | PUT | `/tenant/core-config/{core}` [T] `settings.manage` | `{overrides:{…}}`; el motor valida (claves desconocidas, tipos y rangos ⇒ 422 `invalid_config`); `{}` elimina los valores de empresa |
 | GET | `/platform/extensions` [T] | perfil sectorial y proveedores que aplican a la empresa (vacío si no tiene perfil) |
 
@@ -446,10 +501,18 @@ Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calend
 - **Versiones**: un documento existente con contenido distinto archiva su versión vigente (`sales_document_revisions` / `sale_item_revisions`)
   antes de reemplazarla; `current_revision` avanza en 1 y `first_seen_at` no cambia.
 - **Orden**: una versión entrante con `source_recorded_at` ANTERIOR a la almacenada se descarta (`stale_skipped`, no se escribe nada). Sin marca
-  de tiempo en alguna de las dos gana la última ingestión (`updated_without_source_order`). Estadísticas aditivas en importaciones, lotes y
-  sincronizaciones: `stale_skipped`, `revisions_archived`, `updated_without_source_order`.
-- **Tipos y estados**: no vacíos y desconocidos ⇒ error de fila `REVIEW_REQUIRED`, no se escribe (vacío = factura / completada).
-- **Marca de agua** de las sincronizaciones: acotada al inicio de la sincronización (futuras o ilegibles = anomalía `future_recorded_at`).
+  de tiempo en alguna de las dos gana la última ingestión (`updated_without_source_order`) y la marca almacenada no se borra. Estadísticas aditivas
+  en importaciones, lotes y sincronizaciones: `stale_skipped`, `revisions_archived`, `updated_without_source_order`, `unchanged_mode_mismatch`
+  (documentos sin cambios con modo almacenado distinto del declarado: no se reescriben) y `future_recorded_at` / `recorded_at_unreadable`.
+- **Cota de `source_recorded_at`**: ahora + tolerancia (5 minutos por defecto, `predictily.imports.source_recorded_at_tolerance_minutes`), igual en
+  importaciones, `POST /sales/batch` y sincronizaciones SQL. Una marca posterior o ilegible no se guarda como orden de versión (NULL; la fila se escribe).
+- **Ventanas de conocimiento**: las de las versiones de un documento son disjuntas; una re-carga `backfill` colapsa TODA la cadena archivada del
+  documento (no solo la versión inmediata) para que ningún corte lo vea dos veces.
+- **Tipos y estados**: no vacíos y desconocidos ⇒ error de fila `REVIEW_REQUIRED`, no se escribe (vacío = factura / completada); un documento
+  reconocido con el mismo número que filas de tipo desconocido SE ESCRIBE con sus propias líneas y recibe el aviso `document_number_shared_with_unknown_type`
+  (contado en `stats` de importaciones y en `data` de `POST /sales/batch`).
+- **Marca de agua** de las sincronizaciones: acotada al inicio de la sincronización (futuras o ilegibles = anomalía `future_recorded_at`); sin fechas legibles
+  conserva la marca previa (acotada) y, en la primera sincronización, cae en el inicio de la sincronización.
 - **Huecos de cobertura**: `GET/POST /data-coverage/gaps`, `DELETE /data-coverage/gaps/{id}`.
 
 | Estado | Qué | Prueba que lo demuestra |
@@ -463,25 +526,58 @@ Importaciones nuevas (`POST /imports`): `entity_type` ∈ `commitments`, `calend
 | IMPLEMENTADO / VERIFICADO | Marca de agua acotada (futura, ilegible, marca previa envenenada) | `SqlSyncTemporalContractTest::test_a_future_recorded_at_does_not_advance_the_watermark_and_is_reported`, `::test_unreadable_recorded_at_is_an_anomaly_and_falls_back_to_the_sync_start`, `::test_a_poisoned_previous_watermark_is_bounded_when_it_is_read` |
 | IMPLEMENTADO / VERIFICADO | Huecos de cobertura: CRUD, lista blanca, rango, fuente/sucursal de la misma empresa, habilidades y aislamiento | `CoverageGapsApiTest` (8 pruebas) |
 | IMPLEMENTADO / VERIFICADO | OpenAPI al día con las rutas reales | `OpenApiRoutesTest`; `python infra/scripts/merge_openapi.py --check --strict` |
-| DISEÑADO / NO IMPLEMENTADO | Alerta tras N sincronizaciones consecutivas con 0 filas; mapeo `value_maps` de tipo/estado en archivos; cuarentena `quarantine_records` | ADR-V25-24 / paquete S01 (Data Quality Engine) |
+| IMPLEMENTADO / VERIFICADO | `value_maps` de tipo y estado en archivos y en la sincronización SQL; cuarentena `quarantine_records` (retener, listar, liberar, descartar) | `ValueMapsTest`, `QuarantineFlowTest`, `SqlIngestionQualityTest` (ver §3.14.2) |
+| DISEÑADO / NO IMPLEMENTADO | Alerta tras N sincronizaciones consecutivas con 0 filas | ADR-V25-24 / paquete S01 (Data Quality Engine) |
 | BLOQUEADO | Sincronización de MySQL y SQL Server con el contrato temporal | No hay servidor de pruebas en el entorno: solo PostgreSQL (`tested_with_test_database`); la lógica es independiente del conector |
 | NO APLICA | `ingestion_mode` en productos, inventario y demás entidades | Solo las ventas son documentos versionados; enviarlo para otra entidad es 422 |
 
+#### 3.14.2 Calidad de ingestión, Bronze, linaje y cuarentena (V2.5 · W2-A, ADR-V25-05 y ADR-V25-24) — resumen para integradores
+
+- **Bronze antes de normalizar**: el archivo subido (`file_upload`), la extracción SQL (NDJSON comprimido, `sql_extract`, solo las columnas del mapeo aprobado) y el
+  cuerpo de `POST /sales/batch` (`api_batch`) se guardan íntegros en `bronze_objects` antes de normalizar. Si el almacén falla la carga se detiene
+  (hallazgo BLOCKER `bronze_capture_failed`): importación `failed`, sincronización `failed`, lote 409 `bronze_unavailable`.
+- **Linaje Silver**: `sales.bronze_object_id`, `sales.source_row` (primera fila del documento en el origen; en lotes, posición del documento) y
+  `sales.schema_version` (`CanonicalContracts::version('sales')`); lo mismo en `sales_document_revisions` (cada revisión conserva el linaje de SU
+  versión) e `inventory_snapshots`.
+- **Informe de calidad ampliado** (importación, sincronización y lote): `data_quality_reports.{dataset, issue_counts, rules_version, metrics}` más un hallazgo por fila en
+  `data_quality_issues` (tope configurable por informe, 2000 por defecto, con la marca `truncated`); `summary` e `issues` no cambian.
+- **Cuarentena**: con `skip_invalid_rows=true` un documento de ventas con hallazgos REVIEW_REQUIRED o QUARANTINED se retiene (no se descarta) y se libera tras agregar un
+  mapeo de valores; sin `skip_invalid_rows` la confirmación se bloquea (`has_errors`). Un BLOCKER bloquea siempre (`blocked_by_quality`).
+- **Deriva de esquema**: la huella de encabezados (en SQL, con tipos) por fuente y entidad cambia ⇒ sube `schema_version` y el informe registra el WARNING `schema_drift`
+  con las columnas agregadas y quitadas (sin valores). `data_sources.schema_fingerprint` / `schema_version` reflejan la huella combinada y la versión de la fuente.
+- **Reconciliación por carga**: al confirmar una importación o terminar una sincronización se crea un `reconciliation_reports` (`scope import|sync`) con las capas
+  fuente → Bronze → Silver y las discrepancias explicadas (`docs/data/LINEAGE_AND_RECONCILIATION.md` §13).
+- **Reprocesamiento**: `php artisan predictily:bronze-reprocess {id} [--force]` re-ejecuta de forma determinista un objeto Bronze de ventas; idempotente (la segunda vez, `unchanged`).
+  Si el original es viejo, no trae `source_recorded_at` y revertiría documentos escritos después de él, se detiene con un aviso (409 `reprocess_would_overwrite_newer` en el
+  servicio) y `--force` lo confirma. Su informe de calidad lleva `dataset = «<entidad>_reprocess»` para que los gates no cuenten dos veces las mismas filas.
+
 ### 3.15 Customer Core · comportamiento de compra (etapa 2 · P2) — detalle en `docs/architecture/v2/P2-comportamiento.md`
-Todas bajo `/api/v1/customer`, [T], `auth:sanctum`. Lectura `forecast.view`; entrenar/predecir `forecast.run`. Horizontes: plan ∩ {7, 30, 90} (un horizonte fuera del plan: **402**
+Todas bajo `/api/v1/customer`, [T], `auth:sanctum`. Lectura `forecast.view`; entrenar/predecir `forecast.run`. Horizontes: plan ∩ {7, 14, 15, 30, 90} (subconjunto de Customer del catálogo único; sin 60; un plan sin `features.customer` —Starter— responde **402** `features.customer` en todo el módulo; un horizonte fuera del plan: **402**
 `plan_limit_exceeded`). Toda respuesta de resultados lleva `envelope` (ADR-V2-03): `{tenant_id, run_id, core:'customer', run_version, status, as_of, horizon_start, horizon_end,
 target_definition, entity_keys, unit:'product_unit', currency, result_type, model_version, data_snapshot_id, config_version, assumptions[], limitations[], quality_status:
 ok|degraded|insufficient_data, uncertainty_source:'empirical_holdout'}`. Sin corrida completada: 200 con `data` vacío y `envelope.quality_status = insufficient_data` (abstención explícita).
 
 | Método | Ruta | Detalle |
 |---|---|---|
-| POST | `/customer/runs` `forecast.run` | `{operation: train|predict, horizons?: [7,30,90], as_of?: AAAA-MM-DD}` → **202** `CustomerRun`. `train`: entrena y evalúa (`as_of` = corte retroactivo anterior a hoy ⇒ `run_type = historical`, no se promueve). `predict`: recalcula variables a la fecha con los modelos en producción (`as_of` por defecto hoy; anterior a hoy ⇒ `historical`). **Solo una corrida `production` puede ser vigente (`is_current`) por operación; una `historical` nunca cambia `is_current` de otra ni se vuelve vigente, y las lecturas sin `run_id` (`/customer/predictions`, `/customer/evaluation`, perfil, conciliación) nunca sirven una retroactiva** (solo con `run_id` explícito). La misma regla vale para plan de abastecimiento, pronóstico de costos y demanda. Crea `core_runs` (core `customer`) + `training_jobs` (`job_type = customer_train|customer_predict`) y despacha `RunCustomerTraining`/`RunCustomerPrediction` a la cola `forecasting`. 409 `customer_run_in_progress` (una activa por operación); 402 plan; 422 validación; 429 |
+| POST | `/customer/runs` `forecast.run` | `{operation: train|predict, horizons?: [7,14,15,30,90], as_of?: AAAA-MM-DD}` → **202** `CustomerRun`. `train`: entrena y evalúa (`as_of` = corte retroactivo anterior a hoy ⇒ `run_type = historical`, no se promueve). `predict`: recalcula variables a la fecha con los modelos en producción (`as_of` por defecto hoy; anterior a hoy ⇒ `historical`). **Solo una corrida `production` puede ser vigente (`is_current`) por operación; una `historical` nunca cambia `is_current` de otra ni se vuelve vigente, y las lecturas sin `run_id` (`/customer/predictions`, `/customer/evaluation`, perfil, conciliación) nunca sirven una retroactiva** (solo con `run_id` explícito). La misma regla vale para plan de abastecimiento, pronóstico de costos y demanda. Crea `core_runs` (core `customer`) + `training_jobs` (`job_type = customer_train|customer_predict`) y despacha `RunCustomerTraining`/`RunCustomerPrediction` a la cola `forecasting`. 409 `customer_run_in_progress` (una activa por operación); 402 plan; 422 validación; 429 |
 | GET | `/customer/runs?operation&status`, `/customer/runs/{id}` | `CustomerRun = {id, operation, version, run_type: production|historical, status: queued|running|completed|failed, quality_status, result_type, triggered_by, as_of, horizons, is_current, config_version, data_snapshot_id, model_versions, summary, assumptions[], limitations[], error_message, started_at, completed_at, created_at, envelope, training_job}`. Pagina; otra empresa ⇒ 404 |
 | GET | `/customer/predictions?horizon&customer_id&product_id&min_probability&order_by=probability|expected_quantity|expected_amount|quantity_if_purchase&direction&run_id&per_page&page` | corrida de predicción vigente (o `run_id`). Fila: `{customer:{id,code}, product:{id,sku,name,unit}, horizon_days, as_of, purchase_probability, calibration_status: calibrated|degraded|uncalibrated, probability_coherence_adjusted, quantity_if_purchase, quantity_interval:{lo,hi,level:0.8,method}, expected_quantity, committed_quantity, incremental_quantity, total_view_quantity, expected_amount:{value,currency,assumed_unit_price,basis}, median_interval_days, days_since_last_purchase, n_purchases, model:{family,role: primary|fallback}, quality_flags[]}` + `envelope` + `ranking_source` (fuente del ranking del horizonte) + `definitions`. 422 `horizon_not_available` (la corrida se abstuvo de ese horizonte); `customer_id`/`product_id` de otra empresa ⇒ 422 |
 | GET | `/customer/customers/{id}/profile?horizon` | `{customer, status: predicted|no_individual_prediction|no_candidate_relations|no_prediction_run, fallback, as_of, activity:{last_purchase_date, days_since_last_purchase, n_purchase_days, purchase_frequency_per_30d, median_interval_days, mean_interval_days, inactivity:{status: active|at_risk|inactive_by_pattern|insufficient_history, risk, interval_p75_days, interval_p90_days, n_intervals, definition}, behavior_change:{status: increase|decrease|stable|insufficient_history, frequency_ratio, p_value, spend_ratio}}, rankings:{"7":[{rank, ranking_source, ranking_score, product, purchase_probability, expected_quantity, expected_amount}], …}, ranking_sources:{"7":"popularity", …}, ranking_source_note}`. `ranking_source` ∈ `model|popularity|recency`: fuente decidida en el holdout (regla `cust-ranking-v1`, ADR-P2-01; popularidad por defecto). Genérico o sin historial ⇒ `no_individual_prediction` + `fallback` (residual de la reconciliación). 404 si no es de la empresa |
 | GET | `/customer/evaluation?horizon&run_id` | entrenamiento vigente (o `run_id`): `{run_id, as_of, manifest:{protocol_version, labels_mature_through, final_holdout_policy, horizons:{H:{status, tier, blocks:{train,calibration,selection,holdout:{cutoff_from,cutoff_to,label_window_from,label_window_to,n_cutoffs}}, block_rows, block_positives, promotion, …}}, coherence}, metrics:{"h30:probability":[{model_family, evaluation_type: holdout|selection, is_baseline, is_selected, n_obs, mae, bias, wape, rmse, metrics:{brier, log_loss, pr_auc, ece, calibration_curve:[{n, mean_predicted, observed_rate, observed_lo95, observed_hi95}]}, extra}], "h30:quantity_if_purchase", "h30:expected_quantity", "h30:expected_amount", "h30:ranking", "coherence", "inactivity", "frequency"}, models, summary, notes[]}`. Solo horizontes del plan |
 | POST | `/models/customer/rollback` `forecast.run` (fuera del prefijo `/customer`) | `{model_registry_id}` → 200 `{restored:{id,version,model_family,role,status}, slot, horizon_days, objective, retired:[{id,version,model_family}], artifact_sha256_verified: true|null, artifact_verification:{verified, status: verified|partially_verified|not_verifiable|no_artifacts, registered, checked, reason: artifacts_dir_not_configured|artifacts_dir_not_accessible|artifact_files_not_found|null, message}, ranking_source, note}`. Re-sirve una versión `validated|retired` del core `customer` y retira la de producción **del mismo slot** (`hyperparameters.slot`); auditoría `models.customer_rolled_back`. 404 (otra empresa/otro core/inexistente), 402 (horizonte fuera del plan), 409: `rollback_already_current`, `rollback_target_not_restorable`, `rollback_target_without_slot`, `rollback_target_without_artifact`, `rollback_target_incompatible`, `rollback_artifact_mismatch`; 422 validación |
 | GET | `/customer/reconciliation?horizon&status=ok|inconsistent|aggregate_unavailable|aggregate_incomplete&product_id&run_id` | por producto: `{product, status, severity, aggregate_quantity, aggregate_days, buyers_total_quantity, buyers_committed_quantity, buyers_incremental_quantity, buyers_expected_quantity, n_buyers, committed_outside_model, residual_quantity, residual_share, excess_quantity, excess_ratio}` + `summary.status_counts` + `policy`. Inconsistentes primero |
+
+#### 3.15.1 Cantidades de S05: nº de pedidos, cantidad por pedido, unidades y ventana de recompra (V2.5 · W3-D; ADR-V25-11)
+`GET /customer/predictions` y el perfil del comprador (`rankings.<H>[]` de `GET /customer/customers/{id}/profile`) agregan, **sin cambiar ni quitar ningún campo anterior**:
+`expected_orders` (E(nº de pedidos en H), de un modelo de conteo propio; no se deriva de la probabilidad), `quantity_per_order` (E(cantidad por pedido | ocurre)), `expected_units` (= `expected_orders` × `quantity_per_order` bajo independencia documentada; difiere de `expected_quantity`, que supone un solo evento),
+`window:{status, p10_days, p50_days, p90_days}`, `segment` (p. ej. `frequency:high`) y, en el perfil, `quality_flags[]`. `expected_quantity = P × quantity_if_purchase` se conserva por compatibilidad.
+- **Ventana**: cuantiles del tiempo hasta la siguiente compra contado desde `as_of`; **nunca un día exacto**. `window.status`: `estimated` y `overdue` (atrasado respecto a su patrón; no es abandono) traen cifras; `insufficient_data` (historial insuficiente o sin cobertura validada por el motor), `censored` (producto sin stock al corte) y `null` (corrida anterior a S05) **no traen cifras**: los cuantiles son `null`
+  (la API los anula aunque la columna los trajera). En la demo la ventana no se valida (`not_validated`) y no se publica ninguna cifra.
+- Todo valor no estimado es `null`, nunca un cero. Filtros nuevos: `order_by=expected_orders|expected_units` (nulos al final), `window_status=estimated|insufficient_data|overdue|censored` y `segment=<dimensión>:<valor>` (422 si no cumple el formato).
+- **Banderas** (`quality_flags`, significado en `docs/ml/CUSTOMER_REPURCHASE.md` §14): `orders_nested_adjusted` (modifica `expected_orders`), `cold_start`, `window_beyond_validation`, `s05_unavailable`, `s05_failed`. La UI traduce y muestra solo las que explican una cifra al usuario; las de diagnóstico del motor no se muestran.
+- Calibración por segmento y métricas de S05 del entrenamiento (`level = segment`, `h<H>:expected_orders`, `window`, …): `GET /models/evaluations?core=customer&core_run_id=…` (§3.9.1).
+- Estado: **IMPLEMENTADO / VERIFICADO** en la API (`tests/Feature/Customer/CustomerS05ApiTest.php`: campos, ventana sin cifras sin estado que la respalde, nulos sin estimación, filtros, orden con nulos al final, ficha del comprador sin inventar estimaciones y con consulta acotada a los productos del ranking). **IMPLEMENTADO** en la UI con pruebas de componente; **la interfaz NO se revisó en un navegador**.
+- La UI muestra «No estimado» con su causa cuando la fila trae `s05_unavailable` (modelo anterior a la función) o `s05_failed` (el cálculo falló en la fila): el código de diagnóstico no se muestra, solo la causa.
 
 Tablas que lee Laravel (las escribe el motor): `customer_predictions`, `customer_product_rankings` (`ranking_source`, `ranking_score`), `customer_activity`, `customer_reconciliations` (migraciones `2026_02_03_000100` y `2026_02_03_000200`).
 Programación: `predictily:customer-predict` (diaria 04:20, solo empresas con modelo en producción; **no** espera ventas nuevas) y `predictily:customer-train` (domingos 02:40, omite si no hay ventas
@@ -509,6 +605,27 @@ uncertainty_source}}`; `status` (técnico) ≠ `quality_status`.
 | POST | `/supply/causal/check` [T] `forecast.run` | verificación de requisitos causales; siempre `quality_status=insufficient_evidence`, `data.effect=null`, `estimator_enabled=false`; `conditional_simulation.available=true` |
 | POST, GET | `/supply/simulations`, `/supply/simulations/{id}` [T] | simulación histórica de operación (202, asíncrona): `days`, `review_days`, `as_of`, `seed`; resultado por política (`current`, `reference`, `planner`) con servicio, no atendido, sobrestock, días de inventario, costos y capital; `result_type=evaluation` |
 
+
+### 3.17 Revenue Radar y Agenda Comercial (V2.5 · W5-A; ADR-V25-12) — detalle y estados en `docs/decision/ECONOMIC_PRIORITIZATION.md` (sección Revenue Radar) y equivalencias V2.2 en `docs/product/LEGACY_API_COMPATIBILITY.md`
+Fachadas sobre el Customer Core y el Decision Engine (no duplican su lógica). Todas [T] bajo `/api/v1`. Lectura `forecast.view`; seguimiento `decisions.manage` (analyst, admin, owner; el viewer recibe 403); proponer oportunidades `forecast.run`. Un plan sin `features.customer` responde **402** en `/radar/*` y `/customers/{id}/…`; un horizonte fuera del plan, **402**; ids de otra empresa en filtros, **422**; una oportunidad o un comprador de otra empresa, **404**. Sin PII: solo el código del comprador (el nombre sigue cifrado). Predictily no envía mensajes ni escribe en el ERP.
+
+| Método | Ruta | Detalle |
+|---|---|---|
+| GET | `/radar/summary?horizon&kind&customer_id&product_id&seller_id&segment_id&segment&zone&category_id&state&status&as_of` | `data:{as_of, totals:{opportunities,customers,unit}, by_horizon:{"30":{opportunities,customers,by_kind,by_state:{6 estados},inventory:{known,unknown,below_expected,not_applicable},value:{scope:"customer_product",basis_code:"forecast_units_x_last_net_price",currency,attribution:{label,text},gross_value,gross_value_opportunities,contribution,contribution_opportunities,contribution_unavailable,basis},customer_level:{opportunities,customers,currency,basis_code:"observed_spend_decline",observed_spend_decline,observed_spend_decline_opportunities,basis}}}, control_withheld?, label, notes[], run_id}` + `envelope` + `definitions`. **Por horizonte y nunca sumado entre horizontes** (no hay valor, estado ni inventario totales); `totals` cuenta relaciones **distintas** (tipo, cliente, producto). `value` es el **pronóstico** de las relaciones cliente × producto; `customer_level` es la **caída observada del gasto** de recuperación y riesgo (no es pronóstico ni contribución) y **no se suma a `value`**. Rotulado «Oportunidad potencial, atribución no demostrada»; `contribution` solo suma las valoradas con costo confiable. `control_withheld` solo con `decisions.approve` y sin filtro de cliente o producto |
+| GET | `/radar/opportunities` (mismos filtros) `&order_by=score\|priority\|expected_gross_value\|expected_contribution\|probability\|as_of\|horizon_days&direction&per_page&page` | `data:[Oportunidad]`, `meta`, `envelope`, `label`, `definitions`. Oportunidad = `{id, kind: contact\|recovery\|customer_risk, entity_type, as_of, horizon_days, source_run_id, customer:{id,code,type,zone,segment}, product:{id,sku,name,unit,category}\|null, state (heredado), status (workflow), priority, score, score_formula_version, policy, probability, expected_orders (E(N) servido), quantity_per_order, expected_units, window:{status,p10_days,p50_days,p90_days}, model_segment, activity, value:{expected_gross_value, expected_contribution, cost_status: reliable\|unreliable\|unknown, cost_reasons[], action_cost, incremental_estimate, attribution:{label,text}, basis}, inventory, owner_user_id, assigned_user, experiment_group (solo con `decisions.approve`), expires_at, next_step, follow_up:{last_feedback_at,snoozed_until}}`; `value.basis_code` = `forecast_units_x_last_net_price` (cliente × producto) u `observed_spend_decline` (nivel de cliente). Lista de trabajo por defecto: vigentes y sin pedido recibido ni descartadas, **a lo sumo una accionable por alcance** (tipo, entidad, horizonte, cliente, producto; gana la que está en curso, luego la más reciente); las del **grupo de control no se listan**. Orden determinista: `score` ↓ (nulos al final), valor bruto ↓, `id` |
+| GET | `/radar/opportunities/{id}` | lo anterior más `explanation[]`, `assumptions[]`, `constraints[]`, `uncertainty`, `model_versions`, `interval`, `source`, `allowed_feedback[]` e `history[]` (eventos inmutables); `status_map:{version, table}`. Control u otra empresa: 404 |
+| POST | `/radar/opportunities/materialize` `forecast.run` | `{horizons?: [7,30,…]}` → `data:{status: completed\|partial\|no_run, run_id, as_of, horizons, policy, candidates, created, existing, failed, created_by_kind, errors[]}`. Propone al Decision Engine por `RecommendationSink::propose()` (contacto y recuperación por relación cliente × producto; la recuperación y el riesgo a nivel de cliente son del motor); idempotente. 503 `decision_engine_unavailable` si el motor no está registrado. Comando equivalente: `predictily:radar-materialize [--tenant=] [--horizon=*] [--dry-run]` (04:50) |
+| POST | `/radar/opportunities/{id}/feedback` `decisions.manage` | `{state: pendiente\|contactado\|interesado\|pedido_recibido\|pospuesto\|descartado, note?≤500, idempotency_key (8–120), snoozed_until? (obligatoria con pospuesto)}` → **201** la primera vez, **200** `replayed:true` + cabecera `Idempotent-Replayed` en el reintento exacto; **409** `idempotency_key_reused`; **422** `invalid_transition` (con `from`,`to`,`allowed`) / `opportunity_closed` / validación; 404 control u otra empresa. `data:{opportunity (detalle), event, replayed}`. Cada cambio inserta un evento `feedback` inmutable en `decision_events` (estado previo y nuevo, autor, nota enmascarada, `implied_workflow_status`, `implied_workflow_status`) y una fila `radar.feedback` en auditoría. El resultado de la sincronización con el workflow de W5-B (`workflow_sync` = `applied`/`unchanged`/`not_applicable`/`skipped`, `workflow_sync_reason`, estado antes/después) va en un **segundo evento `comment` (`kind = workflow_sync`)** y se devuelve en `data.event.workflow_sync*`; el evento de seguimiento nunca se modifica. **403** `forbidden` / `decision_segregation_of_duties` (con `required_ability`) si el estado cierra la oportunidad (`pedido_recibido`, `descartado`) y el rol no podría hacer esa transición: no se registra nada. **422** `snooze_beyond_expiry` si `snoozed_until` supera el vencimiento de la oportunidad |
+| GET | `/radar/agenda?date&…filtros&per_page&page` | `data:[{customer, opportunities_count, best_score, top_priority, states, next_action, opportunities[]}]` paginado **por cliente** (un cliente no se duplica por SKU), `date` (por defecto hoy en la zona de la empresa). Vigentes a la fecha (el día se corta en la zona horaria de la empresa); las pospuestas reaparecen desde su `snoozed_until`; sin control |
+| GET | `/customers/{id}/predictions` | alias de `GET /customer/predictions?customer_id={id}`: mismo cuerpo y envoltura (cabecera `X-Equivalent-Of`) |
+| GET | `/customers/{id}/demand?horizon&run_id` | `data:{customer, horizon_days, status, pairs, total_view_quantity (= Σ max(esperanza, comprometido)), breakdown:{expected,committed,incremental}, s05:{pairs_estimated,pairs_without_estimate,expected_orders,expected_units}, expected_amount, products[]}`; coincide con la suma de `/customer/predictions`. Sin predicción individual todo es `null` |
+| GET | `/customers/{id}/products?kind=habitual\|probable&horizon&limit` | `habitual` (compras de los últimos 365 días, base `purchase_history`) y `probable` (ranking del Customer Core con su fuente y la ventana; base `customer_core_ranking`) |
+| GET | `/customers/{id}/overview?horizon` | ficha: `purchases:{recent[],totals}`, `frequency` (ficha de actividad), `habitual_products`, `evolution` (12 meses; los meses sin compras con cero), `next_purchase_window`, `follow_up:{opportunities[],events[]}` |
+| GET | `/demand/forecasts?level=product\|category\|series&…` | alias de `/forecasts/products`, `/forecasts/categories` y `/forecasts/series`: mismo cuerpo y validación (`X-Equivalent-Of`) |
+| GET | `/supply/readiness?product_id&category_id&horizon&as_of&per_page&page` | por producto: `inventory` (disponible = existencias − reservado; tránsito aparte; `unknown` sin fotografía vigente, nunca cero), `buyers_demand`, `aggregate_demand`, `coverage_days`, `serviceable:{status: sufficient\|insufficient\|unknown, value, required_units, required_basis: max_of_buyers_and_aggregate\|identified_buyers_only\|aggregate_forecast, required_basis_note, available, reason}`: se compara con la **mayor** entre la demanda de los compradores identificados y la agregada pronosticada; con solo compradores el estado `sufficient` se rotula «solo compradores identificados» |
+
+`/models/evaluations` (§3.9.1) ya existe y se reutiliza tal cual como fachada V2.2. Estado: **IMPLEMENTADO / VERIFICADO** (`backend/tests/Feature/Radar/**`, `backend/tests/Unit/Radar/**`; `OpenApiRoutesTest`). **DISEÑADO / NO IMPLEMENTADO**: alcance por cartera del rol vendedor y rol gerente (W6); interfaz `MessageDraft` con confirmación humana (AGD-019); inmutabilidad del historial a nivel de base de datos (hoy: solo inserción por diseño de la API y del modelo, sin trigger).
+
 ## 4. API interna del motor (FastAPI)
 
 Base `ENGINE_URL`. Todas las rutas (excepto `/health`) exigen
@@ -524,13 +641,13 @@ solo en las tablas que le pertenecen (ver migración `2026_01_01_000700`). Larav
 | POST | `/v1/forecast-runs/{run_id}/execute` | ejecuta el pipeline completo (síncrono; el Job de Laravel espera con timeout `ENGINE_TIMEOUT`) |
 | POST | `/v1/tenants/{tenant_id}/readiness` | perfila series y calidad para pronóstico (rápido) |
 | POST | `/v1/tenants/{tenant_id}/evaluate-actuals` | compara pronósticos pasados con ventas reales, detecta drift |
-| GET | `/v1/capabilities` | modelos disponibles, versión del feature set, horizontes (7/14/30/60/90), cuantiles (P10=`lo_80`, P90=`hi_80`, P50 solo si se evaluó), métricas y estados de modelo |
+| GET | `/v1/capabilities` | modelos disponibles, versión del feature set, horizontes (catálogo 7/14/15/30/60/90; `horizon_catalog`), cuantiles (P10=`lo_80`, P90=`hi_80`, P50 solo si se evaluó), métricas y estados de modelo |
 
 ### 4.1 `POST /v1/forecast-runs/{run_id}/execute`
 Petición:
 ```json
 {"tenant_id": 3, "training_job_id": 41,
- "horizons": [7, 14, 30, 60, 90],
+ "horizons": [7, 14, 15, 30, 60, 90],
  "cutoff_date": null,
  "options": {"force_models": null, "max_backtest_windows": 3, "seed": 42}}
 ```
@@ -547,7 +664,7 @@ Comportamiento:
 6. Entrena el modelo final (si falla el ganador sirve el respaldo y todo lo demás se calcula para el
    modelo servido), pronostica `max(horizons)` días, calcula intervalos 80/95, reconcilia (bottom-up) y
    escribe `forecast_values` para niveles `series, product, category, branch, branch_category, total` en
-   granularidad `day` (y `week`/`month` para niveles agregados) y `horizon` (totales de 7/14/30/60/90 días
+   granularidad `day` (y `week`/`month` para niveles agregados) y `horizon` (totales de 7/14/15/30/60/90 días
    solicitados). Cada fila lleva `quality_status` (respaldo del horizonte) y, en series, `case_label` y
    `p50` (solo si se publicó). Horizontes sin respaldo: filas sin intervalo y `insufficient_data`.
 7. Escribe `model_registry`, `model_evaluations`, `recommendations` y `alerts`
@@ -561,7 +678,7 @@ Comportamiento:
    `result`. Escribe además `config_version`, `effective_config`, `data_snapshot_id` (tabla `data_snapshots`)
    y `evaluation_manifest`.
 
-Etapa 2 · P1 (resumen; detalle en `docs/architecture/v2/P1-demanda.md`): `horizons` ⊂ {7,14,30,60,90}
+Etapa 2 · P1 (resumen; detalle en `docs/architecture/v2/P1-demanda.md`): `horizons` ⊂ {7,14,15,30,60,90}
 (otro valor ⇒ 422 de validación); antes de cargar, el motor resuelve la configuración efectiva
 (`demand`: core → perfil sectorial → `tenants.settings.cores.demand`; clave desconocida ⇒ 422
 `invalid_configuration`, run `failed`) y la cobertura de ventas (`data_coverage`): el corte no supera el
@@ -577,7 +694,7 @@ Respuesta 200:
  "metrics": {"selected_wape": 0.23, "baseline_wape": 0.31},
  "warnings": ["12 series con historia escasa o menos de 28 días usan respaldo etiquetado"],
  "duration_ms": 48211, "quality_status": "ok",
- "horizon_support": {"7": "ok", "14": "ok", "30": "ok", "60": "ok", "90": "ok"}}
+ "horizon_support": {"7": "ok", "14": "ok", "15": "ok", "30": "ok", "60": "ok", "90": "ok"}}
 ```
 Errores: 404 run/tenant no coinciden · 409 run en ejecución por otro proceso · 422 configuración
 inválida (`{"code":"invalid_configuration"}`) · 422 datos insuficientes (`{"code":"insufficient_data", "message": "...", "details": {...}}`; el motor
@@ -596,7 +713,27 @@ Petición `{"training_job_id": 55, "lookback_runs": 10}` → para cada run compl
 objetivo ya observadas, inserta/actualiza `forecast_actuals` y `model_evaluations`
 (`evaluation_type='realized'`). Si el WAPE realizado supera al de backtest por más del umbral
 (`max(1.3×backtest, backtest+0.10)`) en ≥14 días observados, crea alerta `forecast_drift`
-(deduplicada por `dedup_key`). Respuesta `{"evaluated_runs": [...], "drift_detected": bool, "realized_wape": 0.27}`.
+(deduplicada por `dedup_key`). Respuesta `{"evaluated_runs": [...], "drift_detected": bool, "realized_wape": 0.27}`
+más, de forma **aditiva** (ADR-V25-03), `exclusions`.
+
+Días excluidos de las métricas realizadas y de la detección de deriva (`exclusions`, aditivo; los consumidores existentes lo ignoran). Un
+día sin ventas NO es siempre un cero: los días-serie del pronóstico que la fuente no cubre o en que la sucursal cerró no son ceros observados,
+se marcan censurados (`forecast_actuals.is_censored`) y no entran a las métricas realizadas ni al drift, así que una caída de la integración no se
+lee como un deterioro del pronóstico. Se clasifican con la misma función del entrenamiento (`profiling.days.classify_days`) y con el conocimiento
+más reciente de las declaraciones. `exclusions` es un objeto de conteos enteros por clase, presente en cada elemento de `evaluated_runs[]`
+(`evaluated_runs[].exclusions`, de ese run) y en la raíz de la respuesta (`exclusions`, suma de los runs evaluados):
+
+| Clave | Significado |
+|---|---|
+| `series_days` | series-día del pronóstico comparadas con la realidad (nivel serie) |
+| `evaluated_series_days` | series-día que SÍ entran a las métricas (no censuradas) |
+| `missing_source_days` | excluidos por `missing_source`: fuera de la cobertura declarada de la fuente (`data_coverage`), dentro de un hueco declarado o inferido (`data_coverage_gaps`) o inferidos por la regla de actividad de la sucursal |
+| `missing_source_inferred_days` | subconjunto de `missing_source_days` cuya base es `inferred` (regla, no declaración) |
+| `closed_days` | excluidos por cierre: `calendar_events.category = 'closure'` de alcance empresa o sucursal |
+| `stockout_days` | excluidos por quiebre de stock (la lógica previa a ADR-V25-03) |
+
+Los cuatro conteos de exclusión son disjuntos entre sí salvo `missing_source_inferred_days` (contenido en `missing_source_days`); `series_days = evaluated_series_days + stockout_days + missing_source_days + closed_days`.
+Los mismos conteos se guardan en `model_evaluations.extra.exclusions` de la evaluación `realized` de cada run.
 
 ### 4.4 Estados y valores permitidos que el motor escribe
 - `training_jobs.status`: queued, running, succeeded, failed · `stage`: ver migración.

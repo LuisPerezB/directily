@@ -36,7 +36,7 @@
 | 6. Archivos y artefactos | Rutas `tenants/{tenant_id}/imports|exports/...` en disco privado (no público); artefactos de modelos en `artifacts/{tenant_id}/...`; descargas mediante URL temporal firmada tras verificar permisos. | Servicios de importación/exportación, motor |
 | 7. Caché y colas | Claves de caché prefijadas con `tenant:{id}:`; nunca se cachean respuestas entre empresas. | Servicios |
 | 8. Pruebas | Pruebas automatizadas: un usuario de A no puede leer, modificar, importar, pronosticar ni exportar datos de B por ningún endpoint; el motor no lee datos de B al ejecutar A. | `tests/Feature/*Isolation*`, `engine/tests` |
-| 9. Endurecimiento futuro | **Row Level Security** de PostgreSQL con `SET app.tenant_id` por conexión y rol dedicado de solo lectura/escritura para el motor. | Backlog F4 |
+| 9. Endurecimiento adicional | **Row Level Security** de PostgreSQL con `app.tenant_id` por conexión en las tablas de ventas, detrás de la bandera `PREDICTILY_RLS_ENABLED` (apagada por defecto; V2.5 · W6-A): ver `docs/architecture/TENANT_ISOLATION.md` §4 (límites incluidos). Rol dedicado de solo lectura/escritura para el motor: pendiente. | `TenantRls`, `RowLevelSecurityTest`; rol del motor: backlog F4 |
 
 ## 3. Autenticación y sesiones
 
@@ -49,7 +49,7 @@
   revocables y mostrados una sola vez; se guarda solo su hash.
 - Limitación de intentos: nginx (10/min por IP en login/registro) + `RateLimiter` de Laravel por
   usuario/IP; bloqueo temporal tras fallos consecutivos; `auth.failed` en auditoría.
-- **Futuro:** 2FA TOTP para propietarios y administradores, SSO (OIDC/SAML) para planes empresariales.
+- **2FA TOTP (V2.5 · W6-A):** implementado (RFC 6238, códigos de recuperación, segundo factor fresco en acciones sensibles, política por empresa, obligatorio para el superadministrador en producción): `docs/security/ENTERPRISE_SECURITY.md` §5. **Futuro:** SSO (OIDC/SAML) para planes empresariales.
 
 ## 4. Roles y capacidades
 
@@ -73,6 +73,7 @@ sea miembro de ella (privacidad desde el diseño).
 | `datasources.manage` fuentes y tokens de API | — | — | ✅ | ✅ |
 | `settings.manage` configuración de la empresa | — | — | ✅ | ✅ |
 | `audit.view` bitácora de auditoría | — | — | ✅ | ✅ |
+| `models.approve` aprobar, rechazar y promover modelos del registro (aprobador distinto de quien los publica o entrena; V2.5 · W4) | — | — | ✅ | ✅ |
 | `owners.manage` asignar/quitar propietarios | — | — | — | ✅ |
 | `tenant.consent` consentimiento de entrenamiento compartido | — | — | — | ✅ |
 | `tenant.export_all` exportación completa (portabilidad) | — | — | — | ✅ |
@@ -272,7 +273,7 @@ las redes privadas). Se aplica en este orden a cada conexión (`SqlSourceConnect
    |---|---|---|
    | **Bloqueada siempre** | `0.0.0.0/8`, link-local `169.254.0.0/16` (incluye `169.254.169.254`), `192.0.0.0/24`, multicast `224.0.0.0/4`, reservado `240.0.0.0/4` (incluye broadcast), `168.63.129.16` (Azure), `100.100.100.200` (Alibaba), `::`, `fe80::/10`, `ff00::/8`, `fd00:ec2::/32` (metadatos IPv6 de AWS), 6to4 `2002::/16`, Teredo `2001::/32`, `100::/64`, NAT64 local `64:ff9b:1::/48` | **Ninguna lista las autoriza** |
    | **Loopback** | `127.0.0.0/8`, `::1` | Denegado. Solo lo autoriza una **IP literal** en `allowed_hosts` o un **CIDR** en `allowed_cidrs` (un nombre en la lista no basta) y **nunca en producción** (`APP_ENV=production`). Uso previsto: laboratorio y pruebas |
-   | **Privadas** | `10/8`, `172.16/12`, `192.168/16`, `100.64.0.0/10`, `198.18.0.0/15`, TEST-NET, `fc00::/7` (ULA), `fec0::/10`, `2001:db8::/32` y todo lo que PHP no considere de alcance global | **Denegadas por defecto.** Las autoriza figurar en `allowed_hosts` (el operador aprobó ese destino) o que la IP caiga en `PREDICTILY_SQL_ALLOWED_CIDRS` |
+   | **Privadas** | `10/8`, `172.16/12`, `192.168/16`, `100.64.0.0/10`, `198.18.0.0/15`, TEST-NET, `fc00::/7` (ULA), `fec0::/10`, `2001:db8::/32` y todo lo que PHP no considere de alcance global | **Denegadas por defecto.** Las autoriza que la IP caiga en `PREDICTILY_SQL_ALLOWED_CIDRS` o que el destino sea una **IP literal** presente en `allowed_hosts` (el operador aprobó esa IP exacta). Un **nombre** en `allowed_hosts` solo lo admite como destino; para que resuelva a una red privada hace falta además un CIDR que cubra la IP resuelta |
    | **Públicas** | el resto | Permitidas |
 
 5. **La conexión usa la IP validada** (`SqlResolvedTarget`): no hay segunda resolución, de modo que un DNS que cambia entre la validación y la conexión (*DNS
@@ -285,7 +286,7 @@ Los **mensajes de rechazo son genéricos** y no distinguen «no resuelve», «re
 | Entorno | Configuración recomendada |
 |---|---|
 | **SaaS público multiempresa** | Definir **siempre** `PREDICTILY_SQL_ALLOWED_HOSTS` (nombres exactos, separados por comas): cada alta de un cliente exige añadir su host tras verificarlo con él. Sin lista, cualquier host público es alcanzable (nunca privado, loopback ni metadatos). |
-| **ERP detrás de VPN / red privada del cliente** | Añadir el host del ERP a `PREDICTILY_SQL_ALLOWED_HOSTS` (autoriza que resuelva a una red privada) o la red del túnel a `PREDICTILY_SQL_ALLOWED_CIDRS` (p. ej. `10.20.0.0/16`), alcanzable solo por el túnel (WireGuard/IPsec) desde el servidor que ejecuta los trabajos de la cola `imports`. Preferir un túnel por cliente; nunca abrir el puerto de la base a Internet. Con solo `allowed_cidrs` (sin hosts) cualquier nombre que resuelva dentro del CIDR queda autorizado. |
+| **ERP detrás de VPN / red privada del cliente** | Añadir la red del túnel a `PREDICTILY_SQL_ALLOWED_CIDRS` (p. ej. `10.20.0.0/16`), alcanzable solo por el túnel (WireGuard/IPsec) desde el servidor que ejecuta los trabajos de la cola `imports`, y —en un SaaS multiempresa— el nombre del ERP en `PREDICTILY_SQL_ALLOWED_HOSTS`: el nombre solo conecta si resuelve DENTRO de ese CIDR (si su DNS pasara a apuntar a otra red interna, se rechaza). Alternativa sin DNS: listar la IP literal del ERP en `allowed_hosts`. Preferir un túnel por cliente; nunca abrir el puerto de la base a Internet. Con solo `allowed_cidrs` (sin hosts) cualquier nombre que resuelva dentro del CIDR queda autorizado. |
 | **Instalación dedicada de un solo cliente** | Igual que la anterior; la lista puede incluir únicamente el ERP de la empresa. |
 | **Laboratorio / pruebas** | La base local (loopback) se declara con la IP literal: `PREDICTILY_SQL_ALLOWED_HOSTS=127.0.0.1` (entorno distinto de producción). El E2E `e2e/stage2_acceptance.py` y las pruebas de sincronización lo requieren. |
 
@@ -296,9 +297,9 @@ Estado de lo que NO cubre (honesto):
 - **BLOQUEADO para verificar en este entorno**: MySQL/MariaDB y SQL Server no tienen servidor ni extensión (`pdo_sqlsrv`) aquí; para ellos solo se verifica el DSN generado
   (`SqlHostPolicyTest::test_the_validated_ip_is_pinned…`), no una conexión real. Con SQL Server y `Encrypt=1`, conectar al literal IP exige un certificado que cubra la IP o
   `trust_server_certificate`: **limitación conocida** de conectar a la IP fijada.
-- **Variable obsoleta / infraestructura pendiente del arquitecto** (fuera de los archivos de este paquete): `docker-compose.yml` y el `.env.example` de la raíz aún pasan o documentan
-  `PREDICTILY_SQL_DENY_PRIVATE` (se ignora), no pasan `PREDICTILY_SQL_ALLOWED_CIDRS` (`PREDICTILY_SQL_ALLOWED_HOSTS` sí se pasa) y la pila no declara el host del origen: el E2E
-  (`e2e/stage2_acceptance.py`) conecta a `127.0.0.1` y necesita `PREDICTILY_SQL_ALLOWED_HOSTS=127.0.0.1` en un entorno distinto de producción.
+- **Variable obsoleta (LIMPIADA)**: `PREDICTILY_SQL_DENY_PRIVATE` ya no figura en `docker-compose.yml`, en el `.env.example` de la raíz ni en `docs/architecture/v2/P3-datos.md`; `docker-compose.yml`
+  pasa ahora `PREDICTILY_SQL_ALLOWED_HOSTS` y `PREDICTILY_SQL_ALLOWED_CIDRS` (vacías por defecto). El E2E (`e2e/stage2_acceptance.py`) conecta a `127.0.0.1` y necesita
+  `PREDICTILY_SQL_ALLOWED_HOSTS=127.0.0.1` en un entorno distinto de producción: se declara al lanzar la pila (no se fija por defecto).
 - Usar TLS en la conexión a la base (`sslmode=verify-full` en PostgreSQL) cuando el trayecto no sea un túnel cifrado. Otros topes: `PREDICTILY_SQL_MAX_ROWS` (filas por sincronización) y
   paginación por cursor.
 
@@ -381,43 +382,77 @@ Las copias de seguridad siguen §10 (`BACKUP_RETENTION_DAYS`); el volumen `engin
 ## 16. Endurecimiento de cargas: XLSX / ZIP (ADR-V25-15)
 
 **Estado: IMPLEMENTADO y VERIFICADO** (defecto HIGH «Sin protección ZIP bomb» de `seguridad_ui.json`: un XLSX de 680 KB consumía 23 s de CPU dentro de la petición de subida).
-Código: `app/Services/Imports/Reading/ZipArchiveInspector.php`, `XlsxReader.php`, `UnsafeSpreadsheetException.php`, `app/Http/Requests/Core/StoreImportRequest.php`,
-`config/upload_safety.php`. Pruebas: `tests/Unit/Imports/ZipArchiveInspectorTest.php` (18) y `tests/Feature/Core/XlsxUploadHardeningTest.php` (7).
+Una revisión adversarial posterior encontró tres huecos que esta sección da por corregidos y reproducidos con pruebas: (1) la inspección confiaba en los tamaños del directorio
+central, que el atacante controla; (2) el tope de cadenas compartidas solo miraba el nombre literal `xl/sharedStrings.xml`; (3) el presupuesto de tiempo se evaluaba solo por fila.
+Código: `app/Services/Imports/Reading/ZipArchiveInspector.php`, `ZipReadGuard.php` + `GuardedZipStream.php`, `XlsxReader.php`, `UnsafeSpreadsheetException.php`, `ReaderFactory.php`,
+`app/Http/Requests/Core/StoreImportRequest.php`, `config/upload_safety.php` (y una línea en `ImportService::execute`). Pruebas: `tests/Unit/Imports/ZipArchiveInspectorTest.php` (36) y
+`tests/Feature/Core/XlsxUploadHardeningTest.php` (9); generador de libros hostiles `tests/Support/ZipFixtures.php` (admite directorios centrales falsificados).
 
-**Qué se hace.** Un XLSX es un ZIP. En la validación de la subida (`StoreImportRequest`, antes de guardar el archivo y de crear la importación) y de nuevo antes de abrirlo
-para leerlo (`XlsxReader`), `ZipArchiveInspector` lee **solo el directorio central** (`ZipArchive::statIndex`, y los 4 primeros bytes de las entradas no XML) y comprueba:
+**Qué se hace.** Un XLSX es un ZIP y su directorio central lo escribe quien sube el archivo: no se confía en lo que declara. Tres capas:
+
+1. **Metadatos (milisegundos).** En la validación de la subida (`StoreImportRequest`, antes de guardar el archivo y de crear la importación) y de nuevo antes de abrirlo para leerlo
+   (`XlsxReader`), `ZipArchiveInspector` revisa el directorio central y las partes de control (`xl/workbook.xml` y `xl/_rels/workbook.xml.rels`, leídas con tope y contadas) para
+   **resolver qué parte es cada cosa por relación**, como hace OpenSpout (hojas, cadenas compartidas, estilos), y aplica los límites de la tabla a los tamaños declarados.
+2. **Verificación real.** Cada parte se descomprime por stream **contando los bytes realmente producidos**; si superan lo declarado, o no llegan a ello, o libzip detecta un CRC distinto del declarado,
+   el libro se rechaza (`xlsx_inconsistent_entry`, 422) **antes** de que OpenSpout lo abra. La lectura se corta un byte después de lo declarado, así que un directorio que miente («256 KB que
+   declaran 2 KB y contienen 100 MB») se rechaza sin descomprimir el resto.
+3. **Guarda de la ventana interactiva** (`ZipReadGuard`, ver abajo): acota lo que OpenSpout realmente consume mientras se leen encabezados y vista previa.
 
 | Control | Valor por defecto | Variable | Código estable (HTTP) |
 |---|---|---|---|
-| Firma de ZIP, estructura, partes mínimas de un libro (`[Content_Types].xml`, `xl/workbook.xml`), nombres sin `..`/NUL/absolutos ni repetidos, suma de tamaños comprimidos ≤ archivo (entradas solapadas) | — | — | `xlsx_invalid_archive` (422) |
+| Firma de ZIP, estructura, partes mínimas de un libro (`[Content_Types].xml`, `xl/workbook.xml`, `xl/_rels/workbook.xml.rels`), nombres sin `..`/NUL/absolutos ni repetidos, suma de tamaños comprimidos ≤ archivo (entradas solapadas) | — | — | `xlsx_invalid_archive` (422) |
 | Entradas cifradas | — | — | `xlsx_encrypted` (422) |
 | Nº de entradas | 1 000 (un libro normal tiene decenas; el histórico real, 12) | `PREDICTILY_XLSX_MAX_ENTRIES` | `xlsx_too_many_entries` (422) |
 | Archivos anidados (extensión `zip`, `xlsx`, `gz`, `7z`…, o firma `PK`, gzip, RAR, 7z en entradas no XML) | — | — | `xlsx_nested_archive` (422) |
 | Tamaño descomprimido por entrada / total | 512 MB / 1 024 MB | `PREDICTILY_XLSX_MAX_ENTRY_MB`, `_TOTAL_MB` | `xlsx_uncompressed_too_large` (**413**) |
-| Cadenas compartidas (`xl/sharedStrings.xml`): el lector las carga **enteras** al abrir el libro, sin poder interrumpirse (≈ 8 MB/s medidos) | 32 MB | `PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB` | `xlsx_uncompressed_too_large` (**413**) |
+| Cadenas compartidas y estilos: el lector los carga **enteros** al abrir. El tope se aplica a la parte señalada por la relación de `workbook.xml.rels` (también `/xl/ss.xml` absoluto, otro nombre u otro tipo estricto), no al nombre literal; además se mantiene para `xl/sharedStrings.xml` | 32 MB | `PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB` | `xlsx_uncompressed_too_large` (**413**) |
 | Razón descomprimido/comprimido por entrada y global (desde 5 MB descomprimidos) | 100:1 | `PREDICTILY_XLSX_MAX_RATIO` | `xlsx_compression_ratio_exceeded` (**413**) |
+| **Contenido real distinto del declarado** (más o menos bytes, o CRC distinto) en cualquier parte | — | — | `xlsx_inconsistent_entry` (**422**) |
 
 La respuesta es JSON `{message, code, errors: {file: [message]}}` con el mensaje en español. No se crea la importación ni se guarda el archivo.
 
-**Lectura de encabezados y vista previa** (la ventana interactiva: las primeras 25 filas, que ocurre dentro de la petición): máximo de columnas por fila (500,
-`PREDICTILY_XLSX_MAX_COLUMNS`), de filas recorridas —también las vacías— hasta hallar encabezados y vista previa (20 000, `PREDICTILY_XLSX_ANALYSIS_MAX_SCANNED_ROWS`) y
-presupuesto de tiempo para el recorrido de filas (10 s con el libro ya abierto, `PREDICTILY_XLSX_ANALYSIS_TIMEOUT`); códigos `xlsx_too_many_columns`, `xlsx_header_not_found`, `xlsx_read_timeout`. Además `headers()` y `rows()`
-comparten ahora **una sola apertura** del libro (antes se cargaban dos veces las cadenas compartidas). Pasada esa ventana, la lectura completa (cola) sigue el ritmo del archivo.
+**Ventana interactiva (encabezados y vista previa).** Es lo que ocurre dentro de la petición de subida: **la apertura del libro y las primeras 25 filas no vacías**. OpenSpout abre el libro cargando las cadenas
+compartidas, recorriendo el encabezado de CADA hoja hasta `<sheetData>` y leyendo estilos bajo demanda; todo eso ocurre dentro de llamadas que no devuelven el control, así que un contador «por fila» no las
+interrumpe (el hallazgo: 63 MB de nodos antes de la primera `<row>`, 9,4 s sin activar el presupuesto). Por eso, mientras dura la ventana, `ZipReadGuard` sustituye el envoltorio `zip://` por `GuardedZipStream`
+**solo durante cada llamada a OpenSpout** (se restaura siempre, también si se aborta a mitad de lectura) y cuenta los bytes REALES que consume de cada parte:
 
-**Calibración medida (31-oct-2026).**
-- La bomba de la auditoría, regenerada en la prueba (874 KB; `sharedStrings.xml` de 200 000 183 bytes, ≈ 229:1), se rechaza en **≈ 1 ms** (`xlsx_uncompressed_too_large`, 413); sin la inspección, 22–23 s de CPU.
-- El histórico real de la ferretería demo (99 335 filas × 20 columnas) escrito como XLSX con OpenSpout: 12 entradas; con cadenas «inline» 9,8 MB comprimidos, 123,7 MB descomprimidos y razón 12,7:1 →
-  **pasa** y su análisis tarda 0,03 s. La prueba `test_the_default_limits_accept_the_real_history_profile_of_99334_lines` lo fija.
-- Con cadenas **compartidas sin deduplicar** (modo del escritor de OpenSpout) el mismo histórico tiene `sharedStrings.xml` de 86,8 MB (razón 22,5:1); abrirlo cuesta 10,4 s (el análisis tardaba 20 s al abrir el libro dos veces): **se rechaza** por el tope de 32 MB.
-  Un libro guardado por Excel deduplica las cadenas compartidas (no medido con Excel real en este entorno); si un cliente topa con el límite, puede exportar a CSV o subir `PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB`.
+- presupuesto de **tiempo de toda la ventana**, apertura incluida (10 s, `PREDICTILY_XLSX_ANALYSIS_TIMEOUT`), comprobado en cada lectura (bloques de 8 KB) → `xlsx_read_timeout` (422);
+- presupuesto de **bytes de hoja** consumidos antes de haber entregado las primeras filas (8 MB, `PREDICTILY_XLSX_ANALYSIS_MAX_SHEET_MB`) → `xlsx_header_not_found` (422);
+- rechazo de abrir como parte de datos algo que no es una hoja y supera el tope de cadenas compartidas (cubre una resolución distinta de la del inspector) y corte si una parte produce más bytes de los declarados;
+- además, máximo de columnas por fila (500, `PREDICTILY_XLSX_MAX_COLUMNS`) y de filas recorridas —también las vacías— hasta hallar encabezados y vista previa (20 000, `PREDICTILY_XLSX_ANALYSIS_MAX_SCANNED_ROWS`) → `xlsx_too_many_columns`, `xlsx_header_not_found`.
+
+`headers()` y `rows()` comparten **una sola apertura** del libro. Cerrada la ventana (25 filas entregadas) la guarda deja de instalarse y OpenSpout trabaja a su ritmo. **La lectura en cola no tiene ventana**:
+`ImportService::execute` (validación e importación) construye el lector con `xlsx_interactive = false` (`ReaderFactory`), de modo que el histórico real se importa sin límite de tiempo ni de bytes de hoja
+(solo rigen la inspección y los topes de tamaño). Prueba: `test_the_analysis_is_bounded_by_the_interactive_window_but_the_queued_validation_is_not` y `test_queue_reads_are_not_subject_to_the_interactive_window`.
+
+**Calibración medida (31-oct-2026, máquina de desarrollo con carga; `php 8.3`, `memory_limit` 128 MB).**
+- Bomba de la auditoría (874 KB; `sharedStrings.xml` de 200 000 183 bytes): rechazada por metadatos en **≈ 2 ms** (`xlsx_uncompressed_too_large`, 413); sin la inspección, 22–23 s de CPU.
+- Libros de reproducción del revisor, antes → ahora: 256 KB con `sharedStrings.xml` real de 100 MB declarado pequeño (62 s) → **2 ms** `xlsx_inconsistent_entry`; otro de 307 KB con hoja de 300 MB declarada pequeña → **2 ms**;
+  205 KB con hoja de 200 MB declarada de 2 KB (73 s) → **2 ms**; `xl/ss.xml` honesto de 40 MB (razón 40:1, 16,6 s) → **2 ms** `xlsx_uncompressed_too_large`; 63 MB de nodos antes de la primera fila en un libro honesto de 1,4 MB
+  (razón 45:1, 9,4 s) → cortado a los 8 MB consumidos en **0,77 s** `xlsx_header_not_found`.
+- Histórico real de la ferretería demo (99 334 filas × 20 columnas), dos variantes: con cadenas «inline» 12,2 MB comprimidos y 91,7 MB descomprimidos (razón 7,5:1) y con cadenas compartidas deduplicadas
+  (como Excel) 10,4 MB / 63 MB, `sharedStrings.xml` de 2,9 MB. **Pasan**: inspección con recuento real de bytes **0,09 s**; encabezados + 20 filas de vista previa **0,10 s** (inline) y **0,62 s** (compartidas, que incluye
+  cargar las cadenas); lectura completa en cola de las 99 334 filas **135 s** con la máquina cargada (123 s por el camino interactivo, que tras la ventana no instala nada): es el ritmo de OpenSpout
+  (20 000 filas: 15,5 s con OpenSpout «a pelo» frente a 16,0 s con `XlsxReader`), la guarda no añade coste medible. La prueba `test_the_default_limits_accept_the_real_history_profile_of_99334_lines` fija la inspección y la ventana.
+- **Corrección de una afirmación anterior** («≈ 4 s en el peor caso» para las cadenas compartidas): era falsa. La carga del tope de 32 MB de cadenas compartidas tarda **8 s con 30 MB** en el patrón más denso
+  (`<si><t>…</t></si>` de ≈ 26 bytes, 3,8 MB/s, pico de memoria 13 MB: OpenSpout vuelca la caché a archivos temporales) y 16,6 s con 40 MB en otro patrón (2,4 MB/s). El tope de tamaño NO acota el tiempo; lo acota el
+  presupuesto de 10 s de la ventana, que ahora cubre la apertura del libro (`test_the_interactive_time_budget_covers_loading_the_shared_strings_when_opening_the_workbook`). Los estilos se leen más rápido (30 MB en 2,3 s).
+  Tampoco es cierto que la lectura de un libro mentiroso «quedara acotada por la lectura interactiva y por `memory_limit`»: antes tardaba 62–73 s; ahora se rechaza antes de abrirlo.
+
+**Criterio de los tiempos de las pruebas.** Un rechazo temprano (metadatos, recuento que se corta al pasar de lo declarado, o guarda) tarda milisegundos o ≈ 1 s; leer el contenido hostil de verdad tardaba de 9 a 73 s. Las pruebas
+miden solo la operación bajo prueba (no la generación del libro) con un umbral de 2 s para la inspección y de 5–8 s para la guarda y la petición completa: varias veces por encima de lo medido (no dependen de una máquina ociosa) y
+varias veces por debajo de la lectura completa.
 
 **Estado de lo que NO cubre (honesto).**
 - **DISEÑADO / NO IMPLEMENTADO**: mover el análisis a la cola con timeout corto (`ImportService::analyze` sigue siendo síncrono: queda en manos del paquete dueño de la importación); verificar firmas
   («magic bytes») de los CSV; límite de filas totales del libro en la lectura completa.
-- Los errores de ZIP salen como 413/422 con código estable **antes** de guardar el archivo. Los límites de lectura (columnas, filas recorridas, tiempo) se producen dentro del análisis y
+- Los errores de ZIP salen como 413/422 con código estable **antes** de guardar el archivo. Los límites de lectura (columnas, filas recorridas, bytes de hoja, tiempo) se producen dentro del análisis y
   se manifiestan como importación `failed` con el mensaje en español en `error_message` (HTTP 201), sin código estable en la respuesta.
-- La carga de las cadenas compartidas no es interrumpible: su coste lo acota el tope de tamaño (≈ 4 s en el peor caso permitido), no el presupuesto de tiempo, que cubre el recorrido de filas.
-- La inspección confía en los tamaños del directorio central; un libro que miente sobre ellos queda acotado por la lectura interactiva (columnas, filas, tiempo) y por `memory_limit`.
+- El presupuesto de tiempo es de reloj de pared: en una máquina muy cargada un libro legítimo grande podría cortarse con `xlsx_read_timeout` (ajustable con `PREDICTILY_XLSX_ANALYSIS_TIMEOUT`). La lectura en cola no tiene ese riesgo.
+- La guarda depende de que OpenSpout (5.3.0) lea las partes por `zip://` (`XMLReader::openFileInZip`). Si una versión futura las leyera de otro modo, la guarda dejaría de aplicarse a la ventana, pero la inspección
+  previa (recuento real de bytes) seguiría vigente; las pruebas de la ventana (`…nodes_before_the_first_row…`, `…time_budget…`) fallarían, de modo que una actualización de OpenSpout no pasaría desapercibida.
+  El envoltorio de flujo es global al proceso mientras dura cada llamada a OpenSpout (se instala y restaura en `try/finally`; prueba `assertNoLeakedReaderState`).
+- La validación del CRC la hace libzip al leer cada parte hasta el final; no se calcula en PHP (`hash('crc32b')` costaría ≈ 8 veces más que descomprimir).
 - **NO APLICA**: CSV/TXT/TSV (no son contenedores comprimidos; su tope es el tamaño de subida de 20 MB) y `.xlsm`/`.xlsb`/`.xls`, que no se aceptan.
 
 ## 17. Firma de artefactos de modelos (ADR-V25-20)
@@ -448,7 +483,7 @@ clave desconocida, artefacto de otra empresa, ruta fuera del directorio, sin fir
 - **DISEÑADO / NO IMPLEMENTADO**: formatos seguros sin pickle (texto de LightGBM, parámetros en JSON); deserialización en un subproceso sin credenciales de BD; endurecimiento del contenedor del motor
   (`read_only`, `cap_drop`, `no-new-privileges`, seccomp); claves en KMS/HSM; revocación explícita de claves y comando de re-firmado de artefactos legados; rotación sin ventana de rechazo.
 - **Efecto operativo a tener en cuenta**: sin claves de firma configuradas, los modelos entrenados quedan `unsigned` y el motor **no los carga** (el Customer Core usa la referencia o se abstiene). Los modelos
-  entrenados antes de este cambio son legado sin firma: requieren `ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true` (solo local) o reentrenar con clave. La pila Docker/E2E debe aprovisionar claves.
-- **Pendiente (otros defectos de la auditoría, no cubiertos)**: confinar las rutas absolutas de filas antiguas en el verificador del backend; migrar esas filas a ruta relativa; purgar los artefactos al purgar una empresa; el backend
-  requiere `ext-sodium` (declararlo en `composer.json` y en la verificación de extensiones del `Dockerfile`).
+  entrenados antes de este cambio son legado sin firma: requieren `ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true` (solo local) o reentrenar con clave. `docker-compose.yml` ya pasa las variables de firma (sin valores secretos; la clave privada, como secreto de Compose solo para el motor, desde `ENGINE_SIGNING_PRIVATE_KEY_FILE`); las claves reales las aprovisiona el propietario.
+- **Pendiente (otros defectos de la auditoría, no cubiertos)**: confinar las rutas absolutas de filas antiguas en el verificador del backend; migrar esas filas a ruta relativa; purgar los artefactos al purgar una empresa. El backend requiere `ext-sodium`: **ya declarado** en `composer.json`
+  (`composer.lock` con el hash actualizado, sin cambiar paquetes) y comprobado en el `Dockerfile` del backend. La corrida del manifiesto se compara con la de la fila del registro en la demanda (backend); el Customer Core queda pendiente (ver `docs/ml/MODEL_REGISTRY.md` §3).
 - Los artefactos de demanda (LightGBM) se firman al guardarse, pero hoy **nunca se cargan** (defecto LOW aparte): su firma protege una futura carga y la reversión del backend.

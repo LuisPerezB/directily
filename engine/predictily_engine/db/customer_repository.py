@@ -179,7 +179,12 @@ class CustomerRepository:
 
     def excluded_sales_stats(self, through: date, generic_codes: list[str], knowledge: date | None = None) -> dict[str, Any]:
         """Líneas y unidades de ventas válidas que NO se atribuyen a un comprador modelable (anónimas/genéricas), tal como se
-        conocían al corte `through` (o a `knowledge`; misma regla de visibilidad que las compras)."""
+        conocían al corte `through` (o a `knowledge`; misma regla de visibilidad que las compras).
+
+        EXCEPCIÓN (documentada, W2-C): la visibilidad as-of se aplica a las VENTAS; los atributos del comprador (`customers.deleted_at`,
+        `is_generic`, `external_code`) se leen en su estado ACTUAL porque el Customer Core no los versiona, así que en una reconstrucción
+        histórica un cliente dado de baja DESPUÉS del corte figura aquí como `deleted_customer`. Los gates de calidad (`quality.signals.identity`)
+        calculan la misma proporción con la baja AS-OF y la prefieren; esta cuenta es su respaldo (`identity.basis` lo declara)."""
         tz = self.base.timezone()
         know = to_day(through) if knowledge is None else max(to_day(through), to_day(knowledge))
         df = self._read(
@@ -296,15 +301,20 @@ class CustomerRepository:
             run_id=forecast_run_id, pids=[int(p) for p in product_ids], as_of=as_of, h=int(horizon_days))
 
     # ── registro de modelos ──
+    # W4-B · las filas traen lo necesario para decidir si pueden servirse (`mlops.policy`, espejo de `ModelServingPolicy::basis()`):
+    # aprobación, marcas de publicación y enlaces de corrida, más el uuid de la empresa (clave `tenants/<uuid>/models/…` de lo publicado).
+    SERVING_COLUMNS = ("m.id, m.tenant_id, m.version, m.model_family, m.role, m.status, m.hyperparameters, m.artifact_path, m.artifact_sha256, "
+                       "m.artifact_compat, m.approved_at, m.approved_by, m.published_at, m.published_by, m.published_object_key, "
+                       "m.published_env, m.forecast_run_id, m.core_run_id, m.training_job_id, t.uuid::text AS tenant_uuid")
+
     def validated_references(self) -> pd.DataFrame:
         """Referencias validadas (más reciente primero): respaldo si falla el artefacto en producción."""
         return self._read(
-            "SELECT id, version, model_family, role, status, hyperparameters, artifact_path, artifact_sha256, artifact_compat "
-            "FROM model_registry WHERE tenant_id = :tenant_id AND core = 'customer' AND status IN ('validated', 'retired', 'production') "
-            "AND hyperparameters->>'kind' = 'reference' AND artifact_path IS NOT NULL ORDER BY id DESC")
+            f"SELECT {self.SERVING_COLUMNS} FROM model_registry m JOIN tenants t ON t.id = m.tenant_id "
+            "WHERE m.tenant_id = :tenant_id AND m.core = 'customer' AND m.status IN ('validated', 'retired', 'production') "
+            "AND m.hyperparameters->>'kind' = 'reference' AND (m.artifact_path IS NOT NULL OR m.published_object_key IS NOT NULL) ORDER BY m.id DESC")
 
     def production_models(self) -> pd.DataFrame:
         return self._read(
-            "SELECT id, version, model_family, role, status, hyperparameters, artifact_path, artifact_sha256, "
-            "artifact_compat, core_run_id, training_data_to FROM model_registry "
-            "WHERE tenant_id = :tenant_id AND core = 'customer' AND status = 'production' ORDER BY id")
+            f"SELECT {self.SERVING_COLUMNS}, m.training_data_to FROM model_registry m JOIN tenants t ON t.id = m.tenant_id "
+            "WHERE m.tenant_id = :tenant_id AND m.core = 'customer' AND m.status = 'production' ORDER BY m.id")

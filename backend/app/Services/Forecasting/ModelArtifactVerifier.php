@@ -65,6 +65,8 @@ final class ModelArtifactVerifier
 
     public const REASON_CORE_MISMATCH = 'artifact_core_mismatch';
 
+    public const REASON_RUN_MISMATCH = 'artifact_run_mismatch';
+
     public const REASON_SHA256_MISMATCH = 'artifact_sha256_mismatch';
 
     public const REASON_VERIFIER_UNAVAILABLE = 'signature_verifier_unavailable';
@@ -154,7 +156,7 @@ final class ModelArtifactVerifier
                 continue;
             }
             $core = is_string($model->core ?? null) && $model->core !== '' ? $model->core : null;
-            $inspection = $this->inspect($file, (int) $model->tenant_id, (string) $model->artifact_sha256, $core);
+            $inspection = $this->inspect($file, (int) $model->tenant_id, (string) $model->artifact_sha256, $core, $this->registeredRunId($model, $core));
             if (! $inspection['ok']) {
                 throw $this->rejection($model, $inspection['reason']);
             }
@@ -187,12 +189,13 @@ final class ModelArtifactVerifier
 
     /**
      * Verifica un archivo visible: SHA-256 del registro, manifiesto firmado, clave de confianza, firma Ed25519 sobre los bytes
-     * del manifiesto y coherencia (SHA-256, tamaño, nombre de archivo, empresa y —si se indica— core, igual que el motor). No
-     * deserializa nada.
+     * del manifiesto y coherencia (SHA-256, tamaño, nombre de archivo, empresa y —si se indican— core y corrida, igual que el
+     * motor). No deserializa nada.
      *
+     * @param  ?int  $runId  corrida que registró el modelo, SOLO si quien llama la conoce con certeza (ver registeredRunId())
      * @return array{ok: bool, status: string, reason: ?string, key_id: ?string}
      */
-    public function inspect(string $file, int $tenantId, string $expectedSha256, ?string $core = null): array
+    public function inspect(string $file, int $tenantId, string $expectedSha256, ?string $core = null, ?int $runId = null): array
     {
         $digest = hash_file('sha256', $file);
         if ($digest === false || ! hash_equals(strtolower($expectedSha256), $digest)) {
@@ -258,8 +261,23 @@ final class ModelArtifactVerifier
         if ($core !== null && ($manifest['core'] ?? null) !== $core) {
             return $this->rejected(self::REASON_CORE_MISMATCH);   // un artefacto firmado de otro core no se hace pasar por este modelo
         }
+        if ($runId !== null && ($manifest['run_id'] ?? null) !== $runId) {
+            return $this->rejected(self::REASON_RUN_MISMATCH);    // un artefacto firmado de otra corrida no se hace pasar por el de esta fila
+        }
 
         return ['ok' => true, 'status' => 'signed', 'reason' => null, 'key_id' => $keyId];
+    }
+
+    /**
+     * Corrida que registró el modelo, para compararla con la del manifiesto firmado. Solo donde la fila la guarda con certeza:
+     * el core de demanda inserta `forecast_run_id` una vez por corrida (versión `t<empresa>-r<corrida>-<familia>`). El Customer Core
+     * NO se compara: su registro hace `ON CONFLICT (tenant_id, version) DO UPDATE` sin actualizar `core_run_id`, así que tras
+     * reentrenar una versión la fila conserva la corrida anterior mientras el artefacto y su manifiesto son de la nueva (falso
+     * rechazo). Pendiente: actualizar `core_run_id` en ese upsert (customer/service.py) y entonces pasarlo aquí.
+     */
+    private function registeredRunId(ModelRegistry $model, ?string $core): ?int
+    {
+        return $core === 'demand' && is_numeric($model->forecast_run_id ?? null) ? (int) $model->forecast_run_id : null;
     }
 
     /** ¿Se aceptan artefactos legados SIN firma? Solo con ENGINE_ALLOW_UNSIGNED_ARTIFACTS=true (por defecto no). */

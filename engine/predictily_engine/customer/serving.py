@@ -71,3 +71,21 @@ def enforce_nested_quantity(p: dict[int, np.ndarray], q: dict[int, np.ndarray]) 
         out[h] = qh
         prev_e = p[h] * qh
     return out, stats
+
+
+def rescale_quantity_interval(q_raw: np.ndarray, q_fixed: np.ndarray, lo: np.ndarray, hi: np.ndarray
+                              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Intervalo coherente con la cantidad ajustada por `enforce_nested_quantity`.
+
+    Si la coherencia subió la cantidad condicionada (q_fixed > q_raw), el intervalo se reescala en la misma proporción
+    (la regla sube la escala de la cantidad, no su forma) y, por seguridad numérica, se amplía para contener el punto.
+    Devuelve (lo, hi, ajustado). Sin ajuste, el intervalo queda intacto."""
+    q_raw = np.asarray(q_raw, dtype=np.float64)
+    q_fixed = np.asarray(q_fixed, dtype=np.float64)
+    lo = np.asarray(lo, dtype=np.float64)
+    hi = np.asarray(hi, dtype=np.float64)
+    adjusted = q_fixed > q_raw + 1e-12
+    ratio = np.where(adjusted, q_fixed / np.maximum(q_raw, 1e-9), 1.0)
+    lo_c = np.where(adjusted, np.minimum(lo * ratio, q_fixed), lo)
+    hi_c = np.where(adjusted, np.maximum(hi * ratio, q_fixed), hi)
+    return lo_c, hi_c, adjusted

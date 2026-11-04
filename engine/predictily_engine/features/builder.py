@@ -8,19 +8,35 @@ Reglas anti-fuga temporal:
   la versión vigente ese día (`promotion_revisions.recorded_at` ≤ corte). Una promoción
   registrada o modificada después del corte no altera el pronóstico de ese corte.
 - El precio futuro NO se conoce: en la predicción (y en cada ventana de backtest) se
-  congela en el último precio neto observado hasta el corte (supuesto explícito).
+  congela en el último precio neto observado hasta el corte (supuesto explícito `frozen_price`),
+  salvo un precio futuro CONFIRMADO en `product_price_history` con `known_at` visible al corte
+  (regla de W1: `known_at` < medianoche local de C+1), que es KNOWN_IN_ADVANCE.
 - Las referencias (precio mediano, nivel medio de la serie) se calculan solo con datos
   hasta el corte.
 - Lags y medias móviles los calcula MLForecast de forma recursiva (solo pasado).
+
+Contratos de features (ADR-V25-06): CADA columna que produce el builder tiene un contrato en
+`availability/contracts.py` (clase de disponibilidad, fuente, regla temporal y datos requeridos). Una columna sin contrato
+hace fallar `training_frame` / `future_frame`. Los factores externos (`factors=`) y la omisión de features opcionales
+(`disabled_features=`, DEGRADE) son opcionales: con los valores por defecto los marcos son idénticos a los de siempre.
 """
 
 from __future__ import annotations
 
 from datetime import date
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
 
+from predictily_engine.availability.contracts import (  # noqa: F401  (PRICE_ASSUMPTION se reexporta: lo importan otros módulos)
+    PRICE_ASSUMPTION,
+    disabled_columns,
+    registry_rows,
+    validate_feature_columns,
+)
+from predictily_engine.availability.pipeline import FactorResolution
+from predictily_engine.availability.visibility import resolve_timezone, to_utc_naive, visible_mask
 from predictily_engine.calendar.ecuador import EcuadorCalendar
 from predictily_engine.config import FEATURE_SET_VERSION
 from predictily_engine.profiling.days import censored_days
@@ -30,43 +46,14 @@ COMMERCIAL_FEATURES = ["promo_discount", "price_ratio"]
 STATIC_FEATURES = ["branch_code_num", "category_num", "region_num", "series_level"]
 LAGS = [1, 7, 14, 28]
 DATE_FEATURES = ["dayofweek", "month", "day"]
-PRICE_ASSUMPTION = "último precio neto promedio observado (28 días) hasta el corte"
 
 
 def feature_registry() -> list[dict]:
-    """Definiciones registradas en forecast_features (documentación y trazabilidad)."""
-    rows = [
-        {"name": f, "kind": "calendar", "description": f"Indicador de calendario Ecuador: {f}", "config": {}}
-        for f in CALENDAR_FEATURES
-    ]
-    rows += [
-        {"name": "dayofweek", "kind": "calendar", "description": "Día de la semana", "config": {}},
-        {"name": "month", "kind": "calendar", "description": "Mes del año", "config": {}},
-        {"name": "day", "kind": "calendar", "description": "Día del mes (quincenas/fin de mes)", "config": {}},
-    ]
-    rows += [
-        {"name": f"lag{lag}", "kind": "lag", "description": f"Ventas (demanda imputada) hace {lag} días",
-         "config": {"lag": lag}} for lag in LAGS
-    ]
-    rows += [
-        {"name": "rolling_mean_lag1_w7", "kind": "rolling", "description": "Media móvil 7 días", "config": {"window": 7}},
-        {"name": "rolling_mean_lag1_w28", "kind": "rolling", "description": "Media móvil 28 días", "config": {"window": 28}},
-        {"name": "rolling_std_lag1_w28", "kind": "rolling", "description": "Desviación móvil 28 días", "config": {"window": 28}},
-        {"name": "seasonal_rolling_mean_lag7_s7_w4", "kind": "rolling",
-         "description": "Media del mismo día de semana (4 semanas)", "config": {"season": 7, "window": 4}},
-        {"name": "promo_discount", "kind": "commercial",
-         "description": "Descuento de promociones; a futuro solo las conocidas al corte (known_at y versión vigente)",
-         "config": {"availability": "as_of_cutoff"}},
-        {"name": "price_ratio", "kind": "commercial",
-         "description": "Precio neto / precio mediano de la serie; a futuro se congela en el último precio",
-         "config": {"assumption": PRICE_ASSUMPTION}},
-        {"name": "branch_code_num", "kind": "static", "description": "Sucursal", "config": {}},
-        {"name": "category_num", "kind": "static", "description": "Categoría del producto", "config": {}},
-        {"name": "region_num", "kind": "geographic", "description": "Región (Costa/Sierra) de la sucursal", "config": {}},
-        {"name": "series_level", "kind": "static", "description": "Nivel medio log de la serie hasta el corte", "config": {}},
-        {"name": "external_indicators", "kind": "external",
-         "description": "Indicadores macro as-of (desactivado por defecto; Fase 4)", "config": {"enabled": False}},
-    ]
+    """Definiciones registradas en forecast_features (documentación y trazabilidad).
+
+    Se derivan del registro de contratos (`availability/contracts.py`, fuente única): mismos nombres, tipos y descripciones que
+    siempre; la configuración de cada fila añade su clase de disponibilidad, fuente y datos requeridos."""
+    rows = registry_rows()
     for r in rows:
         r["feature_set_version"] = FEATURE_SET_VERSION
     return rows
@@ -203,10 +190,26 @@ class FeatureBuilder:
 
     def __init__(self, panel_df: pd.DataFrame, branches: pd.DataFrame, promotions: pd.DataFrame,
                  horizon_end: date, promotion_revisions: pd.DataFrame | None = None,
-                 promotions_known_on: date | None = None) -> None:
+                 promotions_known_on: date | None = None, *, factors: FactorResolution | None = None,
+                 confirmed_prices: pd.DataFrame | None = None, disabled_features: Iterable[str] = (),
+                 timezone: str | None = None) -> None:
         """`promotion_revisions`: versiones históricas (promotion_id, revision, recorded_at, deleted y alcance).
         `promotions_known_on`: día de la ejecución vigente; solo amplía lo conocido para el corte final
-        (los cortes anteriores, p. ej. del backtest, usan lo conocido en su propio día)."""
+        (los cortes anteriores, p. ej. del backtest, usan lo conocido en su propio día).
+
+        Opciones del contrato de features (ADR-V25-06; con los valores por defecto el builder no cambia):
+        - `factors`: factores externos ya resueltos (`FactorPipeline.resolve`); solo entra el que el validador declaró utilizable.
+          Apagado/ausente ⇒ ninguna columna externa.
+        - `confirmed_prices`: `product_price_history` (product_id, branch_id, price, valid_from, valid_to, known_at). Un precio futuro
+          con `known_at` visible al corte es KNOWN_IN_ADVANCE y reemplaza al supuesto `frozen_price` en esos días.
+        - `disabled_features`: features OPCIONALES a omitir (DEGRADE del gate de calidad); una imprescindible falla.
+        - `timezone`: zona de la empresa (frontera del día local de `known_at`)."""
+        self.factors = factors if factors is not None and factors.enabled else None
+        self.disabled_features = tuple(dict.fromkeys(disabled_features))
+        self._disabled_columns = disabled_columns(self.disabled_features)
+        self.timezone = resolve_timezone(timezone)
+        self.confirmed_prices = None if confirmed_prices is None or confirmed_prices.empty else confirmed_prices.copy()
+        self.future_price_info: dict[str, int] = {"series_with_confirmed_price": 0, "series_frozen_price": 0}
         self.panel_df = panel_df
         start = panel_df["ds"].min().date()
         self.horizon_end = horizon_end
@@ -228,6 +231,23 @@ class FeatureBuilder:
         if self.promotions_known_on is not None and cutoff >= self.data_end:
             return max(cutoff, self.promotions_known_on.normalize())
         return cutoff
+
+    def options(self) -> dict[str, Any]:
+        """Opciones de contrato para construir otro builder con la misma política (p. ej. cada ventana del backtest)."""
+        return {"factors": self.factors, "confirmed_prices": self.confirmed_prices, "disabled_features": self.disabled_features,
+                "timezone": self.timezone}
+
+    def _finalize(self, frame: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
+        """Omite las features deshabilitadas, agrega las columnas de factores utilizables (con lo visible al corte `cutoff`: cada
+        ventana del backtest usa lo conocido en SU corte) y exige un contrato para cada columna."""
+        if self._disabled_columns:
+            frame = frame.drop(columns=[c for c in frame.columns if c in self._disabled_columns])
+        extra = None
+        if self.factors is not None and self.factors.feature_columns:
+            frame = frame.merge(self.factors.columns_at(cutoff), on="ds", how="left")
+            extra = self.factors.contracts
+        validate_feature_columns(frame.columns, extra=extra)
+        return frame
 
     def future_promotions(self, cutoff: pd.Timestamp) -> pd.DataFrame:
         """Descuentos de los días posteriores al corte, solo con lo conocido al corte (regla as-of)."""
@@ -268,7 +288,8 @@ class FeatureBuilder:
         df["weight"] = np.where(censored_days(df), 0.0, 1.0)
         df = df.merge(self._statics(train), on="unique_id", how="left")
         cols = ["unique_id", "ds", "y", *CALENDAR_FEATURES, *COMMERCIAL_FEATURES, *STATIC_FEATURES, "weight"]
-        return df[cols].sort_values(["unique_id", "ds"]).reset_index(drop=True), ref_price
+        out = df[cols].sort_values(["unique_id", "ds"]).reset_index(drop=True)
+        return self._finalize(out, cutoff), ref_price
 
     def future_frame(self, cutoff: pd.Timestamp, ids: list[str], h: int, ref_price: pd.Series) -> pd.DataFrame:
         """Exógenas para los h días siguientes al corte (precio congelado y promociones conocidas al corte)."""
@@ -281,8 +302,58 @@ class FeatureBuilder:
         })
         df = self._exog(keys, self.future_promotions(cutoff))
         last_price = last_known_price(self.panel_df, cutoff, ids)
-        df["price_ratio"] = (df["unique_id"].map(last_price) / df["unique_id"].map(ref_price)).fillna(1.0).clip(0.2, 5.0)
-        return df[["unique_id", "ds", *CALENDAR_FEATURES, *COMMERCIAL_FEATURES]]
+        frozen = (df["unique_id"].map(last_price) / df["unique_id"].map(ref_price)).fillna(1.0)
+        if self.confirmed_prices is not None and "price_ratio" not in self._disabled_columns:
+            frozen = frozen * self._confirmed_price_multiplier(cutoff, series, days).reindex(
+                pd.MultiIndex.from_frame(df[["unique_id", "ds"]])).fillna(1.0).to_numpy()
+        df["price_ratio"] = frozen.clip(0.2, 5.0)
+        return self._finalize(df[["unique_id", "ds", *CALENDAR_FEATURES, *COMMERCIAL_FEATURES]], cutoff)
+
+    def _confirmed_price_multiplier(self, cutoff: pd.Timestamp, series: pd.DataFrame, days: pd.DatetimeIndex) -> pd.Series:
+        """Cociente (precio confirmado del día / precio vigente al corte) por (serie, día), SOLO donde existe un precio futuro confirmado.
+
+        Un precio de `product_price_history` es visible al corte si su `known_at` es anterior a la medianoche local de C+1 (regla de
+        W1; un `known_at` desconocido no demuestra que se conociera: se excluye). El día `d` toma el precio cuyo `valid_from` es el más
+        reciente ≤ d que cubre d (a igual `valid_from` gana el de la sucursal sobre el general). Se usa el cociente respecto del
+        precio vigente al corte del MISMO historial, no el precio absoluto: así no se mezclan el precio de lista y el neto observado.
+        Sin precio vigente al corte no hay base y se mantiene el supuesto `frozen_price`. `future_price_info` cuenta las series con un
+        precio futuro confirmado DISTINTO del vigente (`series_with_confirmed_price`) y las que siguen en `frozen_price`."""
+        hist = self.confirmed_prices
+        known = to_utc_naive(hist["known_at"])
+        hist = hist[visible_mask(known, cutoff, self.timezone, retroactive=True)].copy()
+        hist["valid_from"] = pd.to_datetime(hist["valid_from"]).dt.normalize()
+        hist["valid_to"] = pd.to_datetime(hist["valid_to"]).dt.normalize()
+        hist["_specific"] = hist["branch_id"].notna()
+        hist = hist.sort_values(["valid_from", "_specific"], kind="mergesort")
+        by_product = {int(pid): g for pid, g in hist.groupby("product_id")}
+        grid = np.concatenate([[np.datetime64(pd.Timestamp(cutoff).normalize(), "ns")], days.to_numpy("datetime64[ns]")])
+        index, values, confirmed = [], [], 0
+        for row in series.itertuples(index=False):
+            g = by_product.get(int(row.product_id))
+            if g is not None:
+                g = g[g["branch_id"].isna() | (g["branch_id"] == row.branch_id)]
+            if g is None or g.empty:
+                continue
+            price = np.full(len(grid), np.nan)
+            for r in g.itertuples(index=False):
+                covers = grid >= np.datetime64(r.valid_from, "ns")
+                if pd.notna(r.valid_to):
+                    covers &= grid <= np.datetime64(r.valid_to, "ns")
+                price[covers] = float(r.price)
+            if np.isnan(price[0]) or price[0] <= 0:
+                continue            # sin precio vigente al corte: no hay base de comparación
+            multiplier = price[1:] / price[0]
+            if np.allclose(multiplier[~np.isnan(multiplier)], 1.0):
+                continue            # ningún precio futuro confirmado distinto del vigente: rige el supuesto frozen_price
+            confirmed += 1
+            index.extend((row.unique_id, d) for d in days)
+            values.extend(multiplier)
+        self.future_price_info = {"series_with_confirmed_price": confirmed,
+                                  "series_frozen_price": int(len(series)) - confirmed}
+        if not index:
+            return pd.Series(dtype=float, index=pd.MultiIndex.from_arrays([[], []], names=["unique_id", "ds"]))
+        out = pd.Series(values, index=pd.MultiIndex.from_tuples(index, names=["unique_id", "ds"]), dtype=float)
+        return out[~out.index.duplicated(keep="last")]
 
 
 def last_known_price(panel_df: pd.DataFrame, cutoff: pd.Timestamp, ids: list[str] | None = None,

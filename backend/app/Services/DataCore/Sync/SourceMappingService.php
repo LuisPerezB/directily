@@ -13,6 +13,7 @@ use App\Services\Connectors\Sql\SqlConnectorInterface;
 use App\Services\Connectors\Sql\SqlQueryGuard;
 use App\Services\Connectors\Sql\SqlQueryRejected;
 use App\Services\Connectors\Sql\ValidatedQuery;
+use App\Services\DataCore\Quality\ValueMaps;
 use App\Services\Imports\Fields\ImportFieldRegistry;
 use App\Services\Imports\ImportEntity;
 use App\Services\Sales\IngestionModeResolver;
@@ -210,14 +211,8 @@ final class SourceMappingService
             }
         }
         if (isset($options['value_maps'])) {
-            foreach ((array) $options['value_maps'] as $field => $map) {
-                if (! in_array($field, $fieldKeys, true) || ! is_array($map)) {
-                    $errors["options.value_maps.{$field}"][] = 'Debe ser un diccionario valor_origen => valor_canónico de un campo del importador.';
-
-                    continue;
-                }
-                $clean['value_maps'][$field] = array_map(fn ($v) => $v === null ? null : (string) $v, $map);
-            }
+            // Mapeos de valores por fuente (ADR-V25-24): en ventas, los destinos de `document_type` y `status` se validan contra el vocabulario canónico.
+            $clean['value_maps'] = ValueMaps::validate($options['value_maps'], $entity, $errors, 'options.value_maps', $fieldKeys);
         }
         if (isset($options['coverage'])) {
             $coverage = (array) $options['coverage'];

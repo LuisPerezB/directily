@@ -1,0 +1,1771 @@
+{
+ "meta": {
+  "wave": "W5",
+  "date": "2026-11-03",
+  "commit": "d54076e · f18541b · 6fb4819 · cb31a03 · 2d1a0b1",
+  "summary": "Flujo Enterprise P1 de W5 (contrato, modelos y RecommendationSink; W5-D Supply S10 con perecibilidad, FEFO, simulación as-of e importación de lotes; W5-A Revenue Radar y agenda y W5-B Decision Engine con flujo auditado; W5-C medición de outcomes y ROI honesto por intención de tratamiento; W5-E vistas Enterprise): 62 requisitos pasan a IMPLEMENTADO (26 desde PARCIAL y 36 desde PENDIENTE), 17 pasan a PARCIAL (17 desde PENDIENTE), 33 siguen PARCIAL con la brecha acotada, 5 siguen PENDIENTES con su diseño documentado, 1 sigue BLOQUEADO con lo construible hecho y 1 ya IMPLEMENTADO (V25-DEC-033) suma evidencia; 9 defectos registrados (4 corregidos, 3 corregidos parcialmente y 2 mitigados). Resultados reales, uplift y ROI siguen BLOQUEADOS hasta un piloto; «atribuible causalmente» es DISEÑADO; el intervalo monetario del análisis por intención de tratamiento es solo indicativo con colas pesadas (cobertura documentada 74-95 %); la interfaz se verificó con pruebas de componente y una corrida de revisión contra el backend real, no con usuarios; el alcance por cartera de vendedor y los roles gerente/vendedor, MessageDraft, el importador de órdenes de compra y de ajustes y las acciones controladas de escritura siguen sin implementarse; todo se probó con datos sintéticos."
+ },
+ "defects": [
+  {
+   "area": "supply_decision",
+   "index": 0,
+   "title_prefix": "D1 · Plan y escenarios retroactivos usan",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/integration/test_supply_w5d_integration.py::test_changing_todays_catalogue_price_does_not_alter_a_past_max_margin_plan",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_recent_prices_and_sales_cost_history_are_read_as_of_the_cutoff",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_service_stockout_days_and_lost_margin_use_the_cost_and_price_known_each_day",
+    "engine/predictily_engine/supply/plan_runner.py; engine/predictily_engine/supply/simulation_runner.py"
+   ],
+   "note": "El plan retroactivo toma el precio neto observado hasta el corte (sin ventas recientes queda desconocido) y la simulación el de cada revisión; cambiar hoy el precio de catálogo no altera un plan pasado (probado). Pendiente: el evaluador de escenarios conserva como respaldo el «precio actual del catálogo» para un producto sin ventas recientes."
+  },
+  {
+   "area": "supply_decision",
+   "index": 1,
+   "title_prefix": "D2 · resolve_lead_time ignora supplier_l",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/integration/test_supply_w5d_integration.py::test_lead_times_are_filtered_by_valid_from_for_a_past_cutoff",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_each_review_sees_the_cost_lead_time_and_prior_sales_known_that_day",
+    "engine/predictily_engine/db/supply_repository.py"
+   ],
+   "note": "Los plazos del plan y de la simulación se filtran por valid_from ≤ corte (probado con un corte pasado y una fila futura). Pendiente: los escenarios y las recomendaciones de la etapa 1 siguen usando los plazos sin filtrar (fuera de los archivos de W5-D)."
+  },
+  {
+   "area": "supply_decision",
+   "index": 2,
+   "title_prefix": "D3 · La simulación sobre datos de la emp",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_supply_asof_simulation.py::test_each_review_sees_the_cost_lead_time_and_prior_sales_known_that_day",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_series_tables_decisions_of_a_review_do_not_depend_on_costs_or_lead_times_known_later",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_orders_are_valued_and_delayed_with_the_cost_and_lead_time_of_the_day_they_are_placed",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_late_sales_document_does_not_alter_decisions_taken_before_it_was_known",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_simulation_ending_after_the_last_sale_still_prices_each_review_with_what_was_known_then",
+    "engine/predictily_engine/supply/simulation_runner.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "Cada revisión de la simulación usa el costo, el precio, el plazo, las ventas previas y las existencias o lotes conocidos ese día. Salvedad declarada: sin historial de compras ni costo en el snapshot se usa el costo del catálogo vigente y la simulación lo declara NO VERSIONADO."
+  },
+  {
+   "area": "supply_decision",
+   "index": 3,
+   "title_prefix": "D4 · Sobrerreserva (reservado > físico) ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_over_reserved_stock_is_declared_with_the_clipped_quantity_and_degrades_quality",
+    "engine/tests/unit/test_supply_position.py::test_negative_on_hand_and_stale_snapshot_are_declared_not_accepted_silently",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_over_reserved_stock_degrades_the_stored_plan_quality_while_the_same_plan_without_it_is_ok",
+    "engine/predictily_engine/supply/position.py"
+   ],
+   "note": "El plan declara la sobrerreserva con la cantidad recortada y degrada su calidad (probado). Pendiente: los escenarios, la simulación y la etapa 1 siguen recortando o conservando el negativo por su cuenta, sin declararlo."
+  },
+  {
+   "area": "supply_decision",
+   "index": 5,
+   "title_prefix": "D6 · El estado de la recomendación y el ",
+   "state": "mitigado",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_while_a_recommendation_is_in_flight_newer_inputs_refresh_it_instead_of_replacing_it",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_same_inputs_return_the_same_recommendation_without_duplicating_anything",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_new_prediction_inputs_replace_the_untouched_ones_and_refresh_the_in_flight_one",
+    "backend/tests/Feature/Radar/RadarReviewFixesTest.php::test_newer_predictions_refresh_the_opportunities_in_flight_instead_of_replacing_them",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Las recomendaciones del Decision Engine (`decision_recommendations`) tienen identidad estable, heredan el estado y conservan lo que se trabaja entre corridas. Sin cambios: la tabla `recommendations` de la etapa 1 y el reconocimiento de alertas siguen sin persistir entre corridas."
+  },
+  {
+   "area": "supply_decision",
+   "index": 9,
+   "title_prefix": "D10 · El cambio de estado de una recomen",
+   "state": "mitigado",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_transition_table_is_closed_and_every_pair_outside_it_is_refused_with_409",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_every_transition_locks_the_row_inside_a_transaction_before_deciding",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_abilities_by_role_are_enforced_on_every_transition",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_every_human_transition_requires_the_expected_version",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Las recomendaciones del Decision Engine tienen máquina de estados cerrada, versión optimista, habilidades separadas (gestionar y aprobar) y evento dentro de la transacción que bloquea la fila. Sin cambios: el cambio de estado de la etapa 1 (InventoryController) sigue permitiendo cualquier estado → cualquier estado, y no hay una prueba que fuerce el fallo de la bitácora."
+  },
+  {
+   "area": "supply_decision",
+   "index": 14,
+   "title_prefix": "D15 · Riesgo de doble conteo entre `rese",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_confirmed_orders_are_inside_the_forecast_never_added_on_top",
+    "engine/tests/unit/test_supply_position.py::test_balance_reports_committed_and_residual_and_reserved_stock_is_not_discounted_twice",
+    "engine/tests/unit/test_supply_position.py::test_committed_above_the_forecast_is_planned_as_firm_demand_and_unbacked_reserved_stays_discounted",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_plan_reconciles_confirmed_orders_with_the_forecast_and_does_not_count_them_twice",
+    "docs/supply/SUPPLY_CORE.md"
+   ],
+   "note": "El solapamiento reservado / pronóstico quedó modelado (demanda neta = máximo entre pronóstico y comprometido; lo reservado que respalda pedidos no se descuenta dos veces), documentado en SUPPLY_CORE §1 y probado con casos a mano y con base de datos real. Efecto declarado: una empresa con pedidos cargados verá planes distintos."
+  },
+  {
+   "area": "supply_decision",
+   "index": 16,
+   "title_prefix": "D17 · solve_plan conserva y run_plan per",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_a_plan_that_neither_solver_nor_fallback_can_make_feasible_returns_no_lines",
+    "engine/tests/unit/test_supply_perishability.py::test_the_heuristic_fallback_alone_never_returns_a_plan_that_violates_the_shelf_caps",
+    "engine/predictily_engine/supply/service.py"
+   ],
+   "note": "Cuando ni el solver ni el respaldo pasan la verificación independiente, el plan no devuelve líneas: no queda nada que persistir. La prueba es a nivel de servicio."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 20,
+   "title_prefix": "El selector de empresa no recarga el Das",
+   "state": "corregido",
+   "evidence": [
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::la página activa se desmonta mientras carga la empresa nueva y vuelve a montarse una sola vez, sin estado de la anterior",
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::aunque la empresa nueva ya venga cargada (sin fase de carga) la vista se remonta: el estado local de la anterior no sobrevive",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::al cambiar de alcance descarta los datos de inmediato, vuelve a pedir y no deja que una respuesta tardía de la empresa anterior pise a la nueva",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M3: al cambiar de empresa CADA tarjeta vuelve a pedir su dato y, mientras llega, no queda nada de la anterior",
+    "frontend/src/layouts/AppLayout.vue"
+   ],
+   "note": "AppLayout no monta la vista hasta que la empresa nueva está cargada y la remonta aunque la ruta sea la misma, de modo que el Dashboard y cualquier vista existente pierden el estado de la empresa anterior; las vistas nuevas además descartan los datos al instante con useAsync por alcance. Salvedad: las pruebas montan AppLayout con una página de prueba, no DashboardView, y no se ejecutó en un navegador."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "V25-AGD-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/CommercialOpportunityServiceTest.php::test_it_builds_contact_and_recovery_per_relation_from_the_current_prediction_run",
+    "backend/tests/Feature/Radar/CommercialOpportunityServiceTest.php::test_the_payload_carries_the_prediction_facts_and_nothing_the_decision_engine_owns",
+    "backend/tests/Feature/Radar/CommercialOpportunityServiceTest.php::test_materialize_proposes_every_candidate_through_the_sink_and_is_idempotent",
+    "backend/tests/Feature/Radar/CommercialOpportunityServiceTest.php::test_a_historical_run_is_never_the_source_of_opportunities",
+    "backend/tests/Feature/Radar/RadarSinkOnlyTest.php::test_no_radar_source_creates_recommendations_directly",
+    "backend/tests/Feature/Radar/RadarSinkOnlyTest.php::test_every_recommendation_in_the_table_arrives_through_the_sink_with_the_facade_fields_only",
+    "backend/tests/Feature/Radar/RadarDecisionEngineIntegrationTest.php::test_the_radar_lists_what_the_engine_stored_with_its_cost_and_inventory_and_summarizes_it",
+    "backend/app/Services/Radar/CommercialOpportunityService.php; backend/app/Services/Radar/PredictiveSalesAgenda.php; backend/app/Services/Radar/AgendaFeedbackService.php; backend/app/Services/Radar/AgendaStatusMap.php"
+   ],
+   "note": "CommercialOpportunityService construye los candidatos cliente × producto × horizonte desde la corrida vigente de Customer (política `radar-v1` versionada y configurable) y los propone al Decision Engine por RecommendationSink; PredictiveSalesAgenda lee lo que el motor guardó y alimenta resumen, lista y agenda. Son fachadas sobre Customer Core y el Decision Engine (ADR-V25-12): el Radar no crea recomendaciones por su cuenta (probado) y una corrida histórica nunca origina oportunidades."
+  },
+  {
+   "id": "V25-AGD-002",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_summary_counts_by_horizon_and_kind_and_labels_the_value_as_potential",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_value_is_never_summed_across_horizons",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_contribution_is_summed_only_over_opportunities_the_decision_engine_valued_with_a_reliable_cost",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_a_company_without_any_prediction_gets_an_explicit_abstention_not_zeros",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_summary_is_isolated_by_company",
+    "backend/tests/Feature/Radar/RadarReviewFixesTest.php::test_the_summary_says_null_not_zero_when_nothing_is_valued",
+    "backend/tests/Feature/OpenApi/OpenApiRoutesTest.php::test_every_real_api_route_is_documented_and_nothing_extra_is_documented",
+    "backend/app/Services/Radar/CommercialOpportunityService.php; backend/app/Services/Radar/PredictiveSalesAgenda.php; backend/app/Services/Radar/AgendaFeedbackService.php; backend/app/Services/Radar/AgendaStatusMap.php"
+   ],
+   "note": "GET /radar/summary entrega, por horizonte y tipo, el número de oportunidades, el valor rotulado «oportunidad potencial, atribución no demostrada», la disponibilidad y la fecha de corte; el valor nunca se suma entre horizontes y sin valor estimado dice nulo, no cero. La lectura está abierta a los cuatro roles actuales (no se definió una habilidad radar.view: NO APLICA por decisión del arquitecto)."
+  },
+  {
+   "id": "V25-AGD-003",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_lists_the_materialized_opportunities_with_the_contract_fields",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_cost_and_inventory_are_shown_as_the_decision_engine_declared_them",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_the_default_order_is_by_score_and_is_deterministic",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_pagination_walks_every_opportunity_exactly_once",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_filters_by_customer_product_horizon_kind_zone_segment_category_seller_and_model_segment",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_the_control_group_is_never_shown_or_reachable",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_opportunities_of_another_company_are_invisible",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_a_plan_without_customer_gets_402_and_a_horizon_outside_the_plan_gets_402",
+    "backend/app/Services/Radar/CommercialOpportunityService.php; backend/app/Services/Radar/PredictiveSalesAgenda.php; backend/app/Services/Radar/AgendaFeedbackService.php; backend/app/Services/Radar/AgendaStatusMap.php"
+   ],
+   "note": "GET /radar/opportunities lista las oportunidades con id estable (la recomendación del motor), probabilidad, ventana con su estado, valor y contribución tal como el motor los declaró, puntaje con la versión de su fórmula, inventario disponible o «desconocido», estado heredado y del flujo; orden determinista, paginado y filtros validados contra la empresa. El grupo de control no se muestra ni se alcanza."
+  },
+  {
+   "id": "V25-AGD-004",
+   "status": "PARCIAL",
+   "gap": "La agenda por cliente y fecha existe y filtra por vendedor, pero «vendedor» es el usuario al que se asignó la recomendación: no hay cartera de vendedor (customer_assignments) ni roles vendedor/gerente, así que un usuario ve la agenda de toda la empresa en vez de solo su cartera. El alcance por cartera no existe en este alcance.",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_groups_by_customer_and_never_duplicates_a_customer_per_sku",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_is_paginated_by_customer_with_a_stable_order",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_respects_the_date_the_expiry_and_the_closed_states",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_defaults_to_today_in_the_company_timezone",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_filters_by_seller_and_state_and_hides_the_control_group",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_is_isolated_by_company_and_open_to_every_existing_role",
+    "backend/tests/Feature/Radar/RadarReviewFixesTest.php::test_the_agenda_boundaries_use_the_company_time_zone_not_utc",
+    "backend/tests/Feature/Radar/RadarReviewFixesTest.php::test_postponing_beyond_the_expiry_of_the_opportunity_is_refused_without_changing_anything",
+    "backend/app/Services/Radar/CommercialOpportunityService.php; backend/app/Services/Radar/PredictiveSalesAgenda.php; backend/app/Services/Radar/AgendaFeedbackService.php; backend/app/Services/Radar/AgendaStatusMap.php"
+   ],
+   "note": "GET /radar/agenda agrupa por cliente sin duplicar por SKU, con estado y próxima acción, por fecha en la zona horaria de la empresa, con las pospuestas ocultas hasta su reactivación y las cerradas o vencidas fuera."
+  },
+  {
+   "id": "V25-AGD-005",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_first_feedback_is_201_and_leaves_an_immutable_auditable_event",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_repeating_the_same_request_is_idempotent_200_and_adds_nothing",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_same_key_with_other_content_is_a_conflict_and_keys_are_per_opportunity",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_invalid_transitions_are_rejected_with_the_allowed_destinations",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_validation_of_the_request",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_free_text_note_is_masked_for_emails_and_identifiers",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_roles_viewer_cannot_give_feedback_and_the_commercial_roles_can",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_feedback_never_crosses_companies",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_control_group_cannot_receive_feedback",
+    "backend/app/Services/Radar/AgendaFeedbackService.php"
+   ],
+   "note": "POST /radar/opportunities/{id}/feedback registra estado, nota (con correos e identificadores enmascarados), autor y fecha como un evento del historial de la recomendación (decision_events): 201 la primera vez, 200 idéntico en el reintento, 409 si la misma clave llega con otro contenido y 422 con los destinos permitidos si la transición no es válida; el visor no puede y el grupo de control no recibe seguimiento."
+  },
+  {
+   "id": "V25-AGD-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Radar/AgendaStatusMapTest.php::test_the_legacy_states_are_the_six_of_the_contract_in_the_same_order",
+    "backend/tests/Unit/Radar/AgendaStatusMapTest.php::test_the_whole_transition_matrix",
+    "backend/tests/Unit/Radar/AgendaStatusMapTest.php::test_final_states_are_dead_ends_and_every_other_state_can_reach_one",
+    "backend/tests/Unit/Radar/AgendaStatusMapTest.php::test_the_published_table_has_one_row_per_state_with_its_next_states",
+    "backend/tests/Unit/Radar/AgendaStatusMapTest.php::test_an_unknown_legacy_state_is_rejected",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_filters_by_seller_and_state_and_hides_the_control_group",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_state_and_status_filters_and_the_default_work_list",
+    "backend/app/Services/Radar/AgendaStatusMap.php"
+   ],
+   "note": "Los seis estados legados (Pendiente, Contactado, Interesado, Pedido recibido, Pospuesto, Descartado) tienen su matriz de transiciones completa y probada, cada cambio queda en el historial y la lista y la agenda filtran por ellos."
+  },
+  {
+   "id": "V25-AGD-007",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Radar/AgendaStatusMapTest.php::test_the_mapping_table_to_the_workflow_is_the_documented_one_and_every_target_is_a_real_workflow_state",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_the_agenda_status_map_and_the_workflow_agree_on_every_legacy_state",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_contacting_a_reviewed_non_sensitive_opportunity_starts_the_action_then_interest_changes_nothing_and_the_order_executes_it",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_when_the_implied_transition_does_not_exist_from_the_current_state_the_feedback_is_recorded_and_the_workflow_does_not_move",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_the_version_covers_the_agenda_feedback_so_a_stale_review_is_refused",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_a_legacy_history_is_kept_complete_and_maps_to_the_workflow",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_a_pending_assignment_maps_to_assigned_and_the_workflow_is_not_touched",
+    "backend/app/Services/Radar/AgendaStatusMap.php"
+   ],
+   "note": "Tabla versionada `radar-agenda-map-v1` del estado legado al workflow Enterprise; el seguimiento registra su estado y aplica la transición implicada solo si existe desde el estado actual (si no, queda registrado y el flujo no se mueve). No existía historial V2.2 que migrar (la agenda V2.2 nunca se construyó en este repositorio): la ausencia de pérdida se prueba sobre historiales sembrados por la propia API."
+  },
+  {
+   "id": "V25-AGD-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_filters_by_customer_product_horizon_kind_zone_segment_category_seller_and_model_segment",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_filter_values_are_validated_and_ids_of_another_company_are_rejected",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_respects_the_date_the_expiry_and_the_closed_states",
+    "backend/app/Services/Radar/RadarFilters.php"
+   ],
+   "note": "La lista de oportunidades filtra por cliente, SKU y horizonte y la agenda por fecha, con validación contra la empresa. En la interfaz no hay buscador de comprador (el filtro llega por enlace): ver V25-UIX-002."
+  },
+  {
+   "id": "V25-AGD-009",
+   "status": "PARCIAL",
+   "gap": "Filtran por segmento, zona, categoría, estado y «vendedor» (probado), pero vendedor es el usuario asignado a la recomendación: no existe el atributo de cartera (customer_assignments) y un usuario sin cartera no obtiene una lista vacía sino la de la empresa. En la interfaz faltan el selector de un vendedor cualquiera y el filtro por segmento.",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_filters_by_customer_product_horizon_kind_zone_segment_category_seller_and_model_segment",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_filter_values_are_validated_and_ids_of_another_company_are_rejected",
+    "backend/tests/Feature/Radar/RadarAgendaAndSummaryApiTest.php::test_the_agenda_filters_by_seller_and_state_and_hides_the_control_group",
+    "backend/app/Services/Radar/RadarFilters.php"
+   ],
+   "note": "Los filtros de segmento, zona, categoría y estado están hechos y probados en la API; el de vendedor filtra por el usuario asignado."
+  },
+  {
+   "id": "V25-AGD-010",
+   "status": "PARCIAL",
+   "gap": "El endpoint de la ficha comercial (compras, frecuencia, SKU habituales, evolución, ventana futura y seguimiento) existe y está probado, pero ninguna vista lo consume: la ficha de la interfaz sigue usando los endpoints canónicos y no hay prueba de componente por bloque.",
+   "evidence": [
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_the_overview_shows_purchases_frequency_habitual_products_evolution_window_and_follow_up",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_the_overview_carries_no_unnecessary_pii_and_never_decrypts_the_name",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_the_overview_of_a_generic_customer_or_without_predictions_says_so",
+    "backend/app/Services/Radar/CustomerCommercialProfile.php"
+   ],
+   "note": "GET /customers/{id}/overview devuelve últimas compras, frecuencia, SKU habituales, evolución mensual, ventana de próxima compra y la línea de seguimiento, sin PII innecesaria y sin descifrar el nombre."
+  },
+  {
+   "id": "V25-AGD-011",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_predictions_answer_exactly_like_customer_predictions_filtered_by_the_customer",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_predictions_of_a_customer_of_another_company_are_404",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_the_facade_endpoints_have_no_write_methods_and_need_forecast_view",
+    "backend/app/Http/Controllers/Api/Radar/CustomerFichaController.php"
+   ],
+   "note": "GET /customers/{id}/predictions es un alias de /customer/predictions?customer_id={id}: mismo cuerpo salvo la URL de paginación, cabecera X-Equivalent-Of y 404 para un comprador de otra empresa. La interfaz no lo consume (usa el endpoint canónico)."
+  },
+  {
+   "id": "V25-AGD-012",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_demand_is_the_sum_over_the_customer_pairs_of_the_total_view_with_its_breakdown",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_demand_does_not_invent_figures_without_an_individual_prediction",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_demand_validates_the_horizon_and_hides_other_companies",
+    "backend/app/Services/Radar/CustomerCommercialProfile.php"
+   ],
+   "note": "GET /customers/{id}/demand suma sobre los pares del comprador la vista total (máximo entre esperado y comprometido) con el desglose esperado, comprometido e incremental, sin inventar cifras si no hay predicción individual."
+  },
+  {
+   "id": "V25-AGD-013",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_products_list_the_habitual_from_purchase_history_and_the_probable_from_the_ranking",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_probable_products_say_when_the_horizon_is_not_available_or_there_is_no_run",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_products_are_isolated_by_company",
+    "backend/app/Services/Radar/CustomerCommercialProfile.php"
+   ],
+   "note": "GET /customers/{id}/products distingue los productos habituales (por compras históricas) de los probables (por el ranking del Customer Core), con aislamiento por empresa y aviso cuando el horizonte no está disponible."
+  },
+  {
+   "id": "V25-AGD-014",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_every_level_answers_with_the_body_of_the_current_forecast_endpoint",
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_the_validation_of_the_underlying_endpoint_applies_through_the_alias",
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_the_alias_is_isolated_by_company_and_open_to_every_existing_role",
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_it_requires_a_session",
+    "backend/app/Http/Controllers/Api/Radar/DemandForecastController.php"
+   ],
+   "note": "GET /demand/forecasts es un alias de /forecasts/products (por defecto), /categories o /series según `level`, con el mismo cuerpo y la validación del endpoint de fondo, sin duplicar controladores."
+  },
+  {
+   "id": "V25-AGD-015",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_available_is_stock_minus_reserved_with_transit_apart_and_a_sufficient_flag",
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_with_only_identified_buyers_the_status_says_it_covers_only_them",
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_without_inventory_the_answer_is_unknown_never_zero",
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_insufficient_stock_is_flagged_and_a_snapshot_after_the_cutoff_is_ignored",
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_a_negative_branch_stock_never_inflates_the_availability",
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_without_a_forecast_or_customer_run_the_demand_is_absent_not_invented",
+    "backend/tests/Feature/Radar/SupplyReadinessApiTest.php::test_it_is_isolated_by_company_and_gated_by_the_plan_horizons",
+    "backend/app/Services/Radar/SupplyReadiness.php"
+   ],
+   "note": "GET /supply/readiness entrega por producto la disponibilidad (físico − reservado, con el tránsito aparte), la necesidad comparada con la mayor entre la demanda de los compradores identificados y la agregada pronosticada (`required_basis` lo dice) y una bandera de si alcanza; sin inventario responde «desconocido», nunca 0."
+  },
+  {
+   "id": "V25-AGD-017",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_every_level_answers_with_the_body_of_the_current_forecast_endpoint",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_predictions_answer_exactly_like_customer_predictions_filtered_by_the_customer",
+    "backend/tests/Feature/OpenApi/OpenApiRoutesTest.php::test_every_real_api_route_is_documented_and_nothing_extra_is_documented",
+    "docs/product/LEGACY_API_COMPATIBILITY.md"
+   ],
+   "note": "Los endpoints V2.2 que ya tenían equivalente (customers/{id}/predictions y demand/forecasts) se adaptaron con alias que delegan en los controladores vigentes (sin duplicarlos), devuelven la cabecera X-Equivalent-Of y el mismo cuerpo (probado), y OpenAPI documenta cada ruta real y no más (`OpenApiRoutesTest`). Que cada alias declare `x-equivalent-of` en OpenAPI no tiene una prueba propia."
+  },
+  {
+   "id": "V25-AGD-018",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/OpenApi/OpenApiRoutesTest.php::test_every_real_api_route_is_documented_and_nothing_extra_is_documented",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_predictions_answer_exactly_like_customer_predictions_filtered_by_the_customer",
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_every_level_answers_with_the_body_of_the_current_forecast_endpoint",
+    "docs/product/LEGACY_API_COMPATIBILITY.md"
+   ],
+   "note": "El documento da la tabla ruta V2.2 → ruta vigente → estado con la prueba que lo respalda y separa lo IMPLEMENTADO / VERIFICADO de lo DISEÑADO (cartera de vendedor, MessageDraft, inmutabilidad en base de datos)."
+  },
+  {
+   "id": "V25-AGD-019",
+   "status": "PARCIAL",
+   "gap": "Lo verificado es la ausencia de envío: ningún camino del Radar ni del flujo de decisiones envía mensajes, y los diálogos de la interfaz lo declaran. La interfaz MessageDraft (borrador → enviado solo tras la confirmación explícita de un usuario con habilidad) está DISEÑADA, no implementada.",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_no_message_is_ever_sent_by_the_radar",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_generating_and_walking_the_workflow_never_sends_messages_calls_the_erp_or_queues_work",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::explica que registrar no envía mensajes ni escribe en el ERP",
+    "frontend/src/components/__tests__/RadarComponents.spec.ts::el seguimiento manda state e idempotency_key y confirma sin enviar ningún mensaje"
+   ],
+   "note": "El seguimiento de la agenda y las transiciones del workflow registran lo que la persona hizo fuera de Predictily; no hay botón ni llamada de envío."
+  },
+  {
+   "id": "V25-AGD-020",
+   "status": "PARCIAL",
+   "gap": "Cada feedback y cada cambio de estado dejan un evento con autor, fecha, estado previo y nuevo y nota, y la API no ofrece ninguna ruta para editarlo o borrarlo (probado). La inmutabilidad a nivel de base de datos (trigger o permisos de la cuenta) está DISEÑADA, no implementada.",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_first_feedback_is_201_and_leaves_an_immutable_auditable_event",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_the_api_exposes_no_way_to_edit_or_delete_history_events",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_the_detail_includes_the_explanation_assumptions_and_full_history",
+    "backend/app/Services/Radar/AgendaFeedbackService.php"
+   ],
+   "note": "El historial por oportunidad se lista en el detalle (GET /radar/opportunities/{id}) con cada evento enlazado al anterior."
+  },
+  {
+   "id": "V25-AGD-021",
+   "status": "PARCIAL",
+   "gap": "Comportamiento, autorizaciones y aislamiento por empresa conservados y probados (lectura abierta a los cuatro roles actuales, seguimiento con decisions.manage, generación con forecast.run, sin cruce entre empresas), pero no existen los roles vendedor/gerente ni el alcance por cartera: un usuario ve todas las oportunidades de la empresa. Las habilidades radar.view / radar.feedback / radar.assign no se definieron (se reutilizan las existentes, por decisión del arquitecto).",
+   "evidence": [
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_every_existing_role_can_read_and_a_missing_header_or_session_is_rejected",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_opportunities_of_another_company_are_invisible",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_roles_viewer_cannot_give_feedback_and_the_commercial_roles_can",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_feedback_never_crosses_companies",
+    "backend/tests/Feature/Radar/RadarMaterializeTest.php::test_roles_a_viewer_cannot_propose_and_the_other_roles_can",
+    "backend/tests/Feature/Radar/RadarMaterializeTest.php::test_it_only_proposes_the_active_company_and_respects_the_plan",
+    "backend/tests/Feature/Radar/CustomerFichaApiTest.php::test_the_facade_endpoints_have_no_write_methods_and_need_forecast_view",
+    "backend/tests/Feature/Radar/DemandForecastAliasTest.php::test_the_alias_is_isolated_by_company_and_open_to_every_existing_role"
+   ],
+   "note": "Las fachadas de Customer y Radar no tienen métodos de escritura salvo el seguimiento y la generación, ambos con su habilidad."
+  },
+  {
+   "id": "V25-DEC-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_sink_is_bound_to_the_decision_engine",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_same_inputs_return_the_same_recommendation_without_duplicating_anything",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_generation_is_idempotent_the_second_run_creates_nothing",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_same_inputs_produce_the_same_recommendations_in_two_companies",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_replenishment_comes_from_the_existing_recommendations_without_recalculating_anything",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_generation_for_one_company_never_touches_another",
+    "backend/tests/Feature/Decision/W5ContractModelsTest.php::test_the_recommendation_sink_is_an_interface_for_w5_b_to_implement",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "DecisionEngine (propone una o por lote) y DecisionGenerator con un generador por tipo combinan la corrida de Customer, las recomendaciones y el plan de Supply y las reglas de la empresa (decision settings) en `decision_recommendations`; no entrena ni recalcula pronósticos (la reposición sale de las recomendaciones existentes) y es determinista y aislado por empresa. Las `recommendations` de la etapa 1 quedan intactas."
+  },
+  {
+   "id": "V25-DEC-002",
+   "status": "PARCIAL",
+   "gap": "Verificado: el motor solo lee filas persistidas, ignora la contribución que aporte quien propone y recalcula valor y puntaje desde precio y costo con su fuente (value_calculation, cost_source), y las cifras de contacto citan su corrida. No existe una verificación que falle si un campo numérico cualquiera de una recomendación no resuelve a una fuente (source_ref por campo).",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_contribution_supplied_by_the_proposer_is_ignored",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_stored_explanation_is_enough_to_verify_the_score",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_each_cost_reliability_rule_withholds_the_contribution",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_replenishment_comes_from_the_existing_recommendations_without_recalculating_anything",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Cada contribución se deriva de un costo con respaldo conocido antes del corte; sin él queda NULL con el motivo."
+  },
+  {
+   "id": "V25-DEC-003",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_priority_follows_the_score_rank_within_each_batch",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_per_horizon_cap_keeps_the_most_valuable_contacts",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_generic_buyers_abstentions_and_low_probability_rows_do_not_become_contacts",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_a_stale_prediction_does_not_generate_already_expired_contacts",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_the_customer_level_candidates_are_capped_by_the_per_horizon_limit",
+    "backend/app/Services/Decision/Generators/CustomerOpportunityGenerator.php"
+   ],
+   "note": "El contacto dice qué comprador, por qué producto y cuándo (probabilidad, ventana con su estado, cantidades esperadas), ordenado por puntaje con prioridad por posición y tope por horizonte; los compradores genéricos, las abstenciones y las probabilidades bajo el mínimo de la empresa no generan contacto."
+  },
+  {
+   "id": "V25-DEC-004",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Radar/CommercialOpportunityServiceTest.php::test_an_overdue_relation_needs_history_to_be_a_recovery",
+    "backend/app/Services/Decision/Generators/CustomerOpportunityGenerator.php"
+   ],
+   "note": "La recuperación nace del estado de actividad del Customer Core (inactivo por patrón; los umbrales P90/P75 son de ese core), con un monto observado (caída de gasto) y no una contribución, y el supuesto «no implica abandono». Un comprador genérico o sin historial no la genera."
+  },
+  {
+   "id": "V25-DEC-005",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_risk_covers_at_risk_or_declining_buyers_but_never_insufficient_history_or_generic_buyers",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_recommendation_walks_the_whole_workflow_and_every_transition_is_audited",
+    "backend/app/Services/Decision/Generators/CustomerOpportunityGenerator.php"
+   ],
+   "note": "El riesgo de cliente (en riesgo o con caída de comportamiento) se emite como recomendación con su evidencia (cambio de comportamiento, gasto previo y reciente) y entra al workflow en `suggested`; nunca se emite con historia insuficiente ni para compradores genéricos. No se verificó por prueba que el percentil y el número de intervalos viajen en la explicación."
+  },
+  {
+   "id": "V25-DEC-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_replenishment_comes_from_the_existing_recommendations_without_recalculating_anything",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_supply_plan_built_on_the_same_forecast_sets_quantity_date_supplier_and_over_budget_constraints",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_a_supply_plan_of_another_forecast_run_is_not_mixed_in",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_the_supply_candidates_are_capped_and_keep_the_most_urgent_ones",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_the_supply_cap_follows_the_stockout_probability_order_not_the_size_of_the_risk",
+    "backend/app/Services/Decision/Generators/ReplenishmentGenerator.php"
+   ],
+   "note": "La reposición (qué, cuánto y cuándo) se emite por el motor con el contrato completo, enlazada a la recomendación de la etapa 1 y a la línea del plan de la misma corrida de pronóstico; conserva su identidad entre corridas. Las unidades en riesgo usan la media de la demanda persistida (un punto, no un intervalo)."
+  },
+  {
+   "id": "V25-DEC-007",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_a_shortage_against_customer_demand_is_a_mismatch_valued_at_the_missing_units",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_overstock_without_customer_demand_is_a_mismatch_without_an_invented_value",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_an_overstocked_product_with_aggregate_forecast_demand_is_not_an_excess_without_demand",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_an_overstocked_product_with_little_aggregate_demand_is_an_excess_that_says_where_the_demand_came_from",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_when_neither_buyers_nor_a_forecast_are_known_the_demand_is_unknown_and_nothing_is_recommended",
+    "backend/app/Services/Decision/Generators/InventoryMismatchGenerator.php"
+   ],
+   "note": "El faltante frente a la demanda de compradores se valora en las unidades que faltan y el exceso sin demanda se emite sin valor inventado (la tasa de mantener inventario por empresa está DISEÑADA); la demanda desconocida no genera nada. Los umbrales por empresa se parametrizan en las reglas del motor (ver V25-DEC-039)."
+  },
+  {
+   "id": "V25-DEC-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_unmet_demand_because_of_the_budget_becomes_a_budget_constraint_recommendation",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_supply_plan_built_on_the_same_forecast_sets_quantity_date_supplier_and_over_budget_constraints",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_recommendation_over_budget_requires_approval_even_if_its_kind_does_not",
+    "backend/app/Services/Decision/Generators/ReplenishmentGenerator.php"
+   ],
+   "note": "La demanda que el presupuesto no cubre se emite como recomendación `budget_constraint` gestionable y lo que excede el presupuesto exige aprobación antes de ejecutarse."
+  },
+  {
+   "id": "V25-DEC-009",
+   "status": "PARCIAL",
+   "gap": "El motor acepta `kind = scenario` por propose() pero no existe un generador que proponga escenarios ni el vínculo con un scenario_evaluation_id: los escenarios siguen pidiéndose a mano. DISEÑADO.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Un `kind = scenario` se lista como cualquier recomendación y recorre el mismo workflow; el Centro de decisiones no tiene vista propia de escenarios."
+  },
+  {
+   "id": "V25-DEC-010",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_same_inputs_return_the_same_recommendation_without_duplicating_anything",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_new_inputs_create_a_new_recommendation_and_expire_the_previous_one_that_was_not_decided",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_while_a_recommendation_is_in_flight_newer_inputs_refresh_it_instead_of_replacing_it",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_customer_level_opportunities_keep_their_identity_when_the_contact_horizons_change",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Cada recomendación tiene id, empresa, fecha de corte, horizonte y entidad (cliente × producto, cliente, producto o sucursal); su identidad es la clave de idempotencia SHA-256 (tipo, corte, horizonte, entidad, fuente) y se conserva entre corridas mientras haya trabajo en curso."
+  },
+  {
+   "id": "V25-DEC-011",
+   "status": "PARCIAL",
+   "gap": "Cada recomendación enlaza la corrida de origen (source_core_run_id y source_forecast_run_id), las versiones de modelo (model_versions) y la versión de la fórmula (SHA-256 de sus parámetros): probado. El vínculo con la huella de datos (data_snapshot_id) se rellena desde la corrida pero ninguna prueba lo afirma, y la huella del plan sigue incompleta (D5): no está probado que cambiar un plazo o una conversión de unidad cambie la huella.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_score_formula_version_is_the_sha256_of_its_parameters_and_changes_with_them",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_score_formula_is_documented_by_its_stored_parameters",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "La versión de fórmula de cada recomendación se conserva aunque cambie la configuración de la empresa."
+  },
+  {
+   "id": "V25-DEC-012",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_contact_value_is_limited_to_the_available_stock_and_unknown_stock_is_not_zero",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_an_out_of_stock_product_has_no_sellable_value",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_constraints_are_always_objects_with_a_code",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "El contrato único expone probabilidad (nula = abstención), intervalo con la ventana y su estado, supuestos, restricciones con código, disponibilidad (desconocida ≠ 0) e incertidumbre explícita. El valor económico es una cifra puntual: su incertidumbre se declara (costo no confiable, costo de acción no configurado) pero no tiene intervalo propio."
+  },
+  {
+   "id": "V25-DEC-013",
+   "status": "PARCIAL",
+   "gap": "action_cost es el costo de contacto único por empresa (decision.contact_cost): se resta del puntaje y, si no está configurado, se declara «no configurado» sin restar nada (probado); el costo unitario de la contribución lleva su fuente (cost_source). No hay costo de ejecución distinto, ni costo de servir, ni el cálculo tiempo × tarifa del criterio de aceptación.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_contact_cost_configured_by_the_company_is_subtracted_from_the_score",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_purchase_cost_history_is_a_fallback_only_when_known_before_the_cutoff",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_cost_line_known_after_the_cutoff_is_not_used",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_the_purchase_outlay_is_capital_not_an_expense_so_it_is_not_subtracted",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_an_action_without_a_configured_contact_cost_leaves_the_cost_unknown_not_zero",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "El desembolso de compra es capital, no un gasto de la acción: no se resta del puntaje."
+  },
+  {
+   "id": "V25-DEC-014",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_contribution_is_derived_from_a_reliable_cost_and_follows_orders_times_per_order_contribution",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_without_a_reliable_cost_the_contribution_is_null_and_the_uncertainty_says_why",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_each_cost_reliability_rule_withholds_the_contribution",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_cost_line_known_after_the_cutoff_is_not_used",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_with_a_reliable_cost_the_score_is_the_contribution_minus_the_action_expense",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_without_a_reliable_cost_the_gross_amount_is_weighted_and_marked",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Cada recomendación lleva el valor bruto esperado y la contribución estimada (precio − costo con respaldo conocido antes del corte) con su supuesto; sin costo confiable la contribución es NULL con su motivo y el importe bruto se pondera y se marca, nunca cero."
+  },
+  {
+   "id": "V25-DEC-015",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_without_a_control_group_nothing_is_ever_incremental",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "El estimado incremental de cada recomendación es siempre nulo con la etiqueta `potential_unproven` (ninguna ruta del código lo escribe): la estimación incremental vive en el análisis agregado por intención de tratamiento (V25-OUT-019) y exige un grupo de control registrado."
+  },
+  {
+   "id": "V25-DEC-016",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_the_version_is_the_sha256_of_the_canonical_parameters_and_follows_them",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_the_default_formula_version_is_pinned_so_a_change_of_parameters_is_always_deliberate",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_priorities_follow_the_rank_inside_the_batch_and_are_deterministic",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_without_any_value_the_score_is_null_not_zero",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_a_negative_contribution_stays_negative",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_score_formula_version_is_the_sha256_of_its_parameters_and_changes_with_them",
+    "backend/tests/Feature/Decision/DecisionProducersAndPriorityTest.php::test_the_radar_priorities_equal_the_rank_of_the_score_within_their_group",
+    "backend/tests/Feature/Decision/DecisionProducersAndPriorityTest.php::test_a_better_score_arriving_later_pushes_the_earlier_ones_down_and_groups_are_independent",
+    "backend/tests/Feature/Decision/DecisionProducersAndPriorityTest.php::test_a_score_without_value_is_the_lowest_priority_and_the_batch_generator_agrees_with_propose",
+    "backend/app/Services/Decision/ScoreFormula.php"
+   ],
+   "note": "Puntaje (contribución menos costo de la acción; sin valor es NULL, no 0), prioridad por posición dentro de su grupo y `score_formula_version` = SHA-256 de los parámetros canónicos, fijada por prueba para que cambiar un parámetro sea deliberado; cada recomendación conserva la versión con que se calculó."
+  },
+  {
+   "id": "V25-DEC-017",
+   "status": "PARCIAL",
+   "gap": "La explicación estructurada (códigos, fuente, value_calculation con unidades, precio, costo y fuente del costo) se guarda con la recomendación y se prueba que alcanza para verificar el valor y el puntaje (se recomputan desde lo guardado). No existe un verificador que recompute la explicación completa byte a byte desde los insumos persistidos.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_stored_explanation_is_enough_to_verify_the_score",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Sin PII: la recomendación identifica al comprador por id y código externo, sin nombre."
+  },
+  {
+   "id": "V25-DEC-018",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_list_filters_sorts_and_paginates",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_allowed_transitions_are_listed_per_user_with_the_reason_when_blocked",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_the_expiry_dates_follow_the_kind_and_the_company_settings",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_list_returns_the_measured_outcomes_with_their_honest_classification_and_evidence",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Cada recomendación declara política, prioridad, responsable (asignado), estado, vencimiento, siguiente paso, versión y su resultado medido (vínculo al outcome); la lista filtra y ordena por ellos."
+  },
+  {
+   "id": "V25-DEC-019",
+   "status": "PARCIAL",
+   "gap": "Se persisten los insumos del valor (unidades esperadas, precio, costo y su fuente, contribución, puntaje) y la versión de la fórmula, sin PII, de modo que el valor y el puntaje se recomputan. Los parámetros de la fórmula no se guardan por recomendación (solo su huella SHA-256: reproducir exige que la configuración de la empresa no haya cambiado) y no existe una tabla decision_inputs ni un reejecutor que reproduzca cantidades, puntaje y explicación idénticos.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_stored_explanation_is_enough_to_verify_the_score",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_score_formula_version_is_the_sha256_of_its_parameters_and_changes_with_them",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "El cliente se identifica por id y código externo; el detalle no incluye el nombre."
+  },
+  {
+   "id": "V25-DEC-020",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_contribution_is_derived_from_a_reliable_cost_and_follows_orders_times_per_order_contribution",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_without_a_reliable_cost_the_contribution_is_null_and_the_uncertainty_says_why",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_cost_line_known_after_the_cutoff_is_not_used",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/app/Services/Decision/UnitEconomics.php"
+   ],
+   "note": "El valor esperado es E(n.º de pedidos) × cantidad por pedido × (precio − costo confiable conocido en su fecha); con costo desconocido la contribución es NULL, no cero, y el supuesto sobre el número de compras (`expected_orders_x_quantity_per_order`) queda en la explicación."
+  },
+  {
+   "id": "V25-DEC-021",
+   "status": "PARCIAL",
+   "gap": "La API (attribution_label y attribution_note en toda respuesta) y las vistas nuevas (Radar, Centro de decisiones, ROI y Resumen ejecutivo) dicen que el valor es una oportunidad potencial y no ventas causadas por el contacto; las vistas anteriores a W5 (p. ej. predicciones por comprador) y cualquier exportación no se tocaron ni se verificaron.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "frontend/src/components/__tests__/RadarComponents.spec.ts::rotula el valor como oportunidad potencial, atribución no demostrada, y muestra corte, unidad y moneda",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::rotula la atribución como oportunidad potencial no demostrada",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::carga por id y muestra el contrato: valor, contribución, puntaje y fórmula, probabilidad, disponibilidad, aprobación y atribución"
+   ],
+   "note": "El resumen de decisiones tampoco suma importes y dice que no son ingresos recuperados."
+  },
+  {
+   "id": "V25-DEC-022",
+   "status": "PARCIAL",
+   "gap": "El estimador del efecto del contacto (diferencia de conversión entre tratados y control, con intervalo y por intención de tratamiento) existe, recupera un efecto conocido y sin grupo de control no estima nada (probado, con datos sintéticos). La priorización de contactos NO incorpora uplift: no hay un modelo de uplift por comprador-producto y el puntaje sigue siendo valor esperado menos costo (DISEÑADO).",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_known_effect_is_recovered_with_its_estimate_sample_sizes_and_interval",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_without_a_control_group_nothing_is_ever_incremental",
+    "backend/tests/Unit/Outcomes/IttEstimatorTest.php::test_newcombe_difference_matches_the_published_reference",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_it_estimates_with_both_groups_at_the_minimum_size_and_enough_buyers",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Sin evidencia el uplift no se usa: el puntaje no depende de él."
+  },
+  {
+   "id": "V25-DEC-023",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_a_proposal_gets_every_field_of_the_section_11_contract",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_customer_predictions_become_contacts_and_inactive_buyers_become_recovery",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_detail_exposes_the_complete_contract_without_pii_and_the_summary_counts",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_without_a_control_group_the_roi_is_potential_unproven_and_never_proven",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::rotula la atribución como oportunidad potencial no demostrada",
+    "backend/app/Http/Resources/Decision/DecisionRecommendationResource.php"
+   ],
+   "note": "Toda recomendación sin evidencia serializa `attribution_label = potential_unproven` y su nota «oportunidad potencial, atribución no demostrada, no son ingresos recuperados»; el ROI sin control nunca es «probado». No existe una exportación CSV de recomendaciones: esa parte del criterio no aplica hoy."
+  },
+  {
+   "id": "V25-DEC-024",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_recommendation_walks_the_whole_workflow_and_every_transition_is_audited",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_transition_table_is_closed_and_every_pair_outside_it_is_refused_with_409",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_allowed_transitions_are_listed_per_user_with_the_reason_when_blocked",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_an_expired_recommendation_is_still_readable_but_allows_no_transitions",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_executed_moves_to_measured_through_the_system_transition_with_its_audit_event",
+    "backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/TransitionRules.php"
+   ],
+   "note": "Máquina de estados cerrada suggested → assigned → reviewed → approved | rejected → in_progress → executed → measured → closed, más expired; toda pareja fuera de la tabla se rechaza con 409 (no 422) y cada transición legal deja su evento. La tabla `recommendations` de la etapa 1 (open / acknowledged / dismissed / ordered) no se migró a este flujo: sigue con el suyo (ver el defecto D10)."
+  },
+  {
+   "id": "V25-DEC-025",
+   "status": "PARCIAL",
+   "gap": "Se asigna a un responsable (miembro con habilidad de gestión) con su evento y las habilidades decisions.view / manage / approve por rol (owner, admin, analyst, viewer) se hacen cumplir en cada transición (probado); no existen los roles gerente ni vendedor ni las habilidades granulares decision.assign / review / approve: se usan los cuatro roles actuales.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_assignee_must_be_a_member_with_manage_ability",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_abilities_by_role_are_enforced_on_every_transition",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_concurrent_assignments_are_serialized_by_the_row_lock_and_the_state_check",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_a_second_assignment_cannot_silently_overwrite_what_another_person_did",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Asignar sin permiso responde 403 y asignar a un viewer se rechaza."
+  },
+  {
+   "id": "V25-DEC-026",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_what_has_no_action_in_progress_expires_when_its_date_passes_and_the_rest_does_not",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_a_recommendation_whose_expiry_is_exactly_now_expires_and_one_second_earlier_does_not",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_expiring_twice_is_idempotent",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_a_recommendation_changed_by_someone_else_before_expiry_is_skipped_without_error",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_the_command_expires_per_company_and_supports_dry_run_and_a_single_company",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_the_expiry_dates_follow_the_kind_and_the_company_settings",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_the_commands_are_scheduled_per_company_and_idempotent",
+    "backend/tests/Feature/Decision/DecisionReviewBoundsTest.php::test_an_older_cutoff_arriving_later_never_expires_a_newer_recommendation",
+    "backend/app/Services/Decision/DecisionExpirer.php"
+   ],
+   "note": "Lo que no tiene una acción en curso pasa a `expired` al vencer (una sola vez, con su evento), sigue legible y sale de la bandeja activa; el barrido es programado y por empresa."
+  },
+  {
+   "id": "V25-DEC-027",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_two_concurrent_reviews_do_not_overwrite_each_other_the_stale_one_is_refused_with_409",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_every_transition_locks_the_row_inside_a_transaction_before_deciding",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_review_approve_and_reject_require_the_expected_version",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_concurrent_assignments_are_serialized_by_the_row_lock_and_the_state_check",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_every_human_transition_requires_the_expected_version",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_the_version_ignores_system_comments",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_a_stale_version_is_detected_by_the_optimistic_lock",
+    "backend/app/Services/Decision/Workflow.php"
+   ],
+   "note": "`expected_version` es obligatorio en toda transición humana (409 `decision_version_conflict` si cambió) y la fila se bloquea con SELECT … FOR UPDATE dentro de la transacción antes de decidir. Limitación honesta: la suite corre cada prueba dentro de una transacción de una sola conexión, así que la carrera real entre dos procesos no se ejecuta en paralelo; se prueba el efecto (versión desfasada rechazada) y el orden de las sentencias (bloqueo antes de escribir)."
+  },
+  {
+   "id": "V25-DEC-028",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_repeating_a_transition_with_the_same_key_has_no_new_effects",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_key_already_used_for_another_target_is_refused_and_keys_are_independent_per_recommendation",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_idempotency_key_is_required_and_validated",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_a_replay_is_authorized_first_and_must_carry_the_same_body_and_user",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_postponing_changes_nothing_in_the_workflow_and_a_repeated_feedback_does_not_repeat_the_transition",
+    "frontend/src/utils/__tests__/decisions.spec.ts::se conserva mientras el intento no se resuelve (red caída) y se renueva con una respuesta definitiva",
+    "backend/app/Services/Decision/Workflow.php"
+   ],
+   "note": "`idempotency_key` obligatoria; repetir la misma petición devuelve el mismo evento sin otro efecto, pero se autoriza primero y debe ser la misma petición (misma clave con otro cuerpo → 409 `idempotency_key_reused`); en la interfaz la clave se conserva solo mientras el intento no se resolvió."
+  },
+  {
+   "id": "V25-DEC-029",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_action_cannot_start_without_approval_but_a_contact_can",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_company_can_require_approval_for_contacts_or_above_a_cost_threshold",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_recommendation_over_budget_requires_approval_even_if_its_kind_does_not",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_recommendation_walks_the_whole_workflow_and_every_transition_is_audited",
+    "backend/app/Services/Decision/Workflow.php; docs/decision/CONTROLLED_ACTIONS.md"
+   ],
+   "note": "Reposición, inventario-demanda, presupuesto, escenario, lo que excede el presupuesto y lo que la empresa configure (contactos o umbral de costo) no pasan de `reviewed` a `in_progress` sin `approved` (409 `decision_approval_required`). «Cambio de precio» no es una acción que Predictily ejecute y el mensaje al cliente solo exige aprobación si la empresa lo configura para los contactos."
+  },
+  {
+   "id": "V25-DEC-030",
+   "status": "PARCIAL",
+   "gap": "Cada transición deja un evento (actor, de/a estado, motivo y fecha) en decision_events, bajo el bloqueo de fila dentro de la misma transacción, y los cambios de configuración se auditan con valor anterior y nuevo sin la semilla (probado). No hay una prueba que fuerce un fallo de la bitácora y compruebe que el cambio de estado se revierte, y la inmutabilidad técnica del historial (trigger o permisos) está DISEÑADA.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_recommendation_walks_the_whole_workflow_and_every_transition_is_audited",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_every_transition_locks_the_row_inside_a_transaction_before_deciding",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_dismissing_requires_a_reason_and_rejecting_requires_a_reason_too",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_the_settings_audit_records_old_and_new_values_and_never_the_seed",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_the_proposal_event_stores_the_experiment_key_and_group",
+    "backend/app/Services/Decision/DecisionEngine.php; backend/app/Services/Decision/DecisionGenerator.php; backend/app/Services/Decision/Workflow.php; backend/app/Services/Decision/ScoreFormula.php; backend/app/Http/Controllers/Api/Decision/DecisionController.php"
+   ],
+   "note": "Descartar y rechazar exigen un motivo."
+  },
+  {
+   "id": "V25-DEC-031",
+   "status": "PENDIENTE",
+   "gap": "DISEÑADO, no implementado: un estado alcanzado no se edita y no existe una transición de reversión; la compensación sería una recomendación nueva (docs/decision/CONTROLLED_ACTIONS.md).",
+   "evidence": [
+    "docs/decision/CONTROLLED_ACTIONS.md"
+   ],
+   "note": "El pasado queda intacto por diseño: no hay noción de reversibilidad por tipo de acción."
+  },
+  {
+   "id": "V25-DEC-032",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_proposer_cannot_approve_their_own_action_but_another_approver_can",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_whoever_must_execute_the_action_cannot_approve_it_and_whoever_approved_cannot_execute_it",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_an_agenda_feedback_event_is_not_mistaken_for_the_approval",
+    "backend/tests/Feature/Decision/DecisionAgendaSyncTest.php::test_the_feedback_of_the_assigned_seller_never_counts_as_approval_and_the_approver_cannot_execute_through_the_agenda",
+    "backend/tests/Feature/Radar/RadarReviewFixesTest.php::test_a_manual_materialization_records_the_user_as_the_proposer_and_the_proposer_cannot_approve_it",
+    "backend/app/Services/Decision/Workflow.php"
+   ],
+   "note": "Quien propone o debe ejecutar no aprueba su propia acción y quien aprobó no la ejecuta (403 `decision_segregation_of_duties` con las funciones en conflicto); el seguimiento de la agenda del vendedor no cuenta como aprobación y la aprobación la hace siempre una persona con decisions.approve. La segregación es organizativa (otra cuenta): no hay MFA para roles privilegiados."
+  },
+  {
+   "id": "V25-DEC-033",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_generating_and_walking_the_workflow_never_sends_messages_calls_the_erp_or_queues_work",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_measuring_never_calls_the_erp_sends_messages_or_creates_recommendations",
+    "backend/tests/Feature/Radar/RadarFeedbackApiTest.php::test_no_message_is_ever_sent_by_the_radar"
+   ],
+   "note": "Generar, recorrer el flujo, medir y dar seguimiento no escriben en el ERP, no envían mensajes ni encolan trabajo (probado además de la ausencia de conectores con método de escritura)."
+  },
+  {
+   "id": "V25-DEC-034",
+   "status": "PENDIENTE",
+   "gap": "DISEÑADO (docs/decision/CONTROLLED_ACTIONS.md): hoy no hay escritura alguna, de modo que los controles de escritura futura (allowlist, dry-run, confirmación, deduplicación, límites, revalidación y rollback) no existen. Lo que sí rige hoy sobre la acción humana: aprobación explícita, segregación de funciones, idempotencia, bloqueo optimista y auditoría.",
+   "evidence": [
+    "docs/decision/CONTROLLED_ACTIONS.md"
+   ],
+   "note": "P3: no hay ejecución supervisada ni doble de ERP."
+  },
+  {
+   "id": "V25-DEC-035",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_the_same_inputs_produce_the_same_recommendations_in_two_companies",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_generation_is_idempotent_the_second_run_creates_nothing",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_same_inputs_return_the_same_recommendation_without_duplicating_anything",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_priorities_follow_the_rank_inside_the_batch_and_are_deterministic",
+    "backend/tests/Unit/Decision/ScoreFormulaTest.php::test_the_idempotency_key_is_a_stable_sha256_of_kind_cut_horizon_entity_and_source",
+    "backend/tests/Feature/Decision/DecisionProducersAndPriorityTest.php::test_the_priority_does_not_depend_on_the_order_in_which_items_are_proposed_one_by_one",
+    "backend/tests/Feature/Radar/RadarOpportunitiesApiTest.php::test_the_default_order_is_by_score_and_is_deterministic"
+   ],
+   "note": "Con los mismos insumos y configuración el motor de decisión produce las mismas filas, el mismo orden (desempate binario estable) y la misma explicación. Se refiere al motor de decisión: el determinismo del MILP con límite de tiempo (D9) no se afirma aquí."
+  },
+  {
+   "id": "V25-DEC-036",
+   "status": "PARCIAL",
+   "gap": "El Centro de decisiones existe (conteos por estado, lista con filtros del servidor, detalle con el contrato completo y las acciones del workflow con confirmación, expected_version, idempotency_key y línea de tiempo), verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios. Los escenarios no tienen vista propia (un kind = scenario se lista como cualquier recomendación) y no existen los roles gerente/vendedor.",
+   "evidence": [
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::muestra los conteos y la lista sin detalle hasta elegir una recomendación",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::con un id en la ruta carga el detalle y sus acciones según el rol",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M3: al cambiar de empresa vuelve a pedir los conteos y la lista, y no queda nada de la anterior mientras llegan",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::carga por id y muestra el contrato: valor, contribución, puntaje y fórmula, probabilidad, disponibilidad, aprobación y atribución",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::asignar manda to_status, expected_version (la leída), una clave nueva y el responsable; muestra el resultado",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::una acción bloqueada por el servidor (segregación) se ofrece desactivada con su motivo",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::409 de versión: recarga el detalle, cierra el cuadro y avisa que otra persona lo cambió",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::pide por defecto las recomendaciones en trabajo y nunca incluye el grupo de control",
+    "frontend/src/utils/__tests__/decisions.spec.ts::siempre lleva expected_version (la versión leída) e idempotency_key"
+   ],
+   "note": "Las acciones se ofrecen por habilidad, los valores nulos se dicen y el grupo del experimento solo lo ve quien aprueba."
+  },
+  {
+   "id": "V25-DEC-037",
+   "status": "PARCIAL",
+   "gap": "Los cuatro documentos existen (DECISION_ENGINE, ECONOMIC_PRIORITIZATION, OUTCOME_MEASUREMENT y CONTROLLED_ACTIONS) con cada sección etiquetada IMPLEMENTADO / VERIFICADO, DISEÑADO, BLOQUEADO o NO APLICA y las pruebas que la respaldan por nombre; no registran los comandos de prueba ejecutados ni sus resultados.",
+   "evidence": [
+    "docs/decision/DECISION_ENGINE.md",
+    "docs/decision/ECONOMIC_PRIORITIZATION.md",
+    "docs/decision/OUTCOME_MEASUREMENT.md",
+    "docs/decision/CONTROLLED_ACTIONS.md",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_recommendation_walks_the_whole_workflow_and_every_transition_is_audited"
+   ],
+   "note": "Cada documento separa lo verificado de lo diseñado y lo bloqueado (resultados reales: piloto)."
+  },
+  {
+   "id": "V25-DEC-038",
+   "status": "PARCIAL",
+   "gap": "El flujo de decisión con dos empresas está probado por API y servicios (oportunidad → recomendación reproducible con inventario y costo → asignación/aprobación con auditoría → la otra empresa no la ve), pero no hay una prueba E2E única que lo repita ante un fallo de calidad de datos, un rollback de modelo y un cambio de tenant con su costo y rendimiento; la parte con datos reales del piloto sigue BLOQUEADA.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_recommendation_of_another_company_is_invisible_and_untouchable",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_recommendation_walks_the_whole_workflow_and_every_transition_is_audited",
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_assignments_are_isolated_between_companies",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_recommendations_are_isolated_between_companies",
+    "backend/tests/Feature/Decision/DecisionEngineProposalTest.php::test_the_same_inputs_return_the_same_recommendation_without_duplicating_anything",
+    "backend/tests/Feature/Decision/DecisionGenerationTest.php::test_generation_for_one_company_never_touches_another",
+    "backend/tests/Feature/Radar/RadarDecisionEngineIntegrationTest.php::test_feedback_on_an_engine_proposal_is_audited_idempotent_and_keeps_the_engine_history"
+   ],
+   "note": "Datos sintéticos; sin datos reales de ninguna empresa."
+  },
+  {
+   "id": "V25-DEC-039",
+   "status": "PARCIAL",
+   "gap": "Las reglas por empresa (probabilidad mínima, tope por horizonte, costo de contacto, peso del costo no confiable, confiabilidad del costo, vigencias, aprobación de contactos o por umbral de costo y exceso) cambian el resultado, se auditan y no se filtran entre empresas (probado). Prioridades por producto y lista de aprobadores están DISEÑADAS; el umbral de riesgo de quiebre por empresa (D7) y el de sobrestock por clase de perecibilidad (D8) siguen pendientes en la etapa 1; GET/PUT /decisions/settings no tienen pantalla.",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionSettingsApiTest.php::test_settings_change_what_the_engine_does_and_do_not_leak_between_companies",
+    "backend/tests/Feature/Decision/DecisionSettingsApiTest.php::test_only_who_manages_the_company_can_change_them_and_the_values_are_validated",
+    "backend/tests/Feature/Decision/DecisionSettingsApiTest.php::test_the_defaults_are_provisional_and_the_control_fraction_is_zero",
+    "backend/tests/Feature/Decision/DecisionSettingsApiTest.php::test_changing_other_company_settings_keeps_the_decision_settings",
+    "backend/tests/Feature/Decision/DecisionReviewFixesTest.php::test_the_settings_audit_records_old_and_new_values_and_never_the_seed",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_company_can_require_approval_for_contacts_or_above_a_cost_threshold",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_the_expiry_dates_follow_the_kind_and_the_company_settings",
+    "backend/tests/Feature/Radar/CommercialOpportunityServiceTest.php::test_the_policy_thresholds_and_the_cap_are_configurable_and_versioned",
+    "backend/tests/Unit/Radar/RadarPolicyTest.php::test_defaults_when_nothing_is_configured",
+    "backend/tests/Unit/Radar/RadarPolicyTest.php::test_out_of_range_values_are_clamped_not_trusted",
+    "backend/tests/Unit/Radar/RadarPolicyTest.php::test_the_version_is_a_stable_fingerprint_of_the_parameters",
+    "backend/app/Services/Decision/DecisionSettings.php"
+   ],
+   "note": "Los valores iniciales son provisionales y «a aprobar en el piloto»."
+  },
+  {
+   "id": "V25-OUT-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_only_recommendations_whose_window_and_settling_lag_have_passed_are_measured",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_re_measuring_is_idempotent_and_dry_run_writes_nothing",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_the_artisan_command_measures_per_tenant_supports_dry_run_and_validates_the_lag",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_the_command_is_scheduled_after_the_decisions_are_generated",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_one_company_never_reads_the_sales_or_recommendations_of_another",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_group_that_fails_midway_is_rolled_back_whole_reported_and_measured_on_the_next_run",
+    "backend/tests/Feature/Outcomes/OutcomeConcurrencyTest.php::test_the_company_advisory_lock_held_by_another_connection_blocks_the_measurement_until_it_is_released",
+    "backend/tests/Feature/Outcomes/OutcomeConcurrencyTest.php::test_several_processes_at_once_neither_duplicate_results_nor_count_a_customer_twice",
+    "backend/tests/Feature/Outcomes/OutcomeKnowledgeAndCommandTest.php::test_a_failing_group_makes_the_command_exit_non_zero_with_a_stable_code_and_no_raw_error",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "OutcomeMeasurementService mide por empresa las recomendaciones cuya ventana y rezago de asentamiento ya pasaron, es idempotente, se programa tras generar las decisiones, revierte un grupo que falla a la mitad y se serializa con un bloqueo por empresa y por fila (probado con conexiones reales distintas)."
+  },
+  {
+   "id": "V25-OUT-002",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_list_returns_the_measured_outcomes_with_their_honest_classification_and_evidence",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_agenda_follow_up_contacted_registers_the_action_time_for_the_association",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_executed_moves_to_measured_through_the_system_transition_with_its_audit_event",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Cada resultado enlaza la recomendación con su asignación (la «tarea»), su estado y eventos del workflow (la «decisión»), la acción registrada y el evento observado posterior, con ids, fechas y fuente en `evidence`."
+  },
+  {
+   "id": "V25-OUT-003",
+   "status": "PARCIAL",
+   "gap": "Se producen y se prueban previsto (virtual), observado, asociado temporalmente e incremental estimado (siempre como resultado agregado por intención de tratamiento, nunca por fila). «Atribuible causalmente» está DISEÑADO: el vocabulario lo reserva, el servicio no lo escribe y no hay un método que lo justifique.",
+   "evidence": [
+    "backend/tests/Unit/Outcomes/OutcomeWindowAndSettingsTest.php::test_the_vocabulary_matches_the_database_contract_and_keeps_causal_attribution_unwritten",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_forecast_state_is_virtual_recommendations_not_yet_measurable_are_reported_as_forecast",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_purchase_after_a_registered_action_is_temporally_associated_and_never_incremental",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_known_effect_is_recovered_with_its_estimate_sample_sizes_and_interval",
+    "frontend/src/utils/__tests__/outcomes.spec.ts::las filas son solo observado o asociado temporalmente: el resumen no ofrece conteos de incremental ni de causal",
+    "backend/app/Services/Outcomes/OutcomeVocabulary.php"
+   ],
+   "note": "La interfaz solo ofrece las clasificaciones de fila que el servidor escribe y deja lo incremental y lo causal en tono neutro."
+  },
+  {
+   "id": "V25-OUT-004",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_rejected_expired_not_contacted_and_superseded_recommendations_are_measured_too",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_dismissing_requires_a_reason_and_rejecting_requires_a_reason_too",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Las rechazadas se miden como las demás (la fecha va en la evidencia; el motivo obligatorio, en decision_events) y entran al embudo."
+  },
+  {
+   "id": "V25-OUT-005",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_rejected_expired_not_contacted_and_superseded_recommendations_are_measured_too",
+    "backend/tests/Feature/Outcomes/OutcomeKnowledgeAndCommandTest.php::test_only_contacted_interested_and_order_received_count_as_an_action_and_the_first_registration_wins",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_the_analysis_follows_the_assigned_group_not_who_was_actually_contacted",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Las no contactadas (sin acción registrada en la ventana, incluida la retenida para medición) se registran y miden en la misma ventana; solo contactado, interesado y pedido recibido cuentan como acción."
+  },
+  {
+   "id": "V25-OUT-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_rejected_expired_not_contacted_and_superseded_recommendations_are_measured_too",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_contacted_recommendation_that_later_expired_or_was_discarded_is_still_contacted",
+    "backend/tests/Feature/Decision/DecisionExpiryTest.php::test_expiring_twice_is_idempotent",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Las caducadas no desaparecen: se miden como resultados con su clasificación y se informan en el embudo."
+  },
+  {
+   "id": "V25-OUT-007",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_without_a_control_group_the_roi_is_potential_unproven_and_never_proven",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_roi_filters_and_breaks_down_by_kind_horizon_segment_and_owner",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_superseded_recommendations_are_not_counted_as_separate_opportunities",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::las tasas nulas son «No estimada» y la respuesta se rotula como asociación",
+    "backend/app/Services/Outcomes/RoiReport.php"
+   ],
+   "note": "El embudo da oportunidades identificadas y atendidas, tasa de acción y de respuesta (nulas cuando no se pueden estimar, nunca 0) desglosables por tipo, horizonte, segmento y responsable; las reemplazadas no cuentan como oportunidades distintas."
+  },
+  {
+   "id": "V25-OUT-008",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_the_associated_money_is_only_what_was_bought_after_the_action_not_the_whole_window",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_a_purchase_only_before_the_action_is_observed_and_adds_nothing_to_the_association",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_overlapping_recommendations_do_not_double_count_the_same_sales_in_the_headline_totals",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_purchase_after_a_registered_action_is_temporally_associated_and_never_incremental",
+    "backend/tests/Unit/Outcomes/ObservationCalculatorTest.php::test_only_a_purchase_strictly_after_the_registered_action_counts_as_after",
+    "backend/app/Services/Outcomes/ObservationCalculator.php"
+   ],
+   "note": "Lo observado es la ventana completa y lo asociado, solo lo posterior a la acción, ambos deduplicados por línea de venta: son observación, no causa."
+  },
+  {
+   "id": "V25-OUT-009",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_contribution_is_null_with_its_reason_when_the_cost_is_not_reliable_and_zero_when_nothing_was_bought",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_a_unit_cost_that_is_not_reliable_leaves_the_deduplicated_contribution_unknown_not_zero",
+    "frontend/src/utils/__tests__/outcomes.spec.ts::sin ningún par con costo confiable, observado y asociado son «no estimados» (null), no 0",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "La contribución conocida usa el costo vigente en su fecha; con costo no confiable queda nula con sus motivos y los pares sin costo se cuentan aparte (suma parcial dicha), nunca como cero."
+  },
+  {
+   "id": "V25-OUT-010",
+   "status": "PARCIAL",
+   "gap": "El costo de contacto es el importe configurado por empresa (action_cost) y solo se cuenta si hay una acción registrada dentro de la ventana; desconocido no es 0 (probado). No se registra el tiempo ni el canal reales de cada contacto.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_the_contact_cost_comes_from_the_recommendation_only_when_an_action_was_registered",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_an_action_without_a_configured_contact_cost_leaves_the_cost_unknown_not_zero",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_an_action_registered_after_the_window_closed_is_not_attended_nor_does_it_cost_contact",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_an_unknown_contact_cost_makes_the_net_unknown_not_zero",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Con costo de contacto desconocido el ROI no tiene neto."
+  },
+  {
+   "id": "V25-OUT-011",
+   "status": "PENDIENTE",
+   "gap": "DISEÑADO, no implementado: el ahorro comprobado exige órdenes de compra efectivas para comparar la compra real con la alternativa (V25-SUP-051 sigue sin vía de ingesta); el informe no declara ningún ahorro y no hay etiqueta estimado / comprobado.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_product_level_results_never_claim_association_with_a_supplier_purchase",
+    "docs/decision/OUTCOME_MEASUREMENT.md"
+   ],
+   "note": "Los resultados a nivel de producto no afirman asociación con una compra a proveedor."
+  },
+  {
+   "id": "V25-OUT-012",
+   "status": "PARCIAL",
+   "gap": "Quiebre y «sin salida» (no_sell_through) se observan por producto con el inventario leído as-of, sin atribuirlos a la decisión (probado); el exceso es solo un diagnóstico y la rotación y el capital inmovilizado realizados, con línea base antes/después, están DISEÑADOS (la simulación de W5-D sí reporta rotación y capital comprometido, pero sobre simulaciones, no sobre datos realizados).",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_product_level_recommendations_are_measured_by_sales_and_stockouts_and_never_incremental",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_availability_that_did_not_fall_is_reported_as_no_sell_through_not_as_overstock",
+    "backend/tests/Feature/Outcomes/OutcomeKnowledgeAndCommandTest.php::test_a_negative_balance_in_one_branch_does_not_cancel_the_stock_of_another",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "El vocabulario del backend incluye `no_sell_through` (antes overstock)."
+  },
+  {
+   "id": "V25-OUT-013",
+   "status": "PENDIENTE",
+   "gap": "DISEÑADO, no implementado: el tiempo hasta contactar y de revisión es derivable de decision_events, pero no se mide ni se informa.",
+   "evidence": [
+    "docs/decision/OUTCOME_MEASUREMENT.md"
+   ],
+   "note": "Sin medición de tiempos por etapa."
+  },
+  {
+   "id": "V25-OUT-014",
+   "status": "PARCIAL",
+   "gap": "El informe de ROI trae las cantidades de uso de la plataforma (W4) y solo las monetiza con precios configurados por la empresa; sin precios, el costo no se estima (probado). No existe un modelo de costo de operación por empresa (cómputo, almacenamiento, inferencia, soporte) ni integración con la facturación de infraestructura (depende de AWS real, BLOQUEADO).",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_a_known_cost_of_platform_usage_enters_the_net_only_when_prices_are_configured",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::costo de contacto desconocido no es cero; uso sin precios no se convierte en dinero",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::con precios configurados muestra el costo de uso",
+    "frontend/src/components/__tests__/AdminComponents.spec.ts::muestra el consumo del plan y el uso de la plataforma como cantidades; sin precios, el costo no se estima",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "La Administración muestra el uso por empresa como cantidades."
+  },
+  {
+   "id": "V25-OUT-015",
+   "status": "PARCIAL",
+   "gap": "Cada resultado trae sus líneas de venta leídas, las tardías, el margen, los motivos de costo no confiable y el corte de conocimiento (probado). La frecuencia de actualización y los reportes de calidad de W2 no se vinculan a cada resultado ni a la ventana de medición (DISEÑADO).",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_late_document_is_not_visible_before_it_was_ingested_but_one_ingested_within_the_lag_is",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_list_returns_the_measured_outcomes_with_their_honest_classification_and_evidence",
+    "frontend/src/utils/__tests__/outcomes.spec.ts::es el mayor corte de conocimiento de los resultados medidos; sin resultados, null",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "«Datos hasta» es el corte real de las ventas leídas, no la fecha del informe."
+  },
+  {
+   "id": "V25-OUT-016",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_roi_filters_and_breaks_down_by_kind_horizon_segment_and_owner",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_list_filters_paginates_and_sorts",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::el desglose usa una columna por tipo de valor (observado, asociado; sin potencial) y trata como «No estimado» lo que no tiene pares con costo confiable",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::las filas del desglose no son aditivas: lo dice, y con cualquier agrupación no hay oportunidad potencial ni totales",
+    "backend/app/Services/Outcomes/RoiReport.php"
+   ],
+   "note": "El ROI y los resultados se filtran y desglosan por tipo, horizonte, segmento y responsable (asignado); las filas del desglose se rotulan no aditivas y sin oportunidad potencial."
+  },
+  {
+   "id": "V25-OUT-017",
+   "status": "PARCIAL",
+   "gap": "El ROI se calcula sobre contribución conocida, neta de los costos de contacto y, con precios configurados, de uso, con intervalo (bootstrap percentil con semilla) y limitaciones, y solo con un grupo de control con muestra suficiente (probado, datos sintéticos). Falta el costo de implantación (no hay insumo); el intervalo monetario es indicativo con colas pesadas (cobertura documentada 74-95 % frente al 95 % nominal, y la API y la interfaz lo avisan); con pocos compradores por brazo solo se estima la conversión y no se publica ninguna cifra en dinero.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_with_a_control_group_the_roi_reports_the_itt_estimate_net_of_contact_costs_with_its_interval",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_without_a_control_group_the_roi_is_potential_unproven_and_never_proven",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_with_an_unreliable_cost_only_the_conversion_is_estimated_and_no_money_figure_is_published",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_a_known_cost_of_platform_usage_enters_the_net_only_when_prices_are_configured",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_an_unknown_contact_cost_makes_the_net_unknown_not_zero",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_a_heavy_tail_among_buyers_is_flagged_because_no_interval_covers_its_nominal_level_there",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_with_too_few_buyers_in_an_arm_no_money_interval_or_incremental_is_published",
+    "backend/tests/Unit/Outcomes/BootstrapIntervalTest.php::test_heavy_tails_widen_the_interval_relative_to_the_normal_approximation",
+    "backend/tests/Unit/Outcomes/BootstrapIntervalTest.php::test_the_compute_budget_lowers_the_resamples_and_below_the_minimum_publishes_nothing",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::cola pesada: el texto de «intervalo indicativo» acompaña al intervalo del neto",
+    "backend/app/Services/Outcomes/RoiReport.php; backend/app/Services/Outcomes/BootstrapInterval.php"
+   ],
+   "note": "El ROI nunca se presenta como probado."
+  },
+  {
+   "id": "V25-OUT-018",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_by_default_there_is_no_experiment_and_nothing_is_assigned",
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_assignment_is_recorded_when_generating_with_the_seed_and_policy_and_follows_the_fraction",
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_the_assignment_is_reproducible_from_the_recorded_seed",
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_control_units_are_never_assigned_to_a_seller_nor_shown_to_non_approvers",
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_an_assignment_already_recorded_does_not_change_when_the_fraction_changes_later",
+    "backend/tests/Feature/Decision/DecisionExperimentTest.php::test_only_customer_contact_actions_enter_the_experiment_and_the_fraction_is_capped",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_the_assignment_made_by_the_decision_engine_is_the_one_analysed",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_an_assignment_registered_after_the_recommendation_was_generated_is_not_trusted",
+    "backend/tests/Feature/Decision/DecisionSettingsApiTest.php::test_enabling_the_experiment_registers_a_seed_that_is_not_returned_and_is_audited",
+    "backend/app/Services/Decision/ExperimentAssigner.php"
+   ],
+   "note": "Por defecto no hay experimento (fracción de control 0); al activarlo, la asignación es uniforme por comprador (`sha256-uniform-v1`), se registra al generar con semilla y política, es reproducible, no cambia si la fracción cambia después y solo cubre acciones de contacto con la fracción acotada. La estratificación está DISEÑADA y no se ha ejecutado ningún piloto real."
+  },
+  {
+   "id": "V25-OUT-019",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_the_analysis_follows_the_assigned_group_not_who_was_actually_contacted",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_known_effect_is_recovered_with_its_estimate_sample_sizes_and_interval",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_an_interval_that_includes_zero_is_reported_as_not_significant_not_as_a_win",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_sample_below_the_minimum_per_group_is_insufficient_and_makes_no_claim",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_it_estimates_with_both_groups_at_the_minimum_size_and_enough_buyers",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_the_money_interval_is_a_deterministic_seeded_bootstrap_with_welch_only_as_a_diagnostic",
+    "backend/tests/Unit/Outcomes/IttEstimatorTest.php::test_wilson_interval_matches_the_published_reference",
+    "backend/tests/Unit/Outcomes/IttEstimatorTest.php::test_newcombe_difference_matches_the_published_reference",
+    "backend/tests/Unit/Outcomes/BootstrapIntervalTest.php::test_the_same_seed_gives_the_same_interval_and_another_seed_a_different_simulation",
+    "backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/IttEstimator.php"
+   ],
+   "note": "El análisis sigue el grupo asignado, no quien se contactó de hecho: diferencia de conversión con intervalo de Newcombe y diferencia de contribución con bootstrap percentil determinista; con muestra bajo el mínimo por grupo no afirma nada. Verificado con datos sintéticos de verdad conocida; no hay resultados reales."
+  },
+  {
+   "id": "V25-OUT-020",
+   "status": "PENDIENTE",
+   "gap": "DISEÑADO, no implementado (docs/decision/OUTCOME_MEASUREMENT.md): cuando no hay experimento no se estima ningún incremento y no existe la plantilla ni la verificación de un cuasiexperimento para contactos.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_without_a_control_group_nothing_is_ever_incremental",
+    "docs/decision/OUTCOME_MEASUREMENT.md"
+   ],
+   "note": "Sin control el sistema informa observación y oportunidad."
+  },
+  {
+   "id": "V25-OUT-021",
+   "status": "PARCIAL",
+   "gap": "Se detectan o informan los controles contaminados (con acción registrada), las fracciones de control mezcladas, el desajuste del cociente de muestras (SRM) y las unidades descartadas por falta de asignación registrada o por clave ambigua (probado). La contaminación entre vendedores y el balance de covariables previas (sesgo de selección) están DISEÑADOS.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_sample_ratio_mismatch_is_flagged_in_the_experiment_and_in_the_roi_reasons",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_single_control_fraction_is_required_to_pool_units",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_the_units_dropped_per_arm_and_the_sample_ratio_are_reported",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_group_not_backed_by_a_registered_assignment_is_excluded_from_the_analysis",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_when_several_experiments_fit_a_customer_the_key_is_ambiguous_and_nothing_is_claimed",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_the_sample_ratio_check_flags_a_split_incompatible_with_the_registered_fraction",
+    "backend/tests/Unit/Outcomes/IttAnalysisTest.php::test_control_units_with_a_registered_action_are_counted_as_contamination",
+    "backend/app/Services/Outcomes/ExperimentResolver.php"
+   ],
+   "note": "La interfaz avisa el SRM y la contaminación del control."
+  },
+  {
+   "id": "V25-OUT-022",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_without_a_control_group_the_roi_is_potential_unproven_and_never_proven",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_without_a_control_group_nothing_is_ever_incremental",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_treatment_only_experiment_without_controls_makes_no_incremental_claim",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::aunque la API dijera proven = true, la vista sigue diciendo «No demostrado»",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::sin grupo de control: estado «potencial, no demostrado», sin cifra de ROI, con el motivo y el método",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Sin causalidad demostrable el informe da observación y oportunidad potencial y nunca un beneficio atribuible; el ROI nunca es «proven» (la interfaz lo ignora aunque llegara) y «atribuible causalmente» queda DISEÑADO."
+  },
+  {
+   "id": "V25-OUT-023",
+   "status": "PARCIAL",
+   "gap": "El informe de ROI respeta settings.data_origin de la empresa (demostración o simulado nunca se muestran como reales; sin declarar, «origen no verificado») y las vistas nuevas muestran la banda (probado); las empresas de demostración lo declaran. El origen es un atributo de la empresa, no del dato o la corrida: no hay pantalla para declararlo, las empresas reales no lo declaran todavía y las vistas anteriores a W5 y las exportaciones no lo propagan.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_origin_of_the_data_is_declared_and_demo_or_simulated_results_are_never_shown_as_real",
+    "backend/tests/Feature/Demo/DemoDataOriginTest.php::test_demo_companies_declare_their_data_origin_and_keep_other_settings",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::muestra el aviso de datos de demostración o simulados junto al ROI",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::origen no declarado: la banda y el aviso del ROI dicen «no verificado» y la vista nunca lo supone real",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::el origen sin declarar NO se supone real; demostración y simulado se avisan; real solo si se declaró"
+   ],
+   "note": "Los importes de datos de demostración se rotulan «no son resultados reales»."
+  },
+  {
+   "id": "V25-OUT-024",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_purchase_after_a_registered_action_is_temporally_associated_and_never_incremental",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_agenda_follow_up_contacted_registers_the_action_time_for_the_association",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_only_returns_issued_after_the_action_reduce_the_after_action_figures",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_without_a_control_group_nothing_is_ever_incremental",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Una compra posterior a la acción se clasifica «asociada temporalmente» y nunca incremental ni causal; solo un experimento con control produce una estimación incremental, y solo agregada."
+  },
+  {
+   "id": "V25-OUT-025",
+   "status": "PARCIAL",
+   "gap": "Las ventas se leen as-of (tiempo de ingestión y rezago de asentamiento configurable): un documento tardío no es visible antes de su ingestión y lo posterior al corte de conocimiento se reporta aparte sin reescribir el resultado (probado). Falta la política de reapertura de ventanas y la re-medición versionada de un resultado ya escrito (DISEÑADA): lo tardío no se incorpora al resultado original.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_late_document_is_not_visible_before_it_was_ingested_but_one_ingested_within_the_lag_is",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_document_voided_and_a_return_ingested_after_the_cutoff_do_not_rewrite_the_outcome_but_are_reported",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_the_settling_lag_is_configurable_per_company_and_by_option",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_an_execution_registered_after_the_measurement_is_closed_as_measured_with_the_late_mark",
+    "backend/tests/Feature/Outcomes/OutcomeKnowledgeAndCommandTest.php::test_the_day_a_document_became_known_is_the_local_day_of_the_company",
+    "backend/tests/Feature/Outcomes/OutcomeKnowledgeAndCommandTest.php::test_a_snapshot_corrected_after_the_cutoff_is_unknown_not_read_with_the_corrected_value",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "La ejecución registrada después de la medición cierra la recomendación como medida con la marca de tardía."
+  },
+  {
+   "id": "V25-OUT-026",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_returns_are_netted_and_never_create_negative_sales",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_voided_document_is_not_a_purchase",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_document_voided_and_a_return_ingested_after_the_cutoff_do_not_rewrite_the_outcome_but_are_reported",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_returns_and_credit_notes_dated_after_the_window_but_known_before_the_cutoff_are_netted_and_reported",
+    "backend/tests/Feature/Outcomes/OutcomeAssociationAndDedupTest.php::test_only_returns_issued_after_the_action_reduce_the_after_action_figures",
+    "backend/tests/Unit/Outcomes/ObservationCalculatorTest.php::test_returns_are_netted_per_product_and_never_go_below_zero",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Devoluciones, notas de crédito y anulaciones conocidas al corte de conocimiento se descuentan (aunque su fecha sea posterior al cierre de la ventana) y se informan; lo posterior al corte se reporta (`late_returned_units_not_counted`, `lines_revised_or_removed_after_cutoff`) sin ajustar el resultado: la re-medición está DISEÑADA (ver V25-OUT-025)."
+  },
+  {
+   "id": "V25-OUT-027",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_without_a_control_group_the_roi_is_potential_unproven_and_never_proven",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_potential_is_reported_per_kind_and_horizon_and_never_as_one_total_across_incompatible_kinds",
+    "backend/tests/Feature/Outcomes/OutcomeApiTest.php::test_the_forecast_state_is_virtual_recommendations_not_yet_measurable_are_reported_as_forecast",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::observado y asociado van en columnas separadas y la oportunidad potencial, por tipo; ninguna suma aparece en ninguna parte",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::sin experimento el incremento es «Sin estimación»; con estimación aparece con su intervalo",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::muestra el ROI no demostrado, los cuatro tipos de valor sin total, embudo, costos, desglose, resultados y límites",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::agrega pronóstico, stock, oportunidades, decisiones y resultados, cada uno con su corte",
+    "backend/app/Services/Outcomes/RoiReport.php"
+   ],
+   "note": "GET /decisions/roi y la vista ROI y resultados separan oportunidad potencial (por tipo y horizonte, sin total), observado, asociado e incremental estimado, con costos y limitaciones; el Resumen ejecutivo los muestra aparte. Verificado con pruebas de componente y una corrida de revisión contra el backend real, no con usuarios, y sin resultados reales."
+  },
+  {
+   "id": "V25-OUT-028",
+   "status": "BLOQUEADO",
+   "gap": "Requiere datos reales de un cliente, una ventana de observación suficiente para el ciclo de recompra y la decisión humana GO / GO-CONDICIONAL / NO-GO. Lo construible localmente está hecho y probado con datos sintéticos de verdad conocida: asignación a control registrada, medición con rezago de asentamiento, outcomes tardíos y devoluciones, análisis por intención de tratamiento con intervalo y ROI nunca «probado»; falta lo construible del cierre del piloto: el formulario de seguimiento manual y la plantilla firmada del informe con la decisión GO/NO-GO. Nada de este paquete es un resultado real.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_a_known_effect_is_recovered_with_its_estimate_sample_sizes_and_interval",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_late_document_is_not_visible_before_it_was_ingested_but_one_ingested_within_the_lag_is",
+    "docs/decision/OUTCOME_MEASUREMENT.md"
+   ],
+   "note": "Resultados reales, uplift y ROI siguen BLOQUEADOS hasta un piloto."
+  },
+  {
+   "id": "V25-OUT-029",
+   "status": "PARCIAL",
+   "gap": "Las rechazadas, caducadas, no contactadas y reemplazadas se miden en la misma ventana y la comparación se hace solo por intención de tratamiento con grupo de control (probado); el balance de covariables previas y una comparación ejecutadas contra no ejecutadas ajustada están DISEÑADOS: fuera del experimento no se compara ejecutado contra no ejecutado.",
+   "evidence": [
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_rejected_expired_not_contacted_and_superseded_recommendations_are_measured_too",
+    "backend/tests/Feature/Outcomes/OutcomeMeasurementTest.php::test_a_superseded_recommendation_is_measured_and_marked_as_superseded",
+    "backend/tests/Feature/Outcomes/IttOutcomeTest.php::test_the_analysis_follows_the_assigned_group_not_who_was_actually_contacted",
+    "backend/app/Services/Outcomes/OutcomeMeasurementService.php; backend/app/Services/Outcomes/IttAnalysis.php; backend/app/Services/Outcomes/RoiReport.php; backend/app/Http/Controllers/Api/Decision/OutcomeController.php"
+   ],
+   "note": "Las filas nunca son incrementales."
+  },
+  {
+   "id": "V25-UIX-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::agrega pronóstico, stock, oportunidades, decisiones y resultados, cada uno con su corte",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::no inventa indicadores: la capacidad y el beneficio probado se declaran no disponibles",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::el pronóstico de oportunidades y la caída observada no se suman",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::una API que falla no oculta las demás tarjetas",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::un plan sin comportamiento de compra (402) se explica, no es un error",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M3: al cambiar de empresa CADA tarjeta vuelve a pedir su dato y, mientras llega, no queda nada de la anterior",
+    "frontend/src/views/ExecutiveOverviewView.vue"
+   ],
+   "note": "El Resumen ejecutivo agrega solo lo que dicen las APIs (pronóstico, stock, oportunidades, decisiones pendientes y resultados medidos con su clasificación), cada tarjeta con su corte, y declara no disponibles la capacidad y el beneficio probado. Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-002",
+   "status": "PARCIAL",
+   "gap": "La vista existe (resumen por horizonte, lista con probabilidad, ventana, valor rotulado, contribución, disponibilidad y próxima acción, agenda por cliente y seguimiento auditable) y filtra por horizonte, tipo, estado heredado y del flujo, SKU, categoría, zona y «solo mías». Faltan el buscador de comprador, el selector de un vendedor cualquiera y el filtro por segmento; no hay roles vendedor/gerente.",
+   "evidence": [
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::lista las oportunidades con el resumen por horizonte y la nota de que no envía mensajes",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::los filtros viajan al servidor: horizonte, tipo, estado heredado, y «solo mías» usa el usuario actual",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::el SKU, la categoría y la zona también viajan al servidor",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::la pestaña de agenda consulta /radar/agenda",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::no muestra el grupo del experimento en ninguna parte, ni a un administrador",
+    "frontend/src/components/__tests__/RadarComponents.spec.ts::muestra probabilidad, ventana, valor rotulado, disponibilidad y próxima acción",
+    "frontend/src/components/__tests__/RadarComponents.spec.ts::agrupa por cliente (no se duplica por SKU) y muestra los estados heredados con su conteo",
+    "frontend/src/components/__tests__/RadarComponents.spec.ts::el seguimiento manda state e idempotency_key y confirma sin enviar ningún mensaje",
+    "frontend/src/views/RevenueRadarView.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-004",
+   "status": "PARCIAL",
+   "gap": "El Plan de compras está probado y la API del plan ya devuelve disponibilidad, perecibilidad con FEFO, el escenario «sin compra» (no_purchase_baseline) y la política de reposición (W5-D), pero la vista de Supply no se cambió: no muestra perecibilidad, FEFO, escenario sin compra ni presupuesto restante, y la vista de Inventario (radar de reposición) sigue sin la prueba de orden por capital en riesgo.",
+   "evidence": [
+    "backend/tests/Feature/Supply/SupplyPerishabilityPlanApiTest.php::test_plan_detail_returns_position_perishability_no_purchase_scenario_and_policy_with_details_only_on_request",
+    "frontend/src/views/SupplyView.vue"
+   ],
+   "note": "La API está lista; la interfaz del plan de compras no se tocó en W5."
+  },
+  {
+   "id": "V25-UIX-005",
+   "status": "PARCIAL",
+   "gap": "El Centro de decisiones unifica recomendaciones, asignación, revisión, aprobación o rechazo con su responsable y el historial de cada transición con persona y fecha (probado con componentes y con una corrida contra el backend real). Los escenarios no tienen vista propia (un kind = scenario se lista como cualquier recomendación) y no existen los roles gerente/vendedor del criterio de aceptación.",
+   "evidence": [
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::muestra los conteos y la lista sin detalle hasta elegir una recomendación",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::con un id en la ruta carga el detalle y sus acciones según el rol",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::la línea de tiempo muestra transiciones con persona y fecha, sin comentarios del sistema ni datos del experimento",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::asignar manda to_status, expected_version (la leída), una clave nueva y el responsable; muestra el resultado",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::un administrador puede asignar a otro usuario con permiso de gestión (no a un viewer)",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::una acción bloqueada por el servidor (segregación) se ofrece desactivada con su motivo",
+    "frontend/src/components/__tests__/DecisionComponents.spec.ts::403 por segregación de funciones nombra la función que lo impide",
+    "frontend/src/views/DecisionCenterView.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-006",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::muestra el ROI no demostrado, los cuatro tipos de valor sin total, embudo, costos, desglose, resultados y límites",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::H1: la oportunidad potencial se muestra por tipo y ninguna suma entre tipos aparece en la vista (contribución 267,52; bruto 1.760,50)",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::el análisis de experimentos solo se muestra a quien aprueba",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::sin grupo de control: estado «potencial, no demostrado», sin cifra de ROI, con el motivo y el método",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::observado y asociado van en columnas separadas y la oportunidad potencial, por tipo; ninguna suma aparece en ninguna parte",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::con estimación muestra el neto con intervalo y la razón, y aclara que no es causalidad demostrada",
+    "frontend/src/components/__tests__/RoiComponents.spec.ts::sin experimento el incremento es «Sin estimación»; con estimación aparece con su intervalo",
+    "frontend/src/views/RoiOutcomesView.vue"
+   ],
+   "note": "La vista separa oportunidad potencial (por tipo y horizonte, sin total), observado, asociado e incremental estimado, con costos y limitaciones, y rotula «No demostrado» sin grupo de control. Sin resultados reales: requiere un piloto (V25-OUT-028 BLOQUEADO). Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-007",
+   "status": "PARCIAL",
+   "gap": "La Administración enterprise muestra modelos y sus aprobaciones (validar, aprobar, rechazar y promover con segregación de funciones), calidad y cobertura de datos, uso del plan y de la plataforma como cantidades y la auditoría, con las acciones por habilidad. No integra tenants, usuarios y roles ampliados, conectores, entrenamiento, costos por empresa más allá del uso registrado ni contratos/DPA/SLA (viven en otras pantallas o no existen; los roles gerente/vendedor no existen).",
+   "evidence": [
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::el administrador ve modelos, calidad, uso y auditoría; la primera pestaña es la de modelos",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::una pestaña desconocida cae en modelos",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::declara que el servidor decide cada acción",
+    "frontend/src/components/__tests__/AdminComponents.spec.ts::un administrador: validar/rechazar un candidato, aprobar/rechazar un validado, promover/rechazar un aprobado; nada en producción ni rechazado",
+    "frontend/src/components/__tests__/AdminComponents.spec.ts::quien publicó el modelo no puede aprobarlo ni rechazarlo: botones desactivados con su motivo (el servidor lo hace cumplir igual)",
+    "frontend/src/components/__tests__/AdminComponents.spec.ts::muestra el consumo del plan y el uso de la plataforma como cantidades; sin precios, el costo no se estima",
+    "frontend/src/components/__tests__/AdminComponents.spec.ts::el historial muestra los eventos de auditoría con persona y motivo",
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::quien consulta ve el resumen, el Radar, el Centro de decisiones y ROI, pero no la Administración",
+    "frontend/src/views/EnterpriseAdminView.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-008",
+   "status": "PARCIAL",
+   "gap": "Las vistas nuevas (Resumen ejecutivo, Radar, Centro de decisiones, ROI y Administración) muestran «Datos hasta <corte>» con el aviso de antigüedad en cada tarjeta (ProvenanceLine) y, en los resultados medidos, el corte real de las ventas leídas, no la fecha del informe. Las vistas anteriores (panel, pronósticos, compradores, escenarios, alertas) no se tocaron: la brecha de «todo resultado» sigue ahí.",
+   "evidence": [
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::muestra «Datos hasta <corte>», unidad y moneda",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::un corte antiguo muestra el aviso de antigüedad",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::«Informe generado el…» va aparte; sin corte de datos se dice y no se inventa uno",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::la antigüedad sale del corte real, no de la fecha del informe",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M4: «Datos hasta» de los resultados es el corte real de las ventas leídas, no la fecha del informe, y la antigüedad sale de ahí",
+    "frontend/src/utils/__tests__/outcomes.spec.ts::es el mayor corte de conocimiento de los resultados medidos; sin resultados, null",
+    "frontend/src/components/enterprise/ProvenanceLine.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-009",
+   "status": "PARCIAL",
+   "gap": "En las vistas nuevas cada cifra lleva su unidad y moneda («unidad no declarada» si falta) y los conteos vivos dicen que son del momento de la consulta. Las vistas anteriores no se tocaron y no hay unidades de presentación (cajas, kg) ni conversión visible.",
+   "evidence": [
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::muestra «Datos hasta <corte>», unidad y moneda",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::formatea con la moneda indicada",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::sin corte lo dice; sin unidad dice «unidad no declarada»; un conteo vivo dice que es del momento de la consulta",
+    "frontend/src/components/enterprise/MoneyFigure.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-011",
+   "status": "PARCIAL",
+   "gap": "ProvenanceLine admite un texto de cobertura y las vistas nuevas lo llenan con lo que la API da (la corrida, la última venta, la huella de datos); el componente se prueba, pero ninguna prueba afirma la cobertura de fuente e historia de cada resultado ni la degradación del estado cuando no alcanza el mínimo, y las vistas anteriores no se tocaron.",
+   "evidence": [
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::muestra «Datos hasta <corte>», unidad y moneda",
+    "frontend/src/components/enterprise/ProvenanceLine.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-012",
+   "status": "PARCIAL",
+   "gap": "Las vistas nuevas muestran la banda «Datos de demostración» o «simulado» según settings.data_origin de la empresa (o roi.data_origin) y, sin declarar, «Origen de datos no verificado» (nunca se supone real); las empresas de demostración lo declaran. El origen es de la empresa, no del dato o la corrida: no hay pantalla para declararlo, las empresas reales no lo declaran todavía y las vistas anteriores no muestran la banda.",
+   "evidence": [
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::el origen sin declarar NO se supone real; demostración y simulado se avisan; real solo si se declaró",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::toma el origen de la empresa cuando la vista no lo indica",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::con datos de demostración o simulados avisa que los importes NO son resultados reales",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::datos de demostración: la banda avisa que los importes no son resultados reales",
+    "backend/tests/Feature/Demo/DemoDataOriginTest.php::test_demo_companies_declare_their_data_origin_and_keep_other_settings",
+    "frontend/src/components/enterprise/DataOriginBand.vue"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-UIX-018",
+   "status": "PARCIAL",
+   "gap": "La réplica de habilidades del cliente se compara con TenantRole::abilities() para los cuatro roles, cada vista nueva declara la habilidad que exige su API y el menú oculta lo que el rol no puede usar (probado). Falta la prueba de router que recorre todas las rutas con meta.ability y la de cada vista anterior ante un 403.",
+   "evidence": [
+    "frontend/src/utils/__tests__/abilities.spec.ts::coincide con App\\Enums\\TenantRole::abilities() para los cuatro roles",
+    "frontend/src/utils/__tests__/abilities.spec.ts::cada vista declara la habilidad que exige su API",
+    "frontend/src/utils/__tests__/abilities.spec.ts::las habilidades de decisiones se reparten como en el servidor: ver (todos), gestionar (analista+), aprobar (administrador+)",
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::quien consulta ve el resumen, el Radar, el Centro de decisiones y ROI, pero no la Administración",
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::un analista tampoco ve la Administración (aprobar modelos exige models.approve)",
+    "backend/app/Enums/TenantRole.php"
+   ],
+   "note": "El servidor sigue siendo la autoridad."
+  },
+  {
+   "id": "V25-UIX-019",
+   "status": "PARCIAL",
+   "gap": "Al cambiar de empresa AppLayout no monta la vista hasta que la empresa nueva está cargada y la remonta sin el estado local de la anterior, y las consultas de las vistas nuevas descartan al instante los datos y una respuesta tardía de la empresa anterior (probado con componentes). Esas pruebas montan AppLayout con una página de prueba y las vistas nuevas, no cada vista anterior; el descarte inmediato de useAsync con alcance solo lo usan las vistas nuevas y no se ejecutó en un navegador.",
+   "evidence": [
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::la página activa se desmonta mientras carga la empresa nueva y vuelve a montarse una sola vez, sin estado de la anterior",
+    "frontend/src/components/__tests__/EnterpriseNavigation.spec.ts::aunque la empresa nueva ya venga cargada (sin fase de carga) la vista se remonta: el estado local de la anterior no sobrevive",
+    "frontend/src/components/__tests__/EnterpriseShared.spec.ts::al cambiar de alcance descarta los datos de inmediato, vuelve a pedir y no deja que una respuesta tardía de la empresa anterior pise a la nueva",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M3: al cambiar de empresa CADA tarjeta vuelve a pedir su dato y, mientras llega, no queda nada de la anterior",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M3: al cambiar de empresa vuelve a pedir el resumen y la lista, y mientras llegan no queda nada de la anterior",
+    "frontend/src/views/__tests__/EnterpriseViews.spec.ts::M3: al cambiar de empresa vuelve a pedir el informe, el desglose y el corte, y no queda ninguna cifra de la anterior"
+   ],
+   "note": "Verificado con pruebas de componente y con una corrida de revisión contra el backend real, no con usuarios."
+  },
+  {
+   "id": "V25-SUP-002",
+   "status": "PARCIAL",
+   "gap": "El plan declara la sobrerreserva (con la cantidad recortada), el físico negativo y el snapshot obsoleto y degrada su calidad a `degraded` (probado). Los escenarios y la simulación conservan su recorte propio sin declararlo (D4) y la etapa 1 sigue con su criterio.",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_over_reserved_stock_is_declared_with_the_clipped_quantity_and_degrades_quality",
+    "engine/tests/unit/test_supply_position.py::test_negative_on_hand_and_stale_snapshot_are_declared_not_accepted_silently",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_over_reserved_stock_degrades_the_stored_plan_quality_while_the_same_plan_without_it_is_ok",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_stale_initial_inventory_snapshot_excludes_the_series_from_the_simulation",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "La existencia utilizable queda acotada en 0 y el recorte consta en `details.report.availability.validity`."
+  },
+  {
+   "id": "V25-SUP-003",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_balance_reports_committed_and_residual_and_reserved_stock_is_not_discounted_twice",
+    "engine/tests/unit/test_supply_position.py::test_confirmed_orders_are_inside_the_forecast_never_added_on_top",
+    "engine/tests/unit/test_supply_position.py::test_committed_above_the_forecast_is_planned_as_firm_demand_and_unbacked_reserved_stays_discounted",
+    "engine/tests/unit/test_supply_position.py::test_commitments_are_attributed_by_branch_and_period_and_unattributed_ones_are_reported",
+    "engine/tests/unit/test_supply_position.py::test_commitments_fall_in_the_period_that_contains_their_due_day_at_every_boundary",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_plan_reconciles_confirmed_orders_with_the_forecast_and_does_not_count_them_twice",
+    "backend/tests/Feature/Supply/SupplyPerishabilityPlanApiTest.php::test_plan_detail_returns_position_perishability_no_purchase_scenario_and_policy_with_details_only_on_request",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "El balance de abastecimiento expone por serie, como componentes separados, existencia válida, reservado, disponible hoy, comprometido (pedidos confirmados tal como se conocían al corte), residual probabilístico, tránsito y ajustes. `commitments_mode = reconcile` es el valor por defecto y `ignore` restituye la conducta anterior."
+  },
+  {
+   "id": "V25-SUP-005",
+   "status": "PARCIAL",
+   "gap": "El motor lee los ajustes de inventario posteriores al snapshot y hasta el corte y los separa como componente propio sin tocar el pronóstico (probado); no existe una vía productiva que cargue stock_movements (importador): con la tabla vacía el plan es el de antes.",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_adjustments_after_the_snapshot_are_a_separate_component_and_do_not_touch_the_forecast",
+    "engine/tests/unit/test_supply_position.py::test_an_adjustment_dated_on_the_snapshot_day_is_already_in_on_hand_and_is_not_applied_twice",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "`adjustments_mode = apply` es el valor por defecto; `ignore` lo desactiva."
+  },
+  {
+   "id": "V25-SUP-007",
+   "status": "PARCIAL",
+   "gap": "La política (fórmula, nivel de servicio z, plazo, variabilidad del plazo y método de incertidumbre) se expone en el plan tal como la calculó y persistió la etapa 1, sin recalcular (probado). Sigue pendiente la prueba del stock de seguridad de la ruta empírica del backtest con un valor exacto (D22; vive en inventory/).",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_replenishment_policy_is_exposed_with_its_formula_service_level_and_lead_time_variability",
+    "backend/tests/Feature/Supply/SupplyPerishabilityPlanApiTest.php::test_plan_detail_returns_position_perishability_no_purchase_scenario_and_policy_with_details_only_on_request",
+    "engine/predictily_engine/supply/policy.py"
+   ],
+   "note": "La política provisional de incertidumbre desconocida se declara en la recomendación."
+  },
+  {
+   "id": "V25-SUP-012",
+   "status": "PARCIAL",
+   "gap": "El margen perdido del escenario «sin compra» solo se calcula con precio y costo conocidos (si no, es nulo), el precio de un plan retroactivo es el neto observado hasta el corte y el costo y el precio de la simulación son los de cada revisión (probado). Las recomendaciones y las líneas del plan siguen sin exponer margen o contribución, no hay costo de servir ni de oportunidad por línea y los escenarios usan como respaldo el precio de catálogo de hoy (D1).",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_no_purchase_scenario_values_each_branch_with_its_own_cost",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_changing_todays_catalogue_price_does_not_alter_a_past_max_margin_plan",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_recent_prices_and_sales_cost_history_are_read_as_of_the_cutoff",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_asof_costs_use_known_at_and_valid_from_and_never_the_catalogue_cost_of_today",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_service_stockout_days_and_lost_margin_use_the_cost_and_price_known_each_day",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "Un costo desconocido deja el margen desconocido, no cero."
+  },
+  {
+   "id": "V25-SUP-017",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_perishability.py::test_shelf_life_caps_period_end_stock_so_the_plan_never_buys_more_than_it_can_sell_before_expiry",
+    "engine/tests/unit/test_supply_perishability.py::test_a_plan_never_buys_more_than_can_be_sold_before_expiry_whatever_the_shelf_life_versus_the_review_period",
+    "engine/tests/unit/test_supply_perishability.py::test_the_reviewers_case_shelf_life_3_with_a_weekly_review_no_longer_buys_480_units_that_expire",
+    "engine/tests/unit/test_supply_perishability.py::test_expired_units_and_projected_fefo_loss_reduce_the_opening_stock_and_are_reported",
+    "engine/tests/unit/test_supply_perishability.py::test_verifier_and_heuristic_respect_the_shelf_cap",
+    "engine/tests/unit/test_supply_perishability.py::test_hard_coverage_with_a_shelf_life_cap_diagnoses_the_shelf_life_as_the_cause",
+    "engine/tests/unit/test_lots_fefo.py::test_fefo_sells_the_first_expiring_lot_first_and_loses_what_is_left_at_its_last_day",
+    "engine/tests/unit/test_lots_fefo.py::test_new_receipts_are_fresher_and_never_change_the_loss_of_older_lots",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_plan_reports_fefo_expiry_losses_the_no_purchase_scenario_and_ignores_other_companies_lots",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "El plan topa lo que se compra a lo vendible antes del vencimiento (el último día vendible es inclusive), proyecta la merma de los lotes existentes con salida FEFO y la reporta, y el verificador independiente y el respaldo heurístico respetan el tope. Límites: con vida útil menor que el periodo de revisión se acota lo disponible y se degrada (la planificación por subperíodos está DISEÑADA); la perecibilidad es el atributo declarado hoy (el catálogo no la versiona); datos sintéticos."
+  },
+  {
+   "id": "V25-SUP-019",
+   "status": "PARCIAL",
+   "gap": "Cada SKU declara is_perishable y shelf_life_days (importación de productos con validación y cuarentena, API del producto y del plan) y el plan clasifica las series (durable, perecible sin cuantificar, con vida útil, con lotes) y usa la clase para topar compras y proyectar mermas (probado). No hay alertas por perecibilidad ni umbral de sobrestock por clase (D8) y ninguna pantalla declara o muestra la perecibilidad.",
+   "evidence": [
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_products_import_writes_perishability_and_the_api_returns_it",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_invalid_perishability_values_are_quarantined_and_unmapped_columns_do_not_overwrite_the_declaration",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_a_products_file_with_only_one_perishability_column_never_touches_the_other",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_perishability_of_another_company_with_the_same_sku_never_leaks_into_a_lot_import",
+    "engine/tests/unit/test_supply_perishability.py::test_a_product_without_shelf_life_or_lots_is_planned_exactly_as_before_and_the_plan_says_so",
+    "engine/tests/unit/test_supply_perishability.py::test_shelf_life_declared_on_a_product_not_marked_perishable_is_ignored_even_when_it_has_lots",
+    "backend/tests/Feature/Supply/SupplyPerishabilityPlanApiTest.php::test_plan_detail_returns_position_perishability_no_purchase_scenario_and_policy_with_details_only_on_request",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "Un durable no cambia nada y no escribe texto de perecibilidad."
+  },
+  {
+   "id": "V25-SUP-020",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_lots_fefo.py::test_without_lots_or_without_expiry_nothing_is_invented",
+    "engine/tests/unit/test_lots_fefo.py::test_expired_at_cutoff_is_on_the_shelf_but_not_usable_and_reserved_ships_first_expiring",
+    "engine/tests/unit/test_lots_fefo.py::test_fefo_sells_the_first_expiring_lot_first_and_loses_what_is_left_at_its_last_day",
+    "engine/tests/unit/test_lots_fefo.py::test_lots_asof_takes_the_last_snapshot_not_after_the_cutoff",
+    "engine/tests/unit/test_supply_perishability.py::test_lots_are_read_as_of_the_cutoff_and_stale_lots_are_ignored",
+    "engine/tests/unit/test_supply_perishability.py::test_loss_uses_the_persisted_quantiles_for_the_low_demand_scenario_and_never_recomputes_the_forecast",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_lots_are_upserted_idempotently_by_branch_product_lot_and_snapshot_date",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_negative_quantity_and_invalid_expiry_are_reported_with_their_quality_class_and_never_dropped_silently",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_a_corrected_snapshot_replaces_the_lots_of_its_branch_product_and_date_without_touching_the_rest",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_a_rejected_row_never_deletes_a_good_lot_of_the_snapshot_it_replaces",
+    "backend/tests/Feature/Supply/InventoryLotsImportTest.php::test_the_expired_on_snapshot_boundary_is_inclusive_of_the_snapshot_day",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_historical_cutoff_ignores_a_lots_snapshot_taken_after_it",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "Con lotes con fecha de vencimiento el balance proyecta la merma con salida FEFO; sin lotes (o sin vencimiento) responde `not_configured` y no inventa. Ya no es una función aislada: hay esquema de lotes, importación con calidad de datos, integración con el plan y API; no hay pantalla."
+  },
+  {
+   "id": "V25-SUP-023",
+   "status": "PARCIAL",
+   "gap": "El plan ofrece details.no_purchase_baseline por serie (unidades no atendidas, serie, primera fecha de faltante y margen perdido solo con precio y costo conocidos) en su detalle (probado). No acompaña a la recomendación de la etapa 1 ni a cada línea de compra y la vista del Plan de compras no lo muestra.",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_no_purchase_scenario_reports_what_is_lost_if_nothing_is_ordered",
+    "engine/tests/unit/test_supply_position.py::test_no_purchase_scenario_values_each_branch_with_its_own_cost",
+    "backend/tests/Feature/Supply/SupplyPerishabilityPlanApiTest.php::test_plan_detail_returns_position_perishability_no_purchase_scenario_and_policy_with_details_only_on_request",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_plan_reports_fefo_expiry_losses_the_no_purchase_scenario_and_ignores_other_companies_lots",
+    "engine/predictily_engine/supply/policy.py"
+   ],
+   "note": "Un margen perdido sin precio o costo conocidos es nulo para la serie, no 0."
+  },
+  {
+   "id": "V25-SUP-025",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_confirmed_orders_are_inside_the_forecast_never_added_on_top",
+    "engine/tests/unit/test_supply_position.py::test_balance_reports_committed_and_residual_and_reserved_stock_is_not_discounted_twice",
+    "engine/tests/unit/test_supply_position.py::test_committed_above_the_forecast_is_planned_as_firm_demand_and_unbacked_reserved_stays_discounted",
+    "engine/tests/unit/test_supply_perishability.py::test_the_expiry_loss_and_the_shelf_cap_use_the_commitments_netted_demand_not_the_raw_forecast",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_plan_reconciles_confirmed_orders_with_the_forecast_and_does_not_count_them_twice",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "Demanda neta = máximo entre el pronóstico y lo comprometido de cada período (con 40 u. comprometidas dentro de un pronóstico de 70 la demanda neta es 70 = 40 + 30, no 110); lo reservado que respalda pedidos del horizonte no se descuenta dos veces. Sin pedidos cargados se conserva el descuento total y el plan lo declara en un solo supuesto."
+  },
+  {
+   "id": "V25-SUP-031",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_a_plan_that_neither_solver_nor_fallback_can_make_feasible_returns_no_lines",
+    "engine/tests/unit/test_supply_perishability.py::test_the_heuristic_fallback_alone_never_returns_a_plan_that_violates_the_shelf_caps",
+    "engine/tests/unit/test_supply_perishability.py::test_the_verifier_rejects_a_plan_that_exceeds_the_availability_cap_when_the_shelf_life_is_shorter_than_the_period",
+    "engine/tests/unit/test_supply_perishability.py::test_verifier_and_heuristic_respect_the_shelf_cap",
+    "engine/predictily_engine/supply/service.py; engine/predictily_engine/supply/verify.py"
+   ],
+   "note": "Todo plan se verifica de forma independiente del solver y, si ni el solver ni el respaldo lo hacen factible, no se devuelven líneas (estado not_solved sin líneas): el camino que antes conservaba y persistía líneas no factibles (D17) quedó cerrado."
+  },
+  {
+   "id": "V25-SUP-032",
+   "status": "PARCIAL",
+   "gap": "El plan nunca proyecta inventario negativo y declara el recorte de la sobrerreserva y del físico negativo (probado). Los escenarios y la simulación todavía recortan a cero sin declararlo (D4 pendiente fuera de los archivos de W5-D).",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_over_reserved_stock_is_declared_with_the_clipped_quantity_and_degrades_quality",
+    "engine/tests/unit/test_supply_position.py::test_negative_on_hand_and_stale_snapshot_are_declared_not_accepted_silently",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_over_reserved_stock_degrades_the_stored_plan_quality_while_the_same_plan_without_it_is_ok",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "La existencia utilizable queda acotada en 0 y el recorte se declara con su cantidad."
+  },
+  {
+   "id": "V25-SUP-037",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_position.py::test_balance_reports_committed_and_residual_and_reserved_stock_is_not_discounted_twice",
+    "engine/tests/unit/test_supply_position.py::test_confirmed_orders_are_inside_the_forecast_never_added_on_top",
+    "engine/tests/unit/test_supply_position.py::test_committed_above_the_forecast_is_planned_as_firm_demand_and_unbacked_reserved_stays_discounted",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_plan_reconciles_confirmed_orders_with_the_forecast_and_does_not_count_them_twice",
+    "engine/predictily_engine/supply/position.py; engine/predictily_engine/supply/perishability.py; engine/predictily_engine/inventory/lots.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "El balance separa el comprometido (pedidos confirmados) del residual probabilístico y ninguna predicción reserva stock: lo reservado es lo que el ERP aparta."
+  },
+  {
+   "id": "V25-SUP-038",
+   "status": "PARCIAL",
+   "gap": "En cada revisión la simulación decide con las ventas previas, los costos, los precios, los plazos y las existencias o lotes conocidos ese día, y un documento tardío no altera lo decidido antes de conocerse (probado, con base de datos real). Para una empresa sin historial de compras ni costo en el snapshot usa como último recurso el costo del catálogo vigente, declarado NO VERSIONADO (no es as-of); el pronosticador de cada revisión es ligero, no el de producción, y no hay ejecución con datos reales (V25-SUP-049 BLOQUEADO).",
+   "evidence": [
+    "engine/tests/unit/test_supply_asof_simulation.py::test_each_review_sees_the_cost_lead_time_and_prior_sales_known_that_day",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_series_tables_decisions_of_a_review_do_not_depend_on_costs_or_lead_times_known_later",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_orders_are_valued_and_delayed_with_the_cost_and_lead_time_of_the_day_they_are_placed",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_step_fill_keeps_the_last_known_value_until_the_next_review",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_asof_costs_use_known_at_and_valid_from_and_never_the_catalogue_cost_of_today",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_static_inputs_give_the_same_result_with_or_without_the_as_of_machinery",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_late_sales_document_does_not_alter_decisions_taken_before_it_was_known",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_simulation_ending_after_the_last_sale_still_prices_each_review_with_what_was_known_then",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_company_whose_only_cost_is_the_catalogue_cost_still_simulates_and_declares_it_unversioned",
+    "engine/predictily_engine/supply/simulation_runner.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "Con insumos estáticos el resultado es idéntico bit a bit al de antes."
+  },
+  {
+   "id": "V25-SUP-041",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_asof_simulation.py::test_days_of_inventory_turnover_and_capital_match_hand_calculations",
+    "engine/predictily_engine/supply/simulation.py"
+   ],
+   "note": "La simulación reporta la rotación como 365 / días de inventario, verificada a mano (inventario medio 30 $ y costo de ventas diario 10 $ ⇒ 3,0 días). El reporte del plan de compras no la incluye: es una métrica de la simulación."
+  },
+  {
+   "id": "V25-SUP-042",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_asof_simulation.py::test_days_of_inventory_turnover_and_capital_match_hand_calculations",
+    "engine/predictily_engine/supply/simulation.py"
+   ],
+   "note": "Los días de inventario (valor medio de existencias / costo de ventas diario) se verifican con un caso a mano: inventario medio 30 $ y costo de ventas diario 10 $ ⇒ 3,0 días."
+  },
+  {
+   "id": "V25-SUP-045",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_supply_asof_simulation.py::test_days_of_inventory_turnover_and_capital_match_hand_calculations",
+    "engine/predictily_engine/supply/simulation.py"
+   ],
+   "note": "El capital comprometido (valor medio y pico de inventario más órdenes en camino) se verifica a mano con una orden en camino incluida."
+  },
+  {
+   "id": "V25-SUP-047",
+   "status": "PARCIAL",
+   "gap": "Los permisos por rol y la aprobación explícita con segregación de funciones existen para las recomendaciones de reposición (probado), pero la ejecución por una integración autorizada no existe: Predictily no escribe en ningún ERP ni emite órdenes (la persona actúa fuera y las ejecuciones supervisadas están DISEÑADAS en docs/decision/CONTROLLED_ACTIONS.md).",
+   "evidence": [
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_a_sensitive_action_cannot_start_without_approval_but_a_contact_can",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_the_proposer_cannot_approve_their_own_action_but_another_approver_can",
+    "backend/tests/Feature/Decision/DecisionWorkflowApiTest.php::test_generating_and_walking_the_workflow_never_sends_messages_calls_the_erp_or_queues_work",
+    "docs/decision/CONTROLLED_ACTIONS.md"
+   ],
+   "note": "Las líneas del plan son sugerencias (`actionable_now`)."
+  },
+  {
+   "id": "V25-SUP-050",
+   "status": "PARCIAL",
+   "gap": "Cerrado y probado: el precio de venta (en el plan retroactivo es el neto observado hasta el corte, no el de catálogo), los plazos con valid_from ≤ corte, los costos, precios y plazos por revisión de la simulación y los lotes con snapshot ≤ corte. Siguen abiertos: los escenarios y las recomendaciones de la etapa 1 usan plazos sin filtrar por valid_from y, los escenarios, el precio de catálogo de respaldo (D1/D2 fuera del plan); el catálogo no versiona la perecibilidad (se usa el atributo declarado hoy y el plan retroactivo lo declara); el costo del catálogo no versionado como último recurso de la simulación (declarado) y las recepciones parciales y cancelaciones en cortes retroactivos (D11).",
+   "evidence": [
+    "engine/tests/integration/test_supply_w5d_integration.py::test_recent_prices_and_sales_cost_history_are_read_as_of_the_cutoff",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_lead_times_are_filtered_by_valid_from_for_a_past_cutoff",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_late_sales_document_does_not_alter_decisions_taken_before_it_was_known",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_a_historical_cutoff_ignores_a_lots_snapshot_taken_after_it",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_changing_todays_catalogue_price_does_not_alter_a_past_max_margin_plan",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_the_current_run_reads_what_is_known_today_but_a_past_cutoff_reads_only_what_was_known_then",
+    "engine/tests/integration/test_supply_w5d_integration.py::test_w5d_repository_queries_are_scoped_to_the_company_and_the_cutoff",
+    "engine/tests/unit/test_supply_asof_simulation.py::test_asof_costs_use_known_at_and_valid_from_and_never_the_catalogue_cost_of_today",
+    "engine/predictily_engine/db/supply_repository.py; engine/predictily_engine/supply/asof_inputs.py"
+   ],
+   "note": "El plan retroactivo declara sus limitaciones as-of."
+  }
+ ]
+}

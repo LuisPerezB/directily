@@ -1,0 +1,83 @@
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 943 modules transformed.
+rendering chunks...
+computing gzip size...
+../../w3int/fe_dist/index.html                                 1.07 kB │ gzip:   0.50 kB
+../../w3int/fe_dist/assets/index-DOqnDYDX.css                 35.27 kB │ gzip:   7.63 kB
+../../w3int/fe_dist/assets/useAbility-B2ecBS42.js              0.09 kB │ gzip:   0.11 kB
+../../w3int/fe_dist/assets/constants-DPPJndmt.js               0.24 kB │ gzip:   0.18 kB
+../../w3int/fe_dist/assets/validation-T8pXlMg6.js              0.38 kB │ gzip:   0.26 kB
+../../w3int/fe_dist/assets/assistant-CQraW8jn.js               0.48 kB │ gzip:   0.31 kB
+../../w3int/fe_dist/assets/usePolling-DS4K4N-j.js              0.49 kB │ gzip:   0.32 kB
+../../w3int/fe_dist/assets/LoadingState-BS3o67mI.js            0.54 kB │ gzip:   0.38 kB
+../../w3int/fe_dist/assets/horizons-DlNVeGHF.js                0.54 kB │ gzip:   0.32 kB
+../../w3int/fe_dist/assets/catalog-DWBt1ngk.js                 0.55 kB │ gzip:   0.36 kB
+../../w3int/fe_dist/assets/ForbiddenView-DR5cQHBy.js           0.57 kB │ gzip:   0.37 kB
+../../w3int/fe_dist/assets/QualityBadge-lS9QmWGz.js            0.59 kB │ gzip:   0.36 kB
+../../w3int/fe_dist/assets/ThemeToggle-DbuPn5Vx.js             0.64 kB │ gzip:   0.41 kB
+../../w3int/fe_dist/assets/CaseLabelBadge-CfFyptEc.js          0.67 kB │ gzip:   0.39 kB
+../../w3int/fe_dist/assets/ProgressBar-B3gk79pc.js             0.68 kB │ gzip:   0.42 kB
+../../w3int/fe_dist/assets/NotFoundView-CbVNiMXs.js            0.73 kB │ gzip:   0.47 kB
+../../w3int/fe_dist/assets/accuracy-DQnsJWtH.js                0.75 kB │ gzip:   0.43 kB
+../../w3int/fe_dist/assets/FormField-CkjdxPkE.js               0.76 kB │ gzip:   0.45 kB
+../../w3int/fe_dist/assets/EmptyState-B10EPEcj.js              0.86 kB │ gzip:   0.52 kB
+../../w3int/fe_dist/assets/useRunJob-BIrx2aT5.js               0.87 kB │ gzip:   0.48 kB
+../../w3int/fe_dist/assets/InlineNotice-B-D_NybB.js            0.88 kB │ gzip:   0.53 kB
+../../w3int/fe_dist/assets/TabsNav-4DJxLFVW.js                 0.93 kB │ gzip:   0.57 kB
+../../w3int/fe_dist/assets/useHorizons-C1DaeKGs.js             0.94 kB │ gzip:   0.55 kB
+../../w3int/fe_dist/assets/ConfirmDialog-hNlZfkh2.js           0.96 kB │ gzip:   0.53 kB
+../../w3int/fe_dist/assets/AuthShell-Ba8FAglY.js               1.20 kB │ gzip:   0.67 kB
+../../w3int/fe_dist/assets/HorizonSupportNotice-BIk2OrA3.js    1.21 kB │ gzip:   0.66 kB
+../../w3int/fe_dist/assets/PredictilyLogo-CySRBOlz.js          1.21 kB │ gzip:   0.67 kB
+../../w3int/fe_dist/assets/echarts-Cz-a2J3R.js                 1.28 kB │ gzip:   0.71 kB
+../../w3int/fe_dist/assets/StatusBadge-CfF-o3F5.js             1.38 kB │ gzip:   0.59 kB
+../../w3int/fe_dist/assets/SegmentedControl-Bb9etFrd.js        1.41 kB │ gzip:   0.81 kB
+../../w3int/fe_dist/assets/PaginationBar-NA5cOxoc.js           1.50 kB │ gzip:   0.76 kB
+../../w3int/fe_dist/assets/useAsync-SeSP7m8b.js                1.59 kB │ gzip:   0.91 kB
+../../w3int/fe_dist/assets/JobProgress-DGXUOpsV.js             1.63 kB │ gzip:   0.82 kB
+../../w3int/fe_dist/assets/KpiCard-Cyo4XsV5.js                 1.96 kB │ gzip:   0.94 kB
+../../w3int/fe_dist/assets/format-BIAtqxuR.js                  2.20 kB │ gzip:   0.89 kB
+../../w3int/fe_dist/assets/RunForecastPanel-D85YOhbH.js        2.24 kB │ gzip:   1.17 kB
+../../w3int/fe_dist/assets/AppModal-CHyaHq5T.js                2.28 kB │ gzip:   1.22 kB
+../../w3int/fe_dist/assets/series-Dr6wEisi.js                  2.51 kB │ gzip:   1.06 kB
+../../w3int/fe_dist/assets/SelectTenantView-B0zQuY3j.js        2.53 kB │ gzip:   1.29 kB
+../../w3int/fe_dist/assets/LoginView-m0ZppXAD.js               2.68 kB │ gzip:   1.29 kB
+../../w3int/fe_dist/assets/DataTable-BmgUq_ud.js               2.84 kB │ gzip:   1.36 kB
+../../w3int/fe_dist/assets/envelope-OCjiuz_W.js                2.97 kB │ gzip:   1.09 kB
+../../w3int/fe_dist/assets/ProductPicker-CCNuzeEH.js           3.09 kB │ gzip:   1.54 kB
+../../w3int/fe_dist/assets/AdminView-CAMdJRY8.js               3.24 kB │ gzip:   1.52 kB
+../../w3int/fe_dist/assets/CustomerWindowCell-4uQyzFQA.js      3.32 kB │ gzip:   1.45 kB
+../../w3int/fe_dist/assets/AlertsView-DZyVYdeA.js              3.33 kB │ gzip:   1.54 kB
+../../w3int/fe_dist/assets/EnvelopePanel-CYNNDpjQ.js           3.43 kB │ gzip:   1.23 kB
+../../w3int/fe_dist/assets/CreateTenantView-9Dl-5hmO.js        4.01 kB │ gzip:   1.68 kB
+../../w3int/fe_dist/assets/RegisterView-BfKqoECV.js            4.13 kB │ gzip:   1.54 kB
+../../w3int/fe_dist/assets/OnboardingView-DHsgaY2w.js          5.09 kB │ gzip:   2.17 kB
+../../w3int/fe_dist/assets/ForecastChart-BRxok843.js           5.42 kB │ gzip:   2.20 kB
+../../w3int/fe_dist/assets/LandingView-BR56FPgL.js             6.93 kB │ gzip:   2.55 kB
+../../w3int/fe_dist/assets/modelQuality-CbBhb-7v.js            7.07 kB │ gzip:   2.82 kB
+../../w3int/fe_dist/assets/sqlSource-z4HbGXFZ.js               7.94 kB │ gzip:   2.44 kB
+../../w3int/fe_dist/assets/CrudPanel-CAaiV-GI.js               8.13 kB │ gzip:   3.12 kB
+../../w3int/fe_dist/assets/AppLayout-DhtNXfbU.js               8.26 kB │ gzip:   3.29 kB
+../../w3int/fe_dist/assets/AssistantView-CNlRl0zB.js           8.62 kB │ gzip:   3.39 kB
+../../w3int/fe_dist/assets/CustomerDetailView-B8G2MVj6.js      9.39 kB │ gzip:   2.99 kB
+../../w3int/fe_dist/assets/api-BIib13-R.js                    10.93 kB │ gzip:   3.94 kB
+../../w3int/fe_dist/assets/ProductsView-B6T72Tnq.js           10.98 kB │ gzip:   3.56 kB
+../../w3int/fe_dist/assets/DashboardView-BjEAaRUj.js          12.89 kB │ gzip:   3.99 kB
+../../w3int/fe_dist/assets/ForecastsView-Bo_AwYXa.js          13.79 kB │ gzip:   4.55 kB
+../../w3int/fe_dist/assets/InventoryView-CmQsWnBm.js          15.04 kB │ gzip:   4.60 kB
+../../w3int/fe_dist/assets/ScenariosView-mQ03XOiZ.js          15.65 kB │ gzip:   5.22 kB
+../../w3int/fe_dist/assets/SqlSourceView-CkUji8I5.js          19.70 kB │ gzip:   6.48 kB
+../../w3int/fe_dist/assets/ImportWizardView-CCj5PJiI.js       31.57 kB │ gzip:   9.77 kB
+../../w3int/fe_dist/assets/SettingsView-DxPx7jpn.js           38.74 kB │ gzip:  11.12 kB
+../../w3int/fe_dist/assets/DataSourcesView-CDQbLpgd.js        43.18 kB │ gzip:  11.36 kB
+../../w3int/fe_dist/assets/CustomersView-gspjdOUY.js          47.51 kB │ gzip:  13.18 kB
+../../w3int/fe_dist/assets/AccuracyView-BlYugUqI.js           54.05 kB │ gzip:  14.13 kB
+../../w3int/fe_dist/assets/SupplyView-DaUKkWOB.js             79.60 kB │ gzip:  19.09 kB
+../../w3int/fe_dist/assets/vendor-C_ZRI6wx.js                104.07 kB │ gzip:  39.57 kB
+../../w3int/fe_dist/assets/i18n-Bmoty8um.js                  121.11 kB │ gzip:  43.56 kB
+../../w3int/fe_dist/assets/index-4Qz838no.js                 138.50 kB │ gzip:  48.61 kB
+../../w3int/fe_dist/assets/charts-BZfHVKXu.js                593.29 kB │ gzip: 198.97 kB
+
+✓ built in 1.87s
+exit=0

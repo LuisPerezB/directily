@@ -68,12 +68,15 @@ def solve_plan(problem: PlanProblem, diagnose_unmet: bool = True, diagnosis_time
         else:
             sol.status = "not_solved"
             outcome_status = "not_solved"
-            notes.append("Ni el solver ni el respaldo heurístico produjeron un plan que cumpla las restricciones.")
+            # Ningún plan devuelto viola restricciones (V25-SUP-031): las líneas que no pasaron la verificación independiente NO se conservan.
+            sol.purchases, sol.productions, sol.evaluation, sol.objective_value = [], [], None, None
+            notes.append("Ni el solver ni el respaldo heurístico produjeron un plan que cumpla las restricciones: no se devuelve ninguna línea.")
     diag = None
     if (diagnose_unmet and sol.evaluation is not None and sol.evaluation.unmet_units > 1e-6
             and outcome_status in ("optimal", "feasible_with_gap", "time_limit", "heuristic_fallback")
             and (problem.budgets or problem.capacities or problem.resources
-                 or any(o.capacity is not None for o in problem.offers))):
+                 or any(o.capacity is not None for o in problem.offers)
+                 or any(n.shelf_cap is not None or n.avail_cap is not None for n in problem.nodes))):
         diag = diagnose(problem, time_limit=diagnosis_time_limit)
         diag.pop("max_coverage_solution", None)
     return PlanOutcome(sol, outcome_status, diag, None, notes)

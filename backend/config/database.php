@@ -97,6 +97,9 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Zona de la SESIÓN de PostgreSQL. Se fija en UTC (como APP_TIMEZONE) para no depender de la zona del servidor de base de
+            // datos: las fechas locales de la empresa se calculan siempre con tenants.timezone (AT TIME ZONE), nunca con la de la sesión.
+            'timezone' => env('DB_TIMEZONE', 'UTC'),
         ],
 
         'sqlsrv' => [

@@ -4,7 +4,7 @@ Cuando la cobertura es obligatoria (`hard`) y el modelo es infactible, o cuando 
 atender, se resuelven versiones del MISMO modelo relajando UNA familia de restricciones a la vez (presupuesto,
 capacidad de proveedor, almacenamiento, recursos) y todas a la vez (causa estructural: plazos, falta de ofertas,
 costos). La diferencia de demanda no atendida atribuye la causa; los requisitos (presupuesto por período,
-capacidad) salen de la solución relajada. Ningún plan relajado se devuelve como plan: solo cifras de lo que habría
+capacidad) salen de la solución relajada. W5-D añade la familia `shelf_life` (tope por vida útil de los perecibles). Ningún plan relajado se devuelve como plan: solo cifras de lo que habría
 que cambiar. La alternativa «plan de máxima cobertura factible» sí respeta TODAS las restricciones.
 """
 
@@ -18,6 +18,7 @@ FAMILIES = {
     "supplier_capacity": ("supplier_capacity", "capacidad de proveedor"),
     "storage": ("storage", "capacidad de almacenamiento"),
     "resource": ("resource", "capacidad de recursos de producción"),
+    "shelf_life": ("shelf_life", "vida útil de los productos perecibles (no se compra lo que vencería sin venderse)"),
 }
 
 
@@ -31,6 +32,8 @@ def _present(problem: PlanProblem) -> list[str]:
         fams.append("storage")
     if problem.resources:
         fams.append("resource")
+    if any(n.shelf_cap is not None or n.avail_cap is not None for n in problem.nodes):
+        fams.append("shelf_life")
     return fams
 
 

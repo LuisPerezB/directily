@@ -37,6 +37,7 @@ from predictily_engine.pipeline.schemas import (  # noqa: E402
     ExecuteResponse,
     ReadinessRequest,
 )
+from predictily_engine.platform.config import HORIZONS  # noqa: E402
 
 logging.basicConfig(level=get_settings().log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -89,7 +90,9 @@ def capabilities() -> dict:
     return {
         "feature_set_version": FEATURE_SET_VERSION,
         "horizons": list(SUPPORTED_HORIZONS),
-        "horizon_rule": "un horizonte H exige historia ≥ 2×H y ventanas de backtest de ≥ H días; si no, insufficient_data",
+        "horizon_catalog": list(HORIZONS["catalog"]),
+        "horizon_rule": "un horizonte H exige historia ≥ 2×H y ventanas de backtest de ≥ H días; si no, insufficient_data "
+                        "(estado) con motivo coverage_insufficient o insufficient_horizon (reason_code)",
         "frequency": "D",
         "models": [{"family": i.family, "level": i.level, "kind": i.kind, "label": i.label,
                     "enabled": i.kind != "foundation" or TimesFMAdapter.available()} for i in FAMILIES.values()],

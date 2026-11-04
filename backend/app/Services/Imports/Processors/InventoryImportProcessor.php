@@ -6,6 +6,7 @@ namespace App\Services\Imports\Processors;
 
 use App\Services\Catalog\CatalogResolver;
 use App\Services\Imports\Support\Issue;
+use App\Support\Canonical\CanonicalContracts;
 use Illuminate\Support\Facades\DB;
 
 /** Existencias: upsert idempotente por (tenant, sucursal, producto, fecha). */
@@ -73,14 +74,14 @@ final class InventoryImportProcessor implements ImportProcessor
             $ctx->issues->addMany($n, $issues);
             if (! $ctx->issues->rowHasError($n)) {
                 $seen[$natural] = true;
-                $row = ['snapshot_date' => $date, 'branch_code' => $branchCode, 'product_sku' => $sku] + $values;
+                $row = ['snapshot_date' => $date, 'branch_code' => $branchCode, 'product_sku' => $sku, 'source_row' => $n] + $values;
                 $valid[] = $row;
                 $stats['negative_stock_rows'] += $values['on_hand'] < 0 ? 1 : 0;
                 $stats['stockout_rows'] += $values['on_hand'] <= 0 ? 1 : 0;
                 $stats['date_from'] = $stats['date_from'] === null || $date < $stats['date_from'] ? $date : $stats['date_from'];
                 $stats['date_to'] = $stats['date_to'] === null || $date > $stats['date_to'] ? $date : $stats['date_to'];
                 if (count($preview) < 20) {
-                    $preview[] = $row;
+                    $preview[] = array_diff_key($row, ['source_row' => true]);
                 }
             }
             $ctx->progress($n, $total, 5, 60);
@@ -100,6 +101,8 @@ final class InventoryImportProcessor implements ImportProcessor
             }
             $catalog->ensureProducts($missing);
             $now = now();
+            // Linaje (ADR-V25-24): objeto Bronze del original, fila de origen y versión del contrato canónico con que se escribe.
+            $schemaVersion = CanonicalContracts::version('inventory_snapshot');
             foreach (array_chunk($valid, 1000) as $chunk) {
                 DB::transaction(fn () => DB::table('inventory_snapshots')->upsert(array_map(fn ($r) => [
                     'tenant_id' => $tenant->id,
@@ -108,7 +111,8 @@ final class InventoryImportProcessor implements ImportProcessor
                     'snapshot_date' => $r['snapshot_date'],
                     'on_hand' => $r['on_hand'], 'reserved' => $r['reserved'], 'in_transit' => $r['in_transit'], 'unit_cost' => $r['unit_cost'],
                     'import_job_id' => $ctx->job->id, 'created_at' => $now, 'updated_at' => $now,
-                ], $chunk), ['tenant_id', 'branch_id', 'product_id', 'snapshot_date'], ['on_hand', 'reserved', 'in_transit', 'unit_cost', 'import_job_id', 'updated_at']));
+                    'bronze_object_id' => $ctx->bronze?->id, 'source_row' => $r['source_row'], 'schema_version' => $schemaVersion,
+                ], $chunk), ['tenant_id', 'branch_id', 'product_id', 'snapshot_date'], ['on_hand', 'reserved', 'in_transit', 'unit_cost', 'import_job_id', 'updated_at', 'bronze_object_id', 'source_row', 'schema_version']));
             }
             $stats['rows_written'] = count($valid);
         }

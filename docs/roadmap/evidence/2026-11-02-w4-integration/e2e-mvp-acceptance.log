@@ -1,0 +1,70 @@
+[OK ] [A] 1. Registro de empresario
+[OK ] [A] 1. Empresa creada — f966a330-46c2-4fe7-9479-3415e149885f
+[OK ] [A] 2. Configura negocio y sucursales — 3 sucursales
+[OK ] [A] 4. Validación detecta errores reales del archivo — 8 filas con error; códigos ['currency_mismatch', 'duplicate_in_file', 'future_date', 'invalid_date', 'invalid_number', 'negative_price', 'negative_quantity', 'net_amount_mismatch']
+[OK ] [A] 4. No se puede confirmar con errores sin 'skip_invalid_rows'
+[OK ] [A] 4. Corrige opciones, revalida y rechaza el archivo defectuoso
+[OK ] [A] 3. Importa ventas históricas — 44269 documentos nuevos, 796 líneas de devolución, 206 anulados, 34 s
+[OK ] [A] 3. Importa inventory — 133302 filas
+[OK ] [A] 3. Importa lead_times — 79 filas
+      job 318: queued · None · 0%
+      job 318: running · loading_data · 3%
+      job 318: running · profiling · 10%
+      job 318: running · backtesting · 20%
+      job 318: running · backtesting · 28%
+      job 318: running · backtesting · 37%
+      job 318: running · backtesting · 46%
+      job 318: running · selecting · 58%
+      job 318: running · training · 62%
+      job 318: running · evaluating · 78%
+      job 318: running · reconciling · 80%
+      job 318: running · recommending · 86%
+      job 318: running · persisting · 92%
+      job 318: succeeded · None · 100%
+[OK ] Trabajo asíncrono de pronóstico finaliza — job 318 succeeded  en 57942 ms
+[OK ] [A] 6. Pronóstico generado por modelo estadístico/ML real — versión 1, modelos {'lumpy': 'auto_ets', 'pooled': 'auto_ets', 'smooth': 'auto_ets', 'erratic': 'auto_ets', 'fallback': 'window_average', 'insufficient': 'window_average', 'intermittent': 'lightgbm_global'}
+[OK ] [A] 7. Visualiza ventas previstas — 14 periodos históricos, 5 pronosticados, nodo total
+[OK ] [A] 7. Dashboard responde con KPIs reales — 30 días: 22169 u. (80%: 18873.1152–25465.5368), ingresos $79,625, riesgo quiebre 81, compra $6,825
+[OK ] [A] 8. Productos de mayor/menor demanda — más vendido: Bloque de hormigón 15 cm (3600 u.); sube: Taladro percutor 1/2 pulg. 650 W (+50%); baja: Malla electrosoldada 6 mm 2.4x6 m (-28%)
+[OK ] [A] 9. Evaluación histórica (backtesting) disponible — WAPE seleccionado 0.491 vs baseline 0.660, cobertura 80% 0.856
+[OK ] [A] 10. Recomendación básica de abastecimiento — 183 recomendaciones; primera: Bloque de hormigón 15 cm @ Matriz Quito Norte, cobertura 0 días, sugerido 0 u., riesgo critical
+[OK ] [A] 11. Reimportar no genera duplicados — nuevos 0, sin cambios 44269, documentos 43267→43267
+      job 319: queued · None · 0%
+      job 319: running · loading_data · 3%
+      job 319: running · profiling · 10%
+      job 319: running · backtesting · 20%
+      job 319: running · backtesting · 28%
+      job 319: running · backtesting · 37%
+      job 319: running · backtesting · 46%
+      job 319: running · selecting · 58%
+      job 319: running · training · 62%
+      job 319: running · evaluating · 78%
+      job 319: running · recommending · 86%
+      job 319: running · persisting · 92%
+      job 319: succeeded · None · 100%
+[OK ] Trabajo asíncrono de pronóstico finaliza — job 319 succeeded  en 55551 ms
+[OK ] [A] 12. Regenera pronóstico y consulta su versión — versiones [2, 1], vigente v2
+[OK ] [B] 1. Registro de empresario
+[OK ] [B] 1. Empresa creada — dbb905a2-40f6-400d-b585-044c8c4a0fa0
+[OK ] [B] 2. Configura negocio y sucursales — 2 sucursales
+[OK ] [B] 3. Importa ventas — 18708 documentos
+      job 323: queued · None · 0%
+      job 323: running · backtesting · 20%
+      job 323: running · backtesting · 28%
+      job 323: running · backtesting · 37%
+      job 323: running · backtesting · 46%
+      job 323: running · selecting · 58%
+      job 323: running · evaluating · 78%
+      job 323: running · recommending · 86%
+      job 323: succeeded · None · 100%
+[OK ] Trabajo asíncrono de pronóstico finaliza — job 323 succeeded  en 23161 ms
+[OK ] [B] 6. Pronóstico propio — versión 1
+[OK ] [B] 13. No accede a run de A
+[OK ] [B] 13. No accede a producto de A
+[OK ] [B] 13. No accede a importación de A
+[OK ] [B] 13. No accede a trabajo de A
+[OK ] [B] 13. No consulta pronósticos de A por run_id
+[OK ] [B] 13. No puede usar el X-Tenant-ID de A
+[OK ] [B] 13. Solo ve su propia empresa
+
+Resumen: 32 de 32 verificaciones OK

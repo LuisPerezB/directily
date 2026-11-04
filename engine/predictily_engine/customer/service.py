@@ -18,6 +18,7 @@ import json
 import logging
 import time
 from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -29,23 +30,37 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Connection, text
 
 from predictily_engine.config import get_settings
-from predictily_engine.customer import FEATURE_SCHEMA_VERSION, LABEL_DEFINITION_VERSION, SUPPORTED_HORIZONS
+from predictily_engine.customer import FEATURE_SCHEMA_VERSION, LABEL_DEFINITION_VERSION, S05_VERSION, SUPPORTED_HORIZONS
 from predictily_engine.customer.commitments import state_as_of
 from predictily_engine.customer.data import CustomerData, load_customer_data
 from predictily_engine.customer.dataset import MODEL_FEATURES, build_dataset
+from predictily_engine.customer.degrade import individual_recommendations_block, ranking_from_demand, ranking_from_purchases
 from predictily_engine.customer.events import from_day, to_day
 from predictily_engine.customer.features import FeatureBuilder
 from predictily_engine.customer.outputs import evaluate_activity
 from predictily_engine.customer.predict import PredictionOutput, predict_all
 from predictily_engine.customer.reconcile import reconcile_horizon, reconciliation_summary
+from predictily_engine.customer.s05 import finalize_s05
+from predictily_engine.customer.s05_persist import attach_window, horizon_summary, manifest_block, s05_eval_rows, window_summary
 from predictily_engine.customer.train import HorizonResult, evaluate_coherence, train_horizon
+from predictily_engine.customer.window import WindowParams, evaluate_window
 from predictily_engine.db.customer_repository import CustomerRepository
 from predictily_engine.db.session import get_engine
 from predictily_engine.db.writer import ProgressReporter, jdump, none_if_nan
-from predictily_engine.pipeline.errors import ConflictError, NotFoundError
-from predictily_engine.platform.artifacts import SavedArtifact, deserialize, save_signed_artifact, tenant_of_stored_path, verify_stored_artifact
+from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
+from predictily_engine.mlops.serving import (
+    ARTIFACT_CACHE,
+    REASON_NOT_APPROVED,
+    CacheKey,
+    deserialize_cached,
+    partition_servable,
+    verify_row_artifact,
+)
+from predictily_engine.platform.artifacts import SavedArtifact, save_signed_artifact, tenant_of_stored_path
 from predictily_engine.platform.config import resolve_config
 from predictily_engine.platform.snapshot import DataSnapshot, persist_snapshot
+from predictily_engine.quality.persistence import insert_run_quality_report
+from predictily_engine.quality.service import customer_gate, resolve_policy
 
 log = logging.getLogger(__name__)
 LIBRARIES = ["scikit-learn", "lightgbm", "numpy", "pandas", "scipy", "joblib"]
@@ -142,14 +157,19 @@ def execute_customer_run(run_id: int, req: CustomerExecuteRequest) -> dict[str, 
             run = repo.core_run(run_id)
             tenant = repo.tenant()
         cfg, cfg_version, provenance = resolve_config("customer", tenant["settings"], tenant.get("sector"))
+        resolve_policy(tenant)      # W2-C: una configuración `quality_gates` inválida se rechaza (422) antes de cargar datos
         op = run["operation"]
         if op == "train":
             result = _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0)
+            ARTIFACT_CACHE.invalidate_tenant(tenant_id)      # los modelos de la empresa cambiaron: se libera su memoria ya (la verificación no depende de esto)
         elif op == "predict":
             result = _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0)
         else:
             raise ValueError(f"Operación no soportada por el Customer Core: {op}")
         return result
+    except InvalidConfigurationError as exc:
+        mark_run_failed(engine, tenant_id, run_id, job_id, str(exc), int((time.perf_counter() - t0) * 1000))
+        raise
     except Exception as exc:
         log.exception("Fallo del Customer Core run=%s tenant=%s", run_id, tenant_id)
         mark_run_failed(engine, tenant_id, run_id, job_id, f"Error interno del motor ({type(exc).__name__}): {exc}",
@@ -209,16 +229,23 @@ def load_artifact(row: dict[str, Any], tenant_id: int | None = None) -> tuple[di
     empresa o con la ruta fuera del directorio de su empresa NO se deserializa: el llamador sirve el respaldo (referencia validada
     o abstención) y el motivo queda en `limitations` y en el registro (sin PII). `tenant_id` es la empresa a la que sirve la
     corrida; sin él se usa `row["tenant_id"]` y, en último caso, la de la propia ruta.
+
+    W4-B: un modelo PUBLICADO por la CLI (`published_object_key`) se verifica sobre el objeto del almacén (la clave debe ser de la empresa del
+    trabajo) y no sobre el directorio de artefactos; el objeto ya deserializado se guarda en una caché con empresa + versión + esquema de
+    variables + SHA-256 (`mlops.serving`). La verificación se repite siempre; la caché solo evita deserializar de nuevo.
     """
     stored = row.get("artifact_path")
-    if not stored:
+    published = row.get("published_object_key")
+    has_published = published is not None and published == published and published != ""      # NaN de pandas = ausente
+    if not stored and not has_published:
         return None, "artifact_missing"
-    owner = tenant_id if tenant_id is not None else (row.get("tenant_id") if row.get("tenant_id") is not None else tenant_of_stored_path(stored))
+    owner = tenant_id if tenant_id is not None else (row.get("tenant_id") if row.get("tenant_id") is not None
+                                                     else (tenant_of_stored_path(stored) if stored else None))
     if owner is None:
         return None, "artifact_path_invalid"
     if not row.get("artifact_sha256"):
         return None, "artifact_sha256_mismatch"
-    verification = verify_stored_artifact(stored, tenant_id=int(owner), core="customer", expected_sha256=row.get("artifact_sha256"))
+    verification = verify_row_artifact(row, tenant_id=int(owner), core="customer")
     if not verification.ok or verification.artifact is None:
         if verification.reason != "artifact_missing":
             log.warning("Artefacto rechazado antes de deserializar: motivo=%s empresa=%s modelo=%s", verification.reason, owner, row.get("version"))
@@ -233,7 +260,8 @@ def load_artifact(row: dict[str, Any], tenant_id: int | None = None) -> tuple[di
         a, b = (compat.get("libraries") or {}).get(lib), cur["libraries"].get(lib)
         if a and b and a.split(".")[:2] != b.split(".")[:2]:
             return None, f"{lib}_version_incompatible"
-    return deserialize(verification.artifact), None      # desde los MISMOS bytes verificados: sin reabrir el archivo
+    key = CacheKey(int(owner), "customer", str(row.get("version") or ""), str(compat["feature_schema_version"]), verification.artifact.sha256)
+    return deserialize_cached(key, verification.artifact, ARTIFACT_CACHE), None      # desde los MISMOS bytes verificados: sin reabrir el archivo
 
 
 def _slot(h: int, target: str) -> str:
@@ -278,12 +306,84 @@ TARGET_DEFINITION = {
     "horizons_days": list(SUPPORTED_HORIZONS),
 }
 
-BASE_LIMITATIONS = [
-    "No se ofrece ventana de próxima compra: la probabilidad binaria de H días no permite deducir una fecha (requeriría modelos de supervivencia).",
+# Definiciones que S05 (W3-C) agrega; solo se declaran si S05 está encendido y el artefacto servido las trae.
+S05_TARGET_DEFINITION = {
+    "expected_orders": "E(nº de pedidos en (corte, corte+H]) = P(≥ 1 pedido) × E(nº de pedidos | ≥ 1), con un modelo de conteo propio del segundo factor ajustado solo con los casos positivos (pedido = día de compra de la relación); E(N) > P por construcción y no decreciente en H.",
+    "quantity_per_order": "E(cantidad por pedido | ocurre): Σ cantidades / nº de pedidos en ventanas con compra; con intervalo conformal (factores relativos en el resumen de la corrida).",
+    "expected_units": "expected_orders × quantity_per_order bajo independencia entre el nº de pedidos y su cantidad (supuesto documentado). Difiere de expected_quantity = P × E(cantidad total de la ventana | compra), que se conserva por compatibilidad.",
+    "window": "Cuantiles P10/P50/P90 de los días hasta la siguiente compra contados desde el corte (nunca un día exacto), con estado estimated | insufficient_data | overdue | censored; sin cifras (insufficient_data) cuando la validación por cobertura no las respalda.",
+}
+
+NO_WINDOW_LIMITATION = "No se ofrece ventana de próxima compra: la probabilidad binaria de H días no permite deducir una fecha (requeriría modelos de supervivencia)."
+
+# Limitaciones que S05 reemplaza/agrega.
+S05_LIMITATIONS = [
+    "La ventana de próxima compra es una distribución empírica suavizada del tiempo hasta la siguiente compra (cuantiles P10/P50/P90 desde el corte), no una fecha: "
+    "describe «cuándo, si vuelve»; un abandono baja su cobertura y no se infiere de un solo atraso. No es un modelo de supervivencia con censura. Solo se publican cifras "
+    "donde la validación por cobertura las respalda (window_status = insufficient_data en el resto).",
+    "E(nº pedidos) = P × E(nº pedidos | ≥ 1): hurdle con conteo condicionado propio; E(unidades) = E(nº pedidos) × E(cantidad por pedido) supone independencia entre el "
+    "número de pedidos y su cantidad; un «pedido» es un día de compra de la relación (varios documentos del mismo día cuentan como uno).",
+    "Sin costo unitario conocido al corte en la lectura de compras, la utilidad económica del ranking se mide en unidades e importe a precio al corte; no se calcula margen.",
+]
+
+OTHER_LIMITATIONS = [
     "Compradores sin historial del producto, compradores nuevos, ventas anónimas y de consumidor final no reciben predicción individual: su demanda queda en el residual de la reconciliación.",
     "El monto esperado usa el último precio neto observado de la relación como supuesto; no incluye impuestos ni devoluciones.",
     "Datos sintéticos o de demostración comprueban el procedimiento; no validan precisión comercial.",
 ]
+
+
+def _target_definition(s05: bool) -> dict[str, Any]:
+    """Definición del objetivo de la corrida: las magnitudes de S05 se declaran solo si S05 aplica a esta corrida."""
+    return {**TARGET_DEFINITION, **(S05_TARGET_DEFINITION if s05 else {})}
+
+
+def _base_limitations(s05: bool) -> list[str]:
+    """Limitaciones fijas de la corrida: con S05 en vigor reemplazan a «no se ofrece ventana»; sin él (apagado o artefacto anterior) se conservan las de siempre."""
+    return [*(S05_LIMITATIONS if s05 else [NO_WINDOW_LIMITATION]), *OTHER_LIMITATIONS]
+
+
+def _window_limitations(w: dict[str, Any] | None, groups: dict[str, Any] | None = None, withheld: dict[str, int] | None = None) -> list[str]:
+    """Textos de la ventana para `limitations`: estado de su validación, grupos sin validar, filas sin cifras y parte no evaluable (P90 > seguimiento)."""
+    if not w:
+        return []
+    out: list[str] = []
+    status, follow = w.get("validation_status") or w.get("status"), w.get("follow_up_days")
+    if status != "validated":
+        out.append(f"Ventana de recompra: validación {status}" + (f" — {w['reason']}" if w.get("reason") else "")
+                   + "; se publica sin cifras (window_status = insufficient_data).")
+    else:
+        bad = {k: g.get("status") for k, g in (groups or {}).items() if g.get("status") != "validated"}
+        if bad:
+            out.append("Ventana de recompra: grupos sin validar por cobertura o evidencia (se publican sin cifras): "
+                       + ", ".join(f"{k} ({v})" for k, v in sorted(bad.items())) + ".")
+        share = w.get("not_assessable_share")
+        if share is not None and share > 0:
+            out.append(f"Ventana de recompra: validada con un seguimiento de {follow} días; el {share:.0%} de las relaciones evaluadas tiene un P90 mayor que ese "
+                       "seguimiento, así que su cola no está validada (bandera window_beyond_validation).")
+    if withheld:
+        out.append(f"Ventana de recompra: {sum(withheld.values())} filas sin cifras por no estar respaldadas por la validación.")
+    return out
+
+
+def _aggregate_ranking(engine, tenant_id: int, data: CustomerData, as_of: date | None, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Ranking AGREGADO de productos para la degradación a agregado (sin compradores): demanda agregada vigente si existe; si no, unidades
+    vendidas a compradores identificados en los últimos días (parcial, declarado)."""
+    top_n, days = int(cfg["aggregate_ranking_top_n"]), int(cfg["aggregate_ranking_days"])
+    horizon = 30 if 30 in cfg["horizons"] else int(min(cfg["horizons"]))
+    day = as_of or data.through or date.today()
+    pids = sorted({int(p) for p in data.products["product_id"]}) if data.products is not None and len(data.products) else []
+    try:
+        with engine.connect() as conn:
+            repo = CustomerRepository(conn, tenant_id)
+            fr = repo.current_forecast_run()
+            if fr and pids:
+                agg = repo.aggregate_demand(int(fr["id"]), pids, day, horizon)
+                if len(agg):
+                    return ranking_from_demand(agg, top_n, horizon, int(fr["id"]))
+    except Exception:  # noqa: BLE001  el ranking agregado es informativo: su fallo no tumba la corrida
+        log.exception("Ranking agregado desde la demanda falló tenant=%s", tenant_id)
+    return ranking_from_purchases(data.purchases, day, days, top_n)
 
 
 # ───────────────────────────── entrenamiento ─────────────────────────────
@@ -292,24 +392,36 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     tenant_id, run_id = int(tenant["id"]), int(run["id"])
     horizons = sorted({int(h) for h in (run.get("horizons") or cfg["horizons"]) if int(h) in SUPPORTED_HORIZONS and int(h) in cfg["horizons"]})
     if not horizons:
-        raise ValueError("Ninguno de los horizontes solicitados es válido para el Customer Core (7, 30, 90).")
+        raise ValueError("Ninguno de los horizontes solicitados es válido para el Customer Core (" + ", ".join(str(h) for h in SUPPORTED_HORIZONS) + ").")
     seed = int((run.get("options") or {}).get("seed", cfg["seed"]))
     as_of_req = _as_date(run.get("as_of"))
     progress("loading_data", 3)
     with engine.connect() as conn:
         repo = CustomerRepository(conn, tenant_id)
         repo.base.analytic_reads()
-        data = load_customer_data(repo, cfg, through=as_of_req, cap_to_complete=True)
+        # Sin fecha histórica pedida la ejecución es vigente aunque la cobertura limite el corte (None = inferir de la fecha pedida).
+        data = load_customer_data(repo, cfg, through=as_of_req, cap_to_complete=True, live=True if as_of_req is None else None)
+        # Gate de calidad (W2-C · ADR-V25-05) ANTES de entrenar: BLOCK o DEGRADE a agregado ⇒ no se entrena a nivel comprador.
+        qa = customer_gate(conn, tenant, cfg, data)
     load_s = time.perf_counter() - t0
     last_complete = data.last_complete_day()
     results: dict[int, HorizonResult] = {}
     bundle = None
     activity_eval: dict[str, Any] = {}
     coherence: dict[str, Any] = {"evaluated": False}
+    window_eval: dict[str, Any] | None = None
+    finalization: dict[str, Any] | None = None
+    individual: dict[str, Any] | None = None
     if data.purchases is None or len(data.purchases) == 0 or last_complete is None:
         for h in horizons:
-            results[h] = HorizonResult(horizon=h, status="abstained",
+            results[h] = HorizonResult(horizon=h, status="abstained", reason_code="no_identified_buyers",
                                        reason="La empresa no tiene compras válidas de compradores identificados.")
+    elif qa.stops_individual_customer:
+        for h in horizons:
+            results[h] = HorizonResult(horizon=h, status="abstained", reason_code=qa.individual_stop_code, reason=qa.individual_stop_message())
+        # W3-C · V2.5 §25.2: sin recomendaciones individuales; se conserva un ranking AGREGADO de productos (nunca compradores inventados).
+        if cfg.get("s05_enabled", True):
+            individual = individual_recommendations_block(qa, _aggregate_ranking(engine, tenant_id, data, last_complete, cfg) if qa.degraded else None)
     else:
         fb = FeatureBuilder(data, cfg, max_horizon=max(horizons), last_day=int(to_day(last_complete)))
         progress("building_dataset", 5)
@@ -330,16 +442,53 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
         coherence = evaluate_coherence(bundle, results)
         mature = [c for c in bundle.cutoffs]
         activity_eval = evaluate_activity(fb, mature, bundle.last_complete, cfg)
+        if cfg.get("s05_enabled", True):
+            try:     # W3-C · E(N) final: anidamiento entre horizontes y gate de promoción/sesgo sobre lo servido
+                finalization = finalize_s05(bundle, results, cfg)
+            except Exception as exc:  # noqa: BLE001  S05 agrega salidas: su fallo no tumba la probabilidad ni la cantidad
+                log.exception("Finalización de pedidos fallida tenant=%s", tenant_id)
+                finalization = {"status": "failed", "reason": f"{type(exc).__name__}: {exc}"[:500]}
+            # W3-C · ventana: niveles recalibrados con cortes de ajuste anteriores a todo holdout y cobertura medida en cortes de evaluación posteriores
+            try:
+                starts = [int(to_day(r.manifest["blocks"]["holdout"]["cutoff_from"])) for r in results.values()
+                          if r.status in ("trained", "reference_only") and (r.manifest.get("blocks") or {}).get("holdout")]
+                window_eval = evaluate_window(bundle, WindowParams.from_cfg(cfg), holdout_starts=starts or None)
+                attach_window(results, window_eval, WindowParams.from_dict(window_eval.get("params"), cfg))
+            except Exception as exc:  # la ventana agrega salidas: su fallo no tumba la probabilidad ni la cantidad
+                log.exception("Evaluación de la ventana fallida tenant=%s", tenant_id)
+                window_eval = {"status": "failed", "reason": f"{type(exc).__name__}: {exc}"[:500], "levels": None}
 
     progress("persisting", 92)
     served = [h for h, r in results.items() if r.status in ("trained", "reference_only")]
     snap = _snapshot(data, cfg, cfg_version, last_complete or date.today(),
                      {"horizons": horizons, "seed": seed})
     manifest = _manifest(results, bundle, data, cfg, coherence, last_complete)
+    if cfg.get("s05_enabled", True):
+        manifest["s05"] = manifest_block(results, window_eval)
+        manifest["s05"]["orders_finalization"] = finalization
+    if individual is not None:
+        manifest["individual_recommendations"] = individual
     duration_ms = int((time.perf_counter() - t0) * 1000)
     quality = _train_quality(results, horizons)
-    limitations = list(BASE_LIMITATIONS)
+    if qa.degraded and qa.stops_individual_customer:
+        quality = "degraded"      # W2-C: DEGRADE a agregado (sin recomendaciones individuales); BLOCK sigue siendo insufficient_data
+    s05_train = bool(cfg.get("s05_enabled", True))
+    limitations = _base_limitations(s05_train)
+    limitations.extend(qa.limitation_strings())
+    if window_eval:
+        ws = window_summary(window_eval)
+        limitations.extend(_window_limitations(ws | {"validation_status": ws["status"]}, ws["groups"], None))
+    if finalization and finalization.get("status") == "failed":
+        limitations.append(f"La finalización de E(nº pedidos) falló ({finalization.get('reason')}): se conservan los gates por horizonte, sin el anidamiento entre horizontes.")
     for h, r in results.items():
+        if r.s05 and r.s05.get("status") == "failed":
+            limitations.append(f"H={h}: las salidas de S05 (pedidos, cantidad por pedido, segmentos) fallaron — {r.s05.get('reason')}")
+        sv = ((r.s05 or {}).get("orders") or {}).get("served")
+        if sv and not sv.get("bias_within_bound"):
+            dec = sv.get("bias_decomposition") or {}
+            limitations.append(f"H={h}: el sesgo del E(nº pedidos) servido en el holdout ({sv['holdout']['bias']:+.0%}) excede el tope configurado "
+                               f"({cfg['orders_max_abs_bias']:.0%}); el hurdle hereda el sesgo de P ({(dec.get('probability_bias') or 0):+.0%}); "
+                               "ningún conteo complejo lo corrige, así que se sirve la referencia y no debe leerse como magnitud calibrada.")
         if r.status == "abstained":
             limitations.append(f"H={h}: abstención — {r.reason}")
         elif r.status == "failed":
@@ -356,8 +505,19 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     with engine.begin() as conn:
         snapshot_id = persist_snapshot(conn, tenant_id, snap)
         model_versions, promoted = _persist_models(conn, tenant, run, job_id, results, cfg, snapshot_id, seed, last_complete, data)
-        _persist_evaluations(conn, tenant_id, run_id, results, coherence, activity_eval, model_versions)
+        _persist_evaluations(conn, tenant_id, run_id, results, coherence, activity_eval, model_versions, window_eval)
         summary = _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_s, promoted)
+        if cfg.get("s05_enabled", True):
+            for h, r in results.items():
+                if str(h) in summary["horizons"]:
+                    summary["horizons"][str(h)]["s05"] = horizon_summary(r)
+            summary["window"] = window_summary(window_eval)
+            summary["s05_version"] = S05_VERSION
+        if individual is not None:
+            summary["individual_recommendations"] = individual
+        gate_report_id = insert_run_quality_report(conn, tenant_id, qa, core_run_id=run_id)   # W2-C: métricas y gate de la ejecución
+        summary["quality_gate"] = qa.manifest_block(gate_report_id)
+        manifest["data_quality_gate"] = qa.manifest_block(gate_report_id)
         # Solo una corrida `production` puede ser vigente (y releva a la anterior); una `historical` no toca `is_current`.
         production_run = run.get("run_type", "production") == "production"
         if production_run:
@@ -372,7 +532,7 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
                 assumptions = CAST(:assumptions AS jsonb), limitations = CAST(:limitations AS jsonb), summary = CAST(:summary AS jsonb),
                 is_current = :current, completed_at = now(), error_message = NULL, updated_at = now()
             WHERE id = :id AND tenant_id = :t
-            """), {"quality": quality, "as_of": last_complete, "horizons": jdump(horizons), "target": jdump(TARGET_DEFINITION),
+            """), {"quality": quality, "as_of": last_complete, "horizons": jdump(horizons), "target": jdump(_target_definition(s05_train)),
                    "cv": cfg_version, "cfg": jdump({"config": cfg, "provenance": provenance}), "snap": snapshot_id,
                    "mv": jdump(model_versions), "manifest": jdump(manifest), "assumptions": jdump(assumptions),
                    "limitations": jdump(limitations), "summary": jdump(summary), "current": production_run,
@@ -386,6 +546,37 @@ def _run_train(engine, tenant, run, job_id, cfg, cfg_version, provenance, progre
     with engine.connect() as conn:
         final = CustomerRepository(conn, tenant_id).core_run(run_id)
     return _response(final, duration_ms)
+
+
+def _predict_horizon_support(requested: list[int], out: PredictionOutput | None, abstained: dict[int, dict[str, str]],
+                             stale: bool, refused: dict[int, list[str]] | None = None) -> dict[str, Any]:
+    """Estado por horizonte pedido (misma forma que el respaldo de demanda): `ok` | `degraded` | `insufficient_data` con sus
+    motivos. Un horizonte sin modelo utilizable (o sin compras identificadas) NO tiene filas: se abstiene, nunca se inventa."""
+    served = set(out.horizons) if out is not None else set()
+    support: dict[str, Any] = {}
+    for h in requested:
+        if h in served:
+            reasons: list[dict[str, str]] = []
+            if refused and h in refused:
+                # (W4-B) el modelo en producción NO está aprobado y no se cargó: se sirve la referencia validada. No es que «no superó la regla de promoción».
+                targets = " y ".join({"probability": "probabilidad", "quantity": "cantidad"}.get(t, t) for t in refused[h])
+                reasons.append({"code": "model_not_approved", "reason_code": "model_not_approved",
+                                "message": f"El modelo en producción de {targets} a {h} días no está aprobado (ADR-V25-07) y no se cargó: se sirve la referencia validada de respaldo."})
+            elif out.served[h]["role"] == "fallback":
+                reasons.append({"code": "fallback_reference", "reason_code": "fallback_reference",
+                                "message": f"Se sirve la referencia frecuencia/recencia a {h} días (el modelo complejo no superó la regla de promoción)."})
+            if out.served[h]["calibration_status"] != "calibrated":
+                reasons.append({"code": "calibration_not_calibrated", "reason_code": "calibration_not_calibrated",
+                                "message": f"Calibración en estado «{out.served[h]['calibration_status']}» en el holdout."})
+            if stale:
+                reasons.append({"code": "stale_data", "reason_code": "stale_data", "message": "Los datos de ventas no están completos hasta la fecha pedida."})
+            support[str(h)] = {"horizon": h, "status": "degraded" if reasons else "ok", "reasons": reasons}
+        else:
+            why = abstained.get(h) or {"reason_code": "no_identified_buyers",
+                                       "message": "La empresa no tiene compras válidas de compradores identificados: abstención."}
+            support[str(h)] = {"horizon": h, "status": "insufficient_data",
+                               "reasons": [{"code": why["reason_code"], "reason_code": why["reason_code"], "message": why["message"]}]}
+    return support
 
 
 def _train_quality(results: dict[int, HorizonResult], horizons: list[int]) -> str:
@@ -410,7 +601,8 @@ def _manifest(results: dict[int, HorizonResult], bundle, data: CustomerData, cfg
         "cutoff_step_days_effective": bundle.effective_step if bundle else None,
         "cutoffs": bundle.meta if bundle else None,
         "dataset_label_counts": {str(h): r.manifest.get("label_counts") for h, r in results.items()},
-        "horizons": {str(h): {"status": r.status, "reason": r.reason, **{k: v for k, v in r.manifest.items() if k != "label_counts"}}
+        "horizons": {str(h): {"status": r.status, "reason": r.reason, "reason_code": r.reason_code,
+                              **{k: v for k, v in r.manifest.items() if k != "label_counts"}}
                      for h, r in results.items()},
         "coherence": coherence,
         "promotion_rule_version": cfg["promotion_rule_version"],
@@ -422,7 +614,7 @@ def _manifest(results: dict[int, HorizonResult], bundle, data: CustomerData, cfg
 def _train_summary(results, bundle, coherence, activity_eval, duration_ms, load_s, promoted) -> dict[str, Any]:
     horizons: dict[str, Any] = {}
     for h, r in results.items():
-        item: dict[str, Any] = {"status": r.status, "reason": r.reason, "tier": r.manifest.get("tier"),
+        item: dict[str, Any] = {"status": r.status, "reason": r.reason, "reason_code": r.reason_code, "tier": r.manifest.get("tier"),
                                 "duration_s": round(r.duration_s, 1)}
         if r.prob:
             sv, ref = r.prob["served"], r.prob["reference"]
@@ -564,17 +756,17 @@ def _metric_columns(m: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _persist_evaluations(conn: Connection, tenant_id: int, run_id: int, results: dict[int, HorizonResult], coherence: dict[str, Any],
-                         activity_eval: dict[str, Any], model_versions: dict[str, Any]) -> None:
+                         activity_eval: dict[str, Any], model_versions: dict[str, Any], window_eval: dict[str, Any] | None = None) -> None:
     conn.execute(text("DELETE FROM model_evaluations WHERE tenant_id = :t AND core_run_id = :r AND core = 'customer'"), {"t": tenant_id, "r": run_id})
     rows: list[dict[str, Any]] = []
 
     def add(family: str, etype: str, key: str, h: int | None, metrics: dict[str, Any], baseline: bool, selected: bool,
-            cols: dict[str, Any] | None = None, extra: dict[str, Any] | None = None, reg: int | None = None) -> None:
+            cols: dict[str, Any] | None = None, extra: dict[str, Any] | None = None, reg: int | None = None, level: str = "overall") -> None:
         c = cols or {}
         rows.append({"t": tenant_id, "reg": reg, "family": family[:40], "etype": etype[:20], "key": key[:80], "h": h,
                      "bl": baseline, "sel": selected, "wape": c.get("wape"), "mae": c.get("mae"), "rmse": c.get("rmse"),
                      "bias": c.get("bias"), "c80": c.get("coverage_80"), "n": int(c.get("n_obs") or 0),
-                     "extra": jdump(extra or {}), "metrics": jdump(metrics), "run": run_id})
+                     "extra": jdump(extra or {}), "metrics": jdump(metrics), "run": run_id, "level": level[:20]})
 
     for h, r in sorted(results.items()):
         if r.status not in ("trained", "reference_only"):
@@ -628,18 +820,112 @@ def _persist_evaluations(conn: Connection, tenant_id: int, run_id: int, results:
         add("customer_inactivity", "holdout", "inactivity", None, activity_eval["inactivity"], False, True, {"n_obs": activity_eval["inactivity"]["n_customer_cutoffs"]})
     if activity_eval.get("frequency"):
         add("customer_frequency", "holdout", "frequency", None, activity_eval["frequency"], False, True, {"n_obs": activity_eval["frequency"]["n_customer_cutoffs"]})
+    for r in s05_eval_rows(results, window_eval):          # W3-C · S05: pedidos, cantidad por pedido, unidades, segmentos, ranking, estabilidad, ventana
+        add(r["family"], r["etype"], r["key"], r["h"], r["metrics"], r["baseline"], r["selected"], r["cols"], r["extra"], level=r["level"])
     if rows:
         conn.execute(text(
             """
             INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type, level, level_key,
                 horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80, n_obs, n_windows, extra, created_at,
                 core, core_run_id, metrics)
-            VALUES (:t, :reg, NULL, :family, :etype, 'overall', :key, :h, :bl, :sel, :wape, :mae, :rmse, :bias, :c80, :n, 0,
+            VALUES (:t, :reg, NULL, :family, :etype, :level, :key, :h, :bl, :sel, :wape, :mae, :rmse, :bias, :c80, :n, 0,
                 CAST(:extra AS jsonb), now(), 'customer', :run, CAST(:metrics AS jsonb))
             """), rows)
 
 
 # ───────────────────────────── predicción ─────────────────────────────
+
+@dataclass
+class ServingSelection:
+    """Modelos que sirve una predicción: artefactos por horizonte, versiones usadas, motivos de rechazo y horizontes en abstención."""
+
+    artifacts: dict[int, dict[str, Any]]
+    model_versions: dict[str, Any]
+    rejected: list[str]
+    abstained: dict[int, dict[str, str]]       # horizonte → {reason_code, message}: estado insufficient_data (ADR-V25-02)
+    refused: dict[int, list[str]] = field(default_factory=dict)       # horizonte → objetivos cuyo modelo en producción NO está aprobado (se sirve el respaldo o se abstiene)
+
+
+def _hyperparameters(row: dict[str, Any]) -> dict[str, Any]:
+    hp = row["hyperparameters"]
+    return json.loads(hp) if isinstance(hp, str) else (hp or {})
+
+
+def _load_serving_models(engine, tenant_id: int, requested: list[int]) -> ServingSelection:
+    """Elige y carga los modelos que sirve una predicción de UNA empresa (W4-B · ADR-V25-07).
+
+    Solo se cargan modelos servibles según `mlops.policy` (aprobado o legado del pipeline propio, ver MODEL_REGISTRY §5.6): un modelo en
+    `production` cuya base es `not_approved` (publicado sin aprobar, validado solo por una persona, sin origen) NO se carga y se trata como un artefacto
+    que falló: se sirve la referencia validada del mismo horizonte o, si no hay, abstención con `model_not_approved`. Todo se lee con la empresa del
+    trabajo; los artefactos se verifican antes de deserializar (`load_artifact`).
+    """
+    with engine.connect() as conn:
+        repo = CustomerRepository(conn, tenant_id)
+        prod = partition_servable(conn, tenant_id, repo.production_models().to_dict("records"))
+        refs = partition_servable(conn, tenant_id, repo.validated_references().to_dict("records"))
+    artifacts: dict[int, dict[str, Any]] = {}
+    references: dict[str, dict[str, Any]] = {}
+    for row in refs.servable:
+        references.setdefault(_hyperparameters(row).get("slot", ""), row)
+    model_versions: dict[str, Any] = {}
+    rejected: list[str] = []
+    abstained: dict[int, dict[str, str]] = {}
+    slots: dict[str, dict[str, Any]] = {}
+    for row in prod.servable:
+        slots[_hyperparameters(row).get("slot", "")] = row
+    refused: dict[str, dict[str, Any]] = {}
+    refused_horizons: dict[int, list[str]] = {}
+    for row in prod.excluded:
+        refused.setdefault(_hyperparameters(row).get("slot", ""), row)
+    for h in requested:
+        slot_p, slot_q = _slot(h, "probability"), _slot(h, "quantity")
+        rp, rq = slots.get(slot_p), slots.get(slot_q)
+        if (rp is None and slot_p not in refused) or (rq is None and slot_q not in refused):
+            rejected.append(f"H={h}: no hay modelo en producción (ejecute el entrenamiento); abstención.")
+            abstained[h] = {"reason_code": "no_model", "message": f"No hay modelo en producción para {h} días: entrene primero."}
+            continue
+        ap = aq = None
+        why_p = why_q = None
+        for target, row, refusal in (("probability", rp, refused.get(slot_p)), ("quantity", rq, refused.get(slot_q))):
+            if row is None:
+                rejected.append(f"H={h}: el modelo de {target} en producción ({refusal['version']}) no está aprobado "
+                                f"(base «{refusal['serving_basis']}»): no se carga.")
+                refused_horizons.setdefault(h, []).append(target)
+        if rp is not None:
+            ap, why_p = load_artifact(rp, tenant_id)
+        else:
+            why_p = REASON_NOT_APPROVED
+        if rq is not None:
+            aq, why_q = load_artifact(rq, tenant_id)
+        else:
+            why_q = REASON_NOT_APPROVED
+        if ap is None or aq is None:
+            # el ganador falló: se sirve la referencia validada del mismo horizonte (respaldo identificado)
+            refs_loaded = {}
+            for target in ("probability", "quantity"):
+                cand = references.get(_slot(h, target))
+                refs_loaded[target] = load_artifact(cand, tenant_id) if cand is not None else (None, "no_validated_reference")
+            if ap is None and refs_loaded["probability"][0] is not None:
+                ap, rp = refs_loaded["probability"][0], references[_slot(h, "probability")]
+                rejected.append(f"H={h}: " + ("el modelo de probabilidad en producción no está aprobado" if why_p == REASON_NOT_APPROVED
+                                              else f"el artefacto de probabilidad en producción falló ({why_p})") + "; se sirve la referencia validada (respaldo).")
+            if aq is None and refs_loaded["quantity"][0] is not None:
+                aq, rq = refs_loaded["quantity"][0], references[_slot(h, "quantity")]
+                rejected.append(f"H={h}: " + ("el modelo de cantidad en producción no está aprobado" if why_q == REASON_NOT_APPROVED
+                                              else f"el artefacto de cantidad en producción falló ({why_q})") + "; se sirve la referencia validada (respaldo).")
+        if ap is None or aq is None:
+            rejected.append(f"H={h}: artefacto no utilizable ({why_p or why_q}); abstención.")
+            if REASON_NOT_APPROVED in (why_p, why_q):
+                abstained[h] = {"reason_code": REASON_NOT_APPROVED, "message": f"El modelo de {h} días no está aprobado para servirse (ADR-V25-07): "
+                                "apruébelo en el registro o entrene de nuevo."}
+            else:
+                abstained[h] = {"reason_code": "model_unusable", "message": f"El artefacto del modelo de {h} días no es utilizable ({why_p or why_q})."}
+            continue
+        artifacts[h] = {"prob": ap, "qty": aq}
+        model_versions[str(h)] = {"probability": rp["version"], "quantity": rq["version"], "probability_id": int(rp["id"]),
+                                  "quantity_id": int(rq["id"]), "role": rp["role"]}
+    return ServingSelection(artifacts, model_versions, rejected, abstained, refused_horizons)
+
 
 def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, progress, settings, t0) -> dict[str, Any]:
     tenant_id, run_id = int(tenant["id"]), int(run["id"])
@@ -647,60 +933,30 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
     today = _tenant_today(tenant)
     as_of_req = _as_date(run.get("as_of")) or today
     progress("loading_models", 3)
-    limitations = list(BASE_LIMITATIONS)
+    limitations: list[str] = []          # las limitaciones fijas se anteponen al final: dependen de si S05 está en vigor en esta corrida
     assumptions: list[str] = []
-    with engine.connect() as conn:
-        repo = CustomerRepository(conn, tenant_id)
-        prod = repo.production_models()
-        refs_df = repo.validated_references()
-    artifacts: dict[int, dict[str, Any]] = {}
-    references: dict[str, dict[str, Any]] = {}
-    for row in refs_df.to_dict("records"):
-        hp_ = row["hyperparameters"]
-        hp_ = json.loads(hp_) if isinstance(hp_, str) else (hp_ or {})
-        references.setdefault(hp_.get("slot", ""), row)
-    model_versions: dict[str, Any] = {}
-    rejected: list[str] = []
-    slots: dict[str, dict[str, Any]] = {}
-    for row in prod.to_dict("records"):
-        hp = row["hyperparameters"]
-        hp = json.loads(hp) if isinstance(hp, str) else (hp or {})
-        slots[hp.get("slot", "")] = row
-    for h in requested:
-        rp, rq = slots.get(_slot(h, "probability")), slots.get(_slot(h, "quantity"))
-        if rp is None or rq is None:
-            rejected.append(f"H={h}: no hay modelo en producción (ejecute el entrenamiento); abstención.")
-            continue
-        ap, why_p = load_artifact(rp, tenant_id)
-        aq, why_q = load_artifact(rq, tenant_id)
-        if ap is None or aq is None:
-            # el ganador falló: se sirve la referencia validada del mismo horizonte (respaldo identificado)
-            refs = {}
-            for target in ("probability", "quantity"):
-                cand = references.get(_slot(h, target))
-                refs[target] = load_artifact(cand, tenant_id) if cand is not None else (None, "no_validated_reference")
-            if ap is None and refs["probability"][0] is not None:
-                ap, rp = refs["probability"][0], references[_slot(h, "probability")]
-                rejected.append(f"H={h}: el artefacto de probabilidad en producción falló ({why_p}); se sirve la referencia validada (respaldo).")
-            if aq is None and refs["quantity"][0] is not None:
-                aq, rq = refs["quantity"][0], references[_slot(h, "quantity")]
-                rejected.append(f"H={h}: el artefacto de cantidad en producción falló ({why_q}); se sirve la referencia validada (respaldo).")
-        if ap is None or aq is None:
-            rejected.append(f"H={h}: artefacto no utilizable ({why_p or why_q}); abstención.")
-            continue
-        artifacts[h] = {"prob": ap, "qty": aq}
-        model_versions[str(h)] = {"probability": rp["version"], "quantity": rq["version"], "probability_id": int(rp["id"]),
-                                  "quantity_id": int(rq["id"]), "role": rp["role"]}
+    selection = _load_serving_models(engine, tenant_id, requested)
+    artifacts, model_versions, rejected, abstained = selection.artifacts, selection.model_versions, selection.rejected, selection.abstained
     limitations += rejected
     progress("loading_data", 10)
     with engine.connect() as conn:
         repo = CustomerRepository(conn, tenant_id)
         repo.base.analytic_reads()
-        data = load_customer_data(repo, cfg, through=as_of_req)
+        data = load_customer_data(repo, cfg, through=as_of_req, live=True if run.get("as_of") is None else None)
+        # Gate de calidad (W2-C · ADR-V25-05) ANTES de inferir: BLOCK o DEGRADE a agregado ⇒ no se predice a nivel comprador.
+        qa = customer_gate(conn, tenant, cfg, data)
+        if qa.stops_individual_customer:
+            artifacts.clear()
+            model_versions.clear()
+            for h in requested:
+                abstained[h] = {"reason_code": qa.individual_stop_code, "message": qa.individual_stop_message()}
         coverage_declared = data.coverage is not None and len(data.coverage) > 0
         complete = data.last_complete_day() if coverage_declared else None
         commit_rev = repo.commitment_revisions() if artifacts else pd.DataFrame()
         sku_map = repo.product_skus() if artifacts else {}
+    individual: dict[str, Any] | None = None
+    if qa.stops_individual_customer and cfg.get("s05_enabled", True):      # W3-C · V2.5 §25.2: sin filas individuales; ranking AGREGADO en su lugar
+        individual = individual_recommendations_block(qa, _aggregate_ranking(engine, tenant_id, data, as_of_req, cfg) if qa.degraded else None)
     # fecha efectiva de las variables: si la cobertura declarada termina antes, los días siguientes son AUSENTES (no cero)
     as_of = as_of_req
     stale = False
@@ -758,7 +1014,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
         else:
             quality = "degraded"
         for h in out.horizons:
-            if out.served[h]["role"] == "fallback":
+            if out.served[h]["role"] == "fallback" and h not in selection.refused:      # (con un modelo no aprobado, `rejected` ya dice el motivo real)
                 limitations.append(f"H={h}: se sirve la referencia frecuencia/recencia (rol fallback): el modelo complejo no superó la regla de promoción o no hubo datos para validarlo.")
             if out.served[h]["calibration_status"] != "calibrated":
                 limitations.append(f"H={h}: calibración en estado «{out.served[h]['calibration_status']}» en el holdout.")
@@ -766,6 +1022,24 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
             quality = "insufficient_data"
     elif artifacts:
         limitations.append("La empresa no tiene compras válidas de compradores identificados: abstención.")
+    limitations.extend(qa.limitation_strings())
+    if out is not None:      # W3-C · drift de la distribución de probabilidades (alerta = señal de revisión; no cambia el estado de calidad)
+        for h, d in ((out.summary.get("s05") or {}).get("drift") or {}).items():
+            if d.get("status") == "alert":
+                limitations.append(f"H={h}: deriva de la distribución de probabilidades respecto del holdout del entrenamiento (PSI ajustado "
+                                   f"{d['psi_adjusted']:.2f} ≥ {d['alert']:.2f}); revisar antes de confiar en el ranking.")
+        s05_summary = out.summary.get("s05") or {}
+        if s05_summary.get("error"):
+            limitations.append(f"Las salidas de S05 (pedidos, cantidad por pedido, ventana, segmento) fallaron en esta predicción ({s05_summary['error']}): "
+                               "columnas nulas con la bandera s05_failed; la probabilidad y la cantidad condicionada no se afectan.")
+        else:
+            limitations.extend(_window_limitations(s05_summary.get("window"), None, (s05_summary.get("window") or {}).get("withheld")))
+    # S05 está en vigor en esta corrida solo si está encendido y el artefacto servido lo trae (no un artefacto anterior ni un fallo)
+    s05_in_force = bool(out is not None and (out.summary.get("s05") or {}) and not (out.summary.get("s05") or {}).get("error")
+                        and any(out.served[h].get("orders_family") or out.served[h].get("per_order_objective") for h in out.horizons))
+    limitations = _base_limitations(s05_in_force) + limitations
+    if qa.degraded and qa.stops_individual_customer:
+        quality = "degraded"      # W2-C: DEGRADE a agregado (sin recomendaciones individuales); BLOCK sigue siendo insufficient_data
     duration_ms_pre = int((time.perf_counter() - t0) * 1000)
     progress("persisting", 90)
     snap = _snapshot(data, cfg, cfg_version, as_of, {"models": {h: v.get("probability_id") for h, v in model_versions.items()},
@@ -773,16 +1047,22 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
                                                     "commitments_revisions": int(len(commit_rev)), "as_of_requested": as_of_req.isoformat()})
     horizons_out = sorted(out.horizons) if out is not None else []
     summary: dict[str, Any] = {"horizons": horizons_out, "as_of_requested": as_of_req.isoformat(), "as_of_effective": as_of.isoformat(), "stale_data": stale,
-                               "excluded_from_individual_prediction": data.excluded, "duration_ms": duration_ms_pre}
+                               "excluded_from_individual_prediction": data.excluded, "duration_ms": duration_ms_pre,
+                               "horizon_support": _predict_horizon_support(requested, out, abstained, stale, selection.refused)}
     if out is not None:
         summary |= {"rows": out.summary.get("rows"), "candidates": out.summary.get("candidates"), "coherence": out.summary.get("coherence"),
                     "quantity_coherence": out.summary.get("quantity_coherence"), "served": out.served,
                     "committed": out.committed, "customers_with_activity": int(len(out.activity))}
+        if out.summary.get("s05"):
+            summary["s05"] = out.summary["s05"]
         if rec_all:
             rec_df = pd.concat(rec_all, ignore_index=True)
             summary["reconciliation"] = {str(h): reconciliation_summary(rec_df[rec_df["horizon_days"] == h]) for h in horizons_out}
+    if individual is not None:
+        summary["individual_recommendations"] = individual
     with engine.begin() as conn:
         snapshot_id = persist_snapshot(conn, tenant_id, snap)
+        summary["quality_gate"] = qa.manifest_block(insert_run_quality_report(conn, tenant_id, qa, core_run_id=run_id))   # W2-C
         # reemplazo total de lo escrito por un intento anterior (idempotencia ante reintentos)
         for table in ("customer_predictions", "customer_product_rankings", "customer_activity", "customer_reconciliations"):
             conn.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t AND core_run_id = :r"), {"t": tenant_id, "r": run_id})
@@ -816,7 +1096,7 @@ def _run_predict(engine, tenant, run, job_id, cfg, cfg_version, provenance, prog
             WHERE id = :id AND tenant_id = :t
             """), {"quality": quality, "unc": "empirical_holdout" if horizons_out else "unknown", "as_of": as_of,
                    "hs": as_of + timedelta(days=1) if horizons_out else None, "he": h_end, "horizons": jdump(horizons_out or requested),
-                   "target": jdump(TARGET_DEFINITION), "cv": cfg_version, "cfg": jdump({"config": cfg, "provenance": provenance}),
+                   "target": jdump(_target_definition(s05_in_force)), "cv": cfg_version, "cfg": jdump({"config": cfg, "provenance": provenance}),
                    "snap": snapshot_id, "mv": jdump(model_versions), "assumptions": jdump(assumptions + [
                        "Probabilidades calibradas con datos temporalmente separados; no se multiplican entre horizontes (P7 ≤ P30 ≤ P90 por máximo acumulado).",
                        "El comprometido (pedidos/contratos confirmados) no se vuelve a sumar a la esperanza: demanda del comprador = max(esperanza, comprometido)."]),
@@ -837,7 +1117,8 @@ PRED_COLUMNS = ["tenant_id", "core_run_id", "customer_id", "product_id", "horizo
                 "probability_coherence_adjusted", "calibration_status", "quantity_if_purchase", "quantity_lo", "quantity_hi",
                 "expected_quantity", "committed_quantity", "incremental_quantity", "total_view_quantity", "assumed_unit_price",
                 "expected_amount", "currency", "median_interval_days", "days_since_last_purchase", "n_purchases", "model_family",
-                "model_role", "quality_flags"]
+                "model_role", "quality_flags", "expected_orders", "quantity_per_order", "expected_units", "window_p10_days", "window_p50_days",
+                "window_p90_days", "window_status", "segment"]
 ACT_COLUMNS = ["tenant_id", "core_run_id", "customer_id", "as_of", "last_purchase_date", "days_since_last_purchase", "n_purchase_days",
                "purchase_frequency_per_30d", "median_interval_days", "mean_interval_days", "interval_p75_days", "interval_p90_days",
                "n_intervals", "inactivity_risk", "inactivity_status", "behavior_change", "frequency_ratio", "behavior_p_value",

@@ -19,6 +19,10 @@
 |   CONVERSATION_MAX_MESSAGE_CHARS   tamaño máximo del mensaje del usuario
 |   CONVERSATION_RATE_PER_MINUTE     mensajes por minuto y usuario/empresa
 |   CONVERSATION_DAILY_LIMIT         mensajes por día y empresa (0 = sin tope diario)
+|   CONVERSATION_WHATSAPP_ENABLED     false por defecto: el canal WhatsApp es solo un CONTRATO (V2.5 · W6-D); sin un proveedor registrado en el código no existe (404)
+|
+| Intelligence Gateway (V2.5 · W6-D; ADR-V25-17): toda herramienta se ejecuta por IntelligenceGateway (autorización por herramienta, argumentos validados contra su
+| esquema, defensa ante inyección y auditoría en gateway_tool_calls). Ver docs/architecture/INTELLIGENCE_GATEWAY.md.
 */
 
 return [
@@ -53,6 +57,31 @@ return [
         'daily_limit_per_tenant' => (int) env('CONVERSATION_DAILY_LIMIT', 300),
         // Filas máximas por herramienta que devuelven listas.
         'max_rows_per_tool' => 10,
+    ],
+
+    'gateway' => [
+        // Catálogo de herramientas por canal ('*' = todas las habilitadas). Un canal que no figura aquí no tiene ninguna herramienta.
+        // WhatsApp (contrato, sin proveedor) quedaría limitado a consultas operativas y comerciales, nunca a ROI ni a calidad de modelos.
+        'channel_tools' => [
+            'web' => '*',
+            'api' => '*',
+            'whatsapp' => ['dashboard_summary', 'radar_opportunities', 'decisions_summary', 'inventory_recommendations'],
+        ],
+        // Plazo por herramienta (segundos; 0 = sin plazo): statement_timeout de PostgreSQL + descarte del resultado si la ejecución lo superó.
+        'tool_timeout_seconds' => (float) env('CONVERSATION_TOOL_TIMEOUT_SECONDS', 10),
+        'injection' => [
+            // Expresiones regulares ADICIONALES (PCRE, con delimitadores y modificador u) que se suman a las incorporadas; sobre el texto normalizado (minúsculas, sin tildes).
+            'extra_patterns' => [],
+        ],
+    ],
+
+    'channels' => [
+        // Canal WhatsApp: solo contrato (interfaz MessagingChannel, plantillas como BORRADOR y confirmación humana explícita). Sin proveedor no existe (404) y nada se envía.
+        'whatsapp' => [
+            'enabled' => (bool) env('CONVERSATION_WHATSAPP_ENABLED', false),
+            // Un borrador sin confirmar caduca (minutos) y se descarta.
+            'draft_ttl_minutes' => 1440,
+        ],
     ],
 
     'privacy' => [

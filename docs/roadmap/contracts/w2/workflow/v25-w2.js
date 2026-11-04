@@ -11,7 +11,7 @@ export const meta = {
 const BASE = (args && args.base) || 'HEAD'
 
 const COMMON = `
-Proyecto: Predictily, SaaS B2B multi-tenant (repositorio /home/user/directily, rama v25/enterprise-core). Eres ingeniero senior bajo un arquitecto que fija contratos, revisa e integra.
+Proyecto: Predictily, SaaS B2B multi-tenant (raíz del repositorio; rama de trabajo vigente según V25-ESTADO-Y-PROXIMOS-PASOS.md). Eres ingeniero senior bajo un arquitecto que fija contratos, revisa e integra.
 Stack: backend/ Laravel 13 (PHP 8.3, Sanctum, PostgreSQL, colas Redis; modelos con BelongsToTenant = global scope fail-closed; FKs compuestas (tenant_id, x_id)); engine/ Python 3.12 FastAPI (venv engine/.venv); frontend/ Vue 3 TS.
 Especificación: docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md (V2.5). Decisiones: docs/architecture/adr/V25-ADRS.md (lee las ADR que te cite el paquete). Auditoría con evidencia y brechas por requisito: docs/roadmap/audit/2026-10-31/*.json y docs/roadmap/V25_GAP_ANALYSIS.md. Plan: docs/roadmap/V25_IMPLEMENTATION_PLAN.md.
 Contrato fijado por el arquitecto (léelo completo y respétalo; NO lo modifiques): backend/database/migrations/2026_03_03_000100_create_data_quality_lineage_and_identity_tables.php, backend/database/migrations/2026_03_04_000100_create_factor_intelligence_and_taxonomy_contracts.php, backend/app/Services/DataCore/Bronze/BronzeStore.php (interfaz) y FilesystemBronzeStore.php (implementación mínima), backend/app/Models/BronzeObject.php, backend/config/bronze.php, backend/app/Support/Canonical/CanonicalContracts.php (versiones), docs/data/DATA_QUALITY_ENGINE.md (esqueleto con secciones asignadas por paquete). Contratos previos vigentes: migración 2026_03_01_000100 (versiones de ventas y vista sales_line_versions; ADR-V25-23).
@@ -19,7 +19,7 @@ Reglas:
 - NO hagas commit ni push. NO modifiques migraciones existentes; si necesitas una nueva, usa el prefijo asignado a tu paquete y justifícala.
 - Otros paquetes trabajan EN PARALELO en el mismo árbol: toca solo tus archivos. Si un archivo compartido es imprescindible (p. ej. engine/predictily_engine/platform/config.py, backend/routes/api.php, docs/openapi/*.yaml), haz ediciones mínimas y localizadas con anclas únicas, relee el archivo justo antes de editarlo y no reformatees el resto.
 - NO toques la base de desarrollo "predictily". Usa solo tus bases de prueba.
-- Si PostgreSQL o Redis no responden: service postgresql start; service redis-server start.
+- Si PostgreSQL o Redis no responden: arránquelos según V25-ESTADO-Y-PROXIMOS-PASOS.md §6 (Linux: service …; macOS: brew services …).
 - Crear base: cd backend && php artisan tinker --execute="try { DB::statement('CREATE DATABASE <nombre>'); } catch (\\Throwable \\$e) { echo 'ya existe'; }"
 - Pruebas backend: cd backend && DB_DATABASE=<bd> php artisan test [--filter=...]; estilo: vendor/bin/pint en los PHP que toques.
 - Pruebas del motor: migra tu BD con: cd backend && DB_DATABASE=<bd_motor> php artisan migrate:fresh --force ; y ejecuta: cd engine && ENGINE_TEST_DATABASE_URL=postgresql+psycopg://predictily:secret@127.0.0.1:5432/<bd_motor> .venv/bin/python -m pytest -q [ruta]

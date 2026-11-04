@@ -1,0 +1,20 @@
+
+> predictily-frontend@0.1.0 test
+> vitest --run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:3:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.5 <repo>/frontend
+
+
+ Test Files  35 passed (35)
+      Tests  313 passed (313)
+   Start at  23:58:25
+   Duration  23.30s (environment 47%, transform 19%, tests 14%, setup 10%, import 9%)
+
+Environment  jsdom was created 35 times · 68.44s total, 47% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

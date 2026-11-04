@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Core;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\RequireFullLogin;
 use App\Http\Requests\Core\ChangePasswordRequest;
 use App\Http\Requests\Core\LoginRequest;
 use App\Http\Requests\Core\RegisterRequest;
@@ -14,6 +15,8 @@ use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
 use App\Services\Auth\AuthService;
+use App\Services\Auth\LoginResponder;
+use App\Services\Auth\Mfa\MfaChallenge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -22,10 +25,18 @@ use Illuminate\Support\Facades\Auth;
 /**
  * Autenticación. En la SPA (dominio "stateful" de Sanctum) usa sesión con cookies httpOnly.
  * Sin sesión (clientes API) devuelve además un token Bearer personal (no ligado a empresa).
+ *
+ * V2.5 · W6-A: si la persona tiene el segundo factor activo, una contraseña correcta NO inicia sesión: responde 202 `mfa_required` con un desafío de un solo uso y corta vida;
+ * la sesión o el token se emiten al completar POST /auth/mfa/challenge.
  */
 final class AuthController extends Controller
 {
-    public function __construct(private readonly AuthService $auth, private readonly AuditLogger $audit) {}
+    public function __construct(
+        private readonly AuthService $auth,
+        private readonly AuditLogger $audit,
+        private readonly LoginResponder $responder,
+        private readonly MfaChallenge $challenges,
+    ) {}
 
     public function register(RegisterRequest $request): JsonResponse
     {
@@ -36,7 +47,22 @@ final class AuthController extends Controller
 
     public function login(LoginRequest $request): JsonResponse
     {
-        $user = $this->auth->attempt($request->string('email')->toString(), (string) $request->input('password'));
+        $user = $this->auth->verifyCredentials($request->string('email')->toString(), (string) $request->input('password'));
+        if ($user->hasMfaEnabled()) {
+            $this->audit->log('auth.mfa_challenge_issued', $user, [], null, $user->id);
+
+            return response()->json([
+                'message' => 'Ingrese el código de su aplicación autenticadora para completar el inicio de sesión.',
+                'code' => 'mfa_required',
+                'data' => [
+                    'mfa_required' => true,
+                    'challenge' => $this->challenges->issue((int) $user->id, $request->boolean('remember')),
+                    'expires_in' => $this->challenges->ttl(),
+                    'methods' => ['totp', 'recovery_code'],
+                ],
+            ], 202);
+        }
+        $this->auth->completeLogin($user);
 
         return response()->json(['data' => $this->loginPayload($request, $user, $request->boolean('remember'))]);
     }
@@ -62,7 +88,13 @@ final class AuthController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
-        $tenants = $user->tenants()->orderBy('tenants.name')->get();
+        $token = $user->currentAccessToken();
+        $query = $user->tenants()->orderBy('tenants.name');
+        // V2.5 · W6-A: un token restringido o ligado a una empresa solo ve SU empresa (no revela las demás de la persona); sin empresa propia no ve ninguna.
+        if (! RequireFullLogin::isFullLogin($token)) {
+            $query->where('tenants.id', $token->tenant_id ?? 0);
+        }
+        $tenants = $query->get();
 
         return response()->json(['data' => [
             'user' => new UserResource($user),
@@ -85,16 +117,6 @@ final class AuthController extends Controller
     /** @return array<string, mixed> */
     private function loginPayload(Request $request, User $user, bool $remember): array
     {
-        $payload = ['user' => new UserResource($user)];
-
-        if ($request->hasSession()) {
-            Auth::guard('web')->login($user, $remember);
-            $request->session()->regenerate();
-        } else {
-            $payload['token'] = $user->createToken('api-login', ['*'], now()->addDays(30))->plainTextToken;
-            $payload['token_type'] = 'Bearer';
-        }
-
-        return $payload;
+        return $this->responder->payload($request, $user, $remember);
     }
 }

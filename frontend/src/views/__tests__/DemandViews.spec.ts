@@ -50,6 +50,35 @@ describe('Pronósticos: horizonte, respaldo y casos especiales', () => {
     expect(w.findAll('[role="radiogroup"][aria-label="Horizonte"] [role="radio"]').map((r) => r.text())).toEqual(['7 días', '14 días', '30 días', '60 días', '90 días'])
   })
 
+  it('Growth y Enterprise (7/15/30) ven el horizonte de 15 días; el catálogo completo habilitado lo incluye', async () => {
+    api.series.mockResolvedValue(series(support('ok')))
+    const growth = mount(ForecastsView, { global: { plugins: [setupTenant('analyst', { horizons: [7, 15, 30] })], stubs } })
+    await flushPromises()
+    expect(growth.findAll('[role="radiogroup"][aria-label="Horizonte"] [role="radio"]').map((r) => r.text())).toEqual(['7 días', '15 días', '30 días'])
+    const full = mount(ForecastsView, { global: { plugins: [setupTenant('analyst', { horizons: [7, 14, 15, 30, 60, 90] })], stubs } })
+    await flushPromises()
+    expect(full.findAll('[role="radiogroup"][aria-label="Horizonte"] [role="radio"]').map((r) => r.text())).toEqual(['7 días', '14 días', '15 días', '30 días', '60 días', '90 días'])
+    const starter = mount(ForecastsView, { global: { plugins: [setupTenant('analyst', { horizons: [7, 30] })], stubs } })
+    await flushPromises()
+    expect(starter.findAll('[role="radiogroup"][aria-label="Horizonte"] [role="radio"]').map((r) => r.text())).toEqual(['7 días', '30 días'])
+  })
+
+  it('el selector marca el horizonte del plan que la ejecución vigente no respalda, con su motivo, sin ocultarlo', async () => {
+    api.series.mockResolvedValue(series(support('ok')))
+    const reasons = [{ code: 'backtest_horizon_lt_h', reason_code: 'insufficient_horizon', message: 'El backtesting solo evalúa ventanas de 14 días.' }]
+    api.runs.mockResolvedValue({ data: [{ id: 1, version: 1, run_type: 'production', status: 'completed', triggered_by: 'user', horizon_days: 30, cutoff_date: '2026-10-01', is_current: true, created_at: '2026-10-01T00:00:00Z',
+      summary: { horizon_support: { '7': { horizon: 7, status: 'ok', reasons: [] }, '15': { horizon: 15, status: 'insufficient_data', reasons }, '30': { horizon: 30, status: 'insufficient_data', reasons } } } }],
+      meta: { current_page: 1, per_page: 20, total: 1, last_page: 1 } })
+    const w = mount(ForecastsView, { global: { plugins: [setupTenant('analyst', { horizons: [7, 15, 30] })], stubs } })
+    await flushPromises()
+    const radios = w.findAll('[role="radiogroup"][aria-label="Horizonte"] [role="radio"]')
+    expect(radios.map((r) => r.text())).toEqual(['7 días', '15 días', '30 días'])
+    expect(radios.map((r) => r.attributes('data-status'))).toEqual([undefined, 'insufficient_data', 'insufficient_data'])
+    expect(radios[1]!.attributes('title')).toContain('Sin respaldo suficiente')
+    expect(radios[1]!.attributes('title')).toContain('Sin ventanas de evaluación de ese largo')
+    expect(radios[0]!.attributes('title')).toBeUndefined()
+  })
+
   it('un horizonte sin respaldo: aviso con motivos, calidad visible, gráfico provisional y total marcado', async () => {
     api.series.mockResolvedValue(series(support('insufficient_data', [{ code: 'history_lt_2h', message: 'La historia (80 días) es menor que 2×60.' }]), 'insufficient_data'))
     const w = mount(ForecastsView, { global: { plugins: [setupTenant('analyst')], stubs } })

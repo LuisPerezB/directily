@@ -18,6 +18,17 @@ describe('fuente SQL', () => {
     expect(JSON.stringify(p.config)).not.toContain('secreta')
   })
 
+  it('SQL Server envía cifrado y confianza en el certificado; los demás motores no', () => {
+    const base = { name: 'ERP', host: '10.0.0.5', database: 'erp', username: 'lector', password: 'x' }
+    const sqlsrv = buildSqlPayload({ ...emptySqlForm('sql_sqlserver'), ...base, encrypt: false, trust_server_certificate: true }, 'create')
+    expect(sqlsrv.config).toMatchObject({ port: 1433, encrypt: false, trust_server_certificate: true })
+    const defaults = buildSqlPayload({ ...emptySqlForm('sql_sqlserver'), ...base }, 'create')
+    expect(defaults.config).toMatchObject({ encrypt: true, trust_server_certificate: false })
+    const pg = buildSqlPayload({ ...emptySqlForm('sql_postgresql'), ...base }, 'create')
+    expect(pg.config).not.toHaveProperty('encrypt')
+    expect(pg.config).not.toHaveProperty('trust_server_certificate')
+  })
+
   it('al editar sin credenciales nuevas no se envían (se conservan las guardadas)', () => {
     const p = buildSqlPayload({ ...emptySqlForm(), name: 'ERP', host: 'h', database: 'd' }, 'update')
     expect(p).not.toHaveProperty('credentials')

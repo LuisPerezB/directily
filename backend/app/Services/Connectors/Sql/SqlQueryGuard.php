@@ -40,6 +40,8 @@ final class SqlQueryGuard
     private const SQLSERVER_EXTRA_WORDS = [
         'deny', 'disable', 'enable', 'setuser', 'revert', 'checkpoint', 'reconfigure', 'print', 'raiserror', 'throw',
         'goto', 'while', 'readtext', 'writetext', 'updatetext', 'openrowset', 'openquery', 'opendatasource', 'openxml',
+        // V2.5 · W6-B (revisión adversarial B-9): RECEIVE consume mensajes de una cola de Service Broker (escribe) y las sugerencias de bloqueo toman bloqueos de filas/tablas.
+        'receive', 'updlock', 'holdlock', 'xlock', 'tablockx',
     ];
 
     /** Funciones con efectos laterales, acceso a archivos/red o ejecución de texto como SQL. */
@@ -47,7 +49,10 @@ final class SqlQueryGuard
         'sleep', 'benchmark', 'get_lock', 'release_lock', 'release_all_locks', 'is_free_lock', 'load_file',
         'sys_exec', 'sys_eval', 'set_config', 'nextval', 'setval', 'dblink', 'dblink_exec', 'dblink_connect',
         'query_to_xml', 'table_to_xml', 'schema_to_xml', 'database_to_xml', 'cursor_to_xml', 'query_to_xml_and_xmlschema',
+        'database_to_xml_and_xmlschema', 'table_to_xml_and_xmlschema', 'schema_to_xml_and_xmlschema',
         'lo_import', 'lo_export', 'lo_create', 'lo_unlink', 'lo_put', 'lo_from_bytea', 'lo_open', 'lo_creat',
+        // Escritura de objetos grandes por descriptor (B-9, defensa en profundidad: el servidor ya las rechaza en una transacción de solo lectura).
+        'lowrite', 'lo_truncate', 'lo_truncate64',
     ];
 
     /** Prefijos de funciones/objetos de sistema (el prefijo basta, con o sin paréntesis). */
@@ -148,11 +153,17 @@ final class SqlQueryGuard
             if (in_array($word, $forbidden, true)) {
                 throw new SqlQueryRejected('La consulta contiene la palabra «'.strtoupper($word).'», no permitida en consultas de solo lectura.', 'forbidden_keyword');
             }
+            // NEXT VALUE FOR <secuencia> (SQL Server, MariaDB) avanza la secuencia: es una escritura. (FETCH NEXT … ROWS y una columna «next» siguen permitidas.)
+            $after = $significant[$i + 2] ?? null;
+            if ($word === 'next' && $next !== null && $next['t'] === 'word' && strtolower($next['v']) === 'value' && $after !== null && $after['t'] === 'word' && strtolower($after['v']) === 'for') {
+                throw new SqlQueryRejected('«NEXT VALUE FOR» avanza una secuencia: no está permitido en consultas de solo lectura.', 'forbidden_keyword');
+            }
             $isCall = $next !== null && $next['t'] === 'symbol' && $next['v'] === '(';
             if ($word === 'replace' && ! $isCall) {
                 throw new SqlQueryRejected('«REPLACE» solo se permite como función REPLACE(...).', 'forbidden_keyword');
             }
-            if ($isCall && in_array($word, self::FORBIDDEN_FUNCTIONS, true)) {
+            // Cualquier función *_to_xml* (query_to_xml, table_to_xml_and_xmlschema, …) ejecuta SQL arbitrario por texto o lee tablas enteras: se veta por patrón, no solo por lista.
+            if ($isCall && (in_array($word, self::FORBIDDEN_FUNCTIONS, true) || str_contains($word, '_to_xml'))) {
                 throw new SqlQueryRejected("La función {$word}() no está permitida en consultas de solo lectura.", 'forbidden_function');
             }
             self::assertNotSystemObject($word, $next);

@@ -6,6 +6,7 @@ namespace App\Services\Privacy;
 
 use App\Models\Tenant;
 use App\Models\TenantExport;
+use App\Services\Intelligence\SharedGrants\SharedForecastGrantExport;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -24,23 +25,23 @@ final class TenantDataExporter
     public const TABLES = [
         'branches' => ['id', 'code', 'name', 'province', 'canton', 'commercial_zone', 'address', 'is_active', 'created_at'],
         'product_categories' => ['id', 'parent_id', 'code', 'name'],
-        'products' => ['id', 'sku', 'name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'created_at'],
+        'products' => ['id', 'sku', 'name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'created_at', 'is_perishable', 'shelf_life_days'],
         'customer_segments' => ['id', 'code', 'name'],
         'customers' => ['id', 'external_code', 'segment_id', 'customer_type', 'province', 'canton', 'commercial_zone', 'created_at'],
         'suppliers' => ['id', 'code', 'name', 'tax_id', 'country', 'default_lead_time_days'],
-        'sales' => ['id', 'branch_id', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at'],
+        'sales' => ['id', 'branch_id', 'document_type', 'document_number', 'status', 'issued_at', 'sale_date', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'version_known_from', 'current_revision', 'first_seen_at', 'bronze_object_id', 'source_row', 'schema_version'],
         'sale_items' => ['id', 'sale_id', 'line_number', 'product_id', 'branch_id', 'sale_date', 'quantity', 'unit_price', 'discount_amount', 'net_amount', 'tax_amount', 'unit_cost', 'is_return'],
         // ── V2.5 · contrato temporal de ventas (ADR-V25-23): versiones reemplazadas de cada documento y huecos de cobertura ──
-        'sales_document_revisions' => ['id', 'sale_id', 'revision', 'document_type', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'source_recorded_at', 'known_from', 'known_until', 'import_job_id', 'superseded_by_import_job_id', 'data_source_id', 'change_kind', 'created_at'],
+        'sales_document_revisions' => ['id', 'sale_id', 'revision', 'document_type', 'status', 'issued_at', 'sale_date', 'branch_id', 'customer_id', 'channel', 'currency', 'subtotal', 'discount_total', 'tax_total', 'total', 'ingestion_mode', 'source_recorded_at', 'known_from', 'known_until', 'import_job_id', 'superseded_by_import_job_id', 'data_source_id', 'change_kind', 'created_at', 'bronze_object_id', 'source_row', 'schema_version'],
         'sale_item_revisions' => ['id', 'sale_id', 'revision', 'line_number', 'product_id', 'branch_id', 'sale_date', 'quantity', 'unit_price', 'discount_amount', 'net_amount', 'tax_amount', 'unit_cost', 'is_return', 'created_at'],
         'data_coverage_gaps' => ['id', 'entity', 'data_source_id', 'branch_id', 'gap_from', 'gap_to', 'reason', 'basis', 'notes', 'created_at', 'updated_at'],
-        'inventory_snapshots' => ['id', 'branch_id', 'product_id', 'snapshot_date', 'on_hand', 'reserved', 'in_transit', 'unit_cost'],
+        'inventory_snapshots' => ['id', 'branch_id', 'product_id', 'snapshot_date', 'on_hand', 'reserved', 'in_transit', 'unit_cost', 'bronze_object_id', 'source_row', 'schema_version'],
         'supplier_lead_times' => ['id', 'supplier_id', 'product_id', 'branch_id', 'lead_time_days', 'lead_time_std_days', 'source'],
         'promotions' => ['id', 'name', 'promo_type', 'discount_pct', 'starts_on', 'ends_on', 'branch_id', 'product_id', 'category_id', 'known_at', 'deleted_at'],
         'promotion_revisions' => ['id', 'promotion_id', 'revision', 'name', 'promo_type', 'discount_pct', 'starts_on', 'ends_on', 'branch_id', 'product_id', 'category_id', 'known_at', 'deleted', 'source', 'recorded_at'],
         'product_price_history' => ['id', 'product_id', 'branch_id', 'price', 'currency', 'valid_from', 'valid_to', 'source'],
         'purchase_cost_history' => ['id', 'product_id', 'supplier_id', 'unit_cost', 'currency', 'valid_from', 'source'],
-        'import_jobs' => ['id', 'entity_type', 'original_filename', 'file_hash', 'status', 'created_at', 'finished_at'],
+        'import_jobs' => ['id', 'entity_type', 'original_filename', 'file_hash', 'status', 'created_at', 'finished_at', 'bronze_object_id'],
         'forecast_runs' => ['id', 'version', 'run_type', 'status', 'horizon_days', 'cutoff_date', 'feature_set_version', 'is_current', 'created_at', 'completed_at'],
         'recommendations' => ['id', 'forecast_run_id', 'branch_id', 'product_id', 'type', 'suggested_qty', 'risk_level', 'status', 'created_at'],
         'audit_logs' => ['id', 'user_id', 'action', 'auditable_type', 'auditable_id', 'created_at'],
@@ -57,12 +58,12 @@ final class TenantDataExporter
         // Solo los eventos DE LA EMPRESA (tenant_id = empresa): el calendario público (tenant_id NULL) no es de la empresa.
         'calendar_events' => ['id', 'scope', 'scope_ref', 'code', 'name', 'category', 'starts_on', 'ends_on', 'status', 'known_at', 'source', 'revision', 'created_at'],
         // Fuentes SIN `config` (host, usuario, base) ni `credentials_encrypted` ni `last_error`: nunca se exportan credenciales.
-        'data_sources' => ['id', 'type', 'connector_key', 'name', 'status', 'last_synced_at', 'created_at'],
+        'data_sources' => ['id', 'type', 'connector_key', 'name', 'status', 'last_synced_at', 'created_at', 'schema_fingerprint', 'schema_version'],
         'source_mappings' => ['id', 'data_source_id', 'entity', 'query', 'field_map', 'options', 'version', 'approved_by', 'approved_at', 'is_active', 'created_at'],
-        'source_syncs' => ['id', 'data_source_id', 'source_mapping_id', 'import_job_id', 'entity', 'mapping_version', 'mode', 'status', 'triggered_by', 'since', 'watermark', 'rows_extracted', 'pages', 'stats', 'started_at', 'finished_at', 'created_at'],
+        'source_syncs' => ['id', 'data_source_id', 'source_mapping_id', 'import_job_id', 'entity', 'mapping_version', 'mode', 'status', 'triggered_by', 'since', 'watermark', 'rows_extracted', 'pages', 'stats', 'started_at', 'finished_at', 'created_at', 'bronze_object_id'],
 
         // ── Etapa 2 · Comportamiento de compra (resultados por comprador; el nombre/identificación del comprador no se incluye aquí) ──
-        'customer_predictions' => ['id', 'core_run_id', 'customer_id', 'product_id', 'horizon_days', 'as_of', 'purchase_probability', 'probability_raw', 'probability_coherence_adjusted', 'calibration_status', 'quantity_if_purchase', 'quantity_lo', 'quantity_hi', 'expected_quantity', 'committed_quantity', 'incremental_quantity', 'total_view_quantity', 'assumed_unit_price', 'expected_amount', 'currency', 'median_interval_days', 'days_since_last_purchase', 'n_purchases', 'model_family', 'model_role', 'quality_flags'],
+        'customer_predictions' => ['id', 'core_run_id', 'customer_id', 'product_id', 'horizon_days', 'as_of', 'purchase_probability', 'probability_raw', 'probability_coherence_adjusted', 'calibration_status', 'quantity_if_purchase', 'quantity_lo', 'quantity_hi', 'expected_quantity', 'committed_quantity', 'incremental_quantity', 'total_view_quantity', 'assumed_unit_price', 'expected_amount', 'currency', 'median_interval_days', 'days_since_last_purchase', 'n_purchases', 'model_family', 'model_role', 'quality_flags', 'expected_orders', 'quantity_per_order', 'expected_units', 'window_p10_days', 'window_p50_days', 'window_p90_days', 'window_status', 'segment'],
         'customer_product_rankings' => ['id', 'core_run_id', 'customer_id', 'product_id', 'horizon_days', 'rank', 'purchase_probability', 'expected_quantity', 'expected_amount', 'currency', 'ranking_source', 'ranking_score'],
         'customer_activity' => ['id', 'core_run_id', 'customer_id', 'as_of', 'last_purchase_date', 'days_since_last_purchase', 'n_purchase_days', 'purchase_frequency_per_30d', 'median_interval_days', 'mean_interval_days', 'interval_p75_days', 'interval_p90_days', 'n_intervals', 'inactivity_risk', 'inactivity_status', 'behavior_change', 'frequency_ratio', 'behavior_p_value', 'spend_recent', 'spend_prior', 'spend_ratio', 'currency'],
         'customer_reconciliations' => ['id', 'core_run_id', 'forecast_run_id', 'product_id', 'horizon_days', 'aggregate_quantity', 'aggregate_days', 'buyers_total_quantity', 'buyers_committed_quantity', 'buyers_incremental_quantity', 'buyers_expected_quantity', 'n_buyers', 'committed_outside_model', 'residual_quantity', 'excess_quantity', 'excess_ratio', 'residual_share', 'status', 'severity'],
@@ -91,7 +92,7 @@ final class TenantDataExporter
         'external_indicators' => ['id', 'code', 'name', 'source', 'frequency', 'unit', 'country', 'description', 'affected_sectors', 'connector_key', 'is_active', 'created_at', 'updated_at'],
         'external_indicator_observations' => ['id', 'indicator_id', 'period_date', 'value', 'published_at', 'ingested_at', 'revision', 'source_url', 'created_at'],
         // Membresías (quién tiene acceso y con qué rol); nombres y correos viven en la cuenta de la plataforma, no se exportan aquí.
-        'tenant_users' => ['id', 'user_id', 'role', 'invited_by', 'created_at', 'updated_at'],
+        'tenant_users' => ['id', 'user_id', 'role', 'invited_by', 'created_at', 'updated_at', 'commercial_role', 'commercial_scope'],
         // Sin `path` (ruta interna del archivo en el servidor) ni `error_message`.
         'tenant_exports' => ['id', 'user_id', 'status', 'file_size', 'file_hash', 'summary', 'expires_at', 'created_at', 'updated_at'],
         'tenant_usage' => ['id', 'period', 'metric', 'value', 'created_at', 'updated_at'],
@@ -103,11 +104,51 @@ final class TenantDataExporter
         'forecast_features' => ['id', 'feature_set_version', 'name', 'kind', 'description', 'config', 'is_active', 'created_at'],
         'forecasting_series' => ['id', 'branch_id', 'product_id', 'unique_id', 'first_sale_date', 'last_sale_date', 'history_days', 'nonzero_days', 'total_units', 'adi', 'cv2', 'demand_class', 'stockout_days', 'censored_days', 'is_active', 'last_profiled_at', 'lifecycle', 'created_at', 'updated_at'],
         // Sin `artifact_path` (ruta interna del artefacto en el servidor); sí su huella `artifact_sha256`.
-        'model_registry' => ['id', 'version', 'model_family', 'strategy_level', 'scope', 'sector', 'demand_class', 'status', 'core', 'role', 'hyperparameters', 'feature_set_version', 'training_data_from', 'training_data_to', 'training_data_hash', 'series_count', 'artifact_sha256', 'artifact_compat', 'library_versions', 'random_seed', 'training_job_id', 'forecast_run_id', 'core_run_id', 'trained_at', 'validated_at', 'promoted_at', 'retired_at', 'notes', 'created_at', 'updated_at'],
+        'model_registry' => ['id', 'version', 'model_family', 'strategy_level', 'scope', 'sector', 'demand_class', 'status', 'core', 'role', 'hyperparameters', 'feature_set_version', 'training_data_from', 'training_data_to', 'training_data_hash', 'series_count', 'artifact_sha256', 'artifact_compat', 'library_versions', 'random_seed', 'training_job_id', 'forecast_run_id', 'core_run_id', 'trained_at', 'validated_at', 'promoted_at', 'retired_at', 'notes', 'created_at', 'updated_at', 'purpose', 'granularity', 'previous_model_registry_id', 'promotion_decision_id', 'published_by', 'published_env', 'published_at', 'approved_by', 'approved_at', 'rejected_reason'],
         'model_evaluations' => ['id', 'model_registry_id', 'forecast_run_id', 'core_run_id', 'core', 'model_family', 'evaluation_type', 'level', 'level_key', 'horizon_days', 'is_baseline', 'is_selected', 'wape', 'mae', 'rmse', 'bias', 'coverage_80', 'coverage_95', 'n_obs', 'n_windows', 'cutoffs', 'extra', 'metrics', 'created_at'],
         // Sin `error_message` (texto técnico interno); el estado y el resultado sí.
         'training_jobs' => ['id', 'forecast_run_id', 'core_run_id', 'job_type', 'status', 'stage', 'progress', 'attempts', 'triggered_by', 'user_id', 'params', 'result', 'model_registry_id', 'queued_at', 'started_at', 'finished_at', 'duration_ms', 'created_at', 'updated_at'],
-        'data_quality_reports' => ['id', 'import_job_id', 'forecast_run_id', 'scope', 'score', 'summary', 'issues', 'created_at'],
+        'data_quality_reports' => ['id', 'import_job_id', 'forecast_run_id', 'scope', 'score', 'summary', 'issues', 'created_at', 'core_run_id', 'bronze_object_id', 'dataset', 'as_of', 'issue_counts', 'metrics', 'gate_results', 'rules_version'],
+        // ── V2.5 · W2 Data Core (ADR-V25-24 y -25): Bronze, calidad, cuarentena, reconciliación, identidades, factores y taxonomía ──
+        // Sin `object_key` (clave interna del almacén); sí la huella, el tamaño y la procedencia del objeto.
+        'bronze_objects' => ['id', 'data_source_id', 'kind', 'entity', 'storage_driver', 'sha256', 'size_bytes', 'content_type', 'schema_fingerprint', 'schema_version', 'row_count', 'original_name', 'received_by_user_id', 'received_from_device', 'received_at', 'retention_until', 'status', 'metadata', 'created_at', 'updated_at'],
+        'data_quality_issues' => ['id', 'report_id', 'dq_class', 'code', 'entity', 'record_ref', 'source_row', 'field', 'original_value', 'proposed_value', 'applied', 'reason', 'status', 'resolved_by', 'resolved_at', 'created_at'],
+        'quarantine_records' => ['id', 'bronze_object_id', 'import_job_id', 'source_sync_id', 'entity', 'record_key', 'payload', 'issue_codes', 'status', 'resolved_by', 'resolved_at', 'created_at', 'updated_at'],
+        'reconciliation_reports' => ['id', 'scope', 'entity', 'data_source_id', 'bronze_object_id', 'import_job_id', 'source_sync_id', 'window_from', 'window_to', 'layers', 'discrepancies', 'status', 'created_at'],
+        'product_aliases' => ['id', 'product_id', 'data_source_id', 'source_code', 'kind', 'valid_from', 'valid_to', 'notes', 'created_by', 'created_at', 'updated_at'],
+        'customer_aliases' => ['id', 'customer_id', 'data_source_id', 'source_code', 'kind', 'valid_from', 'valid_to', 'notes', 'created_by', 'created_at', 'updated_at'],
+        // Las filas públicas (tenant_id NULL: catálogo de la plataforma) no son datos de la empresa y no se exportan.
+        'source_versions' => ['id', 'source_key', 'version_label', 'published_at', 'retrieved_at', 'license', 'terms_url', 'checksum', 'coverage', 'notes', 'created_at', 'updated_at'],
+        'factor_definitions' => ['id', 'family', 'key', 'name', 'availability_class', 'storage', 'external_indicator_id', 'unit', 'frequency', 'geo_scope', 'source_key', 'license', 'missing_strategy', 'max_staleness_days', 'retention_days', 'sector_justification', 'schema', 'is_active', 'is_informative_alert', 'created_at', 'updated_at'],
+        'external_events' => ['id', 'family', 'event_type', 'title', 'summary', 'source_url', 'source_ref', 'authority', 'published_at', 'available_at', 'effective_from', 'effective_to', 'jurisdiction', 'corroboration', 'status', 'extracted_by', 'proposed_by', 'extraction', 'affects', 'is_informative_alert', 'source_version_id', 'verified_by', 'verified_at', 'review_note', 'created_at', 'updated_at'],
+        'taxonomy_nodes' => ['id', 'parent_id', 'level', 'code', 'name', 'version', 'valid_from', 'valid_to', 'erp_category_id', 'attributes', 'created_at', 'updated_at'],
+        'product_taxonomy_assignments' => ['id', 'product_id', 'taxonomy_node_id', 'provenance', 'confidence', 'is_primary', 'proposed_by', 'verified_by', 'verified_at', 'valid_from', 'valid_to', 'created_at', 'updated_at'],
+        'tenant_sector_profiles' => ['id', 'profile_key', 'priority', 'scope', 'scope_ref', 'is_active', 'created_at', 'updated_at'],
+        'factor_applicability_rules' => ['id', 'factor_definition_id', 'profile_key', 'taxonomy_node_id', 'region', 'effect', 'rule', 'priority', 'justification', 'is_active', 'created_at', 'updated_at'],
+        'factor_evaluations' => ['id', 'factor_definition_id', 'family', 'factor_set', 'segment', 'horizon_days', 'cutoff', 'baseline_metrics', 'candidate_metrics', 'holdout_untouched', 'decision', 'cost', 'notes', 'created_at'],
+        // ── V2.5 · W3 Calidad ML (ADR-V25-11 y -21): decisiones de promoción y pronósticos shadow (resultados de la empresa) ──
+        'model_promotion_decisions' => ['id', 'core', 'forecast_run_id', 'core_run_id', 'scope_key', 'policy', 'policy_version', 'candidate_family', 'champion_family', 'candidate_model_registry_id', 'champion_model_registry_id', 'decision', 'is_effective', 'gates', 'metrics', 'reason', 'approved_by', 'approved_at', 'decided_at', 'created_at'],
+        'shadow_forecast_values' => ['id', 'forecast_run_id', 'model_registry_id', 'model_family', 'node_key', 'level', 'branch_id', 'product_id', 'target_date', 'horizon_step', 'yhat', 'lo_80', 'hi_80', 'created_at'],
+        // ── V2.5 · W4 MLOps (ADR-V25-07): transiciones auditadas del registro y medición de uso por empresa (sin published_object_key) ──
+        'model_registry_events' => ['id', 'model_registry_id', 'from_status', 'to_status', 'actor_user_id', 'actor_kind', 'reason', 'evidence', 'created_at'],
+        'tenant_usage_records' => ['id', 'period', 'metric', 'quantity', 'unit', 'source', 'source_ref', 'created_at'],
+        // ── V2.5 · W5 flujo empresarial (ADR-V25-12/-13/-14): recomendaciones del Decision Engine, su workflow auditado, asignación a
+        //    experimentos, outcomes medidos y lotes de inventario (perecibles). Datos de negocio de la empresa: se exportan completos. ──
+        'decision_recommendations' => ['id', 'kind', 'as_of', 'horizon_days', 'entity_type', 'customer_id', 'product_id', 'branch_id', 'source_core_run_id', 'source_forecast_run_id', 'data_snapshot_id', 'model_versions', 'probability', 'interval', 'assumptions', 'constraints', 'availability', 'action_cost', 'expected_gross_value', 'expected_contribution', 'incremental_estimate', 'incremental_evidence', 'attribution_label', 'score', 'score_formula_version', 'uncertainty', 'explanation', 'policy', 'priority', 'owner_user_id', 'assigned_user_id', 'status', 'agenda_status', 'experiment_group', 'proposed_by_kind', 'proposed_by_user_id', 'expires_at', 'next_step', 'idempotency_key', 'created_at', 'updated_at'],
+        'decision_events' => ['id', 'recommendation_id', 'event', 'from_status', 'to_status', 'agenda_status', 'actor_user_id', 'actor_kind', 'reason', 'payload', 'idempotency_key', 'created_at'],
+        'experiment_assignments' => ['id', 'experiment_key', 'unit_type', 'unit_key', 'group', 'policy', 'assigned_at'],
+        'decision_outcomes' => ['id', 'recommendation_id', 'action_kind', 'action_at', 'window_from', 'window_to', 'observed_event', 'observed_ref', 'observed_units', 'observed_net_amount', 'contribution', 'contact_cost', 'classification', 'method', 'evidence', 'measured_at'],
+        'inventory_lots' => ['id', 'branch_id', 'product_id', 'lot_code', 'snapshot_date', 'expiry_date', 'quantity', 'created_at', 'updated_at'],
+        // ── V2.5 · W6 plataforma (ADR-V25-10, -15 y -17): dispositivos y checkpoints del Bridge (sin token_hash: credencial), plantillas
+        //    de mapeo de la empresa (las públicas, con tenant_id NULL, no son datos de la empresa) y auditoría del Intelligence Gateway. ──
+        'bridge_devices' => ['id', 'data_source_id', 'name', 'public_key_fingerprint', 'agent_version', 'platform', 'registered_at', 'last_seen_at', 'revoked_at', 'revoked_by', 'created_at', 'updated_at'],
+        'bridge_checkpoints' => ['id', 'bridge_device_id', 'entity', 'watermark', 'checkpoint', 'bronze_object_id', 'updated_at'],
+        // Códigos de registro del Bridge (W6-B): metadatos de quién los generó, cuándo vencen y quién los consumió; SIN `code_hash` (credencial de un solo uso).
+        'bridge_enrolment_codes' => ['id', 'data_source_id', 'device_name_hint', 'created_by', 'expires_at', 'consumed_at', 'consumed_by_device_id', 'created_at'],
+        // Libro de lotes confirmados por corrida del Bridge (W6-B): metadatos de la extracción de la empresa.
+        'bridge_run_batches' => ['id', 'bridge_device_id', 'entity', 'run_id', 'batch_index', 'bronze_object_id', 'row_count', 'created_at'],
+        'mapping_templates' => ['id', 'system_kind', 'vendor', 'entity', 'version', 'schema_fingerprint', 'field_map', 'value_maps', 'confidence', 'status', 'approved_by', 'approved_at', 'created_at', 'updated_at', 'data_source_id', 'forked_from_id', 'created_by', 'source_spec', 'drift', 'invalidated_at'],
+        'gateway_tool_calls' => ['id', 'user_id', 'channel', 'tool', 'decision', 'arguments', 'result_summary', 'latency_ms', 'created_at'],
     ];
 
     /**
@@ -179,6 +220,8 @@ final class TenantDataExporter
                 $zip->addFile($tmp, $table.'.csv');
                 $summary[$table] = $count;
             }
+            // V2.5 · W2-F: concesiones de pronóstico compartido (sin tenant_id: pertenecen a dos empresas; cada parte exporta lo suyo).
+            $summary += app(SharedForecastGrantExport::class)->addTo($zip, $tenant->id, $tmpFiles);
             // Nombres de clientes (cifrados en reposo) en archivo separado.
             $tmp = tempnam(sys_get_temp_dir(), 'pexp');
             $tmpFiles[] = $tmp;
@@ -205,6 +248,7 @@ final class TenantDataExporter
                 'Quedan fuera los indicadores y el calendario públicos compartidos (no son de la empresa) y las rutas internas de archivos y artefactos del servidor.',
                 'Las cédulas/RUC de clientes no se almacenan en claro en Predictily; solo existe una huella irreversible.',
                 'No se incluyen credenciales de conectores, tokens de acceso ni la configuración de conexión de las fuentes de datos.',
+                'Concesiones de pronóstico compartido (shared_forecast_grants_*.csv): cada empresa recibe lo que le corresponde como emisora o receptora; nunca los usuarios, los identificadores internos ni los datos de la otra parte.',
             ]));
             $zip->addFromString('tenant.json', json_encode([
                 'uuid' => $tenant->uuid, 'name' => $tenant->name, 'legal_name' => $tenant->legal_name, 'tax_id' => $tenant->tax_id,

@@ -1,0 +1,116 @@
+{
+ "demanda": [
+  {
+   "empresa": "Ferretería Andina (Demo ficticia)",
+   "selected_wape": {
+    "w5": 0.49077400559708034,
+    "w6": 0.49077400559708034,
+    "igual": true
+   },
+   "baseline_wape": {
+    "w5": 0.6603794110066593,
+    "w6": 0.6603794110066593,
+    "igual": true
+   },
+   "coverage_80": {
+    "w5": 0.8498701298701299,
+    "w6": 0.8498701298701299,
+    "igual": true
+   },
+   "coverage_95": {
+    "w5": 0.9780519480519481,
+    "w6": 0.9780519480519481,
+    "igual": true
+   },
+   "selected_bias": {
+    "w5": -0.04029699741171417,
+    "w6": -0.04029699741171417,
+    "igual": true
+   },
+   "series_days_igual": true
+  },
+  {
+   "empresa": "Distribuidora Costa (Demo ficticia)",
+   "selected_wape": {
+    "w5": 0.4488488430143674,
+    "w6": 0.4488488430143674,
+    "igual": true
+   },
+   "baseline_wape": {
+    "w5": 0.5982548511340418,
+    "w6": 0.5982548511340418,
+    "igual": true
+   },
+   "coverage_80": {
+    "w5": 0.8027814765497855,
+    "w6": 0.8027814765497855,
+    "igual": true
+   },
+   "coverage_95": {
+    "w5": 0.9517680130196775,
+    "w6": 0.9517680130196775,
+    "igual": true
+   },
+   "selected_bias": {
+    "w5": 0.006098070695952983,
+    "w6": 0.006098070695952983,
+    "igual": true
+   },
+   "series_days_igual": true
+  }
+ ],
+ "customer_core": [
+  {
+   "name": "Ferretería Andina (Demo ficticia)",
+   "promoted_igual": true,
+   "per_h": {
+    "7": {
+     "served": true,
+     "brier_w5": 0.014877,
+     "brier_w6": 0.014877
+    },
+    "14": {
+     "served": true,
+     "brier_w5": 0.028581,
+     "brier_w6": 0.028581
+    },
+    "30": {
+     "served": true,
+     "brier_w5": 0.058271,
+     "brier_w6": 0.058271
+    },
+    "90": {
+     "served": true,
+     "brier_w5": 0.138295,
+     "brier_w6": 0.138295
+    }
+   }
+  },
+  {
+   "name": "Distribuidora Costa (Demo ficticia)",
+   "promoted_igual": true,
+   "per_h": {
+    "7": {
+     "served": true,
+     "brier_w5": 0.023208,
+     "brier_w6": 0.023208
+    },
+    "14": {
+     "served": true,
+     "brier_w5": 0.044248,
+     "brier_w6": 0.044248
+    },
+    "30": {
+     "served": true,
+     "brier_w5": 0.087664,
+     "brier_w6": 0.087664
+    },
+    "90": {
+     "served": true,
+     "brier_w5": 0.192601,
+     "brier_w6": 0.192601
+    }
+   }
+  }
+ ]
+}

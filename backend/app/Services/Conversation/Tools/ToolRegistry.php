@@ -4,18 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services\Conversation\Tools;
 
-use App\Exceptions\PlanLimitExceededException;
-use App\Support\Tenancy\TenantContext;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
-use Throwable;
-
 /**
- * Lista blanca de herramientas del asistente. Una herramienta no registrada, no habilitada, sin la habilidad exigida por la
- * ruta equivalente o con argumentos fuera de su esquema (incluido cualquier tenant_id) NO se ejecuta. Toda herramienta corre
- * con la empresa de la sesión en el TenantContext: no existe ninguna ruta de acceso a datos de otra empresa.
+ * Catálogo (lista blanca) de herramientas tipadas del gateway (V2.5 · W6-D; ADR-V25-17). Solo sabe QUÉ herramientas existen: qué usuario puede usar cuál, con qué
+ * argumentos y con qué auditoría lo decide el IntelligenceGateway, que es el único camino de ejecución (el registro ya no ejecuta). Una herramienta no registrada o no
+ * habilitada no se puede ejecutar; no existe ninguna ruta de acceso a datos de otra empresa porque ninguna herramienta recibe empresa, usuario ni habilidades del modelo.
+ *
+ * Todas son de SOLO LECTURA sobre resultados ya calculados y persistidos: ninguna escribe, calcula, propone ni ejecuta acciones.
  */
 final class ToolRegistry
 {
@@ -27,6 +21,13 @@ final class ToolRegistry
         InventoryRecommendationsTool::class,
         CustomerPredictionsTool::class,
         SupplyPlanTool::class,
+        // V2.5 · W6-D: oportunidades (Radar), recomendaciones y su explicación, resultados medidos, ROI y calidad de modelos.
+        RadarOpportunitiesTool::class,
+        ExplainRecommendationTool::class,
+        DecisionsSummaryTool::class,
+        OutcomesTool::class,
+        RoiSummaryTool::class,
+        ModelQualityTool::class,
     ];
 
     /** @var array<string, AssistantTool> */
@@ -41,7 +42,7 @@ final class ToolRegistry
         }
     }
 
-    /** @return list<string> */
+    /** @return list<string> todas las herramientas registradas (habilitadas o no) */
     public function names(): array
     {
         return array_keys($this->tools);
@@ -49,66 +50,20 @@ final class ToolRegistry
 
     public function has(string $name): bool
     {
-        return isset($this->tools[$name]) && $this->tools[$name]->isEnabled();
+        return $this->find($name) !== null;
     }
 
-    /**
-     * Herramientas que el usuario puede usar (habilitadas y con la habilidad exigida por la ruta equivalente).
-     *
-     * @return list<AssistantTool>
-     */
-    public function availableFor(ToolContext $context): array
+    /** La herramienta registrada y habilitada con ese nombre exacto, o null. */
+    public function find(string $name): ?AssistantTool
     {
-        return array_values(array_filter(
-            $this->tools,
-            fn (AssistantTool $t): bool => $t->isEnabled() && $context->can($t->ability()),
-        ));
+        $tool = $this->tools[$name] ?? null;
+
+        return $tool !== null && $tool->isEnabled() ? $tool : null;
     }
 
-    /** @return list<array{name: string, description: string, parameters: array<string, mixed>}> */
-    public function specsFor(ToolContext $context): array
+    /** @return list<AssistantTool> las habilitadas, en el orden del catálogo */
+    public function enabled(): array
     {
-        return array_map(fn (AssistantTool $t): array => [
-            'name' => $t->name(), 'description' => $t->description(), 'parameters' => $t->parameters(),
-        ], $this->availableFor($context));
-    }
-
-    /** @param array<string, mixed> $arguments */
-    public function execute(string $name, array $arguments, ToolContext $context): ToolResult
-    {
-        if (! $this->has($name)) {
-            return ToolResult::failure('tool_not_allowed', 'Herramienta no permitida. Use únicamente las herramientas ofrecidas.');
-        }
-        $tool = $this->tools[$name];
-        if (! $context->can($tool->ability())) {
-            return ToolResult::failure('forbidden', 'Su rol o su token no tiene permiso para consultar estos resultados (habilidad '.$tool->ability().').');
-        }
-
-        try {
-            return app(TenantContext::class)->runAs($context->tenant, function () use ($tool, $arguments, $context): ToolResult {
-                $rules = $tool->rules();
-                $unknown = array_values(array_diff(array_keys($arguments), array_keys($rules)));
-                if ($unknown !== []) {
-                    return ToolResult::failure('invalid_arguments', 'Argumentos no permitidos: '.implode(', ', array_map(fn ($k) => (string) $k, $unknown)).'.');
-                }
-                $validator = Validator::make($arguments, $rules);
-                if ($validator->fails()) {
-                    return ToolResult::failure('invalid_arguments', 'Argumentos inválidos: '.implode(' ', $validator->errors()->all()));
-                }
-
-                return $tool->execute($validator->validated(), $context);
-            });
-        } catch (PlanLimitExceededException $e) {
-            return ToolResult::failure('plan_limit', $e->getMessage());
-        } catch (ValidationException $e) {
-            return ToolResult::failure('invalid_arguments', implode(' ', $e->validator->errors()->all()));
-        } catch (ModelNotFoundException) {
-            return ToolResult::failure('not_found', 'No se encontró el recurso solicitado en su empresa.');
-        } catch (Throwable $e) {
-            // Solo la clase: el mensaje podría contener datos del negocio.
-            Log::warning('assistant.tool_error', ['tool' => $name, 'exception' => $e::class, 'tenant_id' => $context->tenant->getKey()]);
-
-            return ToolResult::failure('error', 'No se pudo consultar el resultado en este momento.');
-        }
+        return array_values(array_filter($this->tools, fn (AssistantTool $t): bool => $t->isEnabled()));
     }
 }

@@ -329,11 +329,15 @@ Cada versión de un documento tiene una ventana de conocimiento `[known_from, kn
 Orden de escritura de un documento existente con `source_hash` distinto (dentro de la transacción y del bloqueo por empresa):
 
 1. **Orden por la fuente**: si la entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR → `stale_skipped`
-   (no se escribe nada). Si alguna no lo trae, gana la última ingestión y se cuenta `updated_without_source_order`. Con marcas iguales se aplica.
+   (no se escribe nada). Si alguna no lo trae, gana la última ingestión y se cuenta `updated_without_source_order`; la marca almacenada no se
+   borra (`COALESCE`). Con marcas iguales se aplica. Una marca posterior a ahora + tolerancia (5 minutos) o ilegible nunca se guarda como orden.
+   Un documento con el mismo `source_hash` no se reescribe; si su `ingestion_mode` almacenado difiere del declarado se cuenta `unchanged_mode_mismatch`.
 2. **Archivo**: se copia la versión vigente (cabecera + líneas) a las tablas de revisiones. `known_from` = el `version_known_from`
-   vigente (NULL si era backfill); `known_until` = instante de esta escritura si la nueva es `incremental`, o el inicio del día
-   local (`tenants.timezone`) de la `sale_date` ANTERIOR si la nueva es `backfill` (ventana vacía: una re-carga histórica
-   colapsa versiones); en ambos casos nunca por debajo del `known_from` efectivo (jamás una ventana invertida).
+   vigente (NULL si era backfill); `known_until` = instante de esta escritura si la nueva es `incremental`, o su propio `known_from`
+   efectivo si la nueva es `backfill` (ventana vacía: una re-carga histórica colapsa versiones; para una versión backfill es el
+   inicio del día local —`tenants.timezone`— de la `sale_date` ANTERIOR); en ambos casos nunca por debajo del `known_from` efectivo
+   (jamás una ventana invertida). Una re-carga `backfill` colapsa además TODAS las revisiones archivadas más antiguas del documento en el mismo
+   lote SQL, de modo que las ventanas de un documento son disjuntas (a lo sumo una versión visible por corte; ver LINEAGE §4).
    `change_kind`: `status_changed`, `lines_changed`, `header_changed` o `mixed` (varios a la vez).
 3. **Reemplazo**: cabecera y líneas nuevas con `current_revision + 1`, `ingestion_mode` y `version_known_from` de ESTA escritura.
    `first_seen_at` no se actualiza nunca.
@@ -347,6 +351,7 @@ Orden de escritura de un documento existente con `source_hash` distinto (dentro 
 |---|---|---|
 | IMPLEMENTADO / VERIFICADO | Documento nuevo `backfill` (`version_known_from` NULL, `first_seen_at`) e `incremental` (conocido desde la ingestión, invisible antes de llegar) | `SalesTemporalWriteTest::test_new_backfill_document_is_known_since_the_start_of_its_business_day`, `::test_batch_defaults_to_incremental_and_a_late_document_is_not_visible_before_its_arrival` |
 | IMPLEMENTADO / VERIFICADO | Archivo de cabecera y líneas con ventanas correctas; la vista devuelve ambas versiones | `::test_incremental_update_archives_header_and_lines_with_correct_windows` |
+| IMPLEMENTADO / VERIFICADO | Ventanas disjuntas: 0 o 1 versión visible por documento y corte, sobre las 336 secuencias de 2 a 4 escrituras (Guayaquil y Madrid con horario de verano); re-carga `backfill` que colapsa toda la cadena | `SalesVersionWindowsInvariantTest` (9 pruebas, incluida la enumeración exhaustiva) |
 | IMPLEMENTADO / VERIFICADO | `status_changed` / `header_changed` / `mixed`; re-carga `backfill` que colapsa; sin ventanas invertidas | `::test_status_change_to_voided_is_recorded_as_status_changed`, `::test_header_only_and_mixed_changes_are_classified`, `::test_backfill_reload_collapses_versions_into_an_empty_window`, `::test_backfill_reload_of_an_incremental_document_never_leaves_an_inverted_window` |
 | IMPLEMENTADO / VERIFICADO | `stale_skipped` sin efectos (ni catálogos) y `updated_without_source_order` | `::test_older_incoming_version_is_stale_skipped_and_writes_nothing`, `::test_stale_documents_do_not_create_catalog_rows_and_do_not_block_the_rest_of_the_batch`, `::test_missing_source_timestamp_lets_the_last_ingestion_win_and_is_counted` |
 | IMPLEMENTADO / VERIFICADO | Aislamiento de revisiones entre empresas (scope fail-closed, vista, FK compuesta) | `::test_revisions_are_isolated_between_companies` |

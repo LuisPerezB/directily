@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Analytics\ExportController;
 use App\Http\Controllers\Api\Analytics\ForecastController;
 use App\Http\Controllers\Api\Analytics\ForecastRunController;
 use App\Http\Controllers\Api\Analytics\InventoryController;
+use App\Http\Controllers\Api\Analytics\ModelQualityController;
 use App\Http\Controllers\Api\Analytics\ModelRollbackController;
 use App\Http\Controllers\Api\Analytics\ReportController;
 use App\Http\Controllers\Api\Analytics\ScenarioController;
@@ -45,6 +46,12 @@ Route::middleware(['auth:sanctum', 'tenant'])->name('analytics.')->group(functio
         Route::get('accuracy/comparison', [AccuracyController::class, 'comparison'])->name('accuracy.comparison');
         Route::get('model-evaluations', [AccuracyController::class, 'evaluations'])->name('model-evaluations.index');
         Route::get('models', [AccuracyController::class, 'models'])->name('models.index');
+
+        // Calidad de los modelos (V2.5 · W3-D; solo lectura): evaluaciones por horizonte y segmento, decisiones de promoción (política heredada y V2.5)
+        // y evaluación prospectiva del challenger (shadow). Las rutas literales no chocan con `models/{id}` (numérico, en models.php).
+        Route::get('models/evaluations', [ModelQualityController::class, 'evaluations'])->name('quality.evaluations');
+        Route::get('models/promotion-decisions', [ModelQualityController::class, 'promotionDecisions'])->name('quality.promotion-decisions');
+        Route::get('models/shadow-evaluations', [ModelQualityController::class, 'shadowEvaluations'])->name('quality.shadow-evaluations');
 
         // Inventario
         Route::get('inventory/recommendations', [InventoryController::class, 'recommendations'])->name('inventory.recommendations');

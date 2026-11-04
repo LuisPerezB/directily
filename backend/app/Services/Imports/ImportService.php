@@ -9,10 +9,16 @@ use App\Jobs\Forecasting\RefreshReadiness;
 use App\Jobs\Imports\CommitImport;
 use App\Jobs\Imports\ValidateImport;
 use App\Models\Alert;
+use App\Models\BronzeObject;
 use App\Models\ImportJob;
+use App\Models\SourceSync;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
+use App\Services\DataCore\Quality\BronzeCaptureException;
+use App\Services\DataCore\Quality\IngestionBronze;
+use App\Services\DataCore\Quality\IngestionQuality;
+use App\Services\DataCore\Quality\ValueMaps;
 use App\Services\Imports\Fields\ImportFieldRegistry;
 use App\Services\Imports\Mapping\ColumnMatcher;
 use App\Services\Imports\Processors\ImportRunContext;
@@ -44,6 +50,8 @@ final class ImportService
         private readonly PlanLimitService $plans,
         private readonly AuditLogger $audit,
         private readonly IngestionModeResolver $ingestion,
+        private readonly IngestionBronze $bronze,
+        private readonly IngestionQuality $dq,
     ) {}
 
     public function disk(): Filesystem
@@ -51,8 +59,14 @@ final class ImportService
         return Storage::disk((string) config('predictily.imports.disk', 'local'));
     }
 
-    /** Sube un archivo (UploadedFile o ruta local para datos demo) y lo analiza. */
-    public function upload(Tenant $tenant, ?User $user, UploadedFile|string $file, ImportEntity $entity, ?int $dataSourceId = null): ImportJob
+    /**
+     * Sube un archivo (UploadedFile o ruta local para datos demo) y lo analiza.
+     *
+     * `$bronzeKind` (V2.5 · W2-A, ADR-V25-24): el original se guarda íntegro en Bronze ANTES de normalizar (al terminar el análisis, que solo
+     * lee encabezados y una vista previa). `file_upload` por omisión; `api_batch` para filas canónicas que llegan por API; `null` si la
+     * captura la hace quien llama (la sincronización SQL guarda la extracción cruda, no el CSV de preparación).
+     */
+    public function upload(Tenant $tenant, ?User $user, UploadedFile|string $file, ImportEntity $entity, ?int $dataSourceId = null, ?string $bronzeKind = 'file_upload'): ImportJob
     {
         $originalName = $file instanceof UploadedFile ? $file->getClientOriginalName() : basename($file);
         $extension = $file instanceof UploadedFile ? $file->getClientOriginalExtension() : pathinfo($file, PATHINFO_EXTENSION);
@@ -89,11 +103,11 @@ final class ImportService
 
         $this->audit->log('import.uploaded', $job, ['entity_type' => $entity->value, 'format' => $format, 'size' => $job->file_size]);
 
-        return $this->analyze($job);
+        return $this->analyze($job, $bronzeKind);
     }
 
-    /** Detecta columnas, sugiere mapeo y arma la vista previa (lee solo las primeras filas). */
-    public function analyze(ImportJob $job): ImportJob
+    /** Detecta columnas, sugiere mapeo y arma la vista previa (lee solo las primeras filas); luego conserva el original en Bronze. */
+    public function analyze(ImportJob $job, ?string $bronzeKind = null): ImportJob
     {
         try {
             $reader = $this->readers->make($this->disk()->path($job->stored_path), $job->file_format, $job->options ?? []);
@@ -122,9 +136,47 @@ final class ImportService
                 'error_message' => $e instanceof DomainStateException ? $e->getMessage() : 'No se pudo leer el archivo. Verifique que sea un CSV o XLSX válido.',
             ])->save();
             Log::warning('Análisis de importación fallido', ['import_job_id' => $job->id, 'error' => $e->getMessage()]);
+            // BLOCKER (ADR-V25-05): un archivo vacío o ilegible impide la carga completa; queda registrado como hallazgo.
+            $this->recordBlocker($job, $e instanceof DomainStateException && $e->errorCode === 'empty_file' ? 'empty_file' : 'unreadable_file', (string) $job->error_message);
+
+            return $job;
+        }
+        if ($bronzeKind !== null) {
+            $this->captureBronze($job, $headers, $bronzeKind);
         }
 
         return $job;
+    }
+
+    /**
+     * Guarda el archivo original en Bronze (huella de esquema y deriva incluidas). Si el almacén falla, la carga se detiene: sin original
+     * no hay linaje ni reprocesamiento (BLOCKER `bronze_capture_failed`).
+     *
+     * @param  list<string>  $headers
+     */
+    private function captureBronze(ImportJob $job, array $headers, string $kind): void
+    {
+        try {
+            $tenant = Tenant::query()->findOrFail($job->tenant_id);
+            $captured = $this->bronze->captureFile(
+                $tenant, $job->user_id, $this->disk()->path($job->stored_path), (string) $job->original_filename, (string) $job->file_format,
+                (string) $job->entity_type, $headers, $job->data_source_id, $kind,
+            );
+            $job->forceFill(['bronze_object_id' => $captured['object']->id])->save();
+        } catch (BronzeCaptureException $e) {
+            Log::error('No se pudo guardar el original en Bronze', ['import_job_id' => $job->id, 'error' => $e->getMessage()]);
+            $job->forceFill(['status' => ImportStatus::FAILED, 'error_message' => 'No se pudo conservar el archivo original (Bronze): la importación se detuvo y no se cargó nada.'])->save();
+            $this->recordBlocker($job, 'bronze_capture_failed', 'El original no pudo guardarse en Bronze antes de normalizar; la carga se detuvo.');
+        }
+    }
+
+    private function recordBlocker(ImportJob $job, string $code, string $message): void
+    {
+        try {
+            $this->dq->recordBlocker($job->tenant_id, (string) $job->entity_type, $code, $message, $job);
+        } catch (Throwable $e) {
+            Log::warning('No se pudo registrar el hallazgo BLOCKER', ['import_job_id' => $job->id, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -142,6 +194,7 @@ final class ImportService
             }
             $entity = ImportEntity::from($locked->entity_type);
             $this->assertMappingValid($entity, $mapping, $locked->detected_columns, $options);
+            $options = $this->cleanValueMaps($entity, $options);
 
             $locked->forceFill([
                 'column_mapping' => array_filter($mapping, fn ($v) => $v !== null && $v !== ''),
@@ -168,6 +221,10 @@ final class ImportService
                 throw new DomainStateException('Solo se puede confirmar una importación validada.', 'invalid_state', ['status' => $locked->status]);
             }
             $stats = $locked->stats ?? [];
+            // BLOCKER (ADR-V25-05): un problema estructural bloquea SIEMPRE, también con `skip_invalid_rows`.
+            if ($this->dq->hasBlockers($locked)) {
+                throw new DomainStateException('La importación tiene un hallazgo BLOCKER (problema estructural): no se puede confirmar. Revise el informe de calidad.', 'blocked_by_quality');
+            }
             if (($stats['rows_error'] ?? 0) > 0 && ! ($locked->options['skip_invalid_rows'] ?? false)) {
                 throw new DomainStateException(
                     'La importación tiene filas con errores. Corríjalas o active la opción de importar solo filas válidas.',
@@ -237,7 +294,10 @@ final class ImportService
         try {
             $result = $this->execute($job, true);
             $job->forceFill(['status' => ImportStatus::COMPLETED, 'finished_at' => now(), 'progress' => 100])->save();
-            $this->plans->recordUsage($tenant, 'import_rows', (int) ($result['stats']['rows_valid'] ?? 0));
+            // Un reprocesamiento desde Bronze (predictily:bronze-reprocess) no es una carga nueva: no consume la cuota mensual de filas.
+            if (! isset($job->options['reprocess_of_bronze_object_id'])) {
+                $this->plans->recordUsage($tenant, 'import_rows', (int) ($result['stats']['rows_valid'] ?? 0));
+            }
             $this->audit->log('import.completed', $job, array_intersect_key($result['stats'], array_flip(['rows_valid', 'documents_new', 'documents_updated', 'documents_unchanged', 'stale_skipped', 'revisions_archived', 'products_created', 'ingestion_mode'])));
             $this->afterCommit($job);
         } catch (Throwable $e) {
@@ -288,8 +348,14 @@ final class ImportService
             }
         }
 
-        $reader = $this->readers->make($this->disk()->path($job->stored_path), $job->file_format, $job->options ?? []);
-        $ctx = new ImportRunContext($tenant, $job, $reader, $job->column_mapping ?? [], $commit, $ingestion);
+        // Original en Bronze (linaje) y, si la importación nació de una sincronización SQL, su contexto (el original es la extracción cruda).
+        $sync = SourceSync::query()->where('import_job_id', $job->id)->first();
+        $bronzeId = $sync?->bronze_object_id ?? $job->bronze_object_id;
+        $bronze = $bronzeId !== null ? BronzeObject::query()->find($bronzeId) : null;
+
+        // Lectura en cola (validación e importación): sin la ventana interactiva de la subida (tiempo/bytes de la vista previa).
+        $reader = $this->readers->make($this->disk()->path($job->stored_path), $job->file_format, array_merge($job->options ?? [], ['xlsx_interactive' => false]));
+        $ctx = new ImportRunContext($tenant, $job, $reader, $job->column_mapping ?? [], $commit, $ingestion, $bronze, $sync);
         $result = $this->processors->for(ImportEntity::from($job->entity_type))->run($ctx);
 
         $stats = $result['stats'];
@@ -301,11 +367,18 @@ final class ImportService
         }
 
         $report = $this->quality->build($stats, $result['issues']);
-        $this->quality->persist($job, $report);
+        $this->dq->persistImportReport($job, $report, $ctx);
+        if ($bronze !== null && ! isset(($bronze->metadata ?? [])['rows_read'])) {
+            // Filas que contiene el original (descriptivo; el contenido del objeto no cambia).
+            $bronze->forceFill(['metadata' => array_merge($bronze->metadata ?? [], ['rows_read' => (int) ($result['rows_read'] ?? $stats['rows_total'] ?? 0)])])->save();
+        }
 
         $preview = $job->preview ?? [];
         $preview['normalized'] = $normalized;
         $job->forceFill(['stats' => $stats, 'preview' => $preview])->save();
+        if ($commit) {
+            $this->dq->persistReconciliation($job, $sync, $bronze?->refresh(), $result, $stats);
+        }
 
         return $result;
     }
@@ -419,8 +492,37 @@ final class ImportService
                 $errors['options.ingestion_mode'][] = 'Debe ser backfill (carga histórica) o incremental.';
             }
         }
+        if (array_key_exists('value_maps', $options) && $options['value_maps'] !== null) {
+            if ($entity !== ImportEntity::Sales) {
+                $errors['options.value_maps'][] = 'Los mapeos de valores solo aplican a la importación de ventas (tipo y estado de documento).';
+            } else {
+                ValueMaps::validate($options['value_maps'], $entity->value, $errors, 'options.value_maps', ValueMaps::VOCABULARY_FIELDS);
+            }
+        }
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);
         }
+    }
+
+    /**
+     * Mapeos de valores ya validados: se guardan limpios (textos) y se registran en las transformaciones de la carga.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    private function cleanValueMaps(ImportEntity $entity, array $options): array
+    {
+        if (! array_key_exists('value_maps', $options)) {
+            return $options;
+        }
+        if ($options['value_maps'] === null || $options['value_maps'] === []) {
+            $options['value_maps'] = [];
+
+            return $options;
+        }
+        $errors = [];
+        $options['value_maps'] = ValueMaps::validate($options['value_maps'], $entity->value, $errors, 'options.value_maps', ValueMaps::VOCABULARY_FIELDS);
+
+        return $options;
     }
 }

@@ -1,0 +1,1153 @@
+{
+ "meta": {
+  "wave": "W4",
+  "date": "2026-11-02",
+  "commit": "7170174 · c77deab · bc54d9c · 53400d4",
+  "summary": "MLOps y AWS de W4 (W4-A registro de modelos con aprobación separada, serving del backend solo de lo aprobado y medición de uso por empresa; W4-B CLI de entrenamiento privado por empresa, almacén de objetos, serving del motor solo de lo aprobado o legado con firma verificada y exportaciones autorizadas y cifradas; W4-C infraestructura como código con CDK, modelo de costos y recuperación probada en local; FKs compuestas que anulan solo la referencia): 17 requisitos pasan a IMPLEMENTADO (9 desde PARCIAL y 8 desde PENDIENTE), 15 pasan a PARCIAL (4 desde PENDIENTE y 11 desde BLOQUEADO), 31 siguen PARCIAL con la brecha acotada, 3 siguen BLOQUEADOS con lo construible hecho y 2 ya IMPLEMENTADOS suman evidencia; 11 defectos registrados (1 corregidos, 8 corregidos parcialmente y 2 mitigados). AWS y S3 reales siguen BLOQUEADOS (solo emulador de S3, cdk synth, cdk-nag y pruebas de plantilla con datos ficticios), el reentrenamiento automático es DISEÑADO, la segregación de funciones de la CLI es organizativa y no criptográfica y el pipeline propio sigue promoviendo automáticamente (legado explícito); todo se probó con datos sintéticos."
+ },
+ "defects": [
+  {
+   "area": "modelos_aws",
+   "index": 2,
+   "title_prefix": "La reversión permite servir candidatos '",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_refuses_unapproved_published_models_without_changing_anything",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_refuses_a_run_with_unapproved_published_models_and_changes_nothing",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_to_a_legacy_model_keeps_working_and_leaves_auditable_events",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_a_model_without_a_positive_pipeline_origin_is_not_legacy_and_cannot_be_restored",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_an_analyst_cannot_validate_a_legacy_candidate_and_a_validated_one_is_still_not_servable",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_legacy_is_a_positive_definition_that_fails_closed",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "La reversión de Customer y de demanda restaura solo modelos aprobados por una persona distinta de quien los publicó o entrenó o legados del pipeline propio con origen positivo; los candidatos, rechazados, fallidos, publicados sin aprobar y los validados por una persona no son restaurables (409 `rollback_target_not_approved`, sin cambiar nada), el estado `rejected` existe y restaurar un aprobado que nunca sirvió exige `models.approve` y repite las compuertas. Pendiente: un `validated` legado que el motor dejó sin promover (retador que no superó la regla) sigue siendo restaurable, y la reversión no exige motivo."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 3,
+   "title_prefix": "Reversión de modelos de producción abier",
+   "state": "mitigado",
+   "evidence": [
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_to_a_legacy_model_keeps_working_and_leaves_auditable_events",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_to_legacy_models_keeps_working_and_audits_every_transition",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_restoring_a_never_served_approved_model_repeats_the_promotion_gates_and_published_models_are_reverified",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_models_approve_belongs_to_owner_and_admin_only",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "Cada reversión deja eventos con usuario, corrida o slot y la verificación de artefactos, solo se restauran modelos aprobados o legados, y restaurar un aprobado que nunca sirvió exige la habilidad `models.approve` además de repetir las compuertas. Pendiente: la reversión de un legado sigue bajo `forecast.run` (rol analista), sin habilidad `models.rollback`, sin motivo obligatorio y sin MFA."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 7,
+   "title_prefix": "El esquema del registro admite modelos s",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Database/CompositeForeignKeysTest.php::test_no_composite_set_null_foreign_key_would_null_a_not_null_column",
+    "backend/tests/Feature/Database/CompositeForeignKeysTest.php::test_hard_deleting_a_referenced_parent_nulls_only_the_reference_and_keeps_the_tenant",
+    "backend/tests/Feature/Database/CompositeForeignKeysTest.php::test_deleting_a_previous_model_keeps_the_tenant_of_the_model_that_replaced_it",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_database_check_admits_exactly_the_states_of_the_machine",
+    "backend/app/Support/Database/CompositeForeignKeys.php; backend/database/migrations/2026_03_12_000100_add_model_lifecycle_publication_and_usage_metering.php"
+   ],
+   "note": "Las referencias nuevas del registro (modelo anterior y decisión de promoción) son claves foráneas compuestas `(tenant_id, id)` que obligan al mismo tenant, y borrar el modelo anterior o la decisión anula solo la referencia y nunca `tenant_id` (corrección de e0378db y 003fd69: un `ON DELETE SET NULL` de todas las columnas habría convertido el modelo de una empresa en uno de plataforma; una prueba recorre todas las FK compuestas del esquema); el registro tiene un CHECK de estados. Pendiente: `tenant_id` sigue siendo nulable sin un CHECK de alcance, las FK antiguas de una sola columna (trabajo, corrida, registro) no obligan al mismo tenant y no hay un índice único parcial de una producción por alcance."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 10,
+   "title_prefix": "Respaldos sin cifrar por defecto, sin ar",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::backup.sh genera el respaldo, su suma SHA-256 y el manifiesto de conteos",
+    "infra/aws/test/recovery.test.ts::restaura en una base vacía y TODOS los conteos, el esquema, índices, restricciones y secuencias coinciden (salida 0)",
+    "infra/aws/test/recovery.test.ts::rechaza un respaldo alterado (SHA-256) con salida 3, sin restaurar",
+    "infra/scripts/backup.sh; infra/scripts/recovery-check.sh; docs/operations/RECOVERY.md"
+   ],
+   "note": "Hay evidencia y prueba automatizada de una restauración con comparación de conteos, esquema y secuencias (100 tablas y 277 965 filas de la empresa demo, idéntico en 4 s), un manifiesto de conteos por respaldo y un procedimiento mensual con RTO/RPO objetivo. Pendiente: el cifrado GPG sigue siendo opcional por defecto, la copia externa no está automatizada, el respaldo no incluye artefactos ni archivos importados, la prueba mensual no es un trabajo programado que alerte y el RTO medido es de una base pequeña."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 12,
+   "title_prefix": "El estado 'validated' mezcla significado",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_transition_table_is_explicit_and_complete",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_database_check_admits_exactly_the_states_of_the_machine",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_legacy_rejected_alias_returns_stage1_validated_models_and_real_rejections_with_legacy_status",
+    "backend/app/Services/Models/ModelState.php"
+   ],
+   "note": "Los estados `approved` y `rejected` existen como estados reales con CHECK en la base, y `validated` pasó a significar «superó las compuertas, a la espera de aprobación» para lo que pasa por el backend; el alias heredado `status=rejected` conserva el significado de la etapa 1 (`legacy_status`). Pendiente: el motor sigue escribiendo `validated` para sus retadores no elegidos y no se reclasificaron los existentes a `rejected`."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 18,
+   "title_prefix": "El archivo .sha256 de los respaldos guar",
+   "state": "corregido",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::backup.sh genera el respaldo, su suma SHA-256 y el manifiesto de conteos",
+    "infra/aws/test/recovery.test.ts::rechaza un respaldo alterado (SHA-256) con salida 3, sin restaurar",
+    "infra/aws/test/recovery.test.ts::no deja bases temporales ni archivos tras el ciclo completo",
+    "infra/scripts/backup.sh; infra/scripts/restore.sh"
+   ],
+   "note": "`backup.sh` escribe el archivo `.sha256` con el nombre relativo del volcado (desde su directorio) y `restore.sh` y `recovery-check.sh` lo verifican con `sha256sum` o `shasum -a 256` en el directorio de la copia que restauran: un respaldo con un byte alterado se rechaza con salida 3 sin restaurar, aunque se mueva de directorio."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 20,
+   "title_prefix": "restore.sh --verify no compara ni falla:",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::restaura en una base vacía y TODOS los conteos, el esquema, índices, restricciones y secuencias coinciden (salida 0)",
+    "infra/aws/test/recovery.test.ts::detecta una diferencia de filas (manifiesto alterado) y sale con 1",
+    "infra/aws/test/recovery.test.ts::el manifiesto incluye el valor de cada secuencia y una secuencia restaurada con otro valor se detecta (salida 1)",
+    "infra/scripts/recovery-check.sh; infra/scripts/backup.sh"
+   ],
+   "note": "`backup.sh` escribe un manifiesto de conteos y `recovery-check.sh verify` restaura en una base vacía, lo compara línea a línea (tablas, índices, restricciones, secuencias con su valor y filas de cada tabla) y falla con salida 1 ante una diferencia, con evidencia registrada. Pendiente: `restore.sh --verify` sigue imprimiendo los conteos de seis tablas sin comparar ni fallar (la comparación vive en `recovery-check.sh`)."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 25,
+   "title_prefix": "restore.sh --verify imprime conteos pero",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::restaura en una base vacía y TODOS los conteos, el esquema, índices, restricciones y secuencias coinciden (salida 0)",
+    "infra/aws/test/recovery.test.ts::detecta una diferencia de filas (manifiesto alterado) y sale con 1",
+    "infra/scripts/recovery-check.sh; docs/operations/RECOVERY.md"
+   ],
+   "note": "La restauración se compara contra el manifiesto del respaldo y falla con código distinto de cero ante cualquier diferencia, con evidencia de cada ejecución (fecha, comando, salida, tiempo). Pendiente: `restore.sh --verify` conserva su comportamiento de solo imprimir conteos y el RTO/RPO medido es de una base pequeña."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 24,
+   "title_prefix": "El registro de modelos no impone invaria",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_database_check_admits_exactly_the_states_of_the_machine",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_transition_table_is_explicit_and_complete",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_successive_promotions_of_the_same_scope_always_leave_a_single_production_model",
+    "backend/database/migrations/2026_03_12_000100_add_model_lifecycle_publication_and_usage_metering.php; backend/app/Services/Models/ModelLifecycle.php"
+   ],
+   "note": "El registro tiene un CHECK que admite exactamente los estados de la máquina y la aplicación serializa las promociones y reversiones con un bloqueo de la fila de la empresa, de modo que dos promociones del mismo alcance dejan una sola producción (probado en una conexión). Pendiente: el índice único parcial de una producción por alcance y el CHECK «publicado ⇒ no producción sin aprobación» siguen DISEÑADOS: una escritura directa en la base puede violar ambos."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 22,
+   "title_prefix": "Un artefacto de otro tenant se carga sin",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_a_registry_row_of_a_pointing_at_the_artifacts_of_b_is_refused",
+    "engine/tests/integration/test_mlops_integration.py::test_a_job_of_company_a_never_loads_artifacts_or_caches_of_company_b",
+    "engine/tests/integration/test_mlops_integration.py::test_an_approved_published_model_of_b_cannot_be_served_to_a_even_if_a_row_claims_it",
+    "engine/tests/unit/test_mlops_serving.py::test_a_key_of_another_company_is_rejected_before_the_store_is_touched",
+    "engine/tests/unit/test_mlops_serving.py::test_a_manifest_signed_for_another_company_is_rejected",
+    "engine/predictily_engine/mlops/serving.py; engine/predictily_engine/mlops/policy.py; engine/predictily_engine/customer/service.py"
+   ],
+   "note": "Además de la ruta confinada y el manifiesto firmado de la empresa (W1), el motor rechaza una fila de la empresa A que apunte a las rutas o a las claves del almacén de B, también para los modelos publicados (la clave debe empezar por `tenants/<uuid de la empresa del trabajo>/`), con pruebas negativas. Pendiente: el backfill idempotente de las filas heredadas a ruta relativa."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 8,
+   "title_prefix": "Token del motor estático con valor por d",
+   "state": "mitigado",
+   "evidence": [
+    "infra/aws/test/app.test.ts::ningún secreto va como variable de entorno: DB, clave de la app, token del motor y clave de firma llegan por Secrets Manager",
+    "infra/aws/test/platform.test.ts::los secretos se generan en Secrets Manager con KMS y no existe ninguna SecretString literal",
+    "infra/aws/test/platform.test.ts::la contraseña la genera Secrets Manager (cifrada con KMS): no hay credenciales en la plantilla",
+    "infra/aws/lib/platform-stack.ts"
+   ],
+   "note": "En la plantilla de AWS el token del motor, la clave de la aplicación y la contraseña de la base los genera Secrets Manager (no hay un valor por defecto conocido) y llegan a las tareas como secretos. Pendiente: nada se desplegó; en Compose y en el código el token por defecto no cambia y la API, las colas, el programador y el motor siguen compartiendo una sola cuenta de base de datos."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "V25-REG-021",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_validate_data_exit_codes",
+    "engine/tests/integration/test_mlops_integration.py::test_validate_build_features_backtest_and_train_never_write_to_the_database",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_backtest_and_validate_data_for_demand",
+    "engine/tests/unit/test_mlops_cli.py::test_every_command_has_spanish_help_with_the_exit_codes",
+    "engine/tests/unit/test_mlops_cli.py::test_the_exit_code_table_is_stable_and_documented",
+    "engine/predictily_engine/mlops/commands.py; engine/predictily_engine/mlops/training.py; engine/predictily_engine/cli.py"
+   ],
+   "note": "`validate-data --tenant-id N --core demand|customer|all` ejecuta los gates de calidad de W2-C sobre la base o sobre una exportación autorizada y responde PASS/WARN/DEGRADE/BLOCK por core con los motivos y la regla versionada; solo lee; los códigos de salida son estables (0 ok, 1 BLOCK o sin ventas, 2 uso, 3 entorno, 5 no encontrado) y la ayuda está en español. Límites: con una exportación los gates que dependen de la base (informes de ingestión, alias) quedan «no evaluados» y así consta; umbrales de calidad iniciales «a aprobar en el piloto»; datos sintéticos."
+  },
+  {
+   "id": "V25-REG-022",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_validate_build_features_backtest_and_train_never_write_to_the_database",
+    "engine/tests/unit/test_mlops_cli.py::test_every_command_has_spanish_help_with_the_exit_codes",
+    "engine/predictily_engine/mlops/commands.py; engine/predictily_engine/mlops/training.py; engine/predictily_engine/cli.py"
+   ],
+   "note": "`build-features` arma el panel (demanda) o el dataset de cortes (Customer) con el esquema de variables, las formas, la huella de datos y las variables que el gate deshabilita, sin escribir en la base. Límite: datos sintéticos."
+  },
+  {
+   "id": "V25-REG-023",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_cli_training_matches_the_service_for_the_customer_core",
+    "engine/tests/integration/test_mlops_integration.py::test_validate_build_features_backtest_and_train_never_write_to_the_database",
+    "engine/tests/integration/test_mlops_integration.py::test_authorized_export_trains_locally_without_plaintext_and_is_cleaned_up",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_cli_demand_training_matches_the_service",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_cli_demand_training_never_writes_to_the_database",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_training_from_an_authorized_export_reproduces_the_database_training",
+    "engine/tests/unit/test_mlops_bundle.py::test_train_does_not_overwrite_an_existing_output_directory",
+    "engine/predictily_engine/mlops/commands.py; engine/predictily_engine/mlops/training.py; engine/predictily_engine/cli.py"
+   ],
+   "note": "`train --tenant-id N --core demand|customer --out DIR` entrena en CPU sin escribir en la base y deja artefactos firmados, `train.json` y las evaluaciones en un directorio nuevo; equivale al servicio: misma huella de datos, mismos modelos y mismo holdout en Customer y el mismo artefacto byte a byte en demanda; acepta una exportación autorizada (`--from-export`). Límites: no hay perfiles de entrenamiento nombrados (V25-REG-034); lo entrenado desde una exportación no tiene el historial de versiones con tiempo de conocimiento (`asof_fidelity = approximate_no_versions`); datos sintéticos."
+  },
+  {
+   "id": "V25-REG-024",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_demand_integration.py::test_backtest_and_validate_data_for_demand",
+    "engine/tests/integration/test_mlops_integration.py::test_validate_build_features_backtest_and_train_never_write_to_the_database",
+    "engine/predictily_engine/mlops/commands.py; engine/predictily_engine/mlops/training.py; engine/predictily_engine/cli.py"
+   ],
+   "note": "`backtest` corre el mismo protocolo que el servicio sin guardar artefactos y devuelve la selección y las métricas por horizonte y segmento (W3-A); solo lee. Límite: datos sintéticos."
+  },
+  {
+   "id": "V25-REG-025",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_demand_integration.py::test_tune_is_bounded_and_never_uses_the_holdout",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_tune_without_optuna_is_a_configuration_error",
+    "engine/tests/unit/test_mlops_cli.py::test_tune_is_for_demand_only",
+    "engine/tests/unit/test_mlops_cli.py::test_numeric_options_are_validated_against_their_documented_ranges",
+    "engine/predictily_engine/mlops/training.py; engine/predictily_engine/selection/tuning.py"
+   ],
+   "note": "`tune` ajusta LightGBM de demanda con el Optuna acotado de W3-B (n_trials 1-200, timeout, tope de CPU, solo ventanas de selección, nunca el período final); sin Optuna instalado responde un error de configuración (salida 3) con mensaje explícito. Límites: solo demanda (no hay `tune` de Customer); Optuna no es una dependencia declarada (llega con mlforecast); el costo del ajuste en empresas grandes no se midió."
+  },
+  {
+   "id": "V25-REG-027",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_mlops_bundle.py::test_package_creates_a_signed_manifest_with_versions_fingerprint_and_gate",
+    "engine/tests/unit/test_mlops_bundle.py::test_the_package_is_not_rewritten_without_force",
+    "engine/tests/unit/test_mlops_bundle.py::test_package_refuses_unsigned_artifacts_and_sign_fixes_them",
+    "engine/tests/unit/test_mlops_bundle.py::test_a_gate_that_is_not_usable_blocks_packaging",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_demand_bundle_is_packaged_verified_and_published_as_a_candidate",
+    "engine/predictily_engine/mlops/bundle.py"
+   ],
+   "note": "`package` verifica que cada artefacto esté firmado y crea `package.manifest.json`, un sobre firmado con las huellas, las versiones de las librerías, la huella de datos, las métricas y el gate de datos; un gate no utilizable (BLOCK) impide empaquetar y un paquete existente no se reescribe sin `--force`. Límite: la clave privada de firma vive en un archivo o secreto del entorno de entrenamiento (KMS/HSM DISEÑADO)."
+  },
+  {
+   "id": "V25-REG-028",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_mlops_bundle.py::test_package_refuses_unsigned_artifacts_and_sign_fixes_them",
+    "engine/tests/unit/test_mlops_bundle.py::test_sign_and_package_need_a_private_key",
+    "engine/tests/unit/test_mlops_bundle.py::test_sign_refuses_an_artifact_that_changed_after_training",
+    "engine/predictily_engine/mlops/bundle.py; engine/predictily_engine/platform/signing.py"
+   ],
+   "note": "`sign` firma con `ENGINE_SIGNING_PRIVATE_KEY` los artefactos del borrador sin deserializarlos y se niega si no hay clave o si un artefacto cambió después del entrenamiento. Límites: el re-firmado de artefactos legados no existe (se reentrena con la clave de firma); el control de la clave es del entorno de entrenamiento."
+  },
+  {
+   "id": "V25-REG-029",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_mlops_bundle.py::test_verify_detects_every_kind_of_tampering_without_deserializing",
+    "engine/tests/unit/test_mlops_bundle.py::test_verify_rejects_a_package_of_another_company_and_an_untrusted_key",
+    "engine/tests/unit/test_mlops_bundle.py::test_verify_without_a_package_checks_the_draft_artifacts",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_refuses_actors_environments_and_packages_it_must_not_trust",
+    "engine/predictily_engine/mlops/bundle.py"
+   ],
+   "note": "`verify` comprueba, sin deserializar, la firma Ed25519, la clave de confianza, el SHA-256, el tamaño, la empresa y el core del paquete y de cada artefacto y detecta cada forma de manipulación; un paquete de otra empresa o firmado con una clave no confiable se rechaza (salida 1). `publish` lo exige antes de subir nada."
+  },
+  {
+   "id": "V25-REG-031",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_compare_shows_the_same_procedure_trained_twice_as_a_tie",
+    "engine/tests/integration/test_mlops_integration.py::test_compare_two_published_versions_by_horizon_and_bundles_and_failure_modes",
+    "engine/tests/unit/test_mlops_cli.py::test_compare_refuses_a_bundle_of_another_company",
+    "engine/predictily_engine/mlops/compare.py"
+   ],
+   "note": "`compare --a V1|bundle:DIR --b V2|bundle:DIR` compara dos versiones del registro o paquetes locales por las cifras de horizonte y segmento que tienen en común, con las diferencias y un veredicto descriptivo por métrica; sin cifras comunes responde salida 1 y un paquete de otra empresa se rechaza. Límite: el veredicto es descriptivo, sin prueba estadística; datos sintéticos."
+  },
+  {
+   "id": "V25-REG-032",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_rollback_only_prints_the_backend_instruction_and_changes_nothing",
+    "engine/tests/integration/test_mlops_integration.py::test_demand_rollback_is_by_run_and_never_writes",
+    "engine/predictily_engine/mlops/commands.py; engine/predictily_engine/mlops/policy.py"
+   ],
+   "note": "Por diseño (ADR-V25-19) `rollback --to-version V` no cambia nada: comprueba con la misma política de serving que la versión sea servible y deja la instrucción exacta del backend (`POST /models/{id}/promote`, `/models/customer/rollback` o `/models/demand/rollback`), que es quien revierte con auditoría; la reversión de demanda es por corrida. Límite: la CLI nunca escribe `production`."
+  },
+  {
+   "id": "V25-REG-033",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_mlops_cli.py::test_diagnose_never_prints_secrets",
+    "engine/tests/unit/test_mlops_cli.py::test_diagnose_require_turns_missing_pieces_into_a_failure",
+    "engine/tests/unit/test_mlops_cli.py::test_diagnose_flags_an_inconsistent_trust_configuration",
+    "engine/tests/unit/test_mlops_cli.py::test_diagnose_never_prints_pieces_of_a_malformed_database_url",
+    "engine/tests/unit/test_mlops_cli.py::test_diagnose_percent_encoded_passwords_are_fine_and_never_printed",
+    "engine/tests/unit/test_mlops_cli.py::test_diagnose_prints_other_configuration_fields_only_when_they_look_legitimate",
+    "engine/predictily_engine/mlops/diagnose.py"
+   ],
+   "note": "`diagnose [--require db,object-store,signing]` informa el entorno, las claves de confianza (identificador y huella), las versiones, el almacén de objetos y la base de datos sin imprimir secretos (pruebas con valores centinela y con URLs mal formadas); detecta una configuración de confianza incoherente y convierte lo ausente en un fallo cuando se exige."
+  },
+  {
+   "id": "V25-REG-060",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_mlops_serving.py::test_the_cache_key_carries_company_version_schema_and_content",
+    "engine/tests/unit/test_mlops_serving.py::test_two_companies_never_share_cache_entries_even_with_the_same_version_and_content",
+    "engine/tests/unit/test_mlops_serving.py::test_a_cache_hit_skips_deserialization_but_verification_is_always_repeated",
+    "engine/tests/unit/test_mlops_serving.py::test_retiring_a_trusted_key_takes_effect_even_for_cached_artifacts",
+    "engine/tests/unit/test_mlops_serving.py::test_a_different_feature_schema_does_not_reuse_a_cached_object",
+    "engine/tests/unit/test_mlops_serving.py::test_the_cache_is_bounded_and_can_be_disabled",
+    "engine/tests/unit/test_mlops_serving.py::test_a_cache_key_that_does_not_match_the_verified_bytes_is_refused",
+    "engine/tests/integration/test_mlops_integration.py::test_a_job_of_company_a_never_loads_artifacts_or_caches_of_company_b",
+    "engine/tests/integration/test_mlops_integration.py::test_training_a_company_frees_only_its_own_cache_entries",
+    "engine/predictily_engine/mlops/serving.py"
+   ],
+   "note": "La caché de modelos del motor se clava por (empresa, core, versión del modelo, versión del esquema de variables, SHA-256 del artefacto), está acotada por entradas (32 por defecto) y por bytes (256 MB) y la verificación (firma, SHA-256, empresa) se repite siempre antes de consultarla: la caché solo evita volver a deserializar. Límites: retirar una clave de confianza en un motor en marcha exige reiniciarlo (la lee del entorno del proceso); solo el Customer Core carga artefactos (el motor de demanda no)."
+  },
+  {
+   "id": "V25-REG-030",
+   "status": "PARCIAL",
+   "gap": "`publish --env local|staging|production` existe, sube el paquete verificado al almacén de objetos con una clave generada por el servidor (`tenants/<uuid>/models/<core>/<versión>/…` y su `.manifest.json` al lado) y registra cada modelo como `candidate` (nunca validated, approved ni production), pero el controlador S3 solo se ejercitó contra un emulador (moto) en un entorno propio y AWS real está BLOQUEADO; la identidad del publicador (`--published-by-user-id`) es una declaración del operador comprobada contra la empresa y el rol `forecast.run`: control organizativo, no criptográfico.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_publish_meets_the_registry_publication_contract",
+    "engine/tests/integration/test_mlops_integration.py::test_the_status_written_by_publish_can_only_be_candidate",
+    "engine/tests/integration/test_mlops_integration.py::test_production_publish_with_confirmation_is_still_only_a_candidate",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_is_idempotent_and_refuses_to_overwrite_with_other_content",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_refuses_actors_environments_and_packages_it_must_not_trust",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_needs_a_role_with_forecast_run_and_records_who_ran_the_cli",
+    "engine/tests/integration/test_mlops_integration.py::test_republishing_with_another_user_or_environment_is_a_conflict",
+    "engine/tests/integration/test_mlops_integration.py::test_a_failed_registration_removes_only_the_objects_that_call_created",
+    "engine/tests/integration/test_mlops_integration.py::test_two_processes_publishing_the_same_bundle_are_serialized_and_nothing_of_the_winner_is_deleted",
+    "engine/tests/integration/test_mlops_integration.py::test_dry_run_writes_nothing",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_demand_bundle_is_packaged_verified_and_published_as_a_candidate",
+    "engine/tests/unit/test_object_store.py::test_model_keys_are_generated_by_the_server_with_the_tenant_prefix",
+    "engine/tests/unit/test_role_abilities_mirror.py::test_the_engine_mirror_matches_the_backends_role_abilities",
+    "engine/predictily_engine/mlops/commands.py; engine/predictily_engine/mlops/training.py; engine/predictily_engine/cli.py"
+   ],
+   "note": "El contrato de publicación (published_by, published_env, published_at, published_object_key, artifact_sha256, evento con actor_kind = cli y la huella del gate de datos) se cumple al pie de la letra; la publicación es idempotente y un fallo del registro borra solo los objetos que creó esa llamada. `--env production` exige `--confirm-production` y sigue siendo solo un candidato."
+  },
+  {
+   "id": "V25-REG-035",
+   "status": "PARCIAL",
+   "gap": "`export-local` produce una exportación minimizada por lista blanca de columnas, con seudónimos de sucursales, productos y compradores (HMAC con clave aleatoria por exportación que se descarta), cifrada con AES-256-GCM y con el manifiesto autenticado, que vence a las 72 h y se limpia con `cleanup-exports`; pero la autorización es una referencia, quién autorizó y el propósito que el operador declara en el manifiesto: el motor no la valida contra el backend (consentimiento ni habilidad `tenant.export_all`) ni deja una entrada en `audit_logs`, así que el control es organizativo; el borrado seguro es de mejor esfuerzo (en SSD o con copia al escribir la defensa real es el cifrado).",
+   "evidence": [
+    "engine/tests/unit/test_mlops_exports.py::test_no_explicit_authorization_no_export",
+    "engine/tests/unit/test_mlops_exports.py::test_only_allowlisted_columns_leave_and_names_are_pseudonymized",
+    "engine/tests/unit/test_mlops_exports.py::test_customers_are_pseudonymized_stably_and_irreversibly_per_export",
+    "engine/tests/unit/test_mlops_exports.py::test_export_is_encrypted_minimized_authorized_and_private",
+    "engine/tests/unit/test_mlops_exports.py::test_decryption_fails_for_a_wrong_key_another_export_tampering_truncation_and_reordering",
+    "engine/tests/unit/test_mlops_exports.py::test_the_manifest_is_authenticated_so_editing_tenant_core_or_expiry_breaks_decryption",
+    "engine/tests/unit/test_mlops_exports.py::test_loading_refuses_expired_foreign_wrong_key_and_altered_exports",
+    "engine/tests/unit/test_mlops_exports.py::test_cleanup_removes_expired_exports_keeps_valid_ones_and_never_touches_foreign_folders",
+    "engine/tests/unit/test_mlops_exports.py::test_the_allowlists_cover_every_column_the_real_loaders_return",
+    "engine/tests/integration/test_mlops_integration.py::test_authorized_export_trains_locally_without_plaintext_and_is_cleaned_up",
+    "engine/tests/integration/test_mlops_integration.py::test_customer_training_from_an_export_matches_training_from_the_database_up_to_relabelling",
+    "engine/predictily_engine/mlops/exports.py"
+   ],
+   "note": "Sin `--authorized-export`, `--authorized-by` y `--purpose` no se toca la base (salida 4). Lo entrenado desde una exportación de demanda reproduce, con datos sin documentos tardíos, la huella, los ganadores y el artefacto del entrenamiento desde la base; en Customer los compradores cambian de etiqueta (la huella difiere)."
+  },
+  {
+   "id": "V25-SEC-044",
+   "status": "PARCIAL",
+   "gap": "La extracción local exige una referencia de autorización, quién la autorizó y el propósito (sin ellos, salida 4 antes de leer la base), minimiza, cifra, vence y se limpia; pero la autorización no está firmada por un propietario o administrador ni se contrasta con el backend (consentimiento o habilidad) y no deja una entrada en `audit_logs`: queda en el manifiesto autenticado de la exportación y en el registro de quien opera la CLI (control organizativo).",
+   "evidence": [
+    "engine/tests/unit/test_mlops_cli.py::test_export_without_authorization_exits_4_before_touching_the_database",
+    "engine/tests/unit/test_mlops_exports.py::test_no_explicit_authorization_no_export",
+    "engine/tests/unit/test_mlops_exports.py::test_export_is_encrypted_minimized_authorized_and_private",
+    "engine/tests/unit/test_mlops_exports.py::test_cleanup_refuses_dangerous_roots",
+    "engine/predictily_engine/mlops/exports.py"
+   ],
+   "note": "La limpieza solo toca carpetas hijas directas con la marca de exportación y un manifiesto válido, nunca enlaces ni carpetas ajenas."
+  },
+  {
+   "id": "V25-REG-020",
+   "status": "PARCIAL",
+   "gap": "La CLI se ejecuta en CPU sin dependencia obligatoria de GPU (`diagnose` informa `device: cpu`) y tiene pruebas, pero no hay una opción de GPU ni perfiles de hardware (`--profile`): la compatibilidad con GPU es NO APLICA hoy.",
+   "evidence": [
+    "engine/tests/unit/test_mlops_cli.py::test_every_command_has_spanish_help_with_the_exit_codes",
+    "engine/tests/unit/test_mlops_cli.py::test_the_exit_code_table_is_stable_and_documented",
+    "engine/tests/unit/test_mlops_cli.py::test_usage_errors_exit_2_with_a_spanish_message",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_cli_demand_training_matches_the_service",
+    "engine/predictily_engine/cli.py"
+   ],
+   "note": "La ayuda de cada comando está en español con la tabla de códigos de salida."
+  },
+  {
+   "id": "V25-REG-026",
+   "status": "PARCIAL",
+   "gap": "El comando `evaluate` conserva su significado heredado (compara pronósticos pasados con ventas reales para alimentar `model_evaluations`), no evalúa un artefacto candidato; la evaluación de un candidato antes de promoverlo sale de `train` y `backtest` (métricas por horizonte y segmento sobre el holdout, W3-A) y de `compare`, no de `evaluate --model`.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_demand_integration.py::test_backtest_and_validate_data_for_demand",
+    "engine/tests/integration/test_mlops_integration.py::test_compare_two_published_versions_by_horizon_and_bundles_and_failure_modes",
+    "engine/tests/integration/test_mlops_integration.py::test_cli_training_matches_the_service_for_the_customer_core",
+    "engine/predictily_engine/mlops/compare.py"
+   ],
+   "note": "Las cifras posteriores al corte de un candidato dependen de ventas reales (BLOQUEADO hasta el piloto)."
+  },
+  {
+   "id": "V25-REG-008",
+   "status": "PARCIAL",
+   "gap": "Las etapas validación de datos → variables → entrenamiento candidato → backtest → empaquetado → firma → verificación → publicación → comparación se invocan, repiten y prueban por separado con la CLI sobre empresas sintéticas, y la aprobación y la promoción son pasos del backend; pero no hay un orquestador que las encadene con un único punto de control (V25-REG-007, DISEÑADO), la inferencia no es una orden de la CLI y el motor de demanda reentrena y predice en la misma corrida (solo Customer sirve desde un artefacto aprobado).",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_validate_build_features_backtest_and_train_never_write_to_the_database",
+    "engine/tests/integration/test_mlops_integration.py::test_validate_data_exit_codes",
+    "engine/tests/integration/test_mlops_integration.py::test_compare_shows_the_same_procedure_trained_twice_as_a_tie",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_backtest_and_validate_data_for_demand",
+    "engine/tests/integration/test_mlops_demand_integration.py::test_demand_bundle_is_packaged_verified_and_published_as_a_candidate",
+    "engine/tests/unit/test_mlops_bundle.py::test_verify_without_a_package_checks_the_draft_artifacts",
+    "docs/ml/PRIVATE_TENANT_TRAINING.md; docs/ml/AUTOMATED_TRAINING.md"
+   ],
+   "note": "El diseño del orquestador y de los disparadores (calendario, datos nuevos, drift, presupuesto) está en `AUTOMATED_TRAINING.md` como DISEÑADO / NO IMPLEMENTADO."
+  },
+  {
+   "id": "V25-ONB-005",
+   "status": "PARCIAL",
+   "gap": "Los pasos de entrenamiento local autorizado (`export-local`, `validate-data`, `train`, `backtest`, `tune`, `package`, `sign`, `verify`, `publish`) y la revisión y aprobación separada en el backend existen y se prueban cada uno por su lado, con un runbook para el propietario; no hay una prueba automática de punta a punta que una la CLI con el backend (la lectura cruzada se hizo a mano sobre un objeto publicado, sin la pila completa), la autorización de la exportación es organizativa y el entrenamiento automático es DISEÑADO.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_authorized_export_trains_locally_without_plaintext_and_is_cleaned_up",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_meets_the_registry_publication_contract",
+    "engine/tests/integration/test_mlops_integration.py::test_published_models_are_never_servable_until_approved_by_the_backend",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_publisher_cannot_approve_or_reject_their_own_model_but_another_admin_can",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_requires_a_verified_signature_and_never_accepts_the_unsigned_legacy_flag",
+    "docs/operations/TENANT_TRAINING_RUNBOOK.md; docs/ml/PRIVATE_TENANT_TRAINING.md"
+   ],
+   "note": "El runbook del propietario enumera los comandos exactos, los códigos de salida y la lista de comprobación previa a la primera publicación real."
+  },
+  {
+   "id": "V25-REG-047",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_transition_table_is_explicit_and_complete",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_database_check_admits_exactly_the_states_of_the_machine",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_every_forbidden_transition_is_rejected_without_changing_anything",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_an_allowed_transition_writes_the_event_with_actor_reason_and_evidence_in_the_same_transaction",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_status_change_and_its_event_roll_back_together",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_approved_always_records_the_approval_timestamp",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_legacy_rejected_alias_returns_stage1_validated_models_and_real_rejections_with_legacy_status",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelState.php; backend/database/migrations/2026_03_12_000100_add_model_lifecycle_publication_and_usage_metering.php"
+   ],
+   "note": "El registro gestiona candidate, validated, approved, production, retired y rejected (más failed del motor) con un CHECK en la base y una tabla de transiciones explícita en `ModelLifecycle`, el punto único que cambia el estado en el backend: toda transición prohibida (por ejemplo candidate → production) responde 409 sin cambiar nada y cada transición escribe en la misma transacción su evento con fecha, actor, motivo y evidencia en `model_registry_events`; la aprobación fija `approved_at` y la publicación `published_at`. Límites: la fecha del rechazo vive en el evento (no hay columna `rejected_at`); la base impide estados fuera del conjunto pero no transiciones prohibidas hechas por una escritura directa (el motor escribe los estados de su pipeline propio sin pasar por `ModelLifecycle`); 'validated' que escribe el motor sigue significando «evaluado y no elegido» (legado)."
+  },
+  {
+   "id": "V25-REG-048",
+   "status": "PARCIAL",
+   "gap": "Para lo que pasa por el backend se guardan quién decide (`actor_user_id`, `approved_by`), el motivo (obligatorio al rechazar, opcional al aprobar y al promover), el modelo anterior (`previous_model_registry_id`) y la decisión de política aplicada (`promotion_decision_id`, de la que sale la `policy_version`); faltan el motivo obligatorio al aprobar, el `policy_version` dentro del evento y, para el pipeline propio (legado), cualquier registro: el motor sigue promoviendo y retirando sin motivo ni vínculo al modelo anterior.",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_puts_the_approved_model_in_production_and_retires_the_previous_one_of_its_slot_only",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_completes_the_w3_promotion_decision_and_a_policy_rejection_cannot_be_overridden",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_reject_requires_a_reason_records_it_and_is_terminal",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_an_allowed_transition_writes_the_event_with_actor_reason_and_evidence_in_the_same_transaction",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_to_a_legacy_model_keeps_working_and_leaves_auditable_events",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "El detalle `GET /models/{id}` devuelve la sucesión de eventos y la decisión de política."
+  },
+  {
+   "id": "V25-REG-049",
+   "status": "PARCIAL",
+   "gap": "Toda transición que pasa por el backend (validar, aprobar, rechazar, promover y las dos reversiones) deja su evento de solo inserción con usuario, motivo y evidencia en la misma transacción y una entrada en `audit_logs` (`models.validated|approved|rejected|promoted|demand_rolled_back|customer_rolled_back`); el pipeline propio sigue promoviendo y retirando al terminar una corrida sin evento (el modelo recibe una línea base «legado aprobado por migración» solo al primer cambio de estado que haga el backend) y la reversión no exige motivo.",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_an_allowed_transition_writes_the_event_with_actor_reason_and_evidence_in_the_same_transaction",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_status_change_and_its_event_roll_back_together",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_a_legacy_model_gets_a_baseline_event_marked_as_legacy_before_its_first_transition",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_to_a_legacy_model_keeps_working_and_leaves_auditable_events",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_to_legacy_models_keeps_working_and_audits_every_transition",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_reject_requires_a_reason_records_it_and_is_terminal",
+    "backend/tests/Feature/Models/RegistryMigrationsAndExportTest.php::test_the_backfill_marks_legacy_pipeline_models_and_never_publishes_candidates_or_published_models_as_legacy",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "`GET /models/{id}` devuelve los eventos en orden de inserción y la medición de uso y los eventos se exportan en la exportación LOPDP sin la clave del almacén."
+  },
+  {
+   "id": "V25-REG-050",
+   "status": "PARCIAL",
+   "gap": "Promover es un acto separado de subir el archivo: la CLI publica solo `candidate`, validar no vuelve servible al modelo, solo un `approved` por una persona con `models.approve` distinta de quien publicó o entrenó entra en producción, un candidato, validado, rechazado o fallido no se promueve ni se revierte, y el motor carga solo `approved` o `legacy_pipeline` con firma verificada; pero el pipeline propio sigue promoviendo automáticamente los modelos de sus corridas (legado explícito para no romper la demo ni los E2E), la reversión de un legado sigue bajo `forecast.run` sin MFA y la base no tiene un CHECK que impida poner `production` a un publicado sin aprobar (lo acotan la política y el filtro del motor).",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_a_candidate_or_unapproved_model_is_never_promoted_or_served",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_puts_the_approved_model_in_production_and_retires_the_previous_one_of_its_slot_only",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_publisher_cannot_approve_or_reject_their_own_model_but_another_admin_can",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_refuses_an_approval_given_by_someone_responsible_for_the_model",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_a_published_candidate_validated_by_an_analyst_is_not_servable_either",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_the_cli_publication_contract_requires_approval_even_when_the_cli_forgets_some_marks",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_a_published_candidate_can_never_enter_production_without_approval",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_legacy_is_a_positive_definition_that_fails_closed",
+    "engine/tests/integration/test_mlops_integration.py::test_a_published_model_forced_to_production_without_approval_is_not_loaded",
+    "engine/tests/integration/test_mlops_integration.py::test_a_published_model_approved_by_someone_else_is_served_from_the_object_store",
+    "engine/tests/unit/test_serving_policy_mirror.py::test_only_approved_and_legacy_models_are_servable",
+    "engine/tests/unit/test_serving_policy_mirror.py::test_the_cli_publication_contract_never_yields_a_servable_model_until_approved",
+    "engine/predictily_engine/mlops/serving.py; engine/predictily_engine/mlops/policy.py; engine/predictily_engine/customer/service.py"
+   ],
+   "note": "La política de legados es positiva y falla cerrada (`serving_basis` = approved | legacy_pipeline | not_approved, visible en la lista y el detalle) y el motor reproduce los mismos 33 casos que el backend."
+  },
+  {
+   "id": "V25-REG-072",
+   "status": "PARCIAL",
+   "gap": "Existe la habilidad dedicada `models.approve` (propietario y administrador) para validar modelos del pipeline propio, aprobar, rechazar y promover, y la segregación de funciones se impone con usuarios reales: no aprueba ni rechaza quien publicó, quien disparó el entrenamiento (cualquier trabajo enlazado al modelo o a su corrida) ni quien lo registró como candidato, y el rechazo exige motivo; faltan una habilidad `models.rollback` (la reversión sigue bajo `forecast.run`, salvo restaurar un aprobado que nunca sirvió, que exige `models.approve`), el motivo obligatorio al aprobar y al revertir, MFA para los roles privilegiados, los seis roles de V2.5 §15, y la identidad del publicador de la CLI es una declaración del operador (control organizativo, no criptográfico).",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_models_approve_belongs_to_owner_and_admin_only",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_validate_needs_forecast_run_and_a_viewer_cannot_do_it",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_publisher_cannot_approve_or_reject_their_own_model_but_another_admin_can",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_whoever_triggered_the_training_cannot_approve_it_either",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_a_scheduled_training_without_a_human_trigger_has_no_responsible_user",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_approver_must_be_a_user_of_the_company_and_other_companies_cannot_decide",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_reject_requires_a_reason_records_it_and_is_terminal",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_every_training_job_linked_to_the_model_or_its_run_makes_its_user_responsible",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_an_analyst_cannot_validate_a_legacy_candidate_and_a_validated_one_is_still_not_servable",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_restoring_a_never_served_approved_model_repeats_the_promotion_gates_and_published_models_are_reverified",
+    "engine/tests/unit/test_role_abilities_mirror.py::test_the_engine_mirror_matches_the_backends_role_abilities",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_needs_a_role_with_forecast_run_and_records_who_ran_the_cli",
+    "backend/app/Services/Models/ModelResponsibles.php; backend/app/Enums/TenantRole.php"
+   ],
+   "note": "Un entrenamiento programado o del sistema (sin `user_id`) no tiene responsable humano."
+  },
+  {
+   "id": "V25-SEC-019",
+   "status": "PARCIAL",
+   "gap": "La segregación de funciones (quien propone no aprueba) se impone para los modelos: quien publicó, entrenó o registró un modelo no puede aprobarlo, rechazarlo ni promoverlo, probado con usuarios reales; para la reversión de producción no hay una habilidad distinta de `forecast.run` ni motivo, no hay aprobación de dos personas ni MFA, y para otras operaciones sensibles (mapeos, acciones del Decision Engine) no se evaluó en W4. La identidad del publicador de la CLI es una declaración del operador.",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_publisher_cannot_approve_or_reject_their_own_model_but_another_admin_can",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_whoever_triggered_the_training_cannot_approve_it_either",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_refuses_an_approval_given_by_someone_responsible_for_the_model",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_every_training_job_linked_to_the_model_or_its_run_makes_its_user_responsible",
+    "engine/tests/integration/test_mlops_integration.py::test_publish_needs_a_role_with_forecast_run_and_records_who_ran_the_cli",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "Ante una fila manipulada, `promote` vuelve a comprobar que el aprobador registrado no sea responsable del modelo."
+  },
+  {
+   "id": "V25-SEL-034",
+   "status": "PARCIAL",
+   "gap": "La promoción de un modelo del registro exige una aprobación auditada (candidate → validated → approved → production con evento y entrada en `audit_logs`: quién, cuándo, y el motivo cuando se da) por una persona con `models.approve` distinta de quien publicó o entrenó; el motivo es opcional al aprobar (obligatorio al rechazar), no hay MFA, y el pipeline propio sigue promoviendo sin aprobación (legado).",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_publisher_cannot_approve_or_reject_their_own_model_but_another_admin_can",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_completes_the_w3_promotion_decision_and_a_policy_rejection_cannot_be_overridden",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_a_candidate_or_unapproved_model_is_never_promoted_or_served",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_reject_requires_a_reason_records_it_and_is_terminal",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_an_allowed_transition_writes_the_event_with_actor_reason_and_evidence_in_the_same_transaction",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "Al aprobar se completan `approved_by` y `approved_at` de la decisión de promoción de W3 asociada."
+  },
+  {
+   "id": "V25-SEL-033",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_requires_a_verified_signature_and_never_accepts_the_unsigned_legacy_flag",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_signature_is_checked_again_at_approval_time_even_if_it_was_valid_at_validation",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_respects_the_plan_horizons_and_rechecks_the_signature",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_customer_models_need_a_valid_slot_and_a_compatible_feature_schema",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_signature_of_a_published_object_is_verified_from_the_object_store",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_a_published_object_that_was_altered_or_is_missing_or_belongs_to_another_company_is_not_approved",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_restoring_a_never_served_approved_model_repeats_the_promotion_gates_and_published_models_are_reverified",
+    "engine/tests/integration/test_mlops_integration.py::test_an_approved_published_model_whose_object_was_altered_is_not_served",
+    "engine/tests/unit/test_mlops_serving.py::test_altered_missing_or_unsigned_objects_are_rejected_without_deserializing",
+    "engine/tests/unit/test_mlops_serving.py::test_an_untrusted_signing_key_is_rejected",
+    "backend/app/Services/Models/ModelApprovalGates.php; engine/predictily_engine/mlops/serving.py"
+   ],
+   "note": "Aprobar, promover y revertir un modelo con artefacto exige firma Ed25519 válida (el indicador de legado sin firma no basta), SHA-256 del registro, empresa y core del manifiesto y, en Customer, que el slot sea válido y el esquema de variables sea el del motor; un publicado se verifica sobre el objeto del almacén (su clave debe empezar por `tenants/<uuid de la empresa>/models/`) y el motor repite la verificación antes de cargar y de consultar la caché. Límites: un estadístico del pipeline que se reajusta no tiene artefacto (NO APLICA, dicho en la evidencia); el motor de demanda no carga artefactos; la verificación del objeto en S3 real no se hizo (disco local y emulador)."
+  },
+  {
+   "id": "V25-REG-067",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_to_a_legacy_model_keeps_working_and_leaves_auditable_events",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_refuses_unapproved_published_models_without_changing_anything",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_serves_approved_published_models_including_ones_retired_after_being_approved",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_to_legacy_models_keeps_working_and_audits_every_transition",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_refuses_a_run_with_unapproved_published_models_and_changes_nothing",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_is_isolated_between_companies_in_registry_and_events",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_the_stage1_rollback_error_codes_are_unchanged",
+    "backend/tests/Feature/Models/ModelLifecycleTest.php::test_the_status_change_and_its_event_roll_back_together",
+    "backend/app/Services/Customer/CustomerRollbackService.php; backend/app/Services/Forecasting/DemandRollbackService.php"
+   ],
+   "note": "La reversión de demanda (por corrida) y de Customer (por slot) restaura solo modelos aprobados o legados del pipeline propio, verifica el artefacto (SHA-256 y firma; un publicado contra el objeto del almacén), escribe sus eventos y su bitácora en la misma transacción, está aislada por empresa y conserva los códigos de error de la etapa 1; lo no aprobado responde 409 `rollback_target_not_approved` sin cambiar nada. Límites: un `validated` legado del motor sigue siendo restaurable (ver el defecto modelos_aws #3); la reversión no pide motivo ni MFA."
+  },
+  {
+   "id": "V25-REG-017",
+   "status": "PARCIAL",
+   "gap": "Un modelo publicado como candidato no toca al que sirve: el champion sigue en producción hasta que otra persona aprueba y promueve al challenger, y la promoción retira solo al del mismo alcance en la misma transacción; no hay una prueba concurrente que bloquee el final de un entrenamiento mientras se predice, y los modelos de las corridas del pipeline propio se promueven al final de la corrida (propiedad de diseño).",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_a_candidate_or_unapproved_model_is_never_promoted_or_served",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_puts_the_approved_model_in_production_and_retires_the_previous_one_of_its_slot_only",
+    "backend/tests/Feature/Models/ServingPolicyHardeningTest.php::test_successive_promotions_of_the_same_scope_always_leave_a_single_production_model",
+    "engine/tests/integration/test_mlops_integration.py::test_published_models_are_never_servable_until_approved_by_the_backend",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "Dos promociones del mismo alcance se serializan con un bloqueo de la fila de la empresa; la unicidad de una producción por alcance es una garantía de la aplicación, no de la base."
+  },
+  {
+   "id": "V25-REG-018",
+   "status": "PARCIAL",
+   "gap": "Si un candidato publicado falla la firma, el gate de datos, la política o la compatibilidad no se aprueba y el champion sigue sin cambios; si falla el registro o la subida de la CLI, `publish` deja el almacén como estaba; un fallo del almacén al servir degrada ese modelo a la referencia validada y la corrida termina; pero un entrenamiento del pipeline propio cuyo servido es peor sigue retirando a la producción anterior (legado) y no hay una prueba de «challenger falla ⇒ champion en producción» con el rechazo registrado por el pipeline.",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_a_blocked_or_missing_data_gate_prevents_approval",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_requires_a_verified_signature_and_never_accepts_the_unsigned_legacy_flag",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_customer_models_need_a_valid_slot_and_a_compatible_feature_schema",
+    "engine/tests/integration/test_mlops_integration.py::test_a_failed_registration_removes_only_the_objects_that_call_created",
+    "engine/tests/integration/test_mlops_integration.py::test_a_failing_object_store_never_stops_a_customer_run",
+    "engine/tests/integration/test_mlops_integration.py::test_a_refused_production_model_is_reported_as_model_not_approved_in_the_run",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "Un modelo `production` no aprobado se trata como un artefacto que falló: se sirve la referencia validada del mismo horizonte o el horizonte se abstiene con `reason_code = model_not_approved`."
+  },
+  {
+   "id": "V25-REG-019",
+   "status": "PARCIAL",
+   "gap": "El registro tiene ahora el estado `rejected` con motivo, los eventos de cada decisión (candidate, validated, approved, rejected, production, retired con `replaced_by`) y el vínculo a la decisión de política de W3; falta el rol challenger, el pipeline propio sigue registrando sus retadores no elegidos como `validated` sin motivo estructurado, y no hay una `decision_reason` con regla, versión, checks y métrica contra el champion por modelo.",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_reject_requires_a_reason_records_it_and_is_terminal",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_completes_the_w3_promotion_decision_and_a_policy_rejection_cannot_be_overridden",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_legacy_rejected_alias_returns_stage1_validated_models_and_real_rejections_with_legacy_status",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_detail_includes_the_lifecycle_the_events_and_the_policy_decision_but_not_the_storage_key",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "El alias heredado `status=rejected` devuelve los validados no promovidos de la etapa 1 y los rechazados reales."
+  },
+  {
+   "id": "V25-SEL-038",
+   "status": "PARCIAL",
+   "gap": "Se registran el candidato (publicado o del pipeline), el champion al que reemplaza, la decisión de política asociada y los eventos con el motivo de cada aprobación, rechazo y promoción, y el estado `rejected` existe; falta el rol challenger en `model_registry`, el pipeline propio sigue dejando sus retadores no elegidos como `validated` sin motivo estructurado (el motivo por familia evaluada no se guarda) y la regla de la política de W3 sigue siendo una sombra de decisión por defecto.",
+   "evidence": [
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_reject_requires_a_reason_records_it_and_is_terminal",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_puts_the_approved_model_in_production_and_retires_the_previous_one_of_its_slot_only",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_completes_the_w3_promotion_decision_and_a_policy_rejection_cannot_be_overridden",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_detail_includes_the_lifecycle_the_events_and_the_policy_decision_but_not_the_storage_key",
+    "backend/app/Services/Models/ModelLifecycle.php; backend/app/Services/Models/ModelApprovalService.php; backend/app/Services/Models/ModelServingPolicy.php"
+   ],
+   "note": "Mantiene lo registrado en W3: decisiones por política y alcance en `model_promotion_decisions`."
+  },
+  {
+   "id": "V25-REG-054",
+   "status": "PARCIAL",
+   "gap": "El almacén de objetos tiene prefijo por empresa en el servidor (claves `tenants/<uuid>/models/…` generadas, nunca derivadas de una ruta del cliente), un validador de claves, una verificación de que la clave sea de la empresa del trabajo antes de consultar el almacén y pruebas de que una empresa no lee la clave de otra (ni con un enlace simbólico), y la plantilla define una política IAM por prefijo (rol ABAC por empresa y roles de tarea acotados); pero la integración de la aplicación con el rol ABAC es DISEÑADA, las políticas no se validaron en una cuenta real (BLOQUEADO) y los volúmenes locales y el EFS del motor siguen siendo uno solo para todas las empresas.",
+   "evidence": [
+    "engine/tests/unit/test_object_store.py::test_model_keys_are_generated_by_the_server_with_the_tenant_prefix",
+    "engine/tests/unit/test_object_store.py::test_a_key_is_never_derived_from_unsafe_input",
+    "engine/tests/unit/test_object_store.py::test_validate_key_rejects_what_the_backend_rejects",
+    "engine/tests/unit/test_object_store.py::test_own_key_check_rejects_everything_else",
+    "engine/tests/unit/test_object_store.py::test_a_symlink_cannot_make_the_store_leave_its_root",
+    "engine/tests/unit/test_mlops_serving.py::test_a_key_of_another_company_is_rejected_before_the_store_is_touched",
+    "engine/tests/unit/test_mlops_serving.py::test_a_symlink_inside_the_root_cannot_make_one_company_read_the_bytes_of_another",
+    "engine/tests/integration/test_mlops_integration.py::test_server_generated_keys_never_leave_the_companys_prefix",
+    "engine/tests/integration/test_mlops_integration.py::test_an_approved_published_model_of_b_cannot_be_served_to_a_even_if_a_row_claims_it",
+    "infra/aws/test/app.test.ts::el rol por empresa (ABAC) exige la etiqueta tenant_id con forma de UUID y limita S3 a tenants/${aws:PrincipalTag/tenant_id}/*",
+    "infra/aws/test/app.test.ts::el motor no toca Bronze ni SQS: solo el bucket de artefactos y su punto de acceso EFS",
+    "engine/predictily_engine/platform/object_store.py; infra/aws/lib/app-stack.ts"
+   ],
+   "note": "El backend rechaza una clave del almacén que no empiece por el prefijo de la empresa activa, con `..` o `//`."
+  },
+  {
+   "id": "V25-REG-068",
+   "status": "PARCIAL",
+   "gap": "Hay pruebas negativas de contaminación entre empresas en el registro, el almacén, la caché y los trabajos del motor (un trabajo de A no carga artefactos ni cachés de B, ni con una fila de A envenenada con la ruta o la clave de B) y en el backend (A no ve, aprueba ni revierte modelos de B); todas son secuenciales: ninguna ejecuta A y B a la vez ni lo hace sobre una cola real.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_registry_queries_return_only_the_jobs_own_company",
+    "engine/tests/integration/test_mlops_integration.py::test_a_job_of_company_a_never_loads_artifacts_or_caches_of_company_b",
+    "engine/tests/integration/test_mlops_integration.py::test_a_registry_row_of_a_pointing_at_the_artifacts_of_b_is_refused",
+    "engine/tests/integration/test_mlops_integration.py::test_an_approved_published_model_of_b_cannot_be_served_to_a_even_if_a_row_claims_it",
+    "engine/tests/unit/test_mlops_serving.py::test_two_companies_never_share_cache_entries_even_with_the_same_version_and_content",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_approver_must_be_a_user_of_the_company_and_other_companies_cannot_decide",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_is_isolated_between_companies_in_registry_and_events",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_is_isolated_between_companies",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_detail_of_a_model_of_another_company_or_a_missing_one_is_404"
+   ],
+   "note": "La única prueba con dos procesos concurrentes es la de dos publicaciones del mismo paquete, serializadas."
+  },
+  {
+   "id": "V25-REG-069",
+   "status": "PARCIAL",
+   "gap": "Se prueban entrenar en local sin GPU (CLI), firmar, verificar y cargar, publicar solo como candidato, no servir lo no aprobado, rechazar artefactos alterados, sin firma, de otra empresa o con una clave no confiable sin deserializar, el rechazo de un esquema incompatible al aprobar, la degradación a la referencia y el aislamiento entre empresas; no existe una suite etiquetada T05 en CI ni una prueba de punta a punta con la pila completa (los E2E no se ejercieron con un modelo publicado) y «el proceso continúa con el champion ante un fallo de calidad» solo se cubre en el backend y en la política de W3.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_cli_training_matches_the_service_for_the_customer_core",
+    "engine/tests/integration/test_mlops_integration.py::test_published_models_are_never_servable_until_approved_by_the_backend",
+    "engine/tests/integration/test_mlops_integration.py::test_a_published_model_forced_to_production_without_approval_is_not_loaded",
+    "engine/tests/integration/test_mlops_integration.py::test_an_approved_published_model_whose_object_was_altered_is_not_served",
+    "engine/tests/unit/test_mlops_serving.py::test_altered_missing_or_unsigned_objects_are_rejected_without_deserializing",
+    "engine/tests/unit/test_mlops_serving.py::test_an_untrusted_signing_key_is_rejected",
+    "engine/tests/unit/test_mlops_serving.py::test_a_manifest_signed_for_another_company_is_rejected",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_customer_models_need_a_valid_slot_and_a_compatible_feature_schema",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_a_candidate_or_unapproved_model_is_never_promoted_or_served",
+    "engine/tests/unit/test_mlops_bundle.py::test_verify_detects_every_kind_of_tampering_without_deserializing"
+   ],
+   "note": "Con la configuración por defecto la demo sirve lo mismo que antes (verificación manual antes/después sobre el commit 552f6c0, nueve comparaciones idénticas; E2E 32/32 y 256/256 en la integración)."
+  },
+  {
+   "id": "V25-REG-062",
+   "status": "PARCIAL",
+   "gap": "La plantilla fija tamaños de CPU y memoria por tarea y entorno (el motor, 2 vCPU y 4 GiB) y la medición de uso registra los segundos de entrenamiento e inferencia por ejecución; faltan los límites por ejecución y por empresa dentro del motor (un presupuesto de series o memoria que rechace con `insufficient_resources`) y no se midió la memoria pico.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::las tareas usan solo CPU (sin GPU, sin EC2) y los tamaños del entorno",
+    "infra/aws/test/app.test.ts::cinco servicios Fargate en subredes privadas, sin IP pública, con disyuntor de despliegue y sin ECS Exec",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_a_demand_run_records_training_inference_and_wall_seconds_from_what_the_engine_reported",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Los tamaños son puntos de partida a validar en el piloto; no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios."
+  },
+  {
+   "id": "V25-REG-071",
+   "status": "PARCIAL",
+   "gap": "Existen `MODEL_REGISTRY.md`, `MODEL_DEPLOYMENT.md`, `PRIVATE_TENANT_TRAINING.md`, `AUTOMATED_TRAINING.md` (DISEÑADO) y `TENANT_TRAINING_RUNBOOK.md`, con las marcas IMPLEMENTADO / DISEÑADO / BLOQUEADO / NO APLICA, los comandos reales, los códigos de salida y la tabla de pruebas; falta `OWNER_RESPONSIBILITIES.md` y los comandos copiables no se ejecutan en una prueba de documentación en CI.",
+   "evidence": [
+    "engine/tests/unit/test_mlops_cli.py::test_every_command_has_spanish_help_with_the_exit_codes",
+    "engine/tests/unit/test_mlops_cli.py::test_the_exit_code_table_is_stable_and_documented",
+    "docs/ml/MODEL_REGISTRY.md; docs/ml/MODEL_DEPLOYMENT.md; docs/ml/PRIVATE_TENANT_TRAINING.md; docs/ml/AUTOMATED_TRAINING.md; docs/operations/TENANT_TRAINING_RUNBOOK.md"
+   ],
+   "note": "La tabla de códigos de salida de la ayuda de la CLI se contrasta con la del documento mediante una prueba."
+  },
+  {
+   "id": "V25-AWS-021",
+   "status": "PARCIAL",
+   "gap": "`tenant_usage_records` mide por empresa y sin precios las ejecuciones completadas, los segundos de entrenamiento, de inferencia y de reloj de cada ejecución de demanda y de Customer (lo que reporta el motor), y los bytes y objetos de Bronze, artefactos y objetos publicados con una foto diaria idempotente; faltan las llamadas a APIs y al LLM persistidas, el tamaño de la base por empresa, el número de inferencias, el soporte, el consumo de las ejecuciones fallidas y la prueba de GET /admin/usage; los segundos son de reloj del motor (un proxy de la CPU).",
+   "evidence": [
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_a_demand_run_records_training_inference_and_wall_seconds_from_what_the_engine_reported",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_metering_is_idempotent_and_replaces_instead_of_duplicating",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_only_completed_runs_are_metered_and_missing_timings_are_not_invented",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_customer_train_and_predict_runs_are_metered_by_operation",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_usage_is_isolated_between_companies_even_with_the_same_run_id_reference",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_the_table_and_the_metrics_carry_quantities_never_prices",
+    "backend/tests/Feature/Models/TenantUsageMeterTest.php::test_the_demand_job_meters_the_completed_run_and_a_metering_failure_never_breaks_it",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_it_records_bronze_and_artifact_bytes_per_company_without_mixing_companies",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_published_objects_are_measured_in_the_object_store_and_purged_bronze_is_not_counted",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_it_is_idempotent_per_day_and_keeps_history_across_days",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_an_invisible_artifacts_volume_is_reported_and_not_invented",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_a_failure_in_one_company_does_not_stop_the_others",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_the_snapshot_is_scheduled_daily",
+    "backend/tests/Feature/Models/RegistryMigrationsAndExportTest.php::test_the_usage_index_migration_removes_existing_duplicates_keeping_the_latest_and_enforces_uniqueness",
+    "backend/tests/Feature/Models/RegistryMigrationsAndExportTest.php::test_the_lopdp_export_includes_the_events_and_usage_of_the_company_only_and_never_the_storage_key",
+    "backend/app/Services/Models/Usage/TenantUsageMeter.php; backend/app/Services/Models/Usage/StorageUsageSnapshot.php; backend/app/Console/Commands/Models/UsageSnapshotCommand.php"
+   ],
+   "note": "Si el backend no ve el volumen de artefactos el comando lo informa (`artifacts_visible = false`) y registra 0 para ese origen sin estimar; las ejecuciones anteriores al despliegue no se miden retroactivamente."
+  },
+  {
+   "id": "V25-AWS-001",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "infra/aws/test/config.test.ts::solo existen staging y production y se rechaza cualquier otro nombre",
+    "infra/aws/test/config.test.ts::acepta un conjunto completo y válido",
+    "infra/aws/test/config.test.ts::informa TODOS los datos que faltan, no solo el primero",
+    "infra/aws/test/nag.test.ts::la síntesis completa con cdk-nag activo no produce hallazgos (los reconocidos están justificados abajo)",
+    "infra/aws/test/nag.test.ts::el validador de reglas informa cero violaciones en ambas pilas",
+    "infra/aws/test/platform.test.ts::crea el bucket de registros y un bucket por capa (bronze, silver, gold, artifacts)",
+    "infra/aws/test/app.test.ts::cinco servicios Fargate en subredes privadas, sin IP pública, con disyuntor de despliegue y sin ECS Exec",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts; infra/aws/cdk.json; infra/aws/package.json"
+   ],
+   "note": "La infraestructura como código es una app AWS CDK v2 en TypeScript (`infra/aws`, con su `package.json`) con dos pilas por entorno (`Predictily-<entorno>-Platform` y `-App`) para staging y production; `npm run verify` ejecuta `tsc`, 162 pruebas de plantilla y configuración (Jest; 9 de recuperación requieren PostgreSQL) y `cdk synth` de ambos entornos con cdk-nag (AwsSolutions) sin hallazgos, con datos ficticios (cuenta 111111111111, dominios example.com); Docker Compose se conserva como entorno local y alternativa de VPS. Límites: no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios; una plantilla sintetizada con datos ficticios no es desplegable; no se ejecutó `cdk diff`."
+  },
+  {
+   "id": "V25-AWS-014",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::no despliega cómputo con GPU ni instancias EC2 permanentes: solo RDS db.t4g.* y Fargate",
+    "infra/aws/test/platform.test.ts::el verificador de GPU no es decorativo: rechaza una plantilla con una instancia acelerada",
+    "infra/aws/test/app.test.ts::la plantilla de aplicación no contiene GPU, instancias EC2 ni capacity providers (verificación firme)",
+    "infra/aws/test/app.test.ts::las tareas usan solo CPU (sin GPU, sin EC2) y los tamaños del entorno",
+    "infra/aws/test/nag.test.ts::las reglas críticas NO están reconocidas en ningún sitio: cifrado, acceso público, TLS, DLQ, RDS público y GPU",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Un control automatizado rechaza cualquier plantilla con una instancia acelerada o EC2 permanente (y se comprueba que el verificador detecta una instancia acelerada de prueba): el cómputo es Fargate de CPU y RDS `db.t4g.*`; el entrenamiento pesado es local y se publica como artefacto firmado. Límite: es un control sobre la plantilla, sin cuenta AWS."
+  },
+  {
+   "id": "V25-AWS-002",
+   "status": "PARCIAL",
+   "gap": "La plantilla define el bucket privado de la SPA con OAC (no OAI), CloudFront con HTTPS obligatorio, TLS 1.2, WAF, registros y cabeceras de seguridad, y los comportamientos /api y /sanctum hacia el ALB; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios: faltan la cuenta, el dominio y el certificado ACM del propietario, y la SPA se sube con un paso manual del propietario (`aws s3 sync`), no con un `BucketDeployment`.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::CloudFront: HTTPS obligatorio, TLS 1.2, WAF, registros, HTTP/3 y OAC (no OAI) hacia el bucket privado",
+    "infra/aws/test/app.test.ts::/api y /sanctum van al ALB por HTTPS con TLS 1.2, sin caché y con la cabecera de origen",
+    "infra/aws/test/app.test.ts::la SPA vive en un bucket S3 privado, versionado, solo legible por CloudFront (OAC) y sin sitio web público",
+    "infra/aws/test/app.test.ts::el WAF de CloudFront bloquea por tasa (autenticación y general) y las reglas administradas arrancan en modo count",
+    "infra/aws/test/app.test.ts::envía las mismas cabeceras de seguridad que nginx (HSTS, CSP, X-Frame-Options, Referrer-Policy)",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts; docs/operations/AWS_DEPLOYMENT.md"
+   ],
+   "note": "La versión actual exige `us-east-1` (el WAF de CloudFront y su certificado viven allí); otras regiones exigen una pila de borde multirregión (DISEÑADA)."
+  },
+  {
+   "id": "V25-AWS-003",
+   "status": "PARCIAL",
+   "gap": "La plantilla define cinco servicios Fargate de CPU en subredes privadas (API con nginx y php-fpm, dos workers, programador y motor), un ALB con un único listener HTTPS que solo acepta tráfico de CloudFront con una cabecera secreta de origen, el motor en Cloud Map sin balanceador, disyuntor de despliegue y sin ECS Exec; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios: las imágenes no se construyeron (no hay daemon Docker aquí) y las adaptaciones aplicación ↔ AWS (EFS compartido, nginx → php-fpm en una tarea `awsvpc`, IP real del cliente detrás de CloudFront, disco S3 de modelos del backend) son hipótesis sin ejercer.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::el ALB tiene un único listener HTTPS (TLS 1.2+), cabeceras inválidas descartadas y respuesta 403 por defecto",
+    "infra/aws/test/app.test.ts::solo se reenvía a la API cuando llega la cabecera secreta de origen (resuelta desde Secrets Manager, no literal)",
+    "infra/aws/test/app.test.ts::cinco servicios Fargate en subredes privadas, sin IP pública, con disyuntor de despliegue y sin ECS Exec",
+    "infra/aws/test/app.test.ts::el motor se registra en Cloud Map (DNS privado), no tiene balanceador y su grupo de seguridad es el del motor",
+    "infra/aws/test/app.test.ts::los workers consumen las colas correctas con los mismos parámetros que docker-compose",
+    "infra/aws/test/app.test.ts::la API se escala por CPU entre el mínimo y el máximo del entorno",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "`AWS_ARCHITECTURE.md` §10 enumera cada adaptación, con la que sigue pendiente (IP real del cliente) marcada como DISEÑADO / PENDIENTE."
+  },
+  {
+   "id": "V25-AWS-004",
+   "status": "PARCIAL",
+   "gap": "La plantilla define un RDS PostgreSQL 16 en subredes aisladas (sin ruta a Internet), no público, cifrado con KMS, con TLS obligatorio, respaldos con la retención del entorno, contraseña generada por Secrets Manager y el puerto 5432 abierto solo desde los grupos de seguridad de API, workers y motor, y una definición de tarea de migraciones para ejecutarlas una sola vez antes del despliegue; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, es Single-AZ (aceptado y documentado) y la tarea de migraciones no se ejecutó.",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::no es público, está cifrado con KMS, usa TLS obligatorio y respaldo con la retención del entorno",
+    "infra/aws/test/platform.test.ts::vive en subredes AISLADAS: sin ruta a Internet ni a un NAT",
+    "infra/aws/test/platform.test.ts::solo acepta conexiones al 5432 desde los grupos de seguridad de API, workers y motor (ningún CIDR)",
+    "infra/aws/test/platform.test.ts::la contraseña la genera Secrets Manager (cifrada con KMS): no hay credenciales en la plantilla",
+    "infra/aws/test/app.test.ts::[HIGH] las migraciones no montan EFS y su rol de tarea no tiene ninguna política (solo necesitan la base de datos)",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "El criterio para pasar a Multi-AZ está en `AWS_ARCHITECTURE.md` §6 (umbrales a aprobar en el piloto)."
+  },
+  {
+   "id": "V25-AWS-005",
+   "status": "PARCIAL",
+   "gap": "La plantilla define un bucket de registros y uno por capa (Bronze, Silver, Gold y artefactos) con SSE-KMS con la clave de datos, versionado, bloqueo de acceso público en sus cuatro opciones y rechazo del tráfico sin TLS, y el controlador S3 del almacén de objetos del motor tiene pruebas contra un emulador (moto), que según el informe del paquete se ejecutaron en un entorno propio con boto3 y que se omiten con mensaje explícito si boto3 no está instalado; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios y S3 real no se ejercitó. Silver y Gold aún no tienen consumidores.",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::crea el bucket de registros y un bucket por capa (bronze, silver, gold, artifacts)",
+    "infra/aws/test/platform.test.ts::NINGÚN bucket queda sin bloqueo de acceso público (las cuatro opciones activas)",
+    "infra/aws/test/platform.test.ts::los buckets de datos usan SSE-KMS con la clave de datos, clave de bucket y versionado",
+    "infra/aws/test/platform.test.ts::todos los buckets rechazan el tráfico sin TLS y no existe ninguna política de lectura pública",
+    "engine/tests/unit/test_object_store_s3_emulator.py::test_s3_driver_against_the_emulator_put_get_exists_list_delete",
+    "engine/tests/unit/test_object_store_s3_emulator.py::test_s3_driver_applies_server_side_encryption_and_keys_stay_tenant_scoped",
+    "engine/tests/unit/test_object_store_s3_emulator.py::test_s3_errors_never_leak_credentials",
+    "engine/tests/unit/test_object_store.py::test_writes_are_write_once_and_idempotent",
+    "engine/predictily_engine/platform/object_store.py; infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Al verificar este overlay, el entorno del motor (sin boto3) omitió esas pruebas con el mensaje explícito «implemented_untested»: el resultado del emulador se toma del informe del paquete, no de una ejecución propia."
+  },
+  {
+   "id": "V25-AWS-006",
+   "status": "PARCIAL",
+   "gap": "La plantilla define tres colas de Laravel (imports, default y forecasting), cada una con su DLQ con redrive, cifrado KMS, TLS obligatorio, una visibilidad mayor que el timeout del worker y alarma de DLQ hacia un tema SNS cifrado; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios: el comportamiento de `queue:work sqs` con `--tries=2` frente a la DLQ no se ejerció contra SQS real ni contra un doble, y el backend no se probó con el controlador `sqs`.",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::cada cola de Laravel tiene su DLQ con redrive, cifrado KMS y TLS obligatorio",
+    "infra/aws/test/platform.test.ts::la visibilidad supera el timeout del worker (imports/default 600 s; forecasting 1000 s)",
+    "infra/aws/test/platform.test.ts::hay una alarma por DLQ que avisa al tema SNS cifrado con CMK",
+    "infra/aws/test/app.test.ts::la API usa colas SQS (sin Redis), sesiones y caché en base de datos y Bronze en S3 cifrado con la clave de datos",
+    "infra/aws/test/app.test.ts::solo los workers pueden recibir mensajes; la API únicamente encola",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "No hay ElastiCache (alternativa evaluada y descartada en la línea base por su costo fijo)."
+  },
+  {
+   "id": "V25-AWS-007",
+   "status": "PARCIAL",
+   "gap": "La plantilla define un grupo de EventBridge Scheduler con una programación del comando diario de medición de uso como tarea efímera de ECS con DLQ y reintentos acotados, y un rol que solo puede lanzar la familia de tareas `job` de este clúster; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay una tarea programada de entrenamiento con la CLI (`train`; el reentrenamiento automático es DISEÑADO) y la sintaxis de `containerOverrides` y el permiso `ecs:TagResource` son hipótesis sin verificar en AWS.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::lanza el comando diario de medición de uso como tarea efímera de ECS con DLQ y reintentos acotados",
+    "infra/aws/test/app.test.ts::el rol del Scheduler solo puede lanzar la familia job en este clúster y pasar sus roles a ECS",
+    "infra/aws/test/app.test.ts::[LOW] el Scheduler puede etiquetar las tareas que lanza (hipótesis ecs:TagResource, acotada al clúster y a RunTask)",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_the_snapshot_is_scheduled_daily",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts; docs/ml/AUTOMATED_TRAINING.md"
+   ],
+   "note": "El comando diario es idempotente y también corre a las 05:00 (America/Guayaquil) desde el programador de Laravel."
+  },
+  {
+   "id": "V25-AWS-009",
+   "status": "PARCIAL",
+   "gap": "La plantilla define roles de tarea por servicio (el motor sin acceso a Bronze ni a SQS, la API sin borrar de Bronze, solo los workers reciben mensajes), un rol ABAC por empresa, secretos generados en Secrets Manager con KMS que nunca van como variable de entorno, dos claves KMS con rotación y ninguna sentencia IAM con `Action` comodín ni `Resource \"*\"` fuera de `ecr:GetAuthorizationToken`; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, el usuario de base de datos sigue siendo uno solo para API, colas y motor (roles de base de datos por servicio: DISEÑADO), la integración de la aplicación con el rol ABAC es DISEÑADA y la rotación de secretos es manual.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::ningún secreto va como variable de entorno: DB, clave de la app, token del motor y clave de firma llegan por Secrets Manager",
+    "infra/aws/test/app.test.ts::el motor no toca Bronze ni SQS: solo el bucket de artefactos y su punto de acceso EFS",
+    "infra/aws/test/app.test.ts::la API no puede borrar de Bronze; los workers y el programador sí (purga auditada), siempre bajo tenants/*",
+    "infra/aws/test/app.test.ts::ninguna sentencia IAM de la pila usa Action \"*\" ni \"servicio:*\"",
+    "infra/aws/test/app.test.ts::[MEDIUM] los roles de tarea nunca llevan Resource \"*\" y solo los que escriben/leen objetos nombran tenants/*",
+    "infra/aws/test/app.test.ts::las salidas de la pila no contienen secretos",
+    "infra/aws/test/platform.test.ts::hay dos claves (datos y plataforma) con rotación automática y alias por entorno",
+    "infra/aws/test/platform.test.ts::los secretos se generan en Secrets Manager con KMS y no existe ninguna SecretString literal",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "El secreto de firma del motor lo crea el propietario y nunca pasa por CloudFormation."
+  },
+  {
+   "id": "V25-AWS-011",
+   "status": "PARCIAL",
+   "gap": "La plantilla define un presupuesto mensual de AWS Budgets con alertas reales al 50/80/100 % y pronosticada por correo, opcionalmente filtrado por la etiqueta `predictily:environment`, y etiqueta todos los recursos por entorno; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay presupuesto ni alerta por empresa ni una regla local que compare el consumo de una empresa con un tope del plan, y las etiquetas de asignación de costos deben activarse en Billing (paso del propietario).",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::AWS Budgets: presupuesto mensual con alertas reales (50/80/100 %) y pronosticada por correo",
+    "infra/aws/test/platform.test.ts::por defecto cubre toda la cuenta (lo correcto con una cuenta por entorno)",
+    "infra/aws/test/platform.test.ts::con budgetFilterByEnvironmentTag=true filtra por la etiqueta predictily:environment del entorno",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts; docs/architecture/AWS_COST_MODEL.md"
+   ],
+   "note": "El consumo por empresa que alimentaría esa regla sí se mide (V25-AWS-021)."
+  },
+  {
+   "id": "V25-AWS-008",
+   "status": "PARCIAL",
+   "gap": "La plantilla define una VPC con registros de flujo, subredes públicas, privadas y aisladas, un ALB que solo acepta el 443 desde la lista de prefijos de CloudFront (ninguna regla abre 0.0.0.0/0 de entrada), el motor accesible solo desde la API y los workers y la base solo desde sus servicios, y TLS 1.2+ hacia CloudFront, ALB y RDS; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay TLS entre ALB y API ni entre API y motor (DISEÑADO) y el Compose local sigue sin TLS interno.",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::VPC con registros de flujo, endpoint de pasarela de S3 y los NAT del entorno",
+    "infra/aws/test/platform.test.ts::el ALB solo acepta 443 desde la lista de prefijos de CloudFront; ninguna regla abre 0.0.0.0/0 de entrada",
+    "infra/aws/test/platform.test.ts::el motor solo recibe 8100 desde la API y los workers",
+    "infra/aws/test/platform.test.ts::solo acepta conexiones al 5432 desde los grupos de seguridad de API, workers y motor (ningún CIDR)",
+    "infra/aws/test/app.test.ts::el ALB tiene un único listener HTTPS (TLS 1.2+), cabeceras inválidas descartadas y respuesta 403 por defecto",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Hay una sola NAT por defecto (punto único de fallo aceptado y parametrizable)."
+  },
+  {
+   "id": "V25-AWS-010",
+   "status": "PARCIAL",
+   "gap": "La plantilla define registros de contenedores cifrados con retención por entorno, alarmas de RDS, de las DLQ, del ALB, de latencia, de destinos no saludables, de CloudFront, del Scheduler y de CPU y memoria de cada servicio hacia un tema SNS cifrado; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay métricas por empresa (duración y tasa de error por tenant), tablero ni registros estructurados con identificador de empresa y de traza.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::alarmas de ALB, latencia, destinos no saludables, CloudFront, Scheduler y CPU/memoria de cada servicio",
+    "infra/aws/test/app.test.ts::registros de contenedores en CloudWatch Logs cifrados con KMS y con la retención del entorno",
+    "infra/aws/test/platform.test.ts::alarmas de RDS: CPU, almacenamiento libre y memoria",
+    "infra/aws/test/platform.test.ts::hay una alarma por DLQ que avisa al tema SNS cifrado con CMK",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Las alarmas de aplicación (tabla `alerts`) existían antes; estas son de operación."
+  },
+  {
+   "id": "V25-AWS-025",
+   "status": "PARCIAL",
+   "gap": "La plantilla define una alarma por DLQ que avisa a un tema SNS cifrado con correo; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay un monitor propio de la aplicación sobre `failed_jobs` con umbral ni un reproceso controlado (`queue:retry`) automatizado, y el procedimiento de reproceso de una DLQ solo está documentado (DISEÑADO · BLOQUEADO).",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::hay una alarma por DLQ que avisa al tema SNS cifrado con CMK",
+    "infra/aws/test/platform.test.ts::cada cola de Laravel tiene su DLQ con redrive, cifrado KMS y TLS obligatorio",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts; docs/operations/AWS_DEPLOYMENT.md"
+   ],
+   "note": "La DLQ del Scheduler también tiene alarma."
+  },
+  {
+   "id": "V25-AWS-016",
+   "status": "PARCIAL",
+   "gap": "La plantilla separa por servicio los roles de tarea y de ejecución, genera los secretos por entorno y obliga a un nombre de entorno (staging o production) con parámetros propios; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, las cuentas o roles AWS por ambiente los aporta el propietario (una cuenta por entorno es la práctica recomendada, no se verificó) y API, colas, programador y motor siguen compartiendo el usuario de la base de datos (DISEÑADO).",
+   "evidence": [
+    "infra/aws/test/app.test.ts::ninguna sentencia IAM de la pila usa Action \"*\" ni \"servicio:*\"",
+    "infra/aws/test/app.test.ts::el motor no toca Bronze ni SQS: solo el bucket de artefactos y su punto de acceso EFS",
+    "infra/aws/test/config.test.ts::solo existen staging y production y se rechaza cualquier otro nombre",
+    "infra/aws/test/config.test.ts::los valores ficticios usan la cuenta 111111111111, dominios example.com y están marcados como ficticios",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Cada entorno lleva sus propios nombres de recursos."
+  },
+  {
+   "id": "V25-AWS-017",
+   "status": "PARCIAL",
+   "gap": "Producción arranca Single-AZ con protección contra borrado y un respaldo más largo que staging (probado en la configuración y reconocido en cdk-nag con su motivo), con RPO ≤ 15 min con PITR y RTO ≤ 4 h propuestos y un criterio para pasar a Multi-AZ (contrato con disponibilidad mayor, RTO medido que supera el objetivo, costo de indisponibilidad mayor que el de Multi-AZ o un incidente real) documentado en `AWS_ARCHITECTURE.md` §6; los objetivos son propuestas a aprobar, no mediciones: no hay un simulacro de restauración en RDS (BLOQUEADO) y los umbrales del criterio se fijan con datos del piloto.",
+   "evidence": [
+    "infra/aws/test/config.test.ts::production arranca Single-AZ con protección contra borrado y respaldo más largo que staging",
+    "infra/aws/test/nag.test.ts::cada reconocimiento tiene un motivo concreto y ninguno está duplicado en la misma construcción",
+    "infra/aws/test/recovery.test.ts::restaura en una base vacía y TODOS los conteos, el esquema, índices, restricciones y secuencias coinciden (salida 0)",
+    "docs/architecture/AWS_ARCHITECTURE.md; docs/operations/RECOVERY.md"
+   ],
+   "note": "La restauración local (VPS) está probada con conteos; la de AWS es DISEÑADA, NO PROBADA."
+  },
+  {
+   "id": "V25-AWS-018",
+   "status": "PARCIAL",
+   "gap": "`backup.sh` escribe el volcado, su suma SHA-256 con nombre relativo y un manifiesto de conteos (cifrado igual que el respaldo si se define `BACKUP_GPG_RECIPIENT`), con rotación por antigüedad; la plantilla da a RDS una retención de respaldos por entorno, cifrada con KMS, y al EFS un respaldo automático; pero el cifrado GPG sigue siendo opcional (sin destinatario el volcado queda en claro con permisos 0600), la copia fuera del servidor no está automatizada, `backup.sh` no incluye el volumen de artefactos ni el de archivos importados (copia manual) y el flujo de cifrado solo se probó con un `gpg` simulado, no con GPG real.",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::backup.sh genera el respaldo, su suma SHA-256 y el manifiesto de conteos",
+    "infra/aws/test/recovery.test.ts::rechaza un respaldo alterado (SHA-256) con salida 3, sin restaurar",
+    "infra/aws/test/recovery.test.ts::cifrado (GPG SIMULADO con un stub: prueba el flujo de archivos, NO la criptografía real): el manifiesto no queda en claro y verify lo descifra",
+    "infra/aws/test/platform.test.ts::no es público, está cifrado con KMS, usa TLS obligatorio y respaldo con la retención del entorno",
+    "infra/aws/test/platform.test.ts::cifrado con KMS, respaldo automático, rendimiento elástico y dos puntos de acceso con identidad POSIX fija",
+    "infra/scripts/backup.sh; infra/scripts/recovery-check.sh; docs/operations/RECOVERY.md"
+   ],
+   "note": "El manifiesto de conteos contiene nombres de tablas y volumen de filas (información de negocio): se trata como el respaldo."
+  },
+  {
+   "id": "V25-AWS-019",
+   "status": "PARCIAL",
+   "gap": "La restauración de PostgreSQL en local está probada y es repetible: `recovery-check.sh cycle` respalda, restaura en una base vacía temporal y compara línea a línea el manifiesto (100 tablas, 297 índices, 490 restricciones, 95 secuencias con su valor y 277 965 filas de la empresa demo ficticia, idéntico en 4 s sobre 126 MB), con pruebas negativas (manifiesto alterado, respaldo alterado, secuencia distinta) y limpieza verificada; faltan la restauración en AWS (snapshots y PITR de RDS: DISEÑADA, BLOQUEADO), la restauración y carga de un artefacto de modelo, el RTO medido con bases grandes y el modo `docker` del script (escrito, sin probar).",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::restaura en una base vacía y TODOS los conteos, el esquema, índices, restricciones y secuencias coinciden (salida 0)",
+    "infra/aws/test/recovery.test.ts::el manifiesto incluye el valor de cada secuencia y una secuencia restaurada con otro valor se detecta (salida 1)",
+    "infra/aws/test/recovery.test.ts::detecta una diferencia de filas (manifiesto alterado) y sale con 1",
+    "infra/aws/test/recovery.test.ts::rechaza un respaldo alterado (SHA-256) con salida 3, sin restaurar",
+    "infra/aws/test/recovery.test.ts::se niega a trabajar con la base «predictily» (salida 2) y sin argumentos muestra el uso",
+    "infra/aws/test/recovery.test.ts::no deja bases temporales ni archivos tras el ciclo completo",
+    "infra/scripts/recovery-check.sh; infra/scripts/restore.sh; docs/operations/RECOVERY.md"
+   ],
+   "note": "Las pruebas de recuperación se omiten con mensaje explícito si no se define `RECOVERY_CHECK_DB` (una base de pruebas, nunca la de desarrollo)."
+  },
+  {
+   "id": "V25-SEC-049",
+   "status": "PARCIAL",
+   "gap": "Hay una prueba automatizada y evidencia registrada (fecha, comando, salida, conteos, tiempo) de una restauración de PostgreSQL en local con comparación del esquema, las secuencias y las filas de cada tabla, y pruebas negativas; faltan la restauración de los archivos importados y de los artefactos de modelos, una restauración en AWS, la medición del RTO y RPO con volúmenes reales y la ejecución mensual programada (procedimiento documentado, no un trabajo).",
+   "evidence": [
+    "infra/aws/test/recovery.test.ts::restaura en una base vacía y TODOS los conteos, el esquema, índices, restricciones y secuencias coinciden (salida 0)",
+    "infra/aws/test/recovery.test.ts::detecta una diferencia de filas (manifiesto alterado) y sale con 1",
+    "infra/aws/test/recovery.test.ts::rechaza un respaldo alterado (SHA-256) con salida 3, sin restaurar",
+    "infra/scripts/recovery-check.sh; docs/operations/RECOVERY.md"
+   ],
+   "note": "La cifra de RTO de la prueba (4 s) es de una base de 126 MB y no es un compromiso."
+  },
+  {
+   "id": "V25-REG-046",
+   "status": "PARCIAL",
+   "gap": "El registro guarda la clave del almacén de cada modelo publicado por la CLI (`published_object_key`, generada por el servidor con el prefijo de la empresa) y el backend la resuelve y verifica contra el almacén; el controlador S3 solo se probó contra un emulador (moto) y S3 real está BLOQUEADO; los modelos del pipeline propio conservan su ruta relativa en el volumen del motor y no hay columnas `storage_backend` y `storage_uri` separadas.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_publish_meets_the_registry_publication_contract",
+    "engine/tests/integration/test_mlops_integration.py::test_server_generated_keys_never_leave_the_companys_prefix",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_signature_of_a_published_object_is_verified_from_the_object_store",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_detail_includes_the_lifecycle_the_events_and_the_policy_decision_but_not_the_storage_key",
+    "engine/tests/unit/test_object_store_s3_emulator.py::test_s3_driver_against_the_emulator_put_get_exists_list_delete",
+    "engine/tests/unit/test_object_store.py::test_model_keys_are_generated_by_the_server_with_the_tenant_prefix",
+    "engine/predictily_engine/platform/object_store.py; backend/config/mlops.php"
+   ],
+   "note": "La clave del almacén no se expone en la API ni en la exportación LOPDP. El disco S3 de modelos del backend (`models_s3`) aún no existe (DISEÑADO · PENDIENTE)."
+  },
+  {
+   "id": "V25-REG-055",
+   "status": "PARCIAL",
+   "gap": "El bucket de artefactos de la plantilla tiene SSE-KMS, versionado, bloqueo de acceso público y TLS obligatorio (verificado en la plantilla) y el almacén escribe una sola vez cada objeto (idempotente, nunca sobrescribe con otro contenido), con SSE configurable en el controlador S3; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, el cifrado y el versionado de S3 no se verificaron en una cuenta real y el controlador local no cifra a nivel de aplicación.",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::los buckets de datos usan SSE-KMS con la clave de datos, clave de bucket y versionado",
+    "infra/aws/test/platform.test.ts::NINGÚN bucket queda sin bloqueo de acceso público (las cuatro opciones activas)",
+    "infra/aws/test/platform.test.ts::todos los buckets rechazan el tráfico sin TLS y no existe ninguna política de lectura pública",
+    "engine/tests/unit/test_object_store.py::test_writes_are_write_once_and_idempotent",
+    "engine/tests/unit/test_object_store_s3_emulator.py::test_s3_driver_applies_server_side_encryption_and_keys_stay_tenant_scoped",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Los artefactos conservan versiones no vigentes 90/365 días según el bucket."
+  },
+  {
+   "id": "V25-SEC-023",
+   "status": "PARCIAL",
+   "gap": "La plantilla define dos claves KMS gestionadas por el cliente (datos y plataforma) con rotación automática y alias por entorno; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay un `KeyProvider` de la aplicación con cifrado de sobre por empresa ni rotación, y la clave de firma de artefactos vive en un archivo o secreto (KMS/HSM DISEÑADO).",
+   "evidence": [
+    "infra/aws/test/platform.test.ts::hay dos claves (datos y plataforma) con rotación automática y alias por entorno",
+    "infra/aws/test/platform.test.ts::los secretos se generan en Secrets Manager con KMS y no existe ninguna SecretString literal",
+    "infra/aws/test/nag.test.ts::las reglas críticas NO están reconocidas en ningún sitio: cifrado, acceso público, TLS, DLQ, RDS público y GPU",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "El cifrado a nivel de aplicación de datos sensibles (V25-SEC-024) no cambia."
+  },
+  {
+   "id": "V25-SEC-004",
+   "status": "PARCIAL",
+   "gap": "El almacén de objetos genera las claves en el servidor con el prefijo `tenants/<uuid>/`, rechaza claves de otra empresa antes de consultarlo y tiene pruebas negativas entre empresas (también contra enlaces simbólicos), y la plantilla limita S3 por prefijo con roles de tarea y un rol ABAC por empresa; pero no existen URLs prefirmadas (V25-UPL-003), la integración de la aplicación con el rol ABAC es DISEÑADA y no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios.",
+   "evidence": [
+    "engine/tests/unit/test_object_store.py::test_model_keys_are_generated_by_the_server_with_the_tenant_prefix",
+    "engine/tests/unit/test_object_store.py::test_own_key_check_rejects_everything_else",
+    "engine/tests/unit/test_mlops_serving.py::test_a_key_of_another_company_is_rejected_before_the_store_is_touched",
+    "engine/tests/unit/test_mlops_serving.py::test_a_symlink_inside_the_root_cannot_make_one_company_read_the_bytes_of_another",
+    "infra/aws/test/app.test.ts::el rol por empresa (ABAC) exige la etiqueta tenant_id con forma de UUID y limita S3 a tenants/${aws:PrincipalTag/tenant_id}/*",
+    "infra/aws/test/app.test.ts::[HIGH] todo rol con GetObject sobre un bucket tiene ListBucket sobre ese bucket (no sobre los objetos), acotado a tenants/",
+    "engine/predictily_engine/platform/object_store.py; infra/aws/lib/app-stack.ts"
+   ],
+   "note": "El comportamiento real de S3 frente a una clave ausente (404 en vez de 403 con `ListBucket`) es una hipótesis sin verificar."
+  },
+  {
+   "id": "V25-SEC-022",
+   "status": "PARCIAL",
+   "gap": "La plantilla separa por servicio los roles de tarea y de ejecución con mínimo privilegio (sin `Action` comodín, sin `Resource \"*\"` fuera de `ecr:GetAuthorizationToken`, `ListBucket` acotado, EFS por punto de acceso) y un rol ABAC por empresa; pero no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios, no hay roles de base de datos separados (la API, las colas, el programador y el motor comparten una cuenta) y la integración con el rol ABAC es DISEÑADA.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::ninguna sentencia IAM de la pila usa Action \"*\" ni \"servicio:*\"",
+    "infra/aws/test/app.test.ts::[MEDIUM] los roles de tarea nunca llevan Resource \"*\" y solo los que escriben/leen objetos nombran tenants/*",
+    "infra/aws/test/app.test.ts::[HIGH] cada definición de tarea con volúmenes EFS tiene en SU rol exactamente los permisos de esos puntos de acceso (montaje y, si es de escritura, ClientWrite)",
+    "infra/aws/test/app.test.ts::solo los workers pueden recibir mensajes; la API únicamente encola",
+    "infra/aws/test/platform.test.ts::ninguna sentencia IAM de la pila usa acciones comodín totales (service:* ni *)",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "Las acciones de EFS y de S3 se acotan por recurso."
+  },
+  {
+   "id": "V25-SEC-026",
+   "status": "PARCIAL",
+   "gap": "La plantilla exige TLS 1.2+ en CloudFront y en el listener del ALB, `rds.force_ssl` en RDS, TLS obligatorio en los buckets y las colas y envía las cabeceras HSTS y de seguridad de nginx; pero no hay TLS entre ALB y API ni entre API y motor (DISEÑADO), el tráfico interno del Compose local sigue sin TLS y no se desplegó nada: no hay cuenta AWS del propietario (BLOQUEADO) y la plantilla se verificó con cdk synth, cdk-nag y pruebas de plantilla con datos ficticios.",
+   "evidence": [
+    "infra/aws/test/app.test.ts::el ALB tiene un único listener HTTPS (TLS 1.2+), cabeceras inválidas descartadas y respuesta 403 por defecto",
+    "infra/aws/test/app.test.ts::CloudFront: HTTPS obligatorio, TLS 1.2, WAF, registros, HTTP/3 y OAC (no OAI) hacia el bucket privado",
+    "infra/aws/test/app.test.ts::envía las mismas cabeceras de seguridad que nginx (HSTS, CSP, X-Frame-Options, Referrer-Policy)",
+    "infra/aws/test/platform.test.ts::no es público, está cifrado con KMS, usa TLS obligatorio y respaldo con la retención del entorno",
+    "infra/aws/test/platform.test.ts::todos los buckets rechazan el tráfico sin TLS y no existe ninguna política de lectura pública",
+    "infra/aws/lib/platform-stack.ts; infra/aws/lib/app-stack.ts; infra/aws/lib/config/environments.ts"
+   ],
+   "note": "La conexión del backend a RDS usa `DB_SSLMODE=require` en la plantilla."
+  },
+  {
+   "id": "V25-SEC-047",
+   "status": "PARCIAL",
+   "gap": "Con W4 se cubren la publicación y la aprobación de modelos entre empresas (A no ve, aprueba, revierte ni sirve modelos de B; un trabajo del motor de A no carga artefactos ni cachés de B, ni con una fila envenenada), los objetos del almacén y la caché de modelos; sigue sin cubrirse una celda por superficie en una única suite, las colas reales de Redis o SQS, la concurrencia de trabajos, los registros de plataforma, las URLs prefirmadas (no existen) y los respaldos.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_a_job_of_company_a_never_loads_artifacts_or_caches_of_company_b",
+    "engine/tests/integration/test_mlops_integration.py::test_a_registry_row_of_a_pointing_at_the_artifacts_of_b_is_refused",
+    "engine/tests/integration/test_mlops_integration.py::test_an_approved_published_model_of_b_cannot_be_served_to_a_even_if_a_row_claims_it",
+    "engine/tests/unit/test_mlops_serving.py::test_a_key_of_another_company_is_rejected_before_the_store_is_touched",
+    "engine/tests/unit/test_mlops_serving.py::test_two_companies_never_share_cache_entries_even_with_the_same_version_and_content",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_the_approver_must_be_a_user_of_the_company_and_other_companies_cannot_decide",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_customer_rollback_is_isolated_between_companies_in_registry_and_events",
+    "backend/tests/Feature/Models/RollbackApprovalPolicyTest.php::test_demand_rollback_is_isolated_between_companies",
+    "backend/tests/Feature/Models/UsageSnapshotCommandTest.php::test_it_records_bronze_and_artifact_bytes_per_company_without_mixing_companies"
+   ],
+   "note": "Las pruebas de W4 son secuenciales."
+  },
+  {
+   "id": "V25-REG-070",
+   "status": "BLOQUEADO",
+   "gap": "Requiere cuenta AWS, S3 y ECS reales y credenciales del propietario para publicar el modelo aprobado a AWS y servirlo por empresa desde allí. Lo construible localmente está hecho y probado por tramos: CLI (entrenar, empaquetar, firmar, verificar, publicar como candidato), almacén de objetos local y emulador de S3, estado `approved` con aprobación separada y firma verificada, serving del motor solo de lo aprobado desde el almacén, reversión y comparación; no hay una prueba automática de punta a punta que una la CLI con el backend (la lectura cruzada se hizo a mano) ni el escenario en staging con S3 real.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_publish_meets_the_registry_publication_contract",
+    "engine/tests/integration/test_mlops_integration.py::test_a_published_model_approved_by_someone_else_is_served_from_the_object_store",
+    "engine/tests/integration/test_mlops_integration.py::test_rollback_only_prints_the_backend_instruction_and_changes_nothing",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_approval_requires_a_verified_signature_and_never_accepts_the_unsigned_legacy_flag",
+    "backend/tests/Feature/Models/ModelApprovalApiTest.php::test_promote_puts_the_approved_model_in_production_and_retires_the_previous_one_of_its_slot_only",
+    "backend/tests/Feature/Models/ModelRegistryApiTest.php::test_the_signature_of_a_published_object_is_verified_from_the_object_store",
+    "docs/ml/PRIVATE_TENANT_TRAINING.md; docs/operations/AWS_DEPLOYMENT.md"
+   ],
+   "note": "Los E2E 32/32 y 256/256 de la integración de W4 se ejecutaron con la demo, no con un modelo publicado."
+  },
+  {
+   "id": "V25-AWS-029",
+   "status": "BLOQUEADO",
+   "gap": "Requiere cuenta AWS y la autorización del propietario (credenciales, presupuesto) para el plan y apply a un staging, y su registro de salida. Lo construible hoy está hecho: el proyecto CDK, `cdk synth` de ambos entornos con cdk-nag y pruebas de plantilla con datos ficticios, las entradas del propietario validadas (se informan todas las que faltan) y la guía exacta de bootstrap, despliegue y reversión de `AWS_DEPLOYMENT.md`; no se ejecutó `cdk diff` ni `cdk deploy`.",
+   "evidence": [
+    "infra/aws/test/config.test.ts::informa TODOS los datos que faltan, no solo el primero",
+    "infra/aws/test/config.test.ts::los valores ficticios usan la cuenta 111111111111, dominios example.com y están marcados como ficticios",
+    "infra/aws/test/nag.test.ts::la síntesis completa con cdk-nag activo no produce hallazgos (los reconocidos están justificados abajo)",
+    "docs/operations/AWS_DEPLOYMENT.md; infra/aws/owner-inputs.example.json"
+   ],
+   "note": "El despliegue paso a paso (primero staging) está escrito con su estado por paso."
+  },
+  {
+   "id": "V25-ONB-006",
+   "status": "BLOQUEADO",
+   "gap": "Requiere cuenta AWS, presupuesto y credenciales del propietario (V25-UPL-014, V25-AWS-029). Lo construible localmente está hecho: el almacén de objetos con controlador local y emulador de S3, la publicación firmada de artefactos como candidato y el serving del modelo aprobado por empresa desde ese almacén; la carga real, el cifrado en S3 y la inferencia en AWS no se ejercieron.",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_publish_meets_the_registry_publication_contract",
+    "engine/tests/integration/test_mlops_integration.py::test_a_published_model_approved_by_someone_else_is_served_from_the_object_store",
+    "engine/tests/unit/test_object_store.py::test_model_keys_are_generated_by_the_server_with_the_tenant_prefix",
+    "docs/ml/PRIVATE_TENANT_TRAINING.md"
+   ],
+   "note": "Con `ENGINE_OBJECT_STORE_DRIVER=s3` apuntando a un emulador el flujo publicó 16 objetos bajo el prefijo de la empresa (verificación manual, no una prueba automática)."
+  },
+  {
+   "id": "V25-REG-057",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_object_store.py::test_model_keys_are_generated_by_the_server_with_the_tenant_prefix",
+    "engine/tests/unit/test_object_store.py::test_a_key_is_never_derived_from_unsafe_input",
+    "engine/tests/integration/test_mlops_integration.py::test_server_generated_keys_never_leave_the_companys_prefix",
+    "engine/predictily_engine/platform/object_store.py"
+   ],
+   "note": "Además de lo registrado antes, las claves de los modelos publicados las genera el servidor con el prefijo de la empresa y no se derivan de ninguna ruta ni nombre que entregue el cliente."
+  },
+  {
+   "id": "V25-REG-065",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_mlops_integration.py::test_a_refused_production_model_is_reported_as_model_not_approved_in_the_run",
+    "engine/tests/integration/test_mlops_integration.py::test_a_failing_object_store_never_stops_a_customer_run",
+    "engine/tests/unit/test_mlops_serving.py::test_a_store_failure_is_a_rejection_not_a_crash",
+    "engine/tests/unit/test_mlops_serving.py::test_horizon_support_names_the_refusal_honestly",
+    "engine/predictily_engine/mlops/serving.py; engine/predictily_engine/mlops/policy.py; engine/predictily_engine/customer/service.py"
+   ],
+   "note": "Además de lo registrado antes, un modelo en producción no aprobado, un objeto del almacén ilegible o una clave ajena degradan solo ese modelo: se sirve la referencia validada marcada como respaldo o el horizonte se abstiene con un motivo estable, sin rutas del servidor y sin detener la corrida."
+  }
+ ]
+}

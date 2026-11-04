@@ -19,6 +19,24 @@ from predictily_engine.inventory.recommendations import resolve_lead_time
 from predictily_engine.supply.availability import to_date
 from predictily_engine.supply.balance import build_receipts, lead_time_evidence, receipts_by_period
 from predictily_engine.supply.fx import FxRates
+from predictily_engine.supply.perishability import (
+    ASSUMPTIONS as PERISHABILITY_ASSUMPTIONS,
+)
+from predictily_engine.supply.perishability import (
+    NodePerishability,
+    PerishabilityConfig,
+    apply_to_opening,
+    assess_node,
+    compute_shelf_cap,
+    series_lots_index,
+)
+from predictily_engine.supply.position import (
+    adjustments_after_snapshot,
+    committed_by_period,
+    net_daily,
+    reconcile_demand,
+    stock_validity,
+)
 from predictily_engine.supply.model import (
     EPS,
     BudgetSpec,
@@ -36,6 +54,7 @@ from predictily_engine.supply.offers import (
 )
 from predictily_engine.supply.planner import prepare_problem
 from predictily_engine.supply.units import UnitConversions, norm_unit
+from predictily_engine.supply.verify import _simulate_node
 
 
 class PlanInputError(ValueError):
@@ -68,6 +87,15 @@ class PlanInputs:
     recipes: pd.DataFrame = field(default_factory=pd.DataFrame)
     recipe_lines: pd.DataFrame = field(default_factory=pd.DataFrame)
     safety_stock: pd.DataFrame | None = None  # branch_id, product_id, safety_stock, uncertainty
+    # W5-D: perecibilidad, lotes, cuantiles persistidos, ajustes y compromisos (vacíos = conducta anterior a W5-D)
+    perishability: pd.DataFrame = field(default_factory=lambda: _empty(["product_id", "is_perishable", "shelf_life_days"]))
+    lots: pd.DataFrame = field(default_factory=pd.DataFrame)                # fotos de lotes ≤ corte (branch_id, product_id, lot_code, snapshot_date, expiry_date, quantity)
+    forecast_bands: pd.DataFrame = field(default_factory=pd.DataFrame)      # branch_id, product_id, ds, lo_80, hi_80 (ya persistidos)
+    adjustments: pd.DataFrame = field(default_factory=pd.DataFrame)         # branch_id, product_id, occurred_on, quantity, reference
+    commitments: pd.DataFrame = field(default_factory=pd.DataFrame)         # pedidos confirmados del horizonte (supply.position.committed_lines_by_series)
+    commitments_summary: dict[str, Any] = field(default_factory=dict)
+    replenishment_policy: pd.DataFrame | None = None                         # política de la etapa 1 por serie (stock de seguridad, punto de reorden)
+    retro_notes: list[str] = field(default_factory=list)                     # avisos de insumos corregidos por ser un corte pasado (se agregan a las limitaciones)
     cost_by_product: dict[int, dict] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
     options: dict[str, Any] = field(default_factory=dict)
@@ -177,6 +205,26 @@ def build_problem(inp: PlanInputs) -> tuple[PlanProblem, dict[str, Any]]:
     if inp.open_pos is not None and not inp.open_pos.empty:
         orders_by_series = {(int(b), int(p)): g for (b, p), g in inp.open_pos.groupby(["branch_id", "product_id"])}
 
+    # ── W5-D · perecibilidad, lotes, compromisos, ajustes y validez del stock ──
+    pcfg = PerishabilityConfig.from_cfg(lambda k, d=None: _cfg(inp, k, d))
+    perish_idx: dict[int, tuple[bool, int | None]] = {}
+    if pcfg.enabled and inp.perishability is not None and not inp.perishability.empty:
+        for r in inp.perishability.itertuples(index=False):
+            perish_idx[int(r.product_id)] = (bool(r.is_perishable), None if pd.isna(r.shelf_life_days) else int(r.shelf_life_days))
+    lots_idx = series_lots_index(inp.lots, as_of) if pcfg.enabled else {}
+    bands_idx: dict[tuple[int, int], pd.DataFrame] = {}
+    if pcfg.enabled and inp.forecast_bands is not None and not inp.forecast_bands.empty:
+        bands_idx = {(int(b_), int(p_)): g_ for (b_, p_), g_ in inp.forecast_bands.assign(ds=pd.to_datetime(inp.forecast_bands["ds"]).dt.date).groupby(["branch_id", "product_id"])}
+    commit_mode = str(_cfg(inp, "commitments_mode", "reconcile"))
+    adjust_mode = str(_cfg(inp, "adjustments_mode", "apply"))
+    stale_days = int(_cfg(inp, "inventory_stale_days", 30))
+    perish_nodes: dict[tuple[int, int], NodePerishability] = {}
+    position_rows: list[dict[str, Any]] = []
+    validity_counts = {"over_reserved": 0, "over_reserved_qty": 0.0, "negative_physical": 0, "negative_qty": 0.0, "snapshot_stale": 0}
+    commit_counts = {"series": 0, "committed_qty": 0.0, "residual_qty": 0.0, "double_count_avoided_qty": 0.0, "committed_above_forecast_qty": 0.0,
+                     "reserved_backed_qty": 0.0, "reserved_without_commitment_series": 0}
+    adjust_counts = {"series": 0, "quantity": 0.0}
+
     for key in keys:
         b, p = key
         g = fc[(fc["branch_id"] == b) & (fc["product_id"] == p)].sort_values("ds")
@@ -189,7 +237,7 @@ def build_problem(inp: PlanInputs) -> tuple[PlanProblem, dict[str, Any]]:
         if isinstance(snap, pd.DataFrame):
             snap = snap.iloc[-1]
         on_hand, reserved = float(snap["on_hand"]), float(snap.get("reserved") or 0.0)
-        physical = max(on_hand - reserved, 0.0)
+        snap_date = to_date(snap["ds"]) if "ds" in snap.index else None
         # días de pronóstico contiguos desde as_of + 1
         days = (pd.to_datetime(g["ds"]) - pd.Timestamp(as_of)).dt.days.to_numpy()
         yhat = np.clip(np.nan_to_num(g["yhat"].to_numpy(dtype=float), nan=0.0), 0, None)
@@ -208,6 +256,43 @@ def build_problem(inp: PlanInputs) -> tuple[PlanProblem, dict[str, Any]]:
             continue
         n_periods = max(n_periods, 1)
         demand = yhat[: n_periods * R].reshape(n_periods, R).sum(axis=1)
+        # ── Posición de la serie (W5-D): ajustes posteriores al snapshot, compromisos sin doble conteo y validez del físico ──
+        validity = stock_validity(on_hand, reserved, snap_date, as_of, stale_days)
+        adj_qty, adj_detail = (0.0, []) if adjust_mode != "apply" else adjustments_after_snapshot(inp.adjustments, b, p, snap_date, as_of)
+        on_hand_eff = on_hand + adj_qty
+        held_back = reserved
+        backed = 0.0
+        committed = committed_by_period(inp.commitments, b, p, as_of, R, n_periods) if commit_mode == "reconcile" else np.zeros(n_periods)
+        rec = None
+        if float(committed.sum()) > EPS:
+            rec = reconcile_demand(demand, committed)
+            backed = min(reserved, float(committed.sum()))
+            held_back = reserved - backed        # el reservado que respalda pedidos del horizonte ya sale como demanda: no se descuenta dos veces
+            demand = rec["net"]
+        physical = max(on_hand_eff - held_back, 0.0)
+        # ── Perecibilidad (W5-D): lotes con vencimiento (FEFO) y vida útil; sin ninguno de los dos, la serie se planifica como antes ──
+        is_per, shelf = perish_idx.get(p, (False, None))
+        perish = None
+        expired_on_shelf = expected_loss = 0.0
+        if pcfg.enabled and (key in lots_idx or is_per):
+            band = bands_idx.get(key)
+            daily_low = daily_high = None
+            if band is not None:
+                bm = band.set_index("ds").reindex([d_.date() if hasattr(d_, "date") else d_ for d_ in g["ds"].iloc[:covered]])
+                lo_v, hi_v = bm["lo_80"].to_numpy(dtype=float), bm["hi_80"].to_numpy(dtype=float)
+                daily_low = np.clip(np.nan_to_num(lo_v, nan=np.nan), 0, None) if not np.isnan(lo_v).any() else None
+                daily_high = hi_v if not np.isnan(hi_v).any() else None
+            daily_yhat = yhat[:covered]
+            if rec is not None:        # la merma y el tope usan la demanda NETA de pedidos confirmados, no el pronóstico crudo
+                daily_yhat = net_daily(daily_yhat, committed, R)
+                daily_low = None if daily_low is None else net_daily(daily_low, committed, R)
+                daily_high = None if daily_high is None else net_daily(daily_high, committed, R)
+            perish = assess_node(cfg=pcfg, is_perishable=is_per, shelf_life_days=shelf, series_lots=lots_idx.get(key), on_hand=max(on_hand_eff, 0.0),
+                                 held_back=held_back, as_of=as_of, inventory_date=snap_date, daily_yhat=daily_yhat, daily_low=daily_low, daily_high=daily_high)
+            if perish.applies and perish.lots is not None and perish.lots.status == "configured":
+                expired_on_shelf, expected_loss = perish.lots.expired_qty, perish.expected_loss
+                physical, _removed = apply_to_opening(physical, perish)
+            perish_nodes[key] = perish
         lt_days, _lt_std, _src = resolve_lead_time(p, b, inp.lead_times, inp.suppliers, default_lead)
         receipts, rinfo = build_receipts(orders_by_series.get(key), float(snap.get("in_transit") or 0.0), lt_days,
                                          as_of, undated_policy, overdue_policy, observed)
@@ -264,6 +349,44 @@ def build_problem(inp: PlanInputs) -> tuple[PlanProblem, dict[str, Any]]:
                   "physical_available": physical, "on_hand": on_hand, "reserved": reserved,
                   "receipts": [(r.day, r.qty, r.status) for r in receipts],
                   "receipts_info": rinfo, "lead_time_days": lt_days}))
+        node = nodes[-1]
+        if validity["over_reserved"]:
+            validity_counts["over_reserved"] += 1
+            validity_counts["over_reserved_qty"] += validity["over_reserved_qty"]
+        if validity["negative_physical"]:
+            validity_counts["negative_physical"] += 1
+            validity_counts["negative_qty"] += validity["negative_qty"]
+        if validity["snapshot_stale"]:
+            validity_counts["snapshot_stale"] += 1
+        if adj_detail:
+            adjust_counts["series"] += 1
+            adjust_counts["quantity"] += adj_qty
+        if rec is not None:
+            commit_counts["series"] += 1
+            commit_counts["committed_qty"] += float(committed.sum())
+            commit_counts["residual_qty"] += float(rec["residual"].sum())
+            commit_counts["double_count_avoided_qty"] += rec["double_count_avoided"]
+            commit_counts["committed_above_forecast_qty"] += float(rec["committed_above_forecast"].sum())
+            commit_counts["reserved_backed_qty"] += backed
+        elif commit_mode == "reconcile" and reserved > EPS:
+            commit_counts["reserved_without_commitment_series"] += 1
+        if perish is not None and perish.applies:
+            zeros = np.zeros(node.horizon)
+            floor_res = _simulate_node(node, zeros, zeros, zeros, 10 ** 9, [])
+            compute_shelf_cap(perish, pcfg, R, node.horizon, floor_res.inventory, floor_res.peak)
+            node.shelf_cap = perish.shelf_cap
+            node.avail_cap = perish.avail_cap
+            node.meta["perishability"] = perish.summary()
+        if validity["over_reserved"] or validity["negative_physical"] or validity["snapshot_stale"] or adj_detail or rec is not None or (perish is not None and perish.applies):
+            node.meta["position"] = {
+                "on_hand": on_hand, "adjustments_after_snapshot": adj_qty, "adjustments": adj_detail[:20], "physical_valid": max(on_hand_eff, 0.0),
+                "reserved": reserved, "reserved_held_back": held_back, "available": physical,
+                "expired_on_shelf": expired_on_shelf, "expected_expiry_loss": expected_loss,
+                "committed": None if rec is None else [round(float(x), 4) for x in rec["committed"]],
+                "residual_probabilistic": None if rec is None else [round(float(x), 4) for x in rec["residual"]],
+                "validity": validity}
+            position_rows.append({"branch_id": b, "product_id": p, **{k: v for k, v in node.meta["position"].items() if k not in ("adjustments", "validity")},
+                                  "flags": [k for k in ("over_reserved", "negative_physical", "snapshot_stale") if validity[k]]})
 
     # ── Producción genérica (recetas de un nivel) ──
     recipes, resources, prod_notes, prod_status = _build_production(inp, nodes, R, as_of, assumptions, limitations,
@@ -298,6 +421,12 @@ def build_problem(inp: PlanInputs) -> tuple[PlanProblem, dict[str, Any]]:
     limitations += cap_notes + prod_notes
     if inp.retroactive:
         limitations.append("Ejecución retroactiva: solo ofertas, tasas y datos con disponibilidad conocida al corte.")
+    limitations += list(inp.retro_notes)
+    availability_report, perishability_report = _position_report(
+        inp, pcfg, perish_nodes, position_rows, validity_counts, commit_counts, adjust_counts, commit_mode, adjust_mode, stale_days,
+        assumptions, limitations, nodes)
+    problem.meta["perishability_nodes"] = perish_nodes
+    problem.meta["perishability_config"] = {"receipt_life_fraction": pcfg.receipt_life_fraction, "enforce_shelf_cap": pcfg.enforce_shelf_cap}
 
     comp = comparison_coverage(offer_report, product_ids_demand)
     diagnostics = []
@@ -323,8 +452,86 @@ def build_problem(inp: PlanInputs) -> tuple[PlanProblem, dict[str, Any]]:
         "fx_excluded_unknown_availability": getattr(fx, "excluded_unknown_availability", 0),
         "lead_time_evidence": lead_ev.to_dict("records") if not lead_ev.empty else [],
         "period_days": R, "horizon_periods": problem.n_periods,
+        "availability": availability_report, "perishability": perishability_report,
+        "stock_validity_issues": [k for k in ("over_reserved", "negative_physical", "snapshot_stale") if validity_counts[k]],
+        "perishability_issues": ["shelf_life_shorter_than_period"] if perishability_report["series_with_shelf_life_shorter_than_period"] else [],
     }
     return problem, report
+
+
+def _position_report(inp, pcfg, perish_nodes, position_rows, validity_counts, commit_counts, adjust_counts, commit_mode, adjust_mode, stale_days,
+                     assumptions, limitations, nodes) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Informe de la posición de inventario (disponible, comprometido, ajustes, validez) y de la perecibilidad del plan; agrega los supuestos y
+    limitaciones que correspondan. Sin datos de W5-D en el insumo el informe es mínimo y no agrega texto (conducta anterior)."""
+    summary = inp.commitments_summary or {}
+    if validity_counts["over_reserved"]:
+        limitations.append(
+            f"Sobrerreserva: {validity_counts['over_reserved']} serie(s) con reservado mayor que la existencia física ({validity_counts['over_reserved_qty']:g} u. "
+            "en total sin cobertura). La existencia utilizable se acota en 0 (nunca negativa) y esos compromisos sin cobertura se declaran aquí; "
+            "la calidad del plan baja a «degradada».")
+    if validity_counts["negative_physical"]:
+        limitations.append(
+            f"Existencia física negativa en {validity_counts['negative_physical']} serie(s) ({validity_counts['negative_qty']:g} u.): se interpreta como "
+            "quiebre y la existencia utilizable se acota en 0; el dato se declara, no se acepta como válido.")
+    if validity_counts["snapshot_stale"]:
+        limitations.append(
+            f"Snapshot de existencias obsoleto en {validity_counts['snapshot_stale']} serie(s) (más de {stale_days} días antes del corte): las ventas y recepciones "
+            "posteriores al snapshot no están descontadas ni sumadas.")
+    if commit_counts["series"]:
+        assumptions.append(
+            "Pedidos confirmados: dentro del pronóstico, no sumados. Demanda neta por período = max(pronóstico, comprometido) = comprometido + residual "
+            "probabilístico; lo reservado que respalda pedidos del horizonte no se descuenta de la existencia (ya sale como demanda); ninguna predicción reserva stock.")
+        if commit_counts["committed_above_forecast_qty"] > EPS:
+            limitations.append(f"{commit_counts['committed_above_forecast_qty']:g} u. comprometidas superan el pronóstico del período: se planifican como demanda firme.")
+    if commit_counts["reserved_without_commitment_series"] and commit_mode == "reconcile":
+        assumptions.append(
+            f"Reservado sin pedidos confirmados que lo respalden ({commit_counts['reserved_without_commitment_series']} serie(s)): se descuenta de la existencia "
+            "(regla anterior) y la demanda pronosticada puede incluir esos pedidos; sin pedidos cargados no se puede verificar el solapamiento.")
+    if summary.get("unattributed_quantity", 0) > EPS:
+        limitations.append(f"{summary['unattributed_quantity']:g} u. comprometidas sin sucursal atribuible no se descuentan de ninguna serie.")
+    if adjust_counts["series"]:
+        assumptions.append(f"Ajustes de inventario posteriores al snapshot ({adjust_counts['series']} serie(s), {adjust_counts['quantity']:+g} u.): componente separado de las "
+                           "ventas; ajustan la existencia física y no alteran la demanda ni el pronóstico.")
+    applied = [n for n in perish_nodes.values() if n.applies]
+    unq = [n for n in perish_nodes.values() if n.status == "perishable_unquantified"]
+    if applied:
+        assumptions.extend(PERISHABILITY_ASSUMPTIONS)
+    if unq:
+        limitations.append(f"{len(unq)} producto(s) perecible(s) sin vida útil declarada ni lotes con vencimiento: se planifican como durables, sin proyectar vencimientos (no se inventan).")
+    stale = [n for n in perish_nodes.values() if n.lots is not None and n.lots.status == "stale_ignored"]
+    if stale:
+        limitations.append(f"{len(stale)} serie(s) con lotes ignorados por obsoletos (foto de lotes más de {pcfg.lots_max_age_days} días anterior al snapshot de existencias).")
+    expired = sum(n.lots.expired_qty for n in applied if n.lots is not None and n.lots.status == "configured")
+    if expired > EPS:
+        limitations.append(f"{expired:g} u. ya vencidas al corte (en el estante): excluidas de la existencia utilizable.")
+    shorter = [n for n in applied if n.shorter_than_period and n.avail_cap is not None]
+    if shorter:
+        limitations.append(
+            f"{len(shorter)} serie(s) con vida útil menor que el período de revisión: el plan por períodos solo puede cubrir los primeros días de cada período (los que "
+            "se venden antes de vencer) y la demanda restante se declara sin atender por vida útil (`shelf_life`); la calidad baja a «degradada». Acorte el período de "
+            "revisión a un valor ≤ la vida útil para planificar estos productos.")
+    capped = [n for n in applied if n.shelf_cap is not None]
+    if capped:
+        limitations.append("Tope por vida útil: el stock al cierre de cada período se limita a lo vendible dentro de la vida útil solo en los períodos cuya ventana está "
+                           "cubierta por el pronóstico (no se extrapola la demanda).")
+    rows = sorted(position_rows, key=lambda r: (-len(r["flags"]), r["branch_id"], r["product_id"]))
+    availability = {
+        "components": ["on_hand", "adjustments_after_snapshot", "reserved", "available", "committed", "residual_probabilistic", "expired_on_shelf", "expected_expiry_loss"],
+        "rule": "disponible = (existencia física + ajustes posteriores al snapshot) − reservado no respaldado por pedidos; comprometido y residual probabilístico = demanda neta sin doble conteo",
+        "commitments_mode": commit_mode, "adjustments_mode": adjust_mode, "validity": validity_counts, "commitments": {**commit_counts, **{k: v for k, v in summary.items() if k != "excluded"},
+                                                                                                                   "excluded": summary.get("excluded", {})},
+        "adjustments": adjust_counts, "series": rows[:200], "series_total": len(rows)}
+    perishability = {
+        "enabled": pcfg.enabled, "series_assessed": len(perish_nodes), "series_with_effect": len(applied),
+        "by_status": {st: sum(1 for n in perish_nodes.values() if n.status == st) for st in sorted({n.status for n in perish_nodes.values()})},
+        "series_with_lots": sum(1 for n in applied if n.lots is not None and n.lots.status == "configured"),
+        "series_with_shelf_cap": len(capped), "series_with_shelf_life_shorter_than_period": len(shorter), "expired_on_shelf_units": round(float(expired), 4),
+        "expected_expiry_loss_units": round(float(sum(n.expected_loss for n in applied)), 4),
+        "low_demand_expiry_loss_units": round(float(sum(n.low_demand_loss for n in applied if n.low_demand_loss is not None)), 4)
+        if any(n.low_demand_loss is not None for n in applied) else None,
+        "treated_as_durable_units": len(unq), "assumptions": list(PERISHABILITY_ASSUMPTIONS) if applied else [],
+        "series": [{"branch_id": k[0], "product_id": k[1], **n.summary()} for k, n in sorted(perish_nodes.items()) if n.applies][:200]}
+    return availability, perishability
 
 
 def _num(v) -> float | None:

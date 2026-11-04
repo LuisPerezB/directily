@@ -1,0 +1,137 @@
+{
+ "meta": {
+  "schema": "w2-demo-metrics-v1",
+  "captured": "2026-11-01",
+  "datos": "FICTICIOS (empresas demo). Ninguna cifra es evidencia de precisión con datos reales.",
+  "codigo": "fbb1739 (W2 integrado) en el stack local",
+  "linea_base": "docs/roadmap/audit/2026-10-31/baseline_metrics.json; W1: docs/roadmap/evidence/2026-11-01-w1-integration/demo_metrics.json"
+ },
+ "demanda": [
+  {
+   "run": 27,
+   "empresa": "Ferretería Andina (Demo ficticia)",
+   "corte": "2026-10-26",
+   "holdout": {
+    "selected_wape": 0.4905233103480021,
+    "baseline_wape": 0.6603794110066593,
+    "coverage_80": 0.8521428571428571,
+    "coverage_95": 0.9785714285714285,
+    "selected_bias": -0.03538860001771411
+   },
+   "n_obs": 15400,
+   "quality_gate": {
+    "outcome": "PASS",
+    "report_id": 271
+   },
+   "series_days": {
+    "sale": 80677,
+    "closed": 0,
+    "missing_source": 1097,
+    "zero_confirmed": 43222,
+    "stockout_censored": 8323
+   }
+  },
+  {
+   "run": 28,
+   "empresa": "Distribuidora Costa (Demo ficticia)",
+   "corte": "2026-10-26",
+   "holdout": {
+    "selected_wape": 0.4488488430143674,
+    "baseline_wape": 0.5982548511340418,
+    "coverage_80": 0.8027814765497855,
+    "coverage_95": 0.9517680130196775,
+    "selected_bias": 0.006098070695952983
+   },
+   "n_obs": 6759,
+   "quality_gate": {
+    "outcome": "PASS",
+    "report_id": 274
+   },
+   "series_days": {
+    "sale": 28658,
+    "closed": 0,
+    "missing_source": 280,
+    "zero_confirmed": 5726,
+    "stockout_censored": 1817
+   }
+  }
+ ],
+ "customer_core": [
+  {
+   "tenant_id": 20,
+   "name": "Ferretería Andina (Demo ficticia)",
+   "status": "completed",
+   "quality_status": "degraded",
+   "promoted": [
+    "h7:probability:reference",
+    "h7:quantity:poisson",
+    "h14:probability:reference",
+    "h14:quantity:gamma",
+    "h30:probability:reference",
+    "h30:quantity:gamma",
+    "h90:probability:logistic",
+    "h90:quantity:gamma"
+   ],
+   "per_h": {
+    "7": {
+     "served": "reference",
+     "brier": 0.01488,
+     "pr_auc": 0.01454
+    },
+    "14": {
+     "served": "reference",
+     "brier": 0.02858,
+     "pr_auc": 0.02917
+    },
+    "30": {
+     "served": "reference",
+     "brier": 0.05827,
+     "pr_auc": 0.06217
+    },
+    "90": {
+     "served": "logistic",
+     "brier": 0.1383,
+     "pr_auc": 0.23645
+    }
+   }
+  },
+  {
+   "tenant_id": 21,
+   "name": "Distribuidora Costa (Demo ficticia)",
+   "status": "completed",
+   "quality_status": "degraded",
+   "promoted": [
+    "h7:probability:reference",
+    "h7:quantity:poisson",
+    "h14:probability:reference",
+    "h14:quantity:tweedie",
+    "h30:probability:reference",
+    "h30:quantity:gamma",
+    "h90:probability:reference",
+    "h90:quantity:reference"
+   ],
+   "per_h": {
+    "7": {
+     "served": "reference",
+     "brier": 0.02321,
+     "pr_auc": 0.02414
+    },
+    "14": {
+     "served": "reference",
+     "brier": 0.04425,
+     "pr_auc": 0.04768
+    },
+    "30": {
+     "served": "reference",
+     "brier": 0.08766,
+     "pr_auc": 0.09918
+    },
+    "90": {
+     "served": "reference",
+     "brier": 0.1926,
+     "pr_auc": 0.26976
+    }
+   }
+  }
+ ]
+}

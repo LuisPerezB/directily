@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import LoadingState from '@/components/ui/LoadingState.vue'
 import { useUiStore } from '@/stores/ui'
 import { useTenantStore } from '@/stores/tenant'
 import { useCatalogStore } from '@/stores/catalog'
@@ -41,7 +42,9 @@ watch(() => route.fullPath, () => (ui.mobileNavOpen = false))
         <div v-if="tenant.tenant?.status && tenant.tenant.status !== 'active'" class="mb-4 rounded-xl bg-warning-soft text-warning px-4 py-3 text-sm">
           {{ t('layout.tenantInactive') }}
         </div>
-        <RouterView />
+        <!-- Al cambiar de empresa la vista se remonta, ya con la empresa nueva cargada: ningún dato, filtro ni detalle de la anterior queda bajo el nombre, la moneda o los permisos de la nueva (V25-UIX-019). -->
+        <LoadingState v-if="tenant.loading && !tenant.tenant" />
+        <RouterView v-else :key="tenant.tenant?.uuid ?? tenant.currentUuid ?? 'sin-empresa'" />
       </main>
     </div>
   </div>

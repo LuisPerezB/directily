@@ -20,6 +20,7 @@ use App\Services\Connectors\Sql\SqlServerDialect;
 use App\Services\Connectors\Sql\SqlSourceConnection;
 use Illuminate\Validation\ValidationException;
 use PDO;
+use Tests\Feature\DataCore\Support\ErpSourceDatabase;
 use Tests\TestCase;
 
 /**
@@ -130,8 +131,11 @@ final class SqlConnectorContractTest extends TestCase
         $settings = new SqlConnectionSettings(getenv('TEST_ERP_HOST') ?: '127.0.0.1', (int) (getenv('TEST_ERP_PORT') ?: 5432), getenv('TEST_ERP_DATABASE') ?: 'predictily_erp_source_p3');
         try {
             $pdo = $dialect->connect($settings, getenv('TEST_ERP_USERNAME') ?: 'predictily', getenv('TEST_ERP_PASSWORD') ?: 'secret');
-        } catch (\Throwable) {
-            $this->markTestSkipped('Sin base «ERP de origen» PostgreSQL de pruebas.');
+        } catch (\Throwable $e) {
+            $this->markTestSkipped(ErpSourceDatabase::skipMessage(
+                'el contrato del conector PostgreSQL contra un servidor real: lectura por páginas, filtro :since y rechazo de escrituras en el propio motor (modo de solo lectura).',
+                $e->getMessage(),
+            ));
         }
         unset($pdo);
         $this->runServerContract($dialect, $settings, getenv('TEST_ERP_USERNAME') ?: 'predictily', getenv('TEST_ERP_PASSWORD') ?: 'secret');

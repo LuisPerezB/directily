@@ -18,6 +18,8 @@ final class PiiMasker
         'password', 'password_confirmation', 'current_password', 'token', 'access_token', 'api_key', 'secret',
         'credentials', 'authorization', 'cookie', 'temporary_password', 'tax_id', 'cedula', 'ruc', 'name_encrypted',
         'credentials_encrypted', 'remember_token',
+        // V2.5 · W6-A: segundo factor. Ni el secreto TOTP, ni los códigos (de verificación o de recuperación), ni el desafío de inicio de sesión se registran jamás.
+        'otp', 'totp', 'totp_code', 'mfa_code', 'recovery_code', 'recovery_codes', 'mfa_secret', 'mfa_secret_encrypted', 'mfa_recovery_codes', 'challenge', 'otpauth_uri',
     ];
 
     public static function mask(string $text): string

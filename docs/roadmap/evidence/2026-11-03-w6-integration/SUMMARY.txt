@@ -1,0 +1,20 @@
+Integración de W6 (plataforma) · rama v25/w1-cierre-y-w2 · 2026-11-03/04 · macOS arm64, PostgreSQL 15, PHP 8.3, Python 3.12
+Paquetes (implementación → revisión adversarial → corrección): W6-E 778622d · W6-A 6b1bd89 · W6-B e7fbc37 · W6-C 5c51090 ·
+W6-D aa82db1 (contrato d46f839; dfa2d88 corrige números de documento repetidos en datos de prueba de W5). Revisiones: W6-A 1 HIGH
++ 5 MEDIUM + 10 LOW; W6-B 13 hallazgos; W6-C 7; W6-D 4 MEDIUM + 6 LOW; W6-E 2 HIGH + 5 MEDIUM + LOW; todo corregido.
+Cada commit probado por separado (copia con vendor propio y base de pruebas propia): A 1798 (1789 aprobadas, 9 omitidas),
+B 2051 (2042, 9 omitidas), C 2214 (2205, 9 omitidas); D = este stack.
+Stack aislado en aa82db1 con vendor propio; base de desarrollo migrada (2026_03_14_000200 … 000500):
+backend  :: {"tests":2583,"passed":2574,"skipped":9}
+engine   :: 1496 passed, 10 skipped
+frontend :: type-check 0 · lint 0 · vitest 749 passed · build OK
+bridge   :: 344 passed (agente Python; con TEST_ERP_ADMIN_USERNAME = rol local con CREATEROLE para la prueba de roles heredados)
+E2E (demo recreada): mvp_acceptance 32/32 · stage2_acceptance 256/256 (1 aviso de diseño, el mismo) ·
+   v25_acceptance 160/160 (nuevo, W6-F: 2+1 empresas, CSV y fuente SQL PostgreSQL ficticia, calidad y cuarentena, entrenamiento
+   con gates, aprobación separada con firma y segundo factor, inferencia, Radar, decisión, outcome, fallo de calidad que bloquea,
+   reversión, MFA, tokens con alcance, vendedor por cartera, Bridge firmado, Gateway, cambio de empresa sin filtraciones;
+   3 avisos: outcome con ventana abierta, asistente sin clave de proveedor, AWS BLOQUEADO).
+Demo (datos ficticios, demo_metrics.json; demo_compare_vs_w5.json): demanda y Customer Core idénticos a W5 en ambas empresas
+   (los factores externos siguen apagados por defecto: paridad exacta).
+AWS, Windows firmado, SQL Server/MySQL reales, ERP reales y datos de piloto: BLOQUEADO. Rutas locales reemplazadas por <repo>,
+<scratchpad> y ~.

@@ -1,0 +1,601 @@
+{
+ "meta": {
+  "schema": "w1-demo-metrics-v1",
+  "captured": "2026-11-01",
+  "datos": "FICTICIOS (empresas demo y datos sintéticos generados con semilla 42). Ninguna cifra es evidencia de precisión con datos reales.",
+  "entorno": "macOS arm64, PostgreSQL 15 (Homebrew), Python 3.12.8; código W1 integrado (commits 11c7086, c44076e, eea5321).",
+  "linea_base": "docs/roadmap/audit/2026-10-31/baseline_metrics.json (Linux, commit 9d593d5 / 78c5029)"
+ },
+ "demanda_bd_demo": {
+  "nota": "Ejecuciones reales por la API/cola sobre la BD de desarrollo tras recrear la demo (backfill). Run 13 = misma empresa y corte con day_status_infer_gaps=false (paridad).",
+  "runs": {
+   "11": {
+    "empresa": "Ferretería Andina (Demo ficticia)",
+    "corte": "2026-10-26",
+    "regla_huecos_inferidos": true,
+    "holdout": {
+     "selected_wape": 0.49077400559708034,
+     "baseline_wape": 0.6603794110066593,
+     "coverage_80": 0.8498701298701299,
+     "coverage_95": 0.9780519480519481,
+     "selected_bias": -0.04029699741171417,
+     "total_selected_wape": 0.09498827465954861,
+     "total_baseline_wape": 0.11367719713252888
+    },
+    "n_obs_holdout": 15400,
+    "series_days": {
+     "sale": 80677,
+     "closed": 0,
+     "missing_source": 1097,
+     "zero_confirmed": 43222,
+     "stockout_censored": 8323
+    },
+    "branch_days": {
+     "closed_declared": 0,
+     "missing_source_declared": 0,
+     "missing_source_engine_inferred": 18,
+     "missing_source_connector_inferred": 0
+    }
+   },
+   "12": {
+    "empresa": "Distribuidora Costa (Demo ficticia)",
+    "corte": "2026-10-26",
+    "regla_huecos_inferidos": true,
+    "holdout": {
+     "selected_wape": 0.4488488430143674,
+     "baseline_wape": 0.5982548511340418,
+     "coverage_80": 0.8027814765497855,
+     "coverage_95": 0.9517680130196775,
+     "selected_bias": 0.006098070695952983,
+     "total_selected_wape": 0.09584697678630558,
+     "total_baseline_wape": 0.13068498194004782
+    },
+    "n_obs_holdout": 6759,
+    "series_days": {
+     "sale": 28658,
+     "closed": 0,
+     "missing_source": 280,
+     "zero_confirmed": 5726,
+     "stockout_censored": 1817
+    },
+    "branch_days": {
+     "closed_declared": 0,
+     "missing_source_declared": 0,
+     "missing_source_engine_inferred": 7,
+     "missing_source_connector_inferred": 0
+    }
+   },
+   "13": {
+    "empresa": "Ferretería Andina (Demo ficticia)",
+    "corte": "2026-10-26",
+    "regla_huecos_inferidos": false,
+    "holdout": {
+     "selected_wape": 0.49336226114958825,
+     "baseline_wape": 0.6630536246695252,
+     "coverage_80": 0.8450640445076982,
+     "coverage_95": 0.9776814594384785,
+     "selected_bias": -0.036871212669202846,
+     "total_selected_wape": 0.09600655532640238,
+     "total_baseline_wape": 0.11635141079539481
+    },
+    "n_obs_holdout": 15458,
+    "series_days": {
+     "sale": 80677,
+     "closed": 0,
+     "missing_source": 0,
+     "zero_confirmed": 44261,
+     "stockout_censored": 8381
+    },
+    "branch_days": {
+     "closed_declared": 0,
+     "missing_source_declared": 0,
+     "missing_source_engine_inferred": 0,
+     "missing_source_connector_inferred": 0
+    }
+   }
+  },
+  "linea_base_linux": {
+   "ferreteria_andina": {
+    "selected_wape": 0.4928,
+    "seasonal_naive_wape": 0.6631,
+    "relative_wape_improvement_vs_seasonal_naive": 0.2567,
+    "selected_bias": -0.0391,
+    "coverage_80": 0.8522,
+    "coverage_95": 0.9778,
+    "total_daily_selected_wape": 0.0966,
+    "total_daily_seasonal_naive_wape": 0.1164
+   },
+   "distribuidora_costa": {
+    "selected_wape": 0.4519,
+    "seasonal_naive_wape": 0.602,
+    "relative_wape_improvement_vs_seasonal_naive": 0.2493,
+    "selected_bias": 0.0011,
+    "coverage_80": 0.8009,
+    "coverage_95": 0.9506,
+    "total_daily_selected_wape": 0.1002,
+    "total_daily_seasonal_naive_wape": 0.1344
+   }
+  }
+ },
+ "paridad_motor_memoria": {
+  "nota": "Mismo equipo, datos sintéticos en memoria (engine/scripts/benchmark_demand_v2.py adaptado): pre = código b975897 (antes de W1); head_off = W1 con la regla inferida apagada; head_on = W1 por defecto.",
+  "resultados": {
+   "pre:ferreteria_andina": {
+    "slug": "ferreteria_andina",
+    "rule_off": false,
+    "seconds": 48.6,
+    "cutoff": "2026-10-26",
+    "headline": {
+     "selected_wape": 0.493119651797364,
+     "baseline_wape": 0.6630536246695252,
+     "coverage_80": 0.8499805925734247,
+     "coverage_95": 0.9752878768275327,
+     "selected_bias": -0.034849079238476355,
+     "total_selected_wape": 0.09515598607869794,
+     "total_baseline_wape": 0.11635141079539481
+    },
+    "n_obs": 15458,
+    "models_by_class": {
+     "pooled": "auto_ets",
+     "smooth": "auto_ets",
+     "erratic": "auto_ets",
+     "intermittent": "lightgbm_global",
+     "lumpy": "auto_ets"
+    },
+    "day_status": null
+   },
+   "pre:distribuidora_costa": {
+    "slug": "distribuidora_costa",
+    "rule_off": false,
+    "seconds": 21.8,
+    "cutoff": "2026-10-26",
+    "headline": {
+     "selected_wape": 0.4521576780564998,
+     "baseline_wape": 0.6019854291732369,
+     "coverage_80": 0.7969692511402089,
+     "coverage_95": 0.9486538178608209,
+     "selected_bias": 0.002618864397411903,
+     "total_selected_wape": 0.10052905230855881,
+     "total_baseline_wape": 0.1344155599792431
+    },
+    "n_obs": 6797,
+    "models_by_class": {
+     "pooled": "lightgbm_global",
+     "smooth": "auto_ets",
+     "erratic": "lightgbm_global",
+     "intermittent": "lightgbm_global",
+     "lumpy": "lightgbm_global"
+    },
+    "day_status": null
+   },
+   "head_off:ferreteria_andina": {
+    "slug": "ferreteria_andina",
+    "rule_off": true,
+    "seconds": 51.3,
+    "cutoff": "2026-10-26",
+    "headline": {
+     "selected_wape": 0.493119651797364,
+     "baseline_wape": 0.6630536246695252,
+     "coverage_80": 0.8499805925734247,
+     "coverage_95": 0.9752878768275327,
+     "selected_bias": -0.034849079238476355,
+     "total_selected_wape": 0.09515598607869794,
+     "total_baseline_wape": 0.11635141079539481
+    },
+    "n_obs": 15458,
+    "models_by_class": {
+     "pooled": "auto_ets",
+     "smooth": "auto_ets",
+     "erratic": "auto_ets",
+     "intermittent": "lightgbm_global",
+     "lumpy": "auto_ets"
+    },
+    "day_status": {
+     "sale": 80677,
+     "zero_confirmed": 44261,
+     "missing_source": 0,
+     "stockout_censored": 8381,
+     "closed": 0
+    }
+   },
+   "head_off:distribuidora_costa": {
+    "slug": "distribuidora_costa",
+    "rule_off": true,
+    "seconds": 20.1,
+    "cutoff": "2026-10-26",
+    "headline": {
+     "selected_wape": 0.4521576780564998,
+     "baseline_wape": 0.6019854291732369,
+     "coverage_80": 0.7969692511402089,
+     "coverage_95": 0.9486538178608209,
+     "selected_bias": 0.002618864397411903,
+     "total_selected_wape": 0.10052905230855881,
+     "total_baseline_wape": 0.1344155599792431
+    },
+    "n_obs": 6797,
+    "models_by_class": {
+     "pooled": "lightgbm_global",
+     "smooth": "auto_ets",
+     "erratic": "lightgbm_global",
+     "intermittent": "lightgbm_global",
+     "lumpy": "lightgbm_global"
+    },
+    "day_status": {
+     "sale": 28658,
+     "zero_confirmed": 5990,
+     "missing_source": 0,
+     "stockout_censored": 1833,
+     "closed": 0
+    }
+   },
+   "head_on:ferreteria_andina": {
+    "slug": "ferreteria_andina",
+    "rule_off": false,
+    "seconds": 51.4,
+    "cutoff": "2026-10-26",
+    "headline": {
+     "selected_wape": 0.49095701246283985,
+     "baseline_wape": 0.6603794110066593,
+     "coverage_80": 0.8481818181818181,
+     "coverage_95": 0.9746753246753247,
+     "selected_bias": -0.03507950077754584,
+     "total_selected_wape": 0.09271609640090289,
+     "total_baseline_wape": 0.11367719713252888
+    },
+    "n_obs": 15400,
+    "models_by_class": {
+     "pooled": "auto_ets",
+     "smooth": "auto_ets",
+     "erratic": "auto_ets",
+     "intermittent": "lightgbm_global"
+    },
+    "day_status": {
+     "sale": 80677,
+     "zero_confirmed": 43222,
+     "missing_source": 1097,
+     "stockout_censored": 8323,
+     "closed": 0
+    }
+   },
+   "head_on:distribuidora_costa": {
+    "slug": "distribuidora_costa",
+    "rule_off": false,
+    "seconds": 18.6,
+    "cutoff": "2026-10-26",
+    "headline": {
+     "selected_wape": 0.4489120379072706,
+     "baseline_wape": 0.5982548511340418,
+     "coverage_80": 0.8032253291907087,
+     "coverage_95": 0.9535434235833703,
+     "selected_bias": 0.007046544942359351,
+     "total_selected_wape": 0.09601136836171927,
+     "total_baseline_wape": 0.13068498194004782
+    },
+    "n_obs": 6759,
+    "models_by_class": {
+     "pooled": "lightgbm_global",
+     "smooth": "auto_ets",
+     "erratic": "lightgbm_global",
+     "intermittent": "lightgbm_global",
+     "lumpy": "lightgbm_global"
+    },
+    "day_status": {
+     "sale": 28658,
+     "zero_confirmed": 5726,
+     "missing_source": 280,
+     "stockout_censored": 1817,
+     "closed": 0
+    }
+   }
+  }
+ },
+ "customer_core_bd_demo": {
+  "nota": "Entrenamiento por la cola tras recrear la demo. Línea base: baseline_metrics.json 7_demo_metrics.customer_core.",
+  "runs": [
+   {
+    "tenant_id": 10,
+    "as_of": "2026-10-26",
+    "status": "completed",
+    "quality_status": "degraded",
+    "h": {
+     "7": {
+      "tier": "full",
+      "reason": null,
+      "status": "trained",
+      "ranking": {
+       "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+       "primary_k": 5,
+       "rule_version": "cust-ranking-v1",
+       "precision_at_k": {
+        "model": 0.0138671875,
+        "recency": 0.0160546875,
+        "popularity": 0.023437500000000003
+       }
+      },
+      "quantity": {
+       "n": 1773,
+       "mae": 2.9779911668994434,
+       "bias": -0.1302285234820192,
+       "served": "poisson",
+       "reference_mae": 3.1463702010630117,
+       "promotion_passed": true
+      },
+      "duration_s": 14.0,
+      "probability": {
+       "ece": 0.0019653458851627732,
+       "role": "fallback",
+       "brier": 0.014877427739768193,
+       "pr_auc": 0.014540344317320661,
+       "served": "reference",
+       "log_loss": 0.07843645536685136,
+       "n_holdout": 117402,
+       "reference_brier": 0.014877427739768193,
+       "promotion_passed": false,
+       "calibration_status": "calibrated",
+       "n_holdout_positive": 1773,
+       "reference_log_loss": 0.07843645536685136
+      },
+      "ranking_source": "popularity",
+      "expected_quantity": {
+       "served_bias": -0.23022057365978554,
+       "reference_bias": -0.23378751367983266
+      }
+     },
+     "30": {
+      "tier": "full",
+      "reason": null,
+      "status": "trained",
+      "ranking": {
+       "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+       "primary_k": 5,
+       "rule_version": "cust-ranking-v1",
+       "precision_at_k": {
+        "model": 0.06383928571428571,
+        "recency": 0.06446428571428572,
+        "popularity": 0.09441964285714285
+       }
+      },
+      "quantity": {
+       "n": 6215,
+       "mae": 3.222560583023649,
+       "bias": -0.11397734518416391,
+       "served": "gamma",
+       "reference_mae": 3.589122492563303,
+       "promotion_passed": true
+      },
+      "duration_s": 13.1,
+      "probability": {
+       "ece": 0.006255907717355367,
+       "role": "fallback",
+       "brier": 0.05827117002712023,
+       "pr_auc": 0.06217296344437323,
+       "served": "reference",
+       "log_loss": 0.23309246565267544,
+       "n_holdout": 100118,
+       "reference_brier": 0.05827117002712023,
+       "promotion_passed": false,
+       "calibration_status": "calibrated",
+       "n_holdout_positive": 6215,
+       "reference_log_loss": 0.23309246565267544
+      },
+      "ranking_source": "popularity",
+      "expected_quantity": {
+       "served_bias": -0.265687361735494,
+       "reference_bias": -0.3115409392842177
+      }
+     },
+     "90": {
+      "tier": "full",
+      "reason": null,
+      "status": "trained",
+      "ranking": {
+       "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+       "primary_k": 5,
+       "rule_version": "cust-ranking-v1",
+       "precision_at_k": {
+        "model": 0.24765625,
+        "recency": 0.17875000000000002,
+        "popularity": 0.25984375000000004
+       }
+      },
+      "quantity": {
+       "n": 10161,
+       "mae": 3.678760526936506,
+       "bias": -0.06284280909520008,
+       "served": "gamma",
+       "reference_mae": 4.55264407985667,
+       "promotion_passed": true
+      },
+      "duration_s": 8.0,
+      "probability": {
+       "ece": 0.006594779116483193,
+       "role": "primary",
+       "brier": 0.13829504839989668,
+       "pr_auc": 0.23644739436156875,
+       "served": "logistic",
+       "log_loss": 0.4431605142780998,
+       "n_holdout": 59221,
+       "reference_brier": 0.1422729147077999,
+       "promotion_passed": true,
+       "calibration_status": "calibrated",
+       "n_holdout_positive": 10161,
+       "reference_log_loss": 0.45887848600970954
+      },
+      "ranking_source": "popularity",
+      "expected_quantity": {
+       "served_bias": -0.03618685051958779,
+       "reference_bias": -0.29979840651458306
+      }
+     }
+    },
+    "promoted": [
+     "h7:probability:reference",
+     "h7:quantity:poisson",
+     "h30:probability:reference",
+     "h30:quantity:gamma",
+     "h90:probability:logistic",
+     "h90:quantity:gamma"
+    ],
+    "dataset": {
+     "n_cutoffs": 46,
+     "rows_total": 609730,
+     "cutoff_last": "2026-10-19",
+     "cutoff_first": "2025-01-27",
+     "min_history_days": 90
+    }
+   },
+   {
+    "tenant_id": 11,
+    "as_of": "2026-10-26",
+    "status": "completed",
+    "quality_status": "degraded",
+    "h": {
+     "7": {
+      "tier": "full",
+      "reason": null,
+      "status": "trained",
+      "ranking": {
+       "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+       "primary_k": 5,
+       "rule_version": "cust-ranking-v1",
+       "precision_at_k": {
+        "model": 0.02502345949327495,
+        "recency": 0.02558648733187363,
+        "popularity": 0.03753518923991242
+       }
+      },
+      "quantity": {
+       "n": 1712,
+       "mae": 3.45836737896939,
+       "bias": -0.060073537104604946,
+       "served": "poisson",
+       "reference_mae": 4.076523370800583,
+       "promotion_passed": true
+      },
+      "duration_s": 9.0,
+      "probability": {
+       "ece": 0.0016932452226468655,
+       "role": "fallback",
+       "brier": 0.023207778759759077,
+       "pr_auc": 0.024141432267590336,
+       "served": "reference",
+       "log_loss": 0.11243414729546937,
+       "n_holdout": 72024,
+       "reference_brier": 0.023207778759759077,
+       "promotion_passed": false,
+       "calibration_status": "calibrated",
+       "n_holdout_positive": 1712,
+       "reference_log_loss": 0.11243414729546937
+      },
+      "ranking_source": "popularity",
+      "expected_quantity": {
+       "served_bias": -0.18463736619305743,
+       "reference_bias": -0.16824649825777824
+      }
+     },
+     "30": {
+      "tier": "full",
+      "reason": null,
+      "status": "trained",
+      "ranking": {
+       "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+       "primary_k": 5,
+       "rule_version": "cust-ranking-v1",
+       "precision_at_k": {
+        "model": 0.10296875000000001,
+        "recency": 0.101171875,
+        "popularity": 0.143671875
+       }
+      },
+      "quantity": {
+       "n": 5479,
+       "mae": 3.688875177452272,
+       "bias": -0.06784342581331868,
+       "served": "gamma",
+       "reference_mae": 4.575361087238042,
+       "promotion_passed": true
+      },
+      "duration_s": 7.6,
+      "probability": {
+       "ece": 0.00820502410085009,
+       "role": "fallback",
+       "brier": 0.08766358240065301,
+       "pr_auc": 0.09917769527813758,
+       "served": "reference",
+       "log_loss": 0.31878730690621865,
+       "n_holdout": 56472,
+       "reference_brier": 0.08766358240065301,
+       "promotion_passed": false,
+       "calibration_status": "calibrated",
+       "n_holdout_positive": 5479,
+       "reference_log_loss": 0.31878730690621865
+      },
+      "ranking_source": "popularity",
+      "expected_quantity": {
+       "served_bias": -0.09679044624442691,
+       "reference_bias": -0.16600381346017057
+      }
+     },
+     "90": {
+      "tier": "reference_only",
+      "reason": null,
+      "status": "reference_only",
+      "ranking": {
+       "reason": "ninguna fuente supera a popularidad por ≥ 5% de precision@5",
+       "primary_k": 5,
+       "rule_version": "cust-ranking-v1",
+       "precision_at_k": {
+        "model": 0.2746761947297901,
+        "recency": 0.26493970522554716,
+        "popularity": 0.3537740062527915
+       }
+      },
+      "quantity": {
+       "n": 26051,
+       "mae": 6.469468328743747,
+       "bias": -0.20519777409069712,
+       "served": "reference",
+       "reference_mae": 6.469468328743747,
+       "promotion_passed": false
+      },
+      "duration_s": 0.4,
+      "probability": {
+       "ece": 0.008868856937841715,
+       "role": "fallback",
+       "brier": 0.19260085728975435,
+       "pr_auc": 0.2697579373375589,
+       "served": "reference",
+       "log_loss": 0.573432085890057,
+       "n_holdout": 99904,
+       "reference_brier": 0.19260085728975435,
+       "promotion_passed": false,
+       "calibration_status": "calibrated",
+       "n_holdout_positive": 26051,
+       "reference_log_loss": 0.573432085890057
+      },
+      "ranking_source": "popularity",
+      "expected_quantity": {
+       "served_bias": -0.23137919806968002,
+       "reference_bias": -0.23137919806968002
+      }
+     }
+    },
+    "promoted": [
+     "h7:probability:reference",
+     "h7:quantity:poisson",
+     "h30:probability:reference",
+     "h30:quantity:gamma",
+     "h90:probability:reference",
+     "h90:quantity:reference"
+    ],
+    "dataset": {
+     "n_cutoffs": 26,
+     "rows_total": 324151,
+     "cutoff_last": "2026-10-19",
+     "cutoff_first": "2025-11-03",
+     "min_history_days": 90
+    }
+   }
+  ]
+ }
+}

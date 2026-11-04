@@ -8,7 +8,8 @@
 - Quiebre de stock (stockout): cierre del día con existencias ≤ 0, o cierre del día
   anterior ≤ 0 (el día empezó sin stock). Solo se marca si existe el snapshot. `stockout` conserva ese significado (inventario).
 - La venta de un día con quiebre, de fuente ausente o de cierre no refleja la demanda (censura / dato ausente). Para lags y
-  modelos estadísticos se imputa de forma conservadora: max(venta, media móvil de 28 días de los días limpios). Esos días se
+  modelos estadísticos se imputa de forma conservadora: max(venta, media móvil de 28 días de los días limpios); en un hueco de
+  fuente ausente o cierre de más de 21 días (la ventana ya no tiene 7 días limpios) se propaga el último nivel disponible. Esos días se
   excluyen de la pérdida de LightGBM, de las métricas y de la proporción de ceros del perfilado; nunca cuentan como cero observado.
 - Clasificación Syntetos-Boylan sobre los últimos 365 días limpios (sin quiebre, fuente ausente ni cierre).
 - El perfil (actividad, clase, elegibilidad) se calcula SIEMPRE con información disponible
@@ -133,9 +134,16 @@ def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog
     # Imputación conservadora de días censurados / excluidos (misma regla para quiebres, fuente ausente y cierres)
     clean = df["units"].where(~censored)
     roll = clean.groupby(df["unique_id"], sort=False).transform(lambda s: s.shift(1).rolling(28, min_periods=7).mean())
-    df["y"] = np.where(censored, np.maximum(df["units"], roll.fillna(df["units"])), df["units"])
-    imputed_excluded = int((excluded & roll.notna().to_numpy()).sum())
-    not_imputable = int((excluded & roll.isna().to_numpy()).sum())
+    # Un hueco de más de 21 días agota la ventana de 28 días (menos de 7 días limpios) y la media móvil queda nula: sin más, el día
+    # excluido quedaba con su valor observado (0) y los modelos estadísticos veían ceros. Los días de fuente ausente o cierre propagan
+    # el último nivel disponible (ffill dentro de la serie); los quiebres conservan la regla de siempre. Solo queda sin imputar lo que no
+    # tiene ningún nivel previo (el hueco abre la serie).
+    level = roll.groupby(df["unique_id"], sort=False).ffill()
+    fill = roll.where(~excluded, level)
+    df["y"] = np.where(censored, np.maximum(df["units"], fill.fillna(df["units"])), df["units"])
+    imputed_excluded = int((excluded & fill.notna().to_numpy()).sum())
+    carried_forward = int((excluded & roll.isna().to_numpy() & fill.notna().to_numpy()).sum())
+    not_imputable = int((excluded & fill.isna().to_numpy()).sum())
 
     # Precio neto unitario observado, propagado hacia adelante
     unit_price = (df["net_amount"] / df["units"]).where(df["units"] > 0)
@@ -148,7 +156,7 @@ def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog
     active_products = set(data.products.loc[data.products["is_active"].astype(bool), "product_id"].astype(int)) \
         if not data.products.empty else set()
     profile = profile_at(df, cutoff, active_products if current_catalog else None)
-    day_summary = summarize_days(df, classification.summary, imputed_excluded, not_imputable)
+    day_summary = summarize_days(df, classification.summary, imputed_excluded, not_imputable, carried_forward)
     return Panel(df.drop(columns=["net_amount"]), profile, cutoff, day_summary)
 
 

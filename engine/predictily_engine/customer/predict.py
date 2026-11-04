@@ -8,6 +8,7 @@ comprometido conocido y banderas de calidad. Más el ranking top-k por comprador
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -19,7 +20,14 @@ from predictily_engine.customer.commitments import committed_by_relation, commit
 from predictily_engine.customer.events import from_day
 from predictily_engine.customer.features import BASE_FEATURES, HORIZON_FEATURES, FeatureBuilder
 from predictily_engine.customer.outputs import RANKING_SOURCES, compute_activity, top_k_products
-from predictily_engine.customer.serving import enforce_nested, enforce_nested_quantity, serve_probability, serve_quantity
+from predictily_engine.customer.s05 import apply_s05, window_table
+from predictily_engine.customer.serving import (enforce_nested, enforce_nested_quantity, rescale_quantity_interval, serve_probability,
+                                                serve_quantity)
+
+
+log = logging.getLogger(__name__)
+S05_COLUMNS = ["expected_orders", "quantity_per_order", "quantity_per_order_lo", "quantity_per_order_hi", "expected_units",
+               "window_p10_days", "window_p50_days", "window_p90_days", "window_status", "segment"]
 
 
 @dataclass
@@ -49,11 +57,22 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
     if base.empty:
         out.summary = summary | {"rows": 0}
         return out
+    # W3-C · S05: la ventana usa a TODOS los candidatos del corte (suavizado jerárquico), antes de excluir productos inactivos.
+    s05_on = bool(cfg.get("s05_enabled", True))
+    s05_error: str | None = None          # S05 agrega salidas: un fallo suyo deja sus columnas nulas (bandera s05_failed) sin tumbar lo servido
+    win_full, win_info = None, {}
+    if s05_on:
+        try:
+            win_full, win_info = window_table(fb, as_of_day, base, artifacts, cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("S05: la ventana falló en la predicción diaria")
+            s05_error = f"{type(exc).__name__}: {exc}"[:300]
     keep = np.ones(len(base), dtype=bool)
     if products_active is not None:
         keep = np.array([products_active.get(int(p), True) for p in base["product_id"]], dtype=bool)
         summary["excluded_inactive_products"] = int((~keep).sum())
     base = base.loc[keep].reset_index(drop=True)
+    win = win_full.loc[keep].reset_index(drop=True) if win_full is not None else None
     for h in horizons:
         cf.horizon[h] = cf.horizon[h].loc[keep].reset_index(drop=True)
     X_base = base[BASE_FEATURES].to_numpy(dtype=np.float32)
@@ -62,16 +81,33 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
     qs: dict[int, np.ndarray] = {}
     los: dict[int, np.ndarray] = {}
     his: dict[int, np.ndarray] = {}
+    X_by_h: dict[int, np.ndarray] = {}
     for h in horizons:
         X = np.concatenate([X_base, cf.horizon[h][HORIZON_FEATURES].to_numpy(dtype=np.float32)], axis=1)
+        X_by_h[h] = X
         ref_p = cf.horizon[h]["ref_p"].to_numpy(dtype=float)
         ref_q = cf.horizon[h]["ref_q"].to_numpy(dtype=float)
         probs[h], raws[h] = serve_probability(artifacts[h]["prob"], X, ref_p)
         qs[h], los[h], his[h] = serve_quantity(artifacts[h]["qty"], X, ref_q)
     probs_c, coh = enforce_nested(probs)
     qs_c, qcoh = enforce_nested_quantity(probs_c, qs)
+    # El intervalo de la cantidad sigue a la cantidad ajustada (sin esto el punto quedaba fuera de su propio intervalo del 80 %).
+    q_adjusted: dict[int, np.ndarray] = {}
+    for h in horizons:
+        los[h], his[h], q_adjusted[h] = rescale_quantity_interval(qs[h], qs_c[h], los[h], his[h])
     summary["coherence"] = coh
     summary["quantity_coherence"] = qcoh
+    s05_out = None
+    if s05_on and s05_error is None:
+        try:
+            s05_out = apply_s05(base, X_by_h, probs_c, artifacts, win, cfg, win_info)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("S05: fallo en la predicción diaria")
+            s05_error = f"{type(exc).__name__}: {exc}"[:300]
+    if s05_out is not None:
+        summary["s05"] = s05_out["summary"]
+    elif s05_error is not None:
+        summary["s05"] = {"error": s05_error}
     summary["rows"] = int(len(base) * len(horizons))
 
     price = base["last_net_price"].to_numpy(dtype=float)
@@ -97,9 +133,17 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
             flags[i].append("price_unknown")
         for i in np.nonzero(adjusted)[0]:
             flags[i].append("coherence_adjusted")
+        for i in np.nonzero(q_adjusted[h])[0]:
+            flags[i].append("quantity_coherence_adjusted")
         if meta.get("calibration_status") in ("degraded", "uncalibrated"):
             for f in flags:
                 f.append(f"calibration_{meta['calibration_status']}")
+        if s05_out is not None:
+            for f, extra in zip(flags, s05_out["flags"][h]):
+                f.extend(extra)
+        elif s05_error is not None:
+            for f in flags:
+                f.append("s05_failed")
         df = pd.DataFrame({
             "customer_id": base["customer_id"].to_numpy(), "product_id": base["product_id"].to_numpy(), "horizon_days": h,
             "as_of": as_of, "purchase_probability": probs_c[h], "probability_raw": raws[h],
@@ -115,6 +159,8 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
             # puntajes de las fuentes alternativas del ranking (no se persisten en customer_predictions)
             "ranking_score_popularity": base["prod_buyers_90"].to_numpy(dtype=float),
             "ranking_score_recency": -base["rel_recency_days"].to_numpy(dtype=float)})
+        for col in S05_COLUMNS:       # W3-C · S05: pedidos, cantidad por pedido (+ intervalo), unidades, ventana y segmento
+            df[col] = s05_out["columns"][h][col].to_numpy() if s05_out is not None else (None if col in ("window_status", "segment") else np.nan)
         # comprometido (pedidos/contratos confirmados): no se suma a la esperanza
         c_rel = pd.DataFrame(columns=["customer_id", "product_id", "committed_quantity", "n_commitments"])
         if commitments_state is not None:
@@ -136,6 +182,8 @@ def predict_all(fb: FeatureBuilder, artifacts: dict[int, dict[str, Any]], as_of_
                          # fuente del ranking decidida en el holdout (cust-ranking-v1); sin decisión registrada: popularidad (la más segura)
                          "ranking_source": meta.get("ranking_source") if meta.get("ranking_source") in RANKING_SOURCES else "popularity",
                          "calibration_method": art_p["calibrator"].method}
+        if s05_out is not None:
+            out.served[h].update(s05_out["served"][h])
     out.predictions = pd.concat(frames, ignore_index=True)
     k = int(cfg["top_k_stored"])
     ranks = []

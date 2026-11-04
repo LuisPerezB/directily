@@ -1,0 +1,32 @@
+{
+  "name": "predictily-aws-iac",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Predictily · infraestructura como código en AWS CDK (TypeScript). Verificada por síntesis y cdk-nag sin credenciales; NO desplegada (BLOQUEADO: sin cuenta AWS del propietario).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "jest --runInBand",
+    "synth:staging": "cdk synth --quiet -c env=staging -c useFictitiousInputs=true",
+    "synth:production": "cdk synth --quiet -c env=production -c useFictitiousInputs=true",
+    "synth": "npm run synth:staging && npm run synth:production",
+    "verify": "npm run build && npm test && npm run synth",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.20.0",
+    "aws-cdk": "^2.1147.0",
+    "jest": "^30.5.0",
+    "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.275.0",
+    "cdk-nag": "^3.0.2",
+    "constructs": "^10.5.1"
+  }
+}

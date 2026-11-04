@@ -14,6 +14,8 @@ use App\Models\TrainingJob;
 use App\Models\User;
 use App\Services\Customer\Exceptions\CustomerRunConflictException;
 use App\Services\Forecasting\Support\CoreServices;
+use App\Services\Plans\PlanLimitService;
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -23,23 +25,25 @@ use Illuminate\Validation\ValidationException;
  * Solicita corridas del Customer Core: `train` (dataset de cortes, protocolo temporal, registro de modelos) y `predict`
  * (recalcula variables al día con los modelos en producción). Entrenar ≠ predecir (ADR-V2-08).
  *
- * - Horizontes: los del plan ∩ {7, 30, 90}. Un horizonte pedido fuera del plan responde 402 (no se revela un pronóstico
- *   comercial no autorizado); sin horizontes pedidos se usan todos los permitidos.
+ * - Horizontes: los del plan ∩ el subconjunto de Customer del catálogo (predictily.horizons.customer: 7, 14, 15, 30, 90). Un horizonte
+ *   pedido fuera del plan responde 402 (no se revela un pronóstico comercial no autorizado); sin horizontes pedidos se usan todos los permitidos.
+ *   Un plan sin `features.customer` (Starter) no tiene horizontes de Customer.
  * - Concurrencia: una sola corrida activa por empresa y operación (409).
  * - Nunca entrena dentro de la petición HTTP: crea core_run + training_job en «queued» y despacha el Job a la cola.
  */
 class CustomerRunService
 {
-    public const HORIZONS = [7, 30, 90];
-
     public const OPERATIONS = ['train', 'predict'];
 
     public function __construct(private readonly TenantContext $context) {}
 
-    /** @return list<int> horizontes del plan que el Customer Core soporta, ascendentes */
+    /** @return list<int> horizontes del plan que el Customer Core soporta, ascendentes ([] si el plan no incluye Customer) */
     public function allowedHorizons(Tenant $tenant): array
     {
-        $allowed = array_values(array_intersect(self::HORIZONS, CoreServices::allowedHorizons($tenant)));
+        if (! app(PlanLimitService::class)->allowsCustomer($tenant)) {
+            return [];
+        }
+        $allowed = array_values(array_intersect(HorizonCatalog::customer(), CoreServices::allowedHorizons($tenant)));
         sort($allowed);
 
         return $allowed;
@@ -61,6 +65,7 @@ class CustomerRunService
         if (! in_array($operation, self::OPERATIONS, true)) {
             throw ValidationException::withMessages(['operation' => 'La operación debe ser train o predict.']);
         }
+        app(PlanLimitService::class)->assertCustomer($tenant);   // 402 features.customer si el plan no lo incluye
         $allowed = $this->allowedHorizons($tenant);
         if ($horizons === null || $horizons === []) {
             $horizons = $allowed;
@@ -68,14 +73,14 @@ class CustomerRunService
             $horizons = array_values(array_unique(array_map('intval', $horizons)));
             sort($horizons);
             foreach ($horizons as $h) {
-                if (! in_array($h, self::HORIZONS, true)) {
-                    throw ValidationException::withMessages(['horizons' => 'Los horizontes de comportamiento de compra son 7, 30 y 90 días.']);
+                if (! in_array($h, HorizonCatalog::customer(), true)) {
+                    throw ValidationException::withMessages(['horizons' => 'Los horizontes de comportamiento de compra son '.implode(', ', HorizonCatalog::customer()).' días.']);
                 }
                 CoreServices::assertHorizon($tenant, $h);   // 402 si el plan no lo incluye
             }
         }
         if ($horizons === []) {
-            throw new PlanLimitExceededException('horizons', null, null, 'Su plan no incluye horizontes de comportamiento de compra (7, 30 o 90 días).');
+            throw new PlanLimitExceededException('horizons', null, null, 'Su plan no incluye horizontes de comportamiento de compra ('.implode(', ', HorizonCatalog::customer()).' días).');
         }
         $tz = $tenant->timezone ?: 'America/Guayaquil';
         $today = CarbonImmutable::now($tz)->startOfDay();

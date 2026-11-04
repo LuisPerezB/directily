@@ -319,18 +319,36 @@ final class SqlHostPolicyTest extends TestCase
         $this->assertSame(SqlHostRejected::PRIVATE, $this->reasonOf('erp.otra.example'), 'fuera del CIDR autorizado');
     }
 
-    public function test_a_listed_hostname_may_resolve_to_a_private_network_but_never_to_loopback_or_metadata(): void
+    public function test_a_listed_hostname_alone_does_not_authorize_a_private_resolution_but_a_listed_literal_ip_does(): void
     {
         $this->dns([
             'erp.cliente.example' => ['10.8.0.5'],
             'erp.local.example' => ['127.0.0.1'],
             'erp.metadatos.example' => ['169.254.169.254'],
         ]);
-        config(['connectors.sql.allowed_hosts' => ['erp.cliente.example', 'erp.local.example', 'erp.metadatos.example']]);
+        $listed = ['erp.cliente.example', 'erp.local.example', 'erp.metadatos.example', '10.8.0.5'];
 
-        $this->assertSame('10.8.0.5', SqlHostPolicy::resolve('erp.cliente.example')->address);
+        // Un NOMBRE listado que resuelve a una red privada se rechaza mientras ningún CIDR cubra esa IP (aunque la IP esté en la lista).
+        config(['connectors.sql.allowed_hosts' => $listed, 'connectors.sql.allowed_cidrs' => []]);
+        $this->assertSame(SqlHostRejected::PRIVATE, $this->reasonOf('erp.cliente.example'), 'el nombre listado no autoriza una resolución privada');
         $this->assertSame(SqlHostRejected::LOOPBACK, $this->reasonOf('erp.local.example'));
         $this->assertSame(SqlHostRejected::BLOCKED, $this->reasonOf('erp.metadatos.example'));
+        // La IP literal listada sí se autoriza a sí misma (el operador aprobó esa IP exacta).
+        $this->assertSame('10.8.0.5', SqlHostPolicy::resolve('10.8.0.5')->address);
+
+        // Con un CIDR que cubre la resolución, el nombre listado funciona; un CIDR que no la cubre no autoriza nada.
+        config(['connectors.sql.allowed_cidrs' => ['10.8.0.0/16']]);
+        $this->assertSame('10.8.0.5', SqlHostPolicy::resolve('erp.cliente.example')->address);
+        config(['connectors.sql.allowed_cidrs' => ['10.9.0.0/16']]);
+        $this->assertSame(SqlHostRejected::PRIVATE, $this->reasonOf('erp.cliente.example'));
+
+        // Rebinding hacia otra red interna: el nombre sigue listado pero ya no resuelve dentro del CIDR autorizado.
+        config(['connectors.sql.allowed_cidrs' => ['10.8.0.0/16']]);
+        $this->dns(['erp.cliente.example' => ['192.168.1.10']]);
+        $this->assertSame(SqlHostRejected::PRIVATE, $this->reasonOf('erp.cliente.example'));
+
+        // Una IP literal que NO figura en la lista nunca se acepta cuando la lista está configurada.
+        $this->assertSame(SqlHostRejected::NOT_LISTED, $this->reasonOf('10.8.0.6'));
     }
 
     // ───────────────────────── públicas, A + AAAA y fijado de la IP ─────────────────────────

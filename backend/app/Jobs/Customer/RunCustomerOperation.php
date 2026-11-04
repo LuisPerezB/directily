@@ -12,6 +12,7 @@ use App\Services\Customer\CustomerEngineClient;
 use App\Services\Customer\CustomerRunRecorder;
 use App\Services\Forecasting\Exceptions\EngineException;
 use App\Services\Forecasting\TrainingJobRecorder;
+use App\Services\Models\Usage\TenantUsageMeter;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -74,6 +75,7 @@ abstract class RunCustomerOperation implements ShouldQueue
         }
         if ($run->status === 'completed') {
             $jobs->markSucceeded($job, ['core_run_id' => $run->id, 'status' => 'completed']);
+            app(TenantUsageMeter::class)->recordCoreRun($run);   // idempotente: repone la medición si un intento anterior no llegó a registrarla
 
             return;
         }
@@ -94,6 +96,7 @@ abstract class RunCustomerOperation implements ShouldQueue
             // Defensa: el motor respondió OK pero no cerró la corrida.
             $run->forceFill(['status' => 'completed', 'completed_at' => now()])->save();
         }
+        app(TenantUsageMeter::class)->recordCoreRun($run);           // V2.5 · W4: segundos de entrenamiento/inferencia de la empresa (sin precios)
     }
 
     public function failed(?Throwable $exception): void

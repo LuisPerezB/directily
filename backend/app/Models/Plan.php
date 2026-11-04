@@ -10,12 +10,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /** Plan SaaS (asignación manual por superadmin en el MVP, sin pasarela de pagos). */
 class Plan extends Model
 {
-    protected $fillable = ['code', 'name', 'description', 'limits', 'monthly_price_usd', 'is_active'];
+    protected $fillable = ['code', 'name', 'description', 'limits', 'metadata', 'monthly_price_usd', 'is_active'];
 
     protected function casts(): array
     {
         return [
             'limits' => 'array',
+            'metadata' => 'array',
             'is_active' => 'boolean',
             'monthly_price_usd' => 'decimal:2',
         ];

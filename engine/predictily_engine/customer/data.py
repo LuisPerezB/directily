@@ -19,7 +19,7 @@ from typing import Any
 
 import pandas as pd
 
-from predictily_engine.data.asof import local_today, to_day, with_knowledge
+from predictily_engine.data.asof import local_today, with_knowledge
 from predictily_engine.db.customer_repository import CustomerRepository
 
 PURCHASE_COLUMNS = ["customer_id", "product_id", "branch_id", "ds", "currency", "qty", "net_amount",
@@ -42,6 +42,7 @@ class CustomerData:
     tenant: dict[str, Any] = field(default_factory=dict)  # currency, timezone, sector
     through: date | None = None       # los datos se cargaron hasta esta fecha (incluida)
     purchase_versions: Any = None     # data.asof.PurchaseVersions: versiones de compras y devoluciones con su ventana de conocimiento
+    live: bool = False                # ejecución vigente: la verdad conoce hasta HOY (ver `load_customer_data`)
 
     def __post_init__(self) -> None:
         for col in ("ds",):
@@ -80,13 +81,19 @@ def last_complete_day(coverage: pd.DataFrame | None, sales_last: date | None) ->
 
 
 def load_customer_data(repo: CustomerRepository, cfg: dict[str, Any], through: date | None = None,
-                       cap_to_complete: bool = False) -> CustomerData:
+                       cap_to_complete: bool = False, live: bool | None = None) -> CustomerData:
     """Carga los datos de UNA empresa hasta `through` (incluido). Nada posterior entra al paquete.
 
     `cap_to_complete`: limita `through` al último día completo (entrenamiento: sin datos parciales).
+    `live`: la ejecución es VIGENTE (no se pidió una fecha histórica): la verdad con que se etiquetan los cortes conoce hasta HOY (la
+    carga nocturna del último día cuenta), aunque la cobertura declarada limite `through` por debajo de la última venta. `False` fuerza
+    una reconstrucción histórica. `None` (por defecto) lo infiere de lo PEDIDO (`through` ausente o ≥ última venta), no del `through`
+    ya limitado por la cobertura.
     """
     first, last = repo.sales_range()
     coverage = repo.coverage("sales")
+    if live is None:
+        live = last is not None and (through is None or through >= last)
     if through is None or (last is not None and through > last):
         through = last
     if cap_to_complete:
@@ -94,10 +101,10 @@ def load_customer_data(repo: CustomerRepository, cfg: dict[str, Any], through: d
         if complete is not None and through is not None and complete < through:
             through = complete
     # Una sola lectura de versiones hasta `through`: la vista al corte final (verdad disponible) y la de cada corte se derivan de ella.
-    # Ejecución vigente (corte = última venta): la verdad conoce hasta HOY (una carga nocturna del último día cuenta); reconstrucción
-    # histórica: solo hasta el propio corte. Las variables de cada corte anterior usan siempre lo conocido en ese corte.
-    known_until = local_today(repo.base.timezone()) if (through is not None and last is not None
-                                                          and to_day(through) >= to_day(last)) else None
+    # Ejecución vigente (`live`): la verdad conoce hasta HOY (una carga nocturna del último día cuenta), aunque la cobertura limite
+    # `through`; reconstrucción histórica: solo hasta el propio corte. Las variables de cada corte anterior usan siempre lo conocido
+    # en ese corte.
+    known_until = local_today(repo.base.timezone()) if (live and through is not None) else None
     versions = repo.purchase_versions(through, bool(cfg["exclude_generic_buyers"]), list(cfg["generic_buyer_codes"]), known_until) \
         if through is not None else None
     purchases = with_knowledge(versions.purchase_cells(through, known_until), versions) if versions is not None \
@@ -112,5 +119,5 @@ def load_customer_data(repo: CustomerRepository, cfg: dict[str, Any], through: d
         purchases=purchases, returns=returns, products=repo.products(), branches=repo.branches(),
         availability=availability, coverage=coverage, promotions=repo.promotions(),
         promotion_revisions=repo.promotion_revisions(), sales_first=first, sales_last=last,
-        excluded=excluded, tenant=repo.tenant(), through=through, purchase_versions=versions,
+        excluded=excluded, tenant=repo.tenant(), through=through, purchase_versions=versions, live=bool(live),
     )

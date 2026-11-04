@@ -20,6 +20,36 @@ os.environ.setdefault("ENGINE_N_JOBS", "4")
 sys.path.insert(0, str(Path(__file__).parent))
 warnings.filterwarnings("ignore")
 
+# Hermeticidad: NINGUNA prueba lee engine/.env. Las clases de configuración (pydantic-settings) leen `.env` del directorio actual como
+# respaldo del entorno; con el .env de desarrollo presente (claves de firma de desarrollo) las pruebas «sin clave privada» la
+# recuperaban de ahí y fallaban. Se anula `env_file` en todas las clases de configuración del motor al importar este módulo (antes de
+# que nada instancie la configuración) y, por si alguna se importa después, otra vez antes de cada prueba. Es el mismo control que
+# backend/phpunit.xml aplica con force="true".
+def _disable_env_files(clear_settings_cache: bool = False) -> None:
+    import predictily_engine.config as engine_config
+    import predictily_engine.platform.signing  # noqa: F401  (define _SigningEnv)
+    from pydantic_settings import BaseSettings
+
+    pending = list(BaseSettings.__subclasses__())
+    while pending:
+        cls = pending.pop()
+        pending.extend(cls.__subclasses__())
+        if cls.__module__.startswith("predictily_engine") and cls.model_config.get("env_file"):
+            cls.model_config["env_file"] = None
+    cache_clear = getattr(getattr(engine_config, "get_settings", None), "cache_clear", None)
+    if clear_settings_cache and cache_clear is not None:
+        cache_clear()      # una configuración instanciada antes de anular el .env no debe sobrevivir con sus valores
+
+
+_disable_env_files(clear_settings_cache=True)
+
+
+@pytest.fixture(autouse=True)
+def _no_env_file():
+    _disable_env_files()
+    yield
+
+
 # Firma de artefactos (ADR-V25-20): es obligatoria. Las pruebas generan un par Ed25519 EFÍMERO por sesión (la clave privada solo
 # existe en memoria y en el entorno del proceso de pruebas) y NUNCA activan ENGINE_ALLOW_UNSIGNED_ARTIFACTS.
 from predictily_engine.platform.signing import generate_keypair  # noqa: E402

@@ -31,7 +31,9 @@ class CustomerEvaluationController extends CustomerController
         }
         $allowed = $service->allowedHorizons($tenant);
         $horizon = $request->filled('horizon') ? $this->horizon($request) : null;   // 402 si el plan no lo incluye
-        $rows = ModelEvaluation::query()->where('core', 'customer')->where('core_run_id', $run->id)
+        // V2.5 · W3-D: esta respuesta conserva el contenido anterior a W3-C; la calibración por segmento y las métricas de S05 (nº de pedidos,
+        // cantidad por pedido, unidades, ranking económico, ventana) están en GET /models/evaluations?core=customer.
+        $rows = ModelEvaluation::query()->customerClassicView()->where('core', 'customer')->where('core_run_id', $run->id)
             ->when($horizon !== null, fn ($q) => $q->where('horizon_days', $horizon))
             ->when($horizon === null, fn ($q) => $q->where(fn ($w) => $w->whereNull('horizon_days')->orWhereIn('horizon_days', $allowed)))
             ->orderBy('id')->get();

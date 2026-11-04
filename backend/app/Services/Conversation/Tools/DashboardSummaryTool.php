@@ -7,6 +7,7 @@ namespace App\Services\Conversation\Tools;
 use App\Services\Analytics\DashboardService;
 use App\Services\Analytics\DemandEnvelope;
 use App\Services\Analytics\RunResolver;
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantRule;
 use Illuminate\Validation\Rule;
 
@@ -35,7 +36,7 @@ final class DashboardSummaryTool extends ReadTool
         return [
             'type' => 'object',
             'properties' => [
-                'horizon' => $this->horizonSchema(array_map('intval', (array) config('engine.horizons'))),
+                'horizon' => $this->horizonSchema(HorizonCatalog::demand()),
                 'branch_id' => ['type' => 'integer', 'description' => 'Identificador de sucursal de la empresa (opcional).'],
             ],
             'additionalProperties' => false,
@@ -45,14 +46,14 @@ final class DashboardSummaryTool extends ReadTool
     public function rules(): array
     {
         return [
-            'horizon' => ['sometimes', 'integer', Rule::in(array_map('intval', (array) config('engine.horizons')))],
+            'horizon' => ['sometimes', 'integer', Rule::in(HorizonCatalog::demand())],
             'branch_id' => ['sometimes', 'integer', TenantRule::exists('branches')],
         ];
     }
 
     public function execute(array $arguments, ToolContext $context): ToolResult
     {
-        $horizon = $this->horizon($arguments, $context->tenant, array_map('intval', (array) config('engine.horizons')));
+        $horizon = $this->horizon($arguments, $context->tenant, HorizonCatalog::demand());
         $branchId = isset($arguments['branch_id']) ? (int) $arguments['branch_id'] : null;
 
         $data = $this->dashboard->summary($context->tenant, $horizon, $branchId);

@@ -14,6 +14,11 @@ use Illuminate\Support\Facades\DB;
  */
 final class ProductImportProcessor implements ImportProcessor
 {
+    /** Rango de la vida útil declarada (días); 10 años como cota de plausibilidad, a aprobar en el piloto. */
+    public const MIN_SHELF_LIFE_DAYS = 1;
+
+    public const MAX_SHELF_LIFE_DAYS = 3650;
+
     public function run(ImportRunContext $ctx): array
     {
         $tenant = $ctx->tenant;
@@ -23,6 +28,9 @@ final class ProductImportProcessor implements ImportProcessor
         $seen = [];
         $valid = [];
         $preview = [];
+        // V2.5 · W5-D: cada columna de perecibilidad se escribe SOLO si el archivo la mapea; nunca se deriva ni se pisa la que no viene.
+        $mapFlag = ! empty($ctx->mapping['is_perishable']);
+        $mapShelf = ! empty($ctx->mapping['shelf_life_days']);
 
         foreach ($ctx->canonicalRows() as $n => $raw) {
             $issues = [];
@@ -31,6 +39,14 @@ final class ProductImportProcessor implements ImportProcessor
             if ($sku === null) {
                 $issues[] = Issue::error('required', 'Falta el código (SKU).', 'sku');
             }
+            // Cambio de código (ADR-V25-24): un SKU que es alias vigente de otro producto actualiza ESE producto; no crea un duplicado.
+            if ($sku !== null && ($aliased = $catalog->productIdByAlias($sku)) !== null) {
+                $canonical = $catalog->canonicalSku($aliased);
+                if ($canonical !== null && CatalogResolver::norm($canonical) !== CatalogResolver::norm($sku)) {
+                    $issues[] = Issue::warning('alias_resolved', "El código '{$sku}' es un alias del producto '{$canonical}': se actualiza ese producto en lugar de crear uno nuevo.", 'sku', $sku);
+                    $sku = $canonical;
+                }
+            }
             if ($name === null) {
                 $issues[] = Issue::error('required', 'Falta el nombre del producto.', 'name');
             }
@@ -38,6 +54,7 @@ final class ProductImportProcessor implements ImportProcessor
             $cost = $this->optionalNumber($p, $raw, 'current_cost', $issues);
             $priceKnown = $this->knownAt($p, $raw, 'price_known_at', $issues);
             $costKnown = $this->knownAt($p, $raw, 'cost_known_at', $issues);
+            [$perishable, $shelfLife] = $this->perishability($p, $raw, $issues, $mapFlag, $mapShelf);
             if ($sku !== null && isset($seen[CatalogResolver::norm($sku)])) {
                 $issues[] = Issue::error('duplicate_in_file', "El SKU '{$sku}' aparece más de una vez en el archivo.", 'sku', $sku);
             }
@@ -52,6 +69,7 @@ final class ProductImportProcessor implements ImportProcessor
                     'current_price' => $price, 'current_cost' => $cost,
                     'price_known_at' => $priceKnown, 'cost_known_at' => $costKnown,
                     'is_active' => $p->boolean($raw['is_active'] ?? null, true),
+                    'is_perishable' => $perishable, 'shelf_life_days' => $shelfLife,
                 ];
                 $valid[] = $row;
                 if (count($preview) < 20) {
@@ -64,7 +82,7 @@ final class ProductImportProcessor implements ImportProcessor
 
         $existing = [];
         foreach (array_chunk(array_column($valid, 'sku'), 1000) as $chunk) {
-            foreach (DB::table('products')->where('tenant_id', $tenant->id)->whereIn('sku', $chunk)->get(['id', 'sku', 'name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active']) as $row) {
+            foreach (DB::table('products')->where('tenant_id', $tenant->id)->whereIn('sku', $chunk)->get(['id', 'sku', 'name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'is_perishable', 'shelf_life_days']) as $row) {
                 $existing[CatalogResolver::norm($row->sku)] = $row;
             }
         }
@@ -79,7 +97,7 @@ final class ProductImportProcessor implements ImportProcessor
                 if ($row['is_active']) {
                     $stats['activations']++;
                 }
-            } elseif ($e->name !== $row['name'] || (float) $e->current_price !== (float) $row['current_price'] || (float) $e->current_cost !== (float) $row['current_cost'] || $e->unit !== $row['unit'] || $e->brand !== $row['brand'] || (bool) $e->is_active !== $row['is_active'] || ($row['category'] !== null && $catalog->categoryId($row['category']) !== ($e->category_id !== null ? (int) $e->category_id : null))) {
+            } elseif ($e->name !== $row['name'] || (float) $e->current_price !== (float) $row['current_price'] || (float) $e->current_cost !== (float) $row['current_cost'] || $e->unit !== $row['unit'] || $e->brand !== $row['brand'] || (bool) $e->is_active !== $row['is_active'] || ($mapFlag && (bool) $e->is_perishable !== $row['is_perishable']) || ($mapShelf && ($e->shelf_life_days !== null ? (int) $e->shelf_life_days : null) !== $row['shelf_life_days']) || ($row['category'] !== null && $catalog->categoryId($row['category']) !== ($e->category_id !== null ? (int) $e->category_id : null))) {
                 $stats['products_updated']++;
                 if ($row['is_active'] && ! $e->is_active) {
                     $stats['activations']++;
@@ -90,7 +108,7 @@ final class ProductImportProcessor implements ImportProcessor
         }
 
         if ($ctx->commit && $valid !== []) {
-            DB::transaction(function () use ($valid, $existing, $catalog, $tenant): void {
+            DB::transaction(function () use ($valid, $existing, $catalog, $tenant, $mapFlag, $mapShelf): void {
                 $catalog->ensureCategories(array_values(array_filter(array_column($valid, 'category'))));
                 $now = now();
                 $today = now($tenant->timezone)->toDateString();
@@ -99,8 +117,12 @@ final class ProductImportProcessor implements ImportProcessor
                         'tenant_id' => $tenant->id, 'sku' => $r['sku'], 'name' => $r['name'], 'category_id' => $catalog->categoryId($r['category']),
                         'unit' => $r['unit'], 'brand' => $r['brand'], 'current_price' => $r['current_price'], 'current_cost' => $r['current_cost'],
                         'is_active' => $r['is_active'], 'created_at' => $now, 'updated_at' => $now,
-                    ], $chunk);
-                    DB::table('products')->upsert($rows, ['tenant_id', 'sku'], ['name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'updated_at']);
+                    ] + ($mapFlag ? ['is_perishable' => $r['is_perishable']] : []) + ($mapShelf ? ['shelf_life_days' => $r['shelf_life_days']] : []), $chunk);
+                    DB::table('products')->upsert($rows, ['tenant_id', 'sku'], array_merge(
+                        ['name', 'category_id', 'unit', 'brand', 'current_price', 'current_cost', 'is_active', 'updated_at'],
+                        $mapFlag ? ['is_perishable'] : [],
+                        $mapShelf ? ['shelf_life_days'] : [],
+                    ));
                 }
                 $ids = [];
                 foreach (array_chunk(array_column($valid, 'sku'), 1000) as $chunk) {
@@ -152,6 +174,58 @@ final class ProductImportProcessor implements ImportProcessor
         }
 
         return $parsed[0]->utc()->format('Y-m-d H:i:sP');
+    }
+
+    /**
+     * Perecibilidad declarada (V2.5 · W5-D, §10): bandera `is_perishable` y vida útil `shelf_life_days` (1 a 3650 días).
+     *
+     * - Cada columna se evalúa y escribe SOLO si el archivo la mapea (`$mapFlag`, `$mapShelf`); la que no viene devuelve null y no se toca. Nunca se deriva
+     *   una de la otra: un archivo con solo la bandera no borra la vida útil declarada ni uno con solo la vida útil cambia la bandera.
+     * - Columna mapeada y celda vacía: bandera = no perecible; vida útil = no declarada (NULL), igual que las demás columnas opcionales.
+     * - Valor no reconocido en la bandera, o vida útil no entera / fuera de rango: error (QUARANTINED); no se adivina.
+     * - Con AMBAS columnas mapeadas: perecible sin vida útil → advertencia (el plan no proyecta vencimientos sin vida útil ni lotes); vida útil en un
+     *   producto no perecible → advertencia (el plan no la usa).
+     *
+     * @param  list<Issue>  $issues
+     * @return array{0: ?bool, 1: ?int} [is_perishable, shelf_life_days]; null = columna no mapeada (no se escribe)
+     */
+    private function perishability($p, array $raw, array &$issues, bool $mapFlag, bool $mapShelf): array
+    {
+        $flag = null;
+        if ($mapFlag) {
+            $flagRaw = $raw['is_perishable'] ?? null;
+            $flag = false;
+            if ($flagRaw !== null && ! (is_string($flagRaw) && trim($flagRaw) === '')) {
+                // `boolean` devuelve el valor por omisión ante un texto que no reconoce: dos valores por omisión distintos delatan un texto desconocido.
+                if ($p->boolean($flagRaw, true) !== $p->boolean($flagRaw, false)) {
+                    $issues[] = Issue::error('invalid_value', 'Valor no reconocido para «perecible»: use sí o no.', 'is_perishable', $flagRaw);
+                } else {
+                    $flag = $p->boolean($flagRaw, false);
+                }
+            }
+        }
+        $shelf = null;
+        $shelfGiven = false;
+        if ($mapShelf) {
+            $shelfRaw = $raw['shelf_life_days'] ?? null;
+            $shelfGiven = $shelfRaw !== null && ! (is_string($shelfRaw) && trim($shelfRaw) === '');
+            if ($shelfGiven) {
+                $shelf = $p->integer($shelfRaw);
+                if ($shelf === null || $shelf < self::MIN_SHELF_LIFE_DAYS || $shelf > self::MAX_SHELF_LIFE_DAYS) {
+                    $issues[] = Issue::error('invalid_number', 'La vida útil debe ser un número entero de días entre '.self::MIN_SHELF_LIFE_DAYS.' y '.self::MAX_SHELF_LIFE_DAYS.'.', 'shelf_life_days', $shelfRaw);
+                    $shelf = null;
+                }
+            }
+        }
+        if ($mapFlag && $mapShelf) {
+            if ($flag && ! $shelfGiven) {
+                $issues[] = Issue::warning('perishable_without_shelf_life', 'El producto es perecible y no declara vida útil: el plan no proyecta vencimientos sin vida útil ni lotes (no se inventan).', 'shelf_life_days');
+            } elseif (! $flag && $shelf !== null) {
+                $issues[] = Issue::warning('shelf_life_without_perishable', 'Se declara vida útil en un producto no perecible: el plan no la usa.', 'shelf_life_days', $shelf);
+            }
+        }
+
+        return [$flag, $shelf];
     }
 
     /** @param list<Issue> $issues */

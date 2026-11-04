@@ -38,7 +38,7 @@ class CustomerRunApiTest extends TestCase
             ->assertJsonPath('data.operation', 'train')->assertJsonPath('data.status', 'queued')->assertJsonPath('data.version', 1)
             ->assertJsonPath('data.result_type', 'evaluation')->assertJsonPath('data.envelope.core', 'customer')
             ->assertJsonPath('data.training_job.status', 'queued');
-        $this->assertSame([7, 30, 90], $res->json('data.horizons'));
+        $this->assertSame([7, 14, 30, 90], $res->json('data.horizons'), 'plan de prueba (7/14/30/60/90) ∩ Customer (7/14/15/30/90): sin 60');
         $this->assertDatabaseHas('core_runs', ['tenant_id' => $tenant->id, 'core' => 'customer', 'operation' => 'train', 'status' => 'queued', 'run_type' => 'production']);
         $this->assertDatabaseHas('training_jobs', ['tenant_id' => $tenant->id, 'job_type' => 'customer_train', 'core_run_id' => $res->json('data.id')]);
         Queue::assertPushedOn('forecasting', RunCustomerTraining::class);
@@ -61,13 +61,13 @@ class CustomerRunApiTest extends TestCase
             ->assertJsonPath('data.run_type', 'historical')->assertJsonPath('data.as_of', '2026-01-15');
     }
 
-    public function test_basic_plan_only_allows_7_and_30(): void
+    public function test_basic_plan_allows_7_14_and_30(): void
     {
         Queue::fake();
         [$tenant, $user] = $this->createTenantWithUser(TenantRole::Owner, ['plan_id' => $this->basicPlanId()]);
         $api = $this->actingAsTenantUser($user, $tenant);
 
-        $api->postJson('/api/v1/customer/runs', ['operation' => 'train'])->assertStatus(202)->assertJsonPath('data.horizons', [7, 30]);
+        $api->postJson('/api/v1/customer/runs', ['operation' => 'train'])->assertStatus(202)->assertJsonPath('data.horizons', [7, 14, 30]);
         DB::table('core_runs')->where('tenant_id', $tenant->id)->update(['status' => 'completed']);
         $api->postJson('/api/v1/customer/runs', ['operation' => 'predict', 'horizons' => [7, 90]])
             ->assertStatus(402)->assertJsonPath('code', 'plan_limit_exceeded');
@@ -90,7 +90,8 @@ class CustomerRunApiTest extends TestCase
         $api = $this->actingAsTenantUser($user, $tenant);
         $api->postJson('/api/v1/customer/runs', [])->assertStatus(422)->assertJsonValidationErrors('operation');
         $api->postJson('/api/v1/customer/runs', ['operation' => 'plan'])->assertStatus(422)->assertJsonValidationErrors('operation');
-        $api->postJson('/api/v1/customer/runs', ['operation' => 'train', 'horizons' => [14]])->assertStatus(422)->assertJsonValidationErrors('horizons.0');
+        $api->postJson('/api/v1/customer/runs', ['operation' => 'train', 'horizons' => [60]])->assertStatus(422)->assertJsonValidationErrors('horizons.0');   // 60 no es de Customer
+        $api->postJson('/api/v1/customer/runs', ['operation' => 'train', 'horizons' => [21]])->assertStatus(422)->assertJsonValidationErrors('horizons.0');
         $api->postJson('/api/v1/customer/runs', ['operation' => 'predict', 'as_of' => '2999-01-01'])->assertStatus(422)->assertJsonValidationErrors('as_of');
         $api->postJson('/api/v1/customer/runs', ['operation' => 'train', 'as_of' => now()->toDateString()])->assertStatus(422)->assertJsonValidationErrors('as_of');
         Queue::assertNothingPushed();

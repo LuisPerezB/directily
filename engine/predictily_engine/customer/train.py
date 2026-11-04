@@ -1,6 +1,6 @@
 """Entrenamiento y evaluación por horizonte del Customer Core (funciones puras; el servicio persiste).
 
-Para cada H ∈ {7, 30, 90}:
+Para cada H del catálogo de Customer (platform.config.HORIZONS["customer"]: 7, 14, 15, 30, 90):
   1. cortes maduros → bloques cronológicos entrenamiento | calibración | selección | holdout (separados H días);
   2. candidatos de probabilidad (referencia, logística, LGBMClassifier) ajustados con el bloque de entrenamiento,
      calibrados (isotónica/Platt) con el bloque de calibración y comparados con Brier en el bloque de selección;
@@ -12,6 +12,7 @@ Para cada H ∈ {7, 30, 90}:
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -39,8 +40,10 @@ from predictily_engine.customer.models import (
 )
 from predictily_engine.customer.outputs import choose_ranking_source
 from predictily_engine.customer.protocol import FULL_BLOCKS, LEAN_BLOCKS, REFERENCE_BLOCKS, BlockPlan, plan_blocks
+from predictily_engine.customer.s05 import train_s05
 from predictily_engine.customer.serving import enforce_nested, serve_probability, serve_quantity
 
+log = logging.getLogger(__name__)
 MIN_SELECTION_POSITIVES = 20
 SIMPLICITY_ORDER = ["logistic", "lgbm_small", "lgbm_large"]
 QTY_SELECTION_MAX_ABS_BIAS = 0.15
@@ -51,11 +54,14 @@ class HorizonResult:
     horizon: int
     status: str                       # trained | reference_only | abstained
     reason: str | None = None
+    reason_code: str | None = None    # código de motivo de la abstención (coverage_insufficient | insufficient_horizon); estado = insufficient_data
     manifest: dict[str, Any] = field(default_factory=dict)
     prob: dict[str, Any] = field(default_factory=dict)
     qty: dict[str, Any] = field(default_factory=dict)
     holdout: dict[str, Any] = field(default_factory=dict)
     artifacts: dict[str, Any] = field(default_factory=dict)   # picklable: prob / qty (servido) y challenger
+    s05: dict[str, Any] = field(default_factory=dict)         # W3-C: pedidos, cantidad por pedido, unidades, segmentos, ranking económico, drift
+    s05_runtime: dict[str, Any] = field(default_factory=dict, repr=False)   # W3-C: arreglos y artefactos para `finalize_s05` (no se persiste)
     duration_s: float = 0.0
 
 
@@ -86,6 +92,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
                                   "treatment": "La fila censurada se excluye por completo (ni negativo ni positivo)."}}
     if fr.empty:
         res.reason = "Datos insuficientes: no hay etiquetas maduras y no censuradas para este horizonte."
+        res.reason_code = "coverage_insufficient"
         return res
     fractions = cfg["block_fractions"]
     min_cut, min_rows = int(cfg["min_block_cutoffs"]), int(cfg["min_block_rows"])
@@ -119,6 +126,7 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
     if tier is None:
         res.reason = ("Datos insuficientes para este horizonte: no hay suficientes cortes maduros, filas o positivos para "
                       "calibrar y evaluar ni siquiera la referencia con separación temporal.")
+        res.reason_code = "insufficient_horizon"
         res.manifest["blocks"] = None
         return res
 
@@ -350,6 +358,25 @@ def train_horizon(bundle: DatasetBundle, h: int, cfg: dict[str, Any], seed: int,
         "served": quantity_metrics(net[hold_rows][ok_price], (e_served * price)[ok_price]),
         "reference": quantity_metrics(net[hold_rows][ok_price], (e_ref * price)[ok_price]),
         "price_assumption": "last_net_price_of_relation", "rows_without_price": int((~ok_price).sum())}
+    # ── W3-C · S05: nº de pedidos, cantidad por pedido, unidades, segmentos, ranking económico y drift (solo AGREGA; no cambia lo servido) ──
+    if cfg.get("s05_enabled", True):
+        try:
+            s05 = train_s05(bundle, h, cfg, seed, n_jobs, {
+                "tier": tier, "rows": rows, "fr": fr, "X": X, "y": y, "qty": qty, "cut": cut, "brow": brow, "ref_p": ref_p,
+                "served_prob_art": served_prob_art, "p_served_hold": p_served_hold,
+                "raw_served_hold": raw_served_hold, "p_ref_hold": p_ref_hold, "e_served_hold": e_served, "e_ref_hold": e_ref,
+                "units": units, "ks": ks, "by_product": by_product})
+            for a in (served_prob_art, challenger_art, art_ref):
+                if a is not None:
+                    a["s05"] = s05["ext_p"]
+            for a in (served_q_art, q_challenger, q_art_ref):
+                if a is not None:
+                    a["s05"] = s05["ext_q"]
+            res.s05 = s05["info"]
+            res.s05_runtime = s05["runtime"]
+        except Exception as exc:       # S05 agrega salidas: un fallo suyo no tumba la probabilidad ni la cantidad ya evaluadas
+            log.exception("S05 fallido h=%s", h)
+            res.s05 = {"status": "failed", "reason": f"{type(exc).__name__}: {exc}"[:500]}
     res.artifacts = {"prob": served_prob_art, "qty": served_q_art, "prob_challenger": challenger_art, "qty_challenger": q_challenger,
                      "prob_reference": art_ref, "qty_reference": q_art_ref}
     res.holdout["blocks_rows"] = res.manifest["block_rows"]

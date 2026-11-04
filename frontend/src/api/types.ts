@@ -39,12 +39,14 @@ export interface ApiErrorBody {
   max?: number
   required_ability?: string
   details?: Record<string, unknown>
+  /** Contexto de un 403/409 del servidor (p. ej. `roles` en la segregación de funciones, `current_version` en un conflicto de versión). */
+  context?: Record<string, unknown>
 }
 
 export type Granularity = 'day' | 'week' | 'month'
-export type Horizon = 7 | 14 | 30 | 60 | 90
-/** Horizontes del Customer Core (compra): 7, 30 y 90 días. */
-export type CustomerHorizon = 7 | 30 | 90
+export type Horizon = 7 | 14 | 15 | 30 | 60 | 90
+/** Horizontes del Customer Core (compra): 7, 14, 15, 30 y 90 días (subconjunto del catálogo; 60 no aplica). */
+export type CustomerHorizon = 7 | 14 | 15 | 30 | 90
 
 // ─── Autenticación y cuenta ─────────────────────────────────────────────────
 
@@ -113,6 +115,8 @@ export interface TenantSettings {
 
 export interface PlanLimits {
   max_branches?: number | null
+  /** Series activas (sucursal × producto con ventas en los últimos 90 días). Ausente = sin tope en el plan. */
+  max_series?: number | null
   max_active_products?: number | null
   max_import_rows_per_month?: number | null
   max_forecast_runs_per_day?: number | null
@@ -123,6 +127,11 @@ export interface PlanLimits {
     api_access?: boolean
     external_indicators?: boolean
     custom_models?: boolean
+    /** Comportamiento de compra (Customer). Ausente = incluido; Starter lo desactiva. */
+    customer?: boolean
+    roles?: boolean
+    /** Capacidades por contrato (Enterprise): asistente, procesamiento privado... Las claves nuevas no rompen la interfaz. */
+    [capability: string]: boolean | undefined
   }
 }
 
@@ -190,6 +199,8 @@ export interface TenantUsage {
     active_products: number
     branches: number
     users: number
+    /** Solo si el plan define `max_series`; si no, null. */
+    series?: number | null
   }
   limits: PlanLimits
 }
@@ -822,7 +833,9 @@ export interface ModelEvaluation {
 }
 
 /** Estados del registro: nuevos (etapa 2) y legados (aún aceptados por el filtro de la API). */
-export type ModelStatus = 'candidate' | 'validated' | 'production' | 'retired' | 'failed'
+export type ModelStatus = 'candidate' | 'validated' | 'approved' | 'production' | 'retired' | 'rejected' | 'failed'
+/** Base de servicio (V2.5 · W4): aprobado por otra persona, legado del pipeline propio, o sin aprobar (no se sirve ni se restaura). */
+export type ModelServingBasis = 'approved' | 'legacy_pipeline' | 'not_approved'
 export type ModelRole = 'primary' | 'fallback'
 
 export interface ModelRegistryEntry {
@@ -833,6 +846,7 @@ export interface ModelRegistryEntry {
   strategy_level: string
   scope?: string
   status: ModelStatus
+  serving_basis?: ModelServingBasis
   /** Estado de la etapa 1 equivalente (fallback, archived, rejected...). */
   legacy_status?: string | null
   core?: 'demand' | 'customer' | string | null
@@ -848,6 +862,13 @@ export interface ModelRegistryEntry {
   training_data_from: ISODate | null
   training_data_to: ISODate | null
   series_count: number
+  /** V2.5 · W4: publicación y aprobación separada (quién publicó y quién aprobó). */
+  published_by?: number | null
+  published_at?: ISODateTime | null
+  approved_by?: number | null
+  approved_at?: ISODateTime | null
+  rejected_reason?: string | null
+  promotion_decision_id?: number | null
 }
 
 // ─── Inventario y alertas ──────────────────────────────────────────────────
@@ -1022,9 +1043,15 @@ export interface AdminPlan {
   code: string
   name: string
   limits: PlanLimits
+  /** Precio de referencia: informativo, nunca un límite (ADR-V25-18). */
   monthly_price_usd: number | null
+  /** Metadatos informativos (precios de referencia, origen, hipótesis); null en los planes heredados. */
+  metadata?: Record<string, unknown> | null
   is_active: boolean
 }
 
 // ─── Etapa 2 ───────────────────────────────────────────────────────────────
 export * from './types.v2'
+// ─── V2.5 · W5-E: Radar, Decision Engine, Outcomes y ROI, ciclo de vida de modelos ──
+export * from './types.w5'
+export * from './types.w6a'

@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\Analytics;
 
 use App\Http\Controllers\Controller;
 use App\Models\Tenant;
+use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 
@@ -27,6 +28,6 @@ abstract class AnalyticsController extends Controller
     {
         $default = (int) ($this->tenant()->effectiveSettings()['default_horizon_days'] ?? 30);
 
-        return in_array($default, array_map('intval', (array) config('engine.horizons')), true) ? $default : 30;
+        return in_array($default, HorizonCatalog::demand(), true) ? $default : 30;
     }
 }

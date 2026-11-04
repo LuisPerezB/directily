@@ -44,6 +44,10 @@ from predictily_engine.pipeline.schemas import ExecuteRequest
 from predictily_engine.platform.artifacts import SavedArtifact, save_signed_artifact
 from predictily_engine.platform.config import effective_config_record
 from predictily_engine.platform.snapshot import persist_snapshot
+from predictily_engine.quality.persistence import insert_run_quality_report, record_blocked_forecast_run
+from predictily_engine.quality.service import resolve_policy
+from predictily_engine.quality.signals import collect_signals
+from predictily_engine.selection.promotion import champions_from_selection
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +143,9 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
                 raise InsufficientDataError("La empresa no tiene ventas válidas importadas.")
             if cutoff is None or cutoff > last:
                 cutoff = last
+            # Ejecución vigente = no se pidió un corte histórico (anterior al último dato). Sigue siéndolo aunque la cobertura declarada
+            # limite el corte más abajo: su período final conoce hasta HOY (la carga nocturna del último día cuenta; ADR-V25-23).
+            live_run = cutoff >= last
             # Configuración efectiva (core → perfil sectorial → empresa): se valida y se registra en el run.
             tenant = repo.tenant()
             try:
@@ -146,14 +153,30 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             except ValueError as exc:
                 raise InvalidConfigurationError(f"Configuración de demanda inválida: {exc}") from exc
             core_config = config_record["effective_config"]
+            # W3-B: política de promoción (bloque `promotion`: core → perfil → empresa) y champion de cada alcance (la selección servida de
+            # la ejecución de producción vigente ANTES de esta). Una configuración inválida se rechaza, no se aplica.
+            try:
+                promotion_record = effective_config_record("promotion", tenant.get("settings"), tenant.get("sector"))
+            except ValueError as exc:
+                raise InvalidConfigurationError(f"Configuración de promoción de modelos inválida: {exc}") from exc
+            # Solo una ejecución de PRODUCCIÓN toma como champion lo servido por la vigente: una corrida histórica (corte pasado) se compara con el
+            # baseline, porque la vigente es POSTERIOR a su corte (usarla sería mirar el futuro) y la corrida histórica no releva a nadie.
+            production_run = (run.get("run_type") or "production") == "production"
+            champions = load_champions(repo, production_run)
+            champions_source = "previous_production_run" if champions else ("none_historical_run" if not production_run else "none")
+            # Umbrales de los gates de calidad (W2-C): core → perfil → empresa; una configuración inválida se rechaza, no se aplica.
+            quality_policy = resolve_policy(tenant)
             # Cobertura declarada de la fuente de ventas: el corte no la supera y lo posterior es dato ausente.
             branches = repo.branches()
             active_branches = (set(branches.loc[branches["is_active"].astype(bool), "branch_id"].astype(int))
                                if "is_active" in branches else set(branches["branch_id"].astype(int)))
             coverage = SalesCoverage.resolve(conn, tenant_id, repo.sales_coverage(), active_branches)
             cutoff = coverage.limit_cutoff(cutoff)
-            data = coverage.apply(load_tenant_data(repo, cutoff))
+            data = coverage.apply(load_tenant_data(repo, cutoff, live=live_run))
             data.coverage_limitations = coverage.limitations()
+            # Señales de calidad que viven en la base (informes de ingestión, alias, desfase), con el MISMO corte y conocimiento que los datos.
+            quality_signals = collect_signals(conn, tenant_id, cutoff, tenant.get("timezone"), quality_policy.config,
+                                              knowledge=data.promotions_known_on)
         load_s = time.perf_counter() - t0
         log.info("run=%s tenant=%s datos cargados en %.1fs", run_id, tenant_id, load_s)
         seed = req.options.seed if req.options.seed is not None else settings.random_seed
@@ -168,6 +191,8 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
             min_improvement=min_improvement, max_windows=max_windows,
             max_series_lgbm=settings.max_series_lgbm, progress=progress,
             force_families=req.options.force_models, horizons=tuple(req.horizons), config_record=config_record,
+            quality_signals=quality_signals, promotion_record=promotion_record, champions=champions,
+            champions_source=champions_source,
         )
         progress("persisting", 92)
         result.summary.setdefault("timings_seconds", {})["loading_data"] = round(load_s, 1)
@@ -182,6 +207,8 @@ def execute_forecast_run(run_id: int, req: ExecuteRequest) -> dict[str, Any]:
         return _response(final, duration_ms)
     except (InsufficientDataError, InvalidConfigurationError) as exc:
         mark_failed(engine, tenant_id, run_id, job_id, str(exc), int((time.perf_counter() - t0) * 1000))
+        # W2-C: un gate BLOCK deja constancia (informe de calidad de la ejecución con sus motivos); no oculta el error original.
+        record_blocked_forecast_run(engine, tenant_id, run_id, getattr(exc, "assessment", None))
         raise
     except Exception as exc:
         log.exception("Fallo del pipeline run=%s tenant=%s", run_id, tenant_id)
@@ -216,6 +243,63 @@ def _save_signed_artifact(tenant_id: int, run_id: int, family: str, obj: Any, *,
 def _save_artifact(tenant_id: int, run_id: int, family: str, obj: Any) -> tuple[str, str]:
     saved = _save_signed_artifact(tenant_id, run_id, family, obj)
     return saved.stored_path, saved.sha256      # ruta relativa a ENGINE_ARTIFACTS_DIR (ver platform/artifacts.py)
+
+
+# W3-A · persistencia de `model_evaluations`. Capacidad numérica de las columnas escalares (migración 2026_01_01_000700): un valor que no
+# cabe (p. ej. un WAPE enorme con un denominador pequeño) se guarda NULO —nunca revienta la transacción de toda la ejecución— y la
+# columna queda anotada en `extra.column_overflow`; el valor completo sigue en el jsonb `metrics` cuando la fila lo trae.
+EVALUATION_COLUMN_LIMITS = {"wape": 1e6, "bias": 1e6, "mae": 1e10, "rmse": 1e10, "coverage_80": 100.0, "coverage_95": 100.0}
+
+
+def _fit_evaluation_columns(e: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Valores escalares de la fila con NaN/Inf → NULL y los que exceden la capacidad de su columna → NULL (con la lista de columnas)."""
+    fitted, overflow = {}, []
+    for k, v in e.items():
+        if k in ("cutoffs", "extra", "metrics"):
+            continue
+        v = none_if_nan(v)
+        limit = EVALUATION_COLUMN_LIMITS.get(k)
+        if limit is not None and v is not None and abs(float(v)) >= limit - 1e-6:
+            overflow.append(k)
+            v = None
+        fitted[k] = v
+    return fitted, overflow
+
+
+def persist_evaluations(conn: Connection, tenant_id: int, run_id: int, evaluations: list[dict[str, Any]],
+                        registry_ids: dict[str, int]) -> int:
+    """Inserta las filas de `model_evaluations` de una ejecución de Demanda (backtest, ventanas de selección, segmentos). Devuelve cuántas."""
+    if not evaluations:
+        return 0
+    payload = []
+    for e in evaluations:
+        scalars, overflow = _fit_evaluation_columns(e)
+        extra = {"composite": e["model_family"] == "selection", **(e.get("extra") or {})}   # evaluation_scope: 'holdout' | 'selection_windows'
+        if overflow:
+            extra["column_overflow"] = overflow
+        payload.append({**scalars, "tenant_id": tenant_id, "run_id": run_id, "rid": registry_ids.get(e["model_family"]),
+                        "cutoffs": jdump(e.get("cutoffs", [])), "metrics": jdump(e.get("metrics") or {}), "extra": jdump(extra)})
+    conn.execute(text(
+        """
+        INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type,
+            level, level_key, horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80,
+            coverage_95, n_obs, n_windows, cutoffs, extra, core, metrics, created_at)
+        VALUES (:tenant_id, :rid, :run_id, :model_family, :evaluation_type, :level, :level_key, :horizon_days,
+            :is_baseline, :is_selected, :wape, :mae, :rmse, :bias, :coverage_80, :coverage_95, :n_obs, :n_windows,
+            CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), 'demand', CAST(:metrics AS jsonb), now())
+        """
+    ), payload)
+    return len(payload)
+
+
+def factor_registry_fields(result: PipelineResult, family: str) -> tuple[str, dict[str, Any] | None]:
+    """`(feature_set_version, artifact_compat.factors)` de una fila del registro de modelos (W6-E · H2). Solo el LightGBM SERVIDO con factores lleva el linaje de
+    los factores (claves, versiones de definición, huella de los valores visibles) y una versión de features con su marca corta; el resto de las filas, y
+    TODAS con el pipeline apagado, quedan exactamente como siempre."""
+    compat = result.factor_compat if family == "lightgbm_global" and result.lgbm is not None else None
+    if compat is None:
+        return FEATURE_SET_VERSION, None
+    return f"{FEATURE_SET_VERSION}+factors:{compat['fingerprint'][:12]}", compat
 
 
 def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int | None, result: PipelineResult,
@@ -261,6 +345,9 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
         compat = {"input_schema": "demand-panel-v1", "feature_set_version": FEATURE_SET_VERSION, "libraries": versions,
                   "artifact_kind": "mlforecast_joblib" if artifact_path else "statistical_refit",
                   "frequency": "D", "season_length": 7}
+        row_fsv, factor_compat = factor_registry_fields(result, fam)
+        if factor_compat is not None:      # W6-E (H2): el modelo SERVIDO usa factores externos: su linaje (claves, versiones de definición, huella) viaja con el registro
+            compat["factors"] = factor_compat
         if artifact_signature is not None:
             compat["signature"] = artifact_signature      # firma Ed25519 del manifiesto (signed | unsigned), ADR-V25-20
         evaluated = status in ("production", "validated", "candidate") and info.get("evaluated", False)
@@ -282,34 +369,26 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
             "tenant_id": tenant_id, "version": f"t{tenant_id}-r{run['version']}-{fam}", "family": fam,
             "level": info["level"], "demand_class": classes[0] if len(classes) == 1 else None, "status": status,
             "role": role, "evaluated": bool(evaluated), "compat": jdump(compat),
-            "hp": jdump(hp), "fsv": FEATURE_SET_VERSION, "dfrom": result.data_from, "dto": result.data_to,
+            "hp": jdump(hp), "fsv": row_fsv, "dfrom": result.data_from, "dto": result.data_to,
             "hash": result.training_data_hash, "series_count": info["series_count"], "apath": artifact_path,
             "asha": artifact_sha, "libs": jdump(versions), "seed": seed, "job_id": job_id, "run_id": run_id,
             "notes": notes, "promoted": status == "production",
         }).scalar_one()
         registry_ids[fam] = int(rid)
 
-    # ── Evaluaciones (backtest) ──
-    if result.evaluations:
-        conn.execute(text(
-            """
-            INSERT INTO model_evaluations (tenant_id, model_registry_id, forecast_run_id, model_family, evaluation_type,
-                level, level_key, horizon_days, is_baseline, is_selected, wape, mae, rmse, bias, coverage_80,
-                coverage_95, n_obs, n_windows, cutoffs, extra, core, metrics, created_at)
-            VALUES (:tenant_id, :rid, :run_id, :model_family, :evaluation_type, :level, :level_key, :horizon_days,
-                :is_baseline, :is_selected, :wape, :mae, :rmse, :bias, :coverage_80, :coverage_95, :n_obs, :n_windows,
-                CAST(:cutoffs AS jsonb), CAST(:extra AS jsonb), 'demand', CAST(:metrics AS jsonb), now())
-            """
-        ), [{
-            **{k: none_if_nan(v) for k, v in e.items() if k not in ("cutoffs", "extra", "metrics")},
-            "tenant_id": tenant_id, "run_id": run_id, "rid": registry_ids.get(e["model_family"]),
-            "cutoffs": jdump(e.get("cutoffs", [])), "metrics": jdump(e.get("metrics") or {}),
-            # evaluation_scope: 'holdout' (período final reservado) o 'selection_windows'
-            "extra": jdump({"composite": e["model_family"] == "selection", **(e.get("extra") or {})}),
-        } for e in result.evaluations])
+    # ── Evaluaciones (backtest, ventanas de selección y segmentos por horizonte) ──
+    persist_evaluations(conn, tenant_id, run_id, result.evaluations, registry_ids)
 
     # ── Valores pronosticados ──
     copy_forecast_values(conn, tenant_id, run_id, result.forecast_values, registry_ids)
+
+    # ── W3-B · decisiones de promoción de ambas políticas y predicciones del challenger (shadow; no se sirven) ──
+    # Aislados con un punto de guardado: el registro de decisiones y el shadow no pueden tumbar la transacción de lo servido; si fallan, la
+    # ejecución se publica igual y la limitación queda explícita.
+    _isolated(conn, result, "promotion_decisions_persist_failed", "No se pudieron registrar las decisiones de promoción de esta ejecución",
+              persist_promotion_decisions, conn, tenant_id, run_id, result, registry_ids)
+    _isolated(conn, result, "shadow_persist_failed", "No se pudieron guardar las predicciones del challenger (shadow) de esta ejecución",
+              persist_shadow_forecasts, conn, tenant_id, run_id, result, registry_ids)
 
     # ── Recomendaciones ──
     recs = result.recommendations
@@ -332,6 +411,8 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
 
     # ── Calidad de datos ──
     dq_id = insert_quality_report(conn, tenant_id, result.readiness, run_id)
+    # W2-C: métricas de dataset y resultado de los gates de la ejecución (scope `run`), junto al informe de preparación.
+    gate_report_id = insert_run_quality_report(conn, tenant_id, result.quality, forecast_run_id=run_id) if result.quality is not None else None
 
     # ── Alertas (solo ejecuciones de producción) ──
     if production:
@@ -341,6 +422,10 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
     summary = dict(result.summary)
     summary["duration_ms"] = duration_ms
     summary["data_quality_report_id"] = dq_id
+    if gate_report_id is not None:
+        summary["run_quality_report_id"] = gate_report_id
+        summary["quality_gate"] = {**summary.get("quality_gate", {}), "report_id": gate_report_id}
+        result.manifest["data_quality_gate"] = {**result.manifest.get("data_quality_gate", {}), "report_id": gate_report_id}
     summary["library_versions"] = versions
     summary["training_data_hash"] = result.training_data_hash
     snapshot_id = persist_snapshot(conn, tenant_id, result.snapshot) if result.snapshot is not None else None
@@ -375,6 +460,100 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
                                                  "metrics": summary["metrics"], "models": summary["models"],
                                                  "warnings": result.warnings}),
             "rid": registry_ids.get(main_family), "id": job_id, "tenant_id": tenant_id})
+
+
+def load_champions(repo: TenantRepository, production: bool = True) -> dict[str, str]:
+    """W3-B · champion de cada alcance: la familia servida por clase en la ejecución de producción vigente anterior (`forecast_runs.selection`).
+    Sin ejecución vigente —o en una corrida histórica, `production=False`, cuyo corte es anterior a la vigente— no hay champion y la referencia es
+    el baseline."""
+    if not production:
+        return {}
+    current = repo.current_run()
+    return {} if current is None else champions_from_selection(_json(current.get("selection")))
+
+
+def _isolated(conn: Connection, result: PipelineResult, code: str, message: str, fn: Any, *args: Any) -> Any:
+    """Ejecuta `fn(*args)` dentro de un punto de guardado (`begin_nested`): un fallo revierte solo lo suyo, deja la limitación `code` en el resultado
+    (resumen y `limitation_codes`) y la persistencia de la ejecución continúa."""
+    try:
+        with conn.begin_nested():
+            return fn(*args)
+    except Exception as exc:
+        log.exception("%s (run=%s)", code, args[2] if len(args) > 2 else "?")
+        item = {"code": code, "message": f"{message} ({type(exc).__name__}). Lo servido no cambia."}
+        result.limitations.append(item)
+        codes = result.summary.setdefault("limitation_codes", [])
+        if code not in codes:
+            codes.append(code)
+        return None
+
+
+def persist_promotion_decisions(conn: Connection, tenant_id: int, run_id: int, result: PipelineResult, registry_ids: dict[str, int]) -> int:
+    """W3-B · una fila de `model_promotion_decisions` por política (legacy | v25) y alcance (global, clase, horizonte), con `is_effective` en las
+    que gobernaron lo servido y los gates con su evidencia. El candidato referencia el registro de modelos de ESTA ejecución; el champion, el de la
+    ejecución vigente anterior (FK compuestas por empresa). Idempotente por ejecución. Devuelve cuántas filas escribió."""
+    promotion = result.promotion
+    if promotion is None:
+        return 0
+    conn.execute(text("DELETE FROM model_promotion_decisions WHERE tenant_id = :t AND forecast_run_id = :r AND core = 'demand'"),
+                 {"t": tenant_id, "r": run_id})
+    previous = conn.execute(text("SELECT id FROM forecast_runs WHERE tenant_id = :t AND is_current AND id <> :r ORDER BY id DESC LIMIT 1"),
+                            {"t": tenant_id, "r": run_id}).scalar()      # se consulta ANTES de que esta ejecución releve a la vigente
+    previous_ids: dict[str, int] = {}
+    if previous is not None:
+        previous_ids = {str(f): int(i) for f, i in conn.execute(text(
+            "SELECT model_family, MAX(id) FROM model_registry WHERE tenant_id = :t AND core = 'demand' AND forecast_run_id = :p "
+            "GROUP BY model_family"), {"t": tenant_id, "p": previous}).all()}
+    payload = [{
+        "t": tenant_id, "r": run_id, "scope": d["scope_key"], "policy": d["policy"], "version": d["policy_version"],
+        "cand": d["candidate_family"], "champ": d["champion_family"], "cand_id": registry_ids.get(d["candidate_family"]),
+        # Solo un champion REAL (lo servido por la ejecución vigente anterior) referencia su registro; el baseline como referencia no es ese modelo.
+        "champ_id": previous_ids.get(d["champion_family"]) if d["metrics"].get("champion_source") == "previous_run" else None, "decision": d["decision"], "eff": bool(d["is_effective"]),
+        "gates": jdump(d["gates"]), "metrics": jdump(d["metrics"]), "reason": d["reason"],
+    } for d in promotion.rows()]
+    if payload:
+        conn.execute(text(
+            """
+            INSERT INTO model_promotion_decisions (tenant_id, core, forecast_run_id, scope_key, policy, policy_version, candidate_family,
+                champion_family, candidate_model_registry_id, champion_model_registry_id, decision, is_effective, gates, metrics, reason,
+                decided_at, created_at)
+            VALUES (:t, 'demand', :r, :scope, :policy, :version, :cand, :champ, :cand_id, :champ_id, :decision, :eff,
+                CAST(:gates AS jsonb), CAST(:metrics AS jsonb), :reason, now(), now())
+            """), payload)
+    return len(payload)
+
+
+SHADOW_COPY_COLUMNS = ["tenant_id", "forecast_run_id", "model_registry_id", "model_family", "node_key", "level", "branch_id", "product_id",
+                       "target_date", "horizon_step", "yhat", "lo_80", "hi_80"]
+
+
+def persist_shadow_forecasts(conn: Connection, tenant_id: int, run_id: int, result: PipelineResult, registry_ids: dict[str, int]) -> int:
+    """W3-B · predicciones del challenger en `shadow_forecast_values` (NO se sirven: no entran a `forecast_values`). Idempotente por ejecución."""
+    shadow = result.shadow
+    if shadow is None or shadow.empty:
+        return 0
+    conn.execute(text("DELETE FROM shadow_forecast_values WHERE tenant_id = :t AND forecast_run_id = :r"), {"t": tenant_id, "r": run_id})
+    df = shadow.copy()
+    df["tenant_id"], df["forecast_run_id"] = tenant_id, run_id
+    df["model_registry_id"] = df["model_family"].map(registry_ids)
+    for col in ("branch_id", "product_id", "model_registry_id", "horizon_step"):
+        df[col] = pd.to_numeric(df[col]).round().astype("Int64")
+    df = df[SHADOW_COPY_COLUMNS].astype(object).where(df[SHADOW_COPY_COLUMNS].notna(), None)
+    raw = conn.connection.driver_connection
+    n = 0
+    with raw.cursor() as cur:
+        with cur.copy(f"COPY shadow_forecast_values ({', '.join(SHADOW_COPY_COLUMNS)}) FROM STDIN") as cp:
+            for row in df.itertuples(index=False, name=None):
+                cp.write_row(tuple(_shadow_cell(v) for v in row))
+                n += 1
+    return n
+
+
+def _shadow_cell(v: Any) -> Any:
+    if v is pd.NA:
+        return None
+    v = none_if_nan(v)
+    return v.date() if isinstance(v, pd.Timestamp) else v
 
 
 def _alerts(conn: Connection, tenant_id: int, run_id: int, version: int, result: PipelineResult, dq_id: int) -> None:

@@ -48,7 +48,7 @@ class PlanController extends SupplyController
     private const PREVIEW_LIMIT = 20;
 
     /** Bloques pesados del detalle que solo se devuelven si se piden con `?include=` (lista blanca; separados por comas). */
-    private const INCLUDES = ['balance'];
+    private const INCLUDES = ['balance', 'inventory_position', 'perishability_detail', 'replenishment_policy'];
 
     /** Ordenamientos permitidos de las líneas (lista blanca: nunca se interpola la entrada de la persona). */
     private const LINE_SORTS = [
@@ -187,6 +187,12 @@ class PlanController extends SupplyController
                 // null = no solicitado (por defecto); con `?include=balance`, la lista por nodo y período del motor ([] si el plan no la trae).
                 'balance' => in_array('balance', $includes, true) ? ($details['balance'] ?? []) : null,
                 'periods' => $details['periods'] ?? [],
+                // V2.5 · W5-D (Supply Core): posición de inventario (disponible, comprometido sin doble conteo, ajustes, validez del stock), perecibilidad
+                // con FEFO y merma proyectada, escenario «sin compra» y política de reposición. Los detalles por serie solo con `?include=`.
+                'availability' => JsonMap::of($this->withoutKeys($details['report']['availability'] ?? null, in_array('inventory_position', $includes, true) ? [] : ['series'])),
+                'perishability' => JsonMap::of($this->withoutKeys($details['perishability'] ?? null, in_array('perishability_detail', $includes, true) ? [] : ['series', 'audit.series'])),
+                'no_purchase_baseline' => JsonMap::of($details['no_purchase_baseline'] ?? null),
+                'replenishment_policy' => in_array('replenishment_policy', $includes, true) ? ($details['replenishment_policy'] ?? []) : null,
             ],
             'envelope' => $envelope,
         ]);
@@ -247,6 +253,30 @@ class PlanController extends SupplyController
         }
 
         return $values;
+    }
+
+    /**
+     * Copia de un mapa del motor sin las claves indicadas (admite `a.b` para una clave anidada); null sigue siendo null.
+     *
+     * @param  array<string, mixed>|null  $map
+     * @param  list<string>  $keys
+     * @return array<string, mixed>|null
+     */
+    private function withoutKeys(?array $map, array $keys): ?array
+    {
+        if ($map === null) {
+            return null;
+        }
+        foreach ($keys as $key) {
+            [$head, $tail] = array_pad(explode('.', $key, 2), 2, null);
+            if ($tail === null) {
+                unset($map[$head]);
+            } elseif (isset($map[$head]) && is_array($map[$head])) {
+                unset($map[$head][$tail]);
+            }
+        }
+
+        return $map;
     }
 
     /** Corrida de plan de la empresa activa (404 si no existe o es de otra empresa). */

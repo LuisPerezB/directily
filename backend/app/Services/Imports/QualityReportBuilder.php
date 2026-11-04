@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\DB;
  * Reporte de calidad de una importación (data_quality_reports, scope "import").
  * El puntaje 0-100 es ORIENTATIVO: resume tasa de errores, advertencias y días faltantes;
  * no es una medida de precisión de pronósticos.
+ *
+ * `build` arma `score`, `issues` y `summary` (el contrato que consumen ImportJobResource, el tablero, la exportación LOPDP y el E2E).
+ * La persistencia —que además llena `dataset`, `issue_counts`, `rules_version`, `metrics` y los hallazgos— es de
+ * `DataCore\Quality\IngestionQuality::persistImportReport` (ADR-V25-24). `persist` queda solo como camino mínimo de compatibilidad.
  */
 final class QualityReportBuilder
 {
@@ -39,7 +43,8 @@ final class QualityReportBuilder
             'rows_total', 'rows_valid', 'rows_error', 'rows_warning', 'duplicates_in_file', 'documents_total', 'documents_valid',
             'documents_invalid', 'documents_new', 'documents_updated', 'documents_unchanged', 'voided_documents', 'return_lines',
             'date_from', 'date_to', 'missing_days', 'products_new', 'branches_new',
-            'stale_skipped', 'revisions_archived', 'updated_without_source_order', 'ingestion_mode',
+            'stale_skipped', 'revisions_archived', 'updated_without_source_order', 'unchanged_mode_mismatch', 'future_recorded_at', 'recorded_at_unreadable', 'document_number_shared_with_unknown_type', 'ingestion_mode',
+            'documents_quarantined',
         ]));
         $summary['error_rate'] = round($errorRate, 4);
 

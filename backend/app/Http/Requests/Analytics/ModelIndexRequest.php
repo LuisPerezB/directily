@@ -7,7 +7,7 @@ namespace App\Http\Requests\Analytics;
 use App\Services\Analytics\Support\ModelStatus;
 use Illuminate\Validation\Rule;
 
-/** GET /models: acepta los estados nuevos (ADR-V2-07) y los de la etapa 1. */
+/** GET /models: acepta los estados nuevos (ADR-V2-07, ADR-V25-07), los de la etapa 1 y el filtro por familia de modelo. */
 class ModelIndexRequest extends AnalyticsRequest
 {
     /** @return array<string, mixed> */
@@ -15,6 +15,7 @@ class ModelIndexRequest extends AnalyticsRequest
     {
         return [
             'status' => ['nullable', Rule::in(ModelStatus::accepted())],
+            'family' => ['nullable', 'string', 'max:40', 'regex:/^[a-z0-9_]+\z/'],
             'role' => ['nullable', Rule::in(ModelStatus::ROLES)],
             'core' => ['nullable', Rule::in(['demand', 'customer', 'supply', 'cost', 'scenario'])],
             'run_id' => ['nullable', 'integer', 'min:1'],

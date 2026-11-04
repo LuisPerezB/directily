@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources\Customer;
 
 use App\Models\CustomerPrediction;
+use App\Services\Customer\CustomerS05Presenter;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -38,6 +39,6 @@ class CustomerPredictionResource extends JsonResource
             'n_purchases' => $this->n_purchases,
             'model' => ['family' => $this->model_family, 'role' => $this->model_role],
             'quality_flags' => $this->quality_flags ?? [],
-        ];
+        ] + CustomerS05Presenter::fields($this->resource);
     }
 }

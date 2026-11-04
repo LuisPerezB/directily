@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from asof_helpers import GENERIC_CODE, World, add_document, amend_document, local, make_world
+from sqlalchemy import text
 
 from predictily_engine.customer.data import load_customer_data
 from predictily_engine.customer.dataset import build_dataset
@@ -319,3 +320,52 @@ def test_a_live_customer_run_knows_the_nightly_load_of_its_last_day_and_a_histor
         strict = repo.purchases(date.fromisoformat(iso(20)), True, [GENERIC_CODE])
         assert float(strict["qty"].sum()) == 3.0
         assert float(repo.purchases(date.fromisoformat(iso(20)), True, [GENERIC_CODE], date.fromisoformat(iso(25)))["qty"].sum()) == 8.0
+
+
+def coverage_limited_customer_world(conn):
+    """Hallazgo MEDIUM de la revisión (Customer): el comprador 0 solo tiene la compra del día 20 por la carga nocturna (recibida el día 21 a
+    las 03:00 locales); el comprador 1 compra el día 21 (parcial de hoy); la cobertura completa declarada llega hasta el día 20."""
+    w = make_world(conn, n_customers=2)
+    for d in (0, 10):
+        add_document(conn, w, number=f"R-{d}", sale_date=iso(d), lines=[(0, 1, 10.0)], customer=0)
+    add_document(conn, w, number="N-20", sale_date=iso(20), lines=[(0, 5, 10.0)], customer=0, mode="incremental", known_from=local(iso(21), 3))
+    add_document(conn, w, number="P-21", sale_date=iso(21), lines=[(0, 1, 10.0)], customer=1, mode="incremental", known_from=local(iso(21), 15))
+    conn.execute(text("INSERT INTO data_coverage (tenant_id, entity, complete_from, complete_through, basis, created_at, updated_at) "
+                      "VALUES (:t, 'sales', :f, :c, 'declared', now(), now())"), {"t": w.tenant_id, "f": iso(0), "c": iso(20)})
+    return w
+
+
+def test_a_live_customer_run_limited_by_coverage_keeps_the_nightly_load_in_training_and_prediction(db_engine):
+    """El entrenamiento limita `through` al último día completo (20 < última venta 21) y la predicción calcula las variables a esa fecha: en
+    ambos casos la ejecución sigue siendo VIGENTE y la carga nocturna del día 20 cuenta (etiquetas y variables del corte efectivo).
+    Una fecha histórica pedida de forma explícita conserva la regla estricta."""
+    with rolled_back(db_engine) as conn:
+        w = coverage_limited_customer_world(conn)
+        c0, p0 = w.customer_ids[0], w.product_ids[0]
+        qty0 = lambda data: float(data.purchases.loc[data.purchases["customer_id"] == c0, "qty"].sum())  # noqa: E731
+
+        # entrenamiento: through=None + cap_to_complete (la ejecución vigente) o con live explícito
+        train = load_customer_data(repo_of(conn, w), cfg(), through=None, cap_to_complete=True, live=True)
+        assert train.through == date.fromisoformat(iso(20)) and train.live and train.purchase_versions.knowledge > train.purchase_versions.final
+        assert qty0(train) == 1 + 1 + 5, "la etiqueta del último día conoce la carga nocturna"
+        assert qty0(load_customer_data(repo_of(conn, w), cfg(), through=None, cap_to_complete=True)) == 7, "sin pedir fecha ⇒ vigente por inferencia"
+        # fecha histórica pedida (20 < última venta) o reconstrucción forzada: solo lo conocido hasta el propio corte
+        asked = load_customer_data(repo_of(conn, w), cfg(), through=date.fromisoformat(iso(20)), cap_to_complete=True)
+        forced = load_customer_data(repo_of(conn, w), cfg(), through=None, cap_to_complete=True, live=False)
+        for hist in (asked, forced):
+            assert not hist.live and hist.purchase_versions.knowledge == hist.purchase_versions.final == pd.Timestamp(iso(20))
+            assert qty0(hist) == 2, "la carga nocturna no existía en la reconstrucción histórica"
+        assert train.purchases.attrs["knowledge_digest"] != asked.purchases.attrs["knowledge_digest"]
+
+        # predicción: se carga hasta la última venta (21) y las variables se calculan al último día completo (20)
+        def recency(data, cutoff=20):
+            assert data.last_complete_day() == date.fromisoformat(iso(20)) and data.through == date.fromisoformat(iso(21))
+            base = FeatureBuilder(data, cfg(), max_horizon=7, extend_to=day(cutoff)).compute(day(cutoff), (7,)).base
+            row = base[(base["customer_id"] == c0) & (base["product_id"] == p0)].iloc[0]
+            return float(row["rel_recency_days"]), float(row["rel_n_purchases"])
+
+        live = load_customer_data(repo_of(conn, w), cfg(), through=None, live=True)
+        strict = load_customer_data(repo_of(conn, w), cfg(), through=None, live=False)
+        assert recency(live) == (0.0, 3.0), "vigente: la compra del día 20 (carga nocturna) cuenta en el corte efectivo"
+        assert recency(strict) == (10.0, 2.0), "histórica: en el día 20 aún no se conocía"
+        assert recency(live, cutoff=15) == recency(strict, cutoff=15), "los cortes anteriores no dependen de la carga nocturna"

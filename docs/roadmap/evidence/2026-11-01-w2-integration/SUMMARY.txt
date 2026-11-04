@@ -1,0 +1,10 @@
+Integración de W2 (Data Core P0) · rama v25/w1-cierre-y-w2 · 2026-11-01 · macOS arm64, PostgreSQL 15, PHP 8.3.26, Python 3.12.8
+Paquetes (implementación → revisión adversarial → corrección): W2-F e484c43 · W2-B 43a0873 · W2-A 8ed0faa · W2-D 8a69363 · W2-C df6531e · W2-E d7d468c · integración fbb1739.
+Suites con los .env de desarrollo presentes:
+backend  :: {"tool":"phpunit","result":"passed","tests":1090,"passed":1082,"assertions":22971,"duration_ms":69861,"skipped":8}   (omitidas: 5 emulador S3 sin servidor, 3 servidores MySQL/SQL Server)
+engine   :: 780 passed, 1 warning in 293.50s
+frontend :: type-check 0 · lint 0 · vitest 329 passed · build OK
+E2E (stack en fbb1739, demo recreada): mvp_acceptance 32/32 · stage2_acceptance 256/256 (1 aviso de diseño). Una primera corrida dio 253/256: la
+   comprobación «horizon_support coherente» fijaba el catálogo antiguo {7,14,30,60,90}; ahora lee docs/product/horizons.contract.json (ADR-V25-02).
+Demo (datos ficticios): demo_metrics.json · gate de calidad PASS en ambas empresas; Ferretería WAPE 0,4905 vs Seasonal Naive 0,6604 (cob. 80 % 0,852);
+   Distribuidora 0,4488 vs 0,5983 (0,803); Customer Core 7/30 días idéntico a la línea base, 14 días agregado por el catálogo nuevo.

@@ -20,6 +20,7 @@ final class UserResource extends JsonResource
             'email' => $this->email,
             'locale' => $this->locale,
             'is_superadmin' => (bool) $this->is_superadmin,
+            'mfa_enabled' => $this->resource->hasMfaEnabled(),
             'last_login_at' => $this->last_login_at?->toIso8601String(),
         ];
     }

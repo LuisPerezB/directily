@@ -6,14 +6,19 @@ namespace App\Services\Conversation\Tools;
 
 use App\Http\Resources\Customer\CustomerPredictionResource;
 use App\Models\CustomerPrediction;
+use App\Services\Conversation\Gateway\DataScope;
 use App\Services\Customer\CustomerEnvelope;
 use App\Services\Customer\CustomerRunService;
+use App\Services\Plans\PlanLimitService;
+use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 /**
  * Predicciones de compra por comprador × producto (GET /customer/predictions). Los resultados son esperanzas probabilísticas,
- * no ventas confirmadas. Solo expone el código externo del comprador (nunca nombre, correo ni cédula/RUC).
+ * no ventas confirmadas. Solo expone el código externo del comprador (nunca nombre, correo ni cédula/RUC). Alcance por cliente
+ * (V2.5 · W6-D): se acota a los clientes VISIBLES para la persona según su alcance comercial de W6-A (cartera y clientes con recomendaciones asignadas a ella o a su equipo; sin
+ * alcance guardado, toda la empresa, incluido el rol de servicio, que es de solo lectura); un rol comercial desconocido no la ve.
  */
 final class CustomerPredictionsTool extends ReadTool
 {
@@ -24,6 +29,11 @@ final class CustomerPredictionsTool extends ReadTool
         return (bool) config('conversation.privacy.customer_tools_enabled', true);
     }
 
+    public function dataScope(): DataScope
+    {
+        return DataScope::CustomerPortfolio;
+    }
+
     public function name(): string
     {
         return 'customer_predictions';
@@ -31,7 +41,7 @@ final class CustomerPredictionsTool extends ReadTool
 
     public function description(): string
     {
-        return 'Predicciones de compra ya calculadas por comprador y producto: probabilidad de comprar en 7, 30 o 90 días, cantidad total si compra, '
+        return 'Predicciones de compra ya calculadas por comprador y producto: probabilidad de comprar en los horizontes del plan ('.implode(', ', HorizonCatalog::customer()).' días), cantidad total si compra, '
             .'cantidad esperada y monto esperado (supuesto; no es una venta confirmada). Busque por código del comprador y/o producto.';
     }
 
@@ -42,7 +52,7 @@ final class CustomerPredictionsTool extends ReadTool
             'properties' => [
                 'customer_code' => ['type' => 'string', 'maxLength' => 50, 'description' => 'Código externo del comprador tal como figura en la empresa.'],
                 'product' => ['type' => 'string', 'maxLength' => 80, 'description' => 'SKU o parte del nombre del producto (opcional).'],
-                'horizon' => $this->horizonSchema(CustomerRunService::HORIZONS),
+                'horizon' => $this->horizonSchema(HorizonCatalog::customer()),
                 'min_probability' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1, 'description' => 'Probabilidad mínima (0 a 1).'],
                 'limit' => $this->limitSchema(),
             ],
@@ -55,7 +65,7 @@ final class CustomerPredictionsTool extends ReadTool
         return [
             'customer_code' => ['sometimes', 'string', 'min:1', 'max:50'],
             'product' => ['sometimes', 'string', 'min:1', 'max:80'],
-            'horizon' => ['sometimes', 'integer', Rule::in(CustomerRunService::HORIZONS)],
+            'horizon' => ['sometimes', 'integer', Rule::in(HorizonCatalog::customer())],
             'min_probability' => ['sometimes', 'numeric', 'between:0,1'],
             'limit' => ['sometimes', 'integer', 'min:1', 'max:'.(int) config('conversation.limits.max_rows_per_tool', 10)],
         ];
@@ -64,7 +74,9 @@ final class CustomerPredictionsTool extends ReadTool
     public function execute(array $arguments, ToolContext $context): ToolResult
     {
         $tenant = $context->tenant;
-        $horizon = $this->horizon($arguments, $tenant, CustomerRunService::HORIZONS);
+        $scope = $context->requireScope();
+        app(PlanLimitService::class)->assertCustomer($tenant);   // un plan sin comportamiento de compra (Starter) no lo consulta por el asistente
+        $horizon = $this->horizon($arguments, $tenant, HorizonCatalog::customer());
         $run = $this->runs->latestPrediction();
         if ($run === null) {
             return ToolResult::noData(
@@ -89,6 +101,8 @@ final class CustomerPredictionsTool extends ReadTool
                 $q->whereHas('product', fn ($p) => $p->where(fn ($w) => $w->where('sku', 'ilike', $term)->orWhere('name', 'ilike', $term)));
             })
             ->when(isset($arguments['min_probability']), fn ($q) => $q->where('purchase_probability', '>=', (float) $arguments['min_probability']));
+
+        $scope->constrainCustomers($query, 'customer_id');   // cartera comercial del usuario (sin recorte: toda la empresa)
 
         $total = (clone $query)->count();
         $rows = $query->with(['customer:id,external_code', 'product:id,sku,name,unit'])

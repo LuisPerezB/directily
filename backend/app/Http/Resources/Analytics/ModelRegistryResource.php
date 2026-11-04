@@ -7,6 +7,7 @@ namespace App\Http\Resources\Analytics;
 use App\Models\ModelRegistry;
 use App\Services\Analytics\Support\ModelCatalog;
 use App\Services\Analytics\Support\ModelStatus;
+use App\Services\Models\ModelServingPolicy;
 use App\Support\Results\JsonMap;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -44,6 +45,18 @@ class ModelRegistryResource extends JsonResource
             'trained_at' => $this->trained_at?->toIso8601String(),
             'promoted_at' => $this->promoted_at?->toIso8601String(),
             'retired_at' => $this->retired_at?->toIso8601String(),
+            // V2.5 · W4 (ADR-V25-07): ciclo de vida, publicación y aprobación separada. Sin `published_object_key` (clave interna del almacén).
+            'purpose' => $this->purpose,
+            'granularity' => $this->granularity,
+            'previous_model_registry_id' => $this->previous_model_registry_id,
+            'promotion_decision_id' => $this->promotion_decision_id,
+            'published_by' => $this->published_by,
+            'published_env' => $this->published_env,
+            'published_at' => $this->published_at?->toIso8601String(),
+            'approved_by' => $this->approved_by,
+            'approved_at' => $this->approved_at?->toIso8601String(),
+            'rejected_reason' => $this->rejected_reason,
+            'serving_basis' => $this->servingBasis ?? app(ModelServingPolicy::class)->basis($this->resource),
         ];
     }
 }

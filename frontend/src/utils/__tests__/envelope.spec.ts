@@ -10,6 +10,7 @@ import {
   qualityTone,
   rollbackErrorKey,
   shortHash,
+  unifiedReasonCode,
 } from '../envelope'
 import type { HorizonSupport, ResultEnvelope } from '@/api/types'
 
@@ -47,6 +48,21 @@ describe('respaldo por horizonte (estados de abstención)', () => {
     const v = horizonSupportView(support('unknown'))!
     expect(v.showAsComplete).toBe(false)
     expect(v.noticeKey).toBe('horizonSupport.unknown')
+  })
+
+  it('la abstención unifica el motivo: el estado es insufficient_data y el código, coverage_insufficient o insufficient_horizon', () => {
+    const v = horizonSupportView(support('insufficient_data', [
+      { code: 'history_lt_2h', reason_code: 'coverage_insufficient', message: 'La historia es menor que 2×15.' },
+      { code: 'backtest_horizon_lt_h', message: 'El backtesting solo evalúa ventanas de 14 días.' }, // ejecución anterior a W2-E: sin reason_code
+      { code: 'algo_nuevo', message: 'Motivo futuro.' },
+    ]))!
+    expect(v.status).toBe('insufficient_data')
+    expect(v.reasonItems.map((r) => r.code)).toEqual(['coverage_insufficient', 'insufficient_horizon', 'algo_nuevo'])
+    expect(v.reasons).toHaveLength(3)
+    expect(unifiedReasonCode({ code: 'no_backtest' })).toBe('coverage_insufficient')
+    expect(unifiedReasonCode({ code: 'no_evaluated_observations' })).toBe('insufficient_horizon')
+    expect(unifiedReasonCode({ code: 'history_lt_2h', reason_code: 'no_model' })).toBe('no_model')
+    expect(unifiedReasonCode({})).toBeNull()
   })
 
   it('acepta motivos como texto y sin información devuelve null', () => {

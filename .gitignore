@@ -28,3 +28,9 @@ engine/*.egg-info/
 # sin autorización expresa del propietario (docs/operations/PILOT_RUNBOOK.md §0).
 reports/private/
 data/private/
+# infra/aws (AWS CDK, V2.5 W4-C): dependencias, salida de síntesis y datos locales del propietario (cuenta, dominios; sin secretos).
+infra/aws/node_modules/
+infra/aws/cdk.out/
+infra/aws/cdk.context.json
+infra/aws/owner-inputs.*.json
+!infra/aws/owner-inputs.example.json

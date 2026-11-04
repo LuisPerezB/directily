@@ -123,6 +123,20 @@ def test_demand_artifacts_are_signed_with_the_demand_core(tenant):
     assert artifacts.verify_stored_artifact(stored, tenant_id=tenant, core="customer", expected_sha256=sha).reason == signing.REASON_CORE_MISMATCH
 
 
+def test_the_run_of_the_registry_row_is_compared_with_the_manifest_when_the_caller_knows_it(tenant):
+    stored, sha = save_demand_artifact(tenant, 11, "lightgbm_global", {"x": 1})
+    ok = artifacts.verify_stored_artifact(stored, tenant_id=tenant, core="demand", expected_sha256=sha, run_id=11)
+    assert ok.ok and ok.artifact.status == "signed"
+    # Una fila del registro de OTRA corrida que apunte a este artefacto firmado (reutilización de un modelo legítimo anterior) se rechaza.
+    other = artifacts.verify_stored_artifact(stored, tenant_id=tenant, core="demand", expected_sha256=sha, run_id=12)
+    assert not other.ok and other.reason == signing.REASON_RUN_MISMATCH and other.artifact is None
+    # Sin run_id (llamador que no la conoce) no se compara: el comportamiento anterior no cambia.
+    assert artifacts.verify_stored_artifact(stored, tenant_id=tenant, core="demand", expected_sha256=sha).ok
+    # El CLI lo acepta y devuelve el mismo motivo.
+    assert cli.main(["verify-artifact", "--path", stored, "--tenant-id", str(tenant), "--core", "demand", "--sha256", sha, "--run-id", "11"]) == 0
+    assert cli.main(["verify-artifact", "--path", stored, "--tenant-id", str(tenant), "--core", "demand", "--sha256", sha, "--run-id", "12"]) == 1
+
+
 # ───────────────────────────── alteración y clave desconocida ─────────────────────────────
 
 def test_altered_bytes_are_rejected_before_deserializing(tenant, marker, monkeypatch):

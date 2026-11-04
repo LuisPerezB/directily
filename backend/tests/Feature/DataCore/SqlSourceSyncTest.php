@@ -48,7 +48,11 @@ final class SqlSourceSyncTest extends TestCase
         parent::setUp();
         $erp = ErpSourceDatabase::tryConnect();
         if ($erp === null) {
-            $this->markTestSkipped('No hay base de datos «ERP de origen» de pruebas (predictily_erp_source_p3).');
+            $this->markTestSkipped(ErpSourceDatabase::skipMessage(
+                'el conector SQL de punta a punta contra un ERP PostgreSQL real: prueba y fallo de conexión sin filtrar secretos, política de solo lectura (rechazo de escrituras y transacción de solo lectura), '
+                .'sincronización completa por el pipeline de importación con procedencia, reimportación sin duplicados y corrección del origen, mapeos sin aprobar, filas inválidas, cobertura declarada, aislamiento entre empresas, '
+                .'permisos, sincronización programada y una sola sincronización activa por fuente y entidad.'
+            ));
         }
         $this->erp = $erp;
         $this->erp->createSchema();
@@ -179,7 +183,9 @@ SQL,
 
     public function test_failed_connection_reports_error_without_secrets(): void
     {
-        $this->patchJson("/api/v1/data-sources/{$this->sourceId}", ['credentials' => ['username' => 'predictily', 'password' => 'clave-incorrecta-123']])->assertOk();
+        // Rol inexistente además de una clave incorrecta: la conexión falla también en un PostgreSQL local con autenticación `trust`
+        // (Homebrew), que aceptaría cualquier clave para un rol existente.
+        $this->patchJson("/api/v1/data-sources/{$this->sourceId}", ['credentials' => ['username' => 'predictily_rol_inexistente', 'password' => 'clave-incorrecta-123']])->assertOk();
         $result = $this->postJson("/api/v1/data-sources/{$this->sourceId}/test")->assertOk();
         $result->assertJsonPath('data.ok', false);
         $this->assertStringNotContainsString('clave-incorrecta-123', $result->getContent());
@@ -191,6 +197,19 @@ SQL,
             'type' => 'connector', 'connector_key' => 'sql_postgresql', 'name' => 'x',
             'config' => ['host' => 'db;host=evil', 'database' => 'erp', 'password' => 'no-aqui'], 'credentials' => ['username' => 'u', 'password' => 'p'],
         ])->assertStatus(422)->assertJsonValidationErrors(['config.host', 'config.password']);
+    }
+
+    public function test_sql_server_tls_options_must_be_booleans(): void
+    {
+        $payload = fn (array $tls) => [
+            'type' => 'connector', 'connector_key' => 'sql_sqlserver', 'name' => 'ERP SQL Server',
+            'config' => ['host' => '203.0.113.10', 'database' => 'erp', ...$tls], 'credentials' => ['username' => 'lector', 'password' => 'p'],
+        ];
+        // Un texto «false» se leería como true al convertirlo: se rechaza.
+        $this->postJson('/api/v1/data-sources', $payload(['encrypt' => 'false', 'trust_server_certificate' => 'yes']))
+            ->assertStatus(422)->assertJsonValidationErrors(['config.encrypt', 'config.trust_server_certificate']);
+        $this->postJson('/api/v1/data-sources', $payload(['encrypt' => false, 'trust_server_certificate' => true]))
+            ->assertCreated()->assertJsonPath('data.config.encrypt', false)->assertJsonPath('data.config.trust_server_certificate', true);
     }
 
     public function test_unapproved_mapping_cannot_sync(): void

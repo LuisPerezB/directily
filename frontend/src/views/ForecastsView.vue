@@ -27,6 +27,7 @@ import { formatDate, formatDateTime, formatNumber, formatCurrency } from '@/util
 import { GRANULARITIES } from '@/utils/constants'
 import { distinctCaseLabels, horizonSupportView } from '@/utils/envelope'
 import { abstentionSummary } from '@/utils/accuracy'
+import { horizonSupportMap } from '@/utils/horizons'
 import type { Metric } from '@/utils/series'
 
 const { t, te } = useI18n()
@@ -38,7 +39,8 @@ const branchId = ref<number | null>(null)
 const categoryId = ref<number | null>(null)
 const product = ref<Product | null>(null)
 const granularity = ref<Granularity>('day')
-const { horizon, options: horizonOptions, hasHorizons } = useHorizonSelection(undefined, 30)
+// El selector marca los horizontes del plan que la ejecución vigente no respalda (abstención con su motivo en el título).
+const { horizon, options: horizonOptions, hasHorizons } = useHorizonSelection(undefined, 30, () => horizonSupportMap(runs.data.value?.data.find((r) => r.is_current)?.summary))
 const historyDays = ref(90)
 const metric = ref<Metric>('units')
 const runId = ref<number | null>(null)

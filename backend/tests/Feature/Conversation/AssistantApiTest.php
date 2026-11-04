@@ -37,6 +37,12 @@ class AssistantApiTest extends TestCase
 
     private const CUTOFF = '2026-10-20';
 
+    /** Lista blanca completa, en el orden del catálogo (V2.5 · W6-D agregó las seis últimas). */
+    private const TOOLS = [
+        'dashboard_summary', 'product_forecast', 'forecast_accuracy', 'inventory_recommendations', 'customer_predictions', 'supply_plan',
+        'radar_opportunities', 'explain_recommendation', 'decisions_summary', 'outcomes', 'roi_summary', 'model_quality',
+    ];
+
     private function basicPlanId(): int
     {
         return (int) DB::table('plans')->insertGetId([
@@ -119,7 +125,7 @@ class AssistantApiTest extends TestCase
         $res = $this->actingAsTenantUser($viewer, $tenant)->getJson('/api/v1/assistant/status')->assertOk()->assertJsonPath('data.enabled', true)->assertJsonPath('data.model', 'fake-model');
         $tools = collect($res->json('data.tools'))->pluck('available_to_you', 'name')->all();
         $this->assertSame(
-            ['dashboard_summary', 'product_forecast', 'forecast_accuracy', 'inventory_recommendations', 'customer_predictions', 'supply_plan'],
+            self::TOOLS,
             array_keys($tools),
         );
         $this->assertNotContains(false, $tools);
@@ -172,7 +178,7 @@ class AssistantApiTest extends TestCase
 
         // Al proveedor solo se le ofrecen las herramientas de la lista blanca, con esquema cerrado.
         $this->assertSame(
-            ['dashboard_summary', 'product_forecast', 'forecast_accuracy', 'inventory_recommendations', 'customer_predictions', 'supply_plan'],
+            self::TOOLS,
             array_column($provider->calls[0]['tools'], 'name'),
         );
         foreach ($provider->calls[0]['tools'] as $tool) {
@@ -335,6 +341,19 @@ class AssistantApiTest extends TestCase
         // Un horizonte permitido sí responde.
         $this->fakeProvider([Fake::tool('dashboard_summary', ['horizon' => 30]), Fake::text('Consultado.')]);
         $api->postJson('/api/v1/assistant/messages', ['message' => 'a 30 días'])->assertOk()->assertJsonPath('data.figures.0.status', 'ok');
+    }
+
+    public function test_a_plan_without_customer_behavior_reveals_no_customer_prediction_through_the_assistant(): void
+    {
+        [$tenant, $user] = $this->createTenantWithUser(TenantRole::Owner, ['plan_overrides' => ['features' => ['customer' => false]]]);
+        $this->seedCatalog($tenant);
+        $this->seedPredictionRun($tenant, $this->seedCustomerCatalogFor($tenant));
+        $api = $this->actingAsTenantUser($user, $tenant);
+
+        $this->fakeProvider([Fake::tool('customer_predictions', ['horizon' => 30]), Fake::text('Sin acceso.')]);
+        $res = $api->postJson('/api/v1/assistant/messages', ['message' => 'qué compradores comprarán'])->assertOk();
+        $this->assertSame(['plan_limit'], array_column($res->json('data.figures'), 'status'));
+        $this->assertNull($res->json('data.figures.0.data'));
     }
 
     // ── aislamiento entre empresas ──

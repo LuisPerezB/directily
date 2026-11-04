@@ -38,6 +38,8 @@ final class ProductResource extends JsonResource
             'current_price' => $this->current_price,
             'current_cost' => $this->current_cost,
             'is_active' => (bool) $this->is_active,
+            'is_perishable' => (bool) $this->is_perishable,
+            'shelf_life_days' => $this->shelf_life_days,
             'stats' => $stats ?? ['units_90d' => 0.0, 'revenue_90d' => 0.0, 'last_sale_date' => null],
             'created_at' => $this->created_at?->toIso8601String(),
         ];

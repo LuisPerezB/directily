@@ -82,15 +82,28 @@ ventas**. El motor distingue dos casos, con la misma convención que ya usaban l
 
 | Ejecución | Cómo se reconoce | Hasta qué día llega lo conocido para el período final y los reales de las ventanas (`knowledge`) |
 |---|---|---|
-| **Vigente** | el corte es el último dato (`cutoff ≥ last_sale_date()`) | **HOY** (día local de la empresa): lo recibido después de la medianoche del último día —la carga nocturna— cuenta |
-| **Reconstrucción histórica** | existen ventas posteriores al corte | el **propio corte**: lo que llegó después no puede cambiar ni el período final ni la huella |
+| **Vigente** | el llamador lo declara con el parámetro `live=True` de `load_tenant_data` / `load_customer_data`: ninguna petición de corte histórico (producción sin corte explícito, entrenamiento y predicción del Customer sin fecha pedida, preparación de datos). Si no se declara (`live=None`) se infiere: el corte pedido es ≥ el último dato | **HOY** (día local de la empresa): lo recibido después de la medianoche del último día —la carga nocturna— cuenta |
+| **Reconstrucción histórica** | se pidió un corte anterior al último dato (o `live=False`) | el **propio corte**: lo que llegó después no puede cambiar ni el período final ni la huella |
+
+**La señal es explícita porque la cobertura declarada puede limitar el corte de una ejecución vigente.** `forecast_run` recorta el corte a `data_coverage.complete_through` y el
+entrenamiento del Customer limita `through` al último día completo (`cap_to_complete`): el corte queda por debajo del último dato sin ser una reconstrucción histórica. Inferir «vigente» del
+corte ya recortado trataba esa ejecución como histórica y perdía la carga nocturna de su último día. Ahora `execute_forecast_run` calcula `live` ANTES de aplicar la cobertura (`cutoff ≥ último dato`
+con el corte pedido, sin pedido ⇒ vigente) y lo pasa a la carga; `customer/service.py` pasa `live=True` cuando el run no trae `as_of` (None = inferir de la fecha pedida, no de la limitada).
+En la **predicción** del Customer, cuyo corte efectivo es el último día completo aunque se carga hasta la última venta, las variables de ESE corte (`FeatureBuilder.events_at(last_complete)`) también conocen
+hasta hoy; las de los cortes anteriores, solo lo suyo.
 
 Solo cambia la «verdad» del corte final. Las vistas de los cortes **anteriores** (las ventanas del backtest y las observaciones del Customer Core) siguen siendo estrictas: cada una usa
 lo conocido en su propio corte, y lo que llegó después de él no se les cuela (`AsOfWindows` lo trata como tardío). API: `daily_sales(cutoff, knowledge=None)`, `daily_returns`, `sales_stats`,
 `last_sale_date` y `sales_versions(upto, knowledge=None)` (y `purchases`, `returns`, `purchase_versions`, `excluded_sales_stats` del Customer Core) aceptan el día de conocimiento; sin él son
-as-of estrictas del corte, como siempre. `load_tenant_data` y `load_customer_data` lo fijan con la regla de la tabla. Queda registrado en `knowledge.source.knowledge_date` del
+as-of estrictas del corte, como siempre. `load_tenant_data(repo, cutoff, live=None)` y `load_customer_data(repo, cfg, through, cap_to_complete, live=None)` lo fijan con la regla de la tabla. Queda registrado en `knowledge.source.knowledge_date` del
 manifiesto y del resumen. La huella de datos **no depende del día de ejecución**, solo de qué versiones se conocieron: dos ejecuciones vigentes de días distintos sin cargas nuevas
 entre ellas comparten huella.
+
+IMPLEMENTADO / VERIFICADO (corte limitado por la cobertura): `test_asof_integration.py::test_a_live_run_whose_cutoff_is_limited_by_coverage_keeps_the_nightly_load_of_its_last_day` (el escenario de la
+revisión: histórico hasta el día 9, carga nocturna del día 9 recibida el 10 a las 03:00, ventas parciales de hoy y cobertura hasta el día 9: `live=True` ⇒ 10 u. el día 9; sin la señal, 4 u.),
+`::test_the_forecast_run_passes_live_to_the_loader_so_a_coverage_limited_run_knows_the_nightly_load` (de extremo a extremo por `execute_forecast_run`: la ejecución de producción limitada por la cobertura conoce hasta hoy y
+una histórica con corte explícito solo hasta su corte; falla si se quita el parámetro), `test_asof_customer_integration.py::test_a_live_customer_run_limited_by_coverage_keeps_the_nightly_load_in_training_and_prediction`
+(entrenamiento con `cap_to_complete` y variables del corte efectivo de la predicción: recencia 0 con la carga nocturna, 10 sin ella).
 
 IMPLEMENTADO / VERIFICADO: `test_asof_visibility.py::test_a_live_final_view_knows_what_arrived_after_the_midnight_of_the_last_day`,
 `::test_a_live_view_applies_a_correction_received_after_the_final_cutoff_but_windows_keep_the_version_in_force`,
@@ -187,7 +200,7 @@ registran la política, la huella de las versiones y lo que usó cada ventana.
 
 | Qué | Conocimiento | Dónde |
 |---|---|---|
-| **Variables** de la observación (comprador × producto × corte `c`): recencia, frecuencia, intervalos, cantidades, precios, devoluciones, comprador, producto, actividad | lo conocido el día `c` | `FeatureBuilder.events_at(c)` |
+| **Variables** de la observación (comprador × producto × corte `c`): recencia, frecuencia, intervalos, cantidades, precios, devoluciones, comprador, producto, actividad | lo conocido el día `c`; excepción: en una ejecución vigente (`live`) el corte EFECTIVO (último día completo, que puede quedar por debajo de lo cargado por la cobertura declarada) conoce hasta hoy | `FeatureBuilder.events_at(c)` |
 | **Etiquetas** `purchase`, `qty`, `net`, `returned_qty` de la ventana `(c, c+H]` | el conocimiento más reciente: la verdad disponible (hasta hoy si el corte `through` es la última venta; hasta `through` en una reconstrucción histórica, §3) | `FeatureBuilder.labels` (índice de la verdad) |
 | Resultados de la evaluación de inactividad/frecuencia (`evaluate_activity`) | variables as-of `c`; resultado con la verdad | `outputs.evaluate_activity` |
 | Calendario, promociones (`promotions_as_of`), disponibilidad, catálogo y compradores genéricos | como antes (no versionados o ya as-of por su regla) | — |
@@ -243,11 +256,31 @@ acepta: **pendiente fuera de este paquete** (§12).
 - `missing_source` y `closed` se **excluyen** de WAPE, MASE, sesgo, cobertura, selección de modelos y calibración de intervalos: las filas del backtest los marcan como no evaluables
   (`stockout = True`, `day_status` dice cuál) y las métricas reportan `exclusions.{stockout_days, missing_source_days, closed_days}`. Se excluyen también de la proporción de ceros del perfilado
   (ADI sobre los últimos 365 días limpios) y reciben **peso 0** en LightGBM.
-- Para los modelos que exigen series contiguas se **imputan** con la misma regla de los quiebres: `y = max(venta, media móvil de 28 días de los días limpios)` (mínimo 7 días previos; sin historia
-  suficiente queda el valor observado y se cuenta aparte).
-- **Trazabilidad**: limitaciones `days_missing_source`, `days_missing_source_inferred` y `days_closed` con su conteo (series-día, imputados y no imputables); `summary.day_status` y
-  `evaluation_manifest.day_status`/`knowledge` con el desglose por estado y base; problemas de calidad `missing_source_days` y `closed_days` en el reporte de preparación; el `training_data_hash` incluye `day_status`.
+- Para los modelos que exigen series contiguas se **imputan** con la misma regla de los quiebres: `y = max(venta, media móvil de 28 días de los días limpios)` (mínimo 7 días previos). **Huecos largos**: un hueco o cierre
+  de más de 21 días agota la ventana (menos de 7 días limpios) y la media móvil queda nula; en vez de dejar el valor observado (0), los días `missing_source` / `closed` **propagan el último nivel disponible** (`ffill` dentro de la serie), de modo que
+  60 días declarados ya no dejan 38 con `y = 0` visibles a las familias estadísticas. Solo queda sin imputar un día sin ningún nivel previo (el hueco abre la serie): conserva el valor observado y se cuenta aparte. Los **quiebres de stock conservan
+  la regla de siempre** (un quiebre de más de 28 días vuelve a dejar el valor observado: limitación §12.16).
+- **Trazabilidad**: limitaciones `days_missing_source`, `days_missing_source_inferred`, `days_closed` y —si quedan días sin imputar— `days_not_imputable`, con su conteo (series-día, imputados, de ellos propagados por hueco largo, y no imputables); `summary.day_status` y
+  `evaluation_manifest.day_status`/`knowledge` con el desglose por estado y base (`excluded_days_imputed`, `excluded_days_carried_forward`, `excluded_days_not_imputable`); problemas de calidad `missing_source_days` y `closed_days` en el reporte de preparación; el `training_data_hash` incluye `day_status`.
 - **Sin cobertura declarada** se conserva el comportamiento anterior (los días sin venta son `zero_confirmed`) y la limitación `coverage_undeclared`.
+
+Huecos largos (IMPLEMENTADO / VERIFICADO), `test_day_status.py`: `::test_a_long_declared_gap_carries_the_last_level_instead_of_feeding_zeros_to_the_statistical_models` (60 días declarados: ningún `y = 0`,
+76 días-serie propagados), `::test_the_carried_level_is_the_last_one_before_the_gap_and_stockouts_keep_the_legacy_rule` y `::test_days_that_cannot_be_imputed_emit_their_own_limitation_code`.
+
+### Evaluación posterior de pronósticos y deriva (`evaluation/actuals.py`)
+
+La exactitud realizada de los pronósticos ya publicados (`forecast_actuals`, métricas `realized` y la alerta `forecast_drift`) tomaba `actual = units.fillna(0)` y solo censuraba los quiebres: una caída de la integración, un día fuera de
+la cobertura declarada o un cierre se leían como demanda cero, inflando el WAPE/sesgo realizados y disparando una deriva falsa. **Ahora** los días-serie `missing_source` (cobertura, huecos declarados o inferidos, regla inferida) y `closed` se clasifican con la
+MISMA función del entrenamiento (`profiling.days.classify_days`, con la regla de la configuración efectiva de la empresa y el conocimiento más reciente de las declaraciones) y:
+
+- se marcan censurados en `forecast_actuals.is_censored` (todos los niveles: un nodo agregado queda marcado si alguna de sus series lo está ese día);
+- no entran a las métricas realizadas de serie (`overall`/`horizon`), a las de nivel total (se omiten los días excluidos) ni a la detección de deriva (que usa solo series evaluables); los quiebres siguen como antes (fuera de la serie, dentro del total);
+- se cuentan por clase en `model_evaluations.extra.exclusions` (`series_days`, `evaluated_series_days`, `stockout_days`, `missing_source_days`, `missing_source_inferred_days`, `closed_days`) y en la respuesta de `evaluate-actuals` (`evaluated_runs[].exclusions` y `exclusions` total).
+
+IMPLEMENTADO / VERIFICADO (`test_asof_evaluation_integration.py`, pronósticos publicados fabricados con la demanda real, de modo que todo error proviene de contar ceros falsos): `::test_an_undeclared_outage_is_read_as_zero_demand_and_triggers_a_false_drift_alert`
+(línea base: sin declarar ni poder inferir, la deriva salta), `::test_a_declared_outage_is_missing_source_not_zero_demand_and_does_not_produce_drift` (declarada: WAPE y sesgo 0, 20 series-día excluidos, total sin esos días, reevaluación idempotente),
+`::test_an_outage_in_a_regular_branch_is_inferred_with_the_training_rule`, `::test_declared_closures_are_closed_days_and_are_not_zero_demand`, `::test_days_outside_the_declared_coverage_of_a_branch_are_missing_source_in_the_evaluation` y
+`::test_stockouts_and_excluded_days_are_counted_apart_and_a_real_deterioration_is_still_detected` (la exclusión no enmascara un deterioro real).
 
 Pruebas (IMPLEMENTADO / VERIFICADO), `test_day_status.py`: `::test_without_any_declaration_the_panel_behaves_as_before`, `::test_a_declared_gap_is_missing_source_never_a_zero_and_is_imputed`,
 `::test_zero_proportion_of_the_profile_ignores_missing_source_and_closed_days`, `::test_closures_by_scope_and_precedence_between_the_statuses`,
@@ -264,6 +297,14 @@ Pruebas (IMPLEMENTADO / VERIFICADO), `test_day_status.py`: `::test_without_any_d
 `platform.snapshot.frame_hash` mezcla en el hash de un marco la **huella de las ventanas de conocimiento** de las versiones de las que salió (`DataFrame.attrs['knowledge_digest']`:
 contenido y ventana de visibilidad de toda versión que pueda ser visible en algún corte ≤ final). Los componentes `sales` y `costs` de la huella de demanda y `purchases` de la del Customer Core
 se calculan así sobre los datos as-of EFECTIVAMENTE usados (después de aplicar la cobertura). Un marco sin esa marca se hashea como siempre (las huellas de datos sintéticos no cambian). La huella depende de lo que se conoció, no del día en que corre la ejecución (§3).
+
+**Clasificación de días en la huella (ADR-V25-03).** Dos paneles con las mismas ventas pueden diferir en qué días son `missing_source` o `closed`, y eso cambia el entrenamiento y las métricas; antes la huella solo hasheaba la cobertura, así que
+declarar un cierre o un hueco no la cambiaba y `persist_snapshot` reutilizaba la fila por `(empresa, core, hash)`. Ahora lleva dos componentes: `day_inputs` (las ENTRADAS declaradas, ordenadas: huecos de cobertura, cierres y el mapa fuente → sucursales
+que expande los huecos por fuente) y `day_status` (el RESULTADO: los días-serie excluidos con su estado y base, que recoge también la regla inferida; sus parámetros `day_status_*` viajan además en el componente `config`). El Customer Core NO clasifica
+días (no usa huecos ni cierres), así que su huella no necesita esos componentes.
+
+IMPLEMENTADO / VERIFICADO: `test_day_status.py::test_the_data_fingerprint_changes_with_gaps_closures_the_source_map_and_the_rules` (con y sin cierre/hueco ⇒ distinto hash, solo se mueven `day_inputs` y `day_status`; el orden de las filas declaradas no influye; el mapa de fuente
+cambia la huella aunque el panel no cambie) y `test_asof_integration.py::test_declaring_a_closure_or_a_gap_changes_the_persisted_fingerprint_and_removing_it_reuses_the_old_row` (contra `persist_snapshot`: tres filas distintas y, al retirar las declaraciones, la original).
 
 IMPLEMENTADO / VERIFICADO: `test_asof_visibility.py::test_the_digest_covers_knowledge_windows_not_only_values` y `::test_frame_hash_mixes_the_knowledge_digest_and_keeps_unmarked_frames_unchanged`;
 `test_asof_integration.py::test_the_sales_fingerprint_changes_with_the_knowledge_windows_even_if_the_values_are_equal` (mismas cifras, un documento histórico frente a uno recibido tarde: cambian
@@ -288,8 +329,9 @@ Se configuran por empresa en `tenants.settings.cores.demand` (validación en `va
 | Política de conocimiento, hasta qué día conoció el corte final (`source.knowledge_date`) y lo que usó cada ventana | `forecast_runs.evaluation_manifest.knowledge` y `forecast_runs.summary.knowledge` |
 | Conteos por estado y base, imputados y no imputables, reglas aplicadas | `…evaluation_manifest.day_status`, `…summary.day_status`, `data_quality_reports.summary.day_status` |
 | Limitaciones con conteo | `forecast_runs.summary.limitations` (`days_missing_source`, `days_missing_source_inferred`, `days_closed`, `coverage_undeclared`) |
-| Exclusiones por métrica | `model_evaluations.metrics.sample.exclusions` |
-| Huella | `data_snapshots.components` (`sales`, `costs`, `purchases`) |
+| Exclusiones por métrica (backtest) | `model_evaluations.metrics.sample.exclusions` |
+| Exclusiones de la evaluación posterior (realizada) y de la deriva | `model_evaluations.extra.exclusions` (`evaluation_type = 'realized'`), `forecast_actuals.is_censored` y la respuesta de `evaluate-actuals` |
+| Huella | `data_snapshots.components` (`sales`, `costs`, `purchases`, `day_inputs`, `day_status`) |
 
 El perfil por serie (`forecasting_series`) no tiene columnas para los días `missing_source`/`closed`: se calculan en memoria (`missing_source_days`, `closed_days` de `profile_at`) y se reportan en el
 manifiesto; añadir columnas requeriría una migración (no incluida).
@@ -312,30 +354,64 @@ conteo) y la clasificación día a día vive en el panel en memoria de cada ejec
 7. **Compradores (`customers`)**: los filtros de genéricos y eliminados usan su estado vigente (no versionado).
 8. **Un día `closed` o `missing_source` con ventas registradas** se excluye de la medición aunque la venta sea real (decisión conservadora: la fuente o el calendario dicen que el día no es representativo).
 9. **Zonas con cambio de horario a medianoche**: la equivalencia por días se verificó con Santiago y Nueva York en las fechas de cambio; una medianoche inexistente se adelanta y una ambigua usa la primera ocurrencia. Ecuador no tiene horario de verano.
-10. **Otros lectores de ventas** (`db/supply_repository.py`, `causal/runner.py`) siguen leyendo el estado vigente: fuera del alcance de este paquete (Supply y Causal). `evaluation/actuals.py` (exactitud posterior de pronósticos ya publicados) usa `daily_actuals` = verdad más reciente, que es lo deseado para esa medición.
+   La lectura de PostgreSQL (`CAST(known_from AT TIME ZONE tz AS date)`) se verifica además **contra la base de datos** con documentos cuyo `known_from` / `known_until` caen en la frontera `M(C+1)` (−1 s, 0, +1 s y ±3 h) en `America/Guayaquil`,
+   `Europe/Madrid` (cambio de primavera y de otoño) y `America/Santiago` (cambio A MEDIANOCHE, primavera y otoño), día por día frente a la regla literal calculada con `zoneinfo`: IMPLEMENTADO / VERIFICADO,
+   `test_asof_timezones_integration.py::test_the_database_asof_read_matches_the_literal_rule_at_the_boundaries_of_dst_and_non_dst_zones` (5 casos). Dos precisiones medidas por esa verificación: (a) las columnas del contrato (`sales.version_known_from`,
+   `sales_document_revisions.known_from/known_until`) son `timestamptz(0)`: **la precisión del conocimiento es de un segundo** (un instante a ±1 µs de la frontera se redondea al segundo más cercano; un documento recibido a menos de medio segundo antes de la
+   medianoche local cuenta como del día siguiente); la comparación a ±1 ns se comprueba sin base de datos en `test_asof_visibility.py`. (b) PostgreSQL y Python llevan **copias distintas de la base de zonas horarias**: en zonas cuyas reglas cambiaron
+   recientemente pueden discrepar (la sonda de la revisión lo observó con `America/Havana` tras el 1-nov-2026, donde `zoneinfo` seguía en horario de verano). La lectura de ventas usa solo la conversión de PostgreSQL; Python interviene en `local_today` (el día
+   hasta el que llega lo conocido de una ejecución vigente) y en las rutinas de las pruebas, de modo que una discrepancia afectaría como máximo a ese día. Mantener actualizada la base de zonas (paquete `tzdata` del motor y la de PostgreSQL) en producción.
+10. **Otros lectores de ventas** siguen leyendo el estado vigente: `supply/simulation_runner.py` (`repo.daily_sales(as_of)`), `db/supply_repository.py` (`recent_net_prices`, `sales_cost_history`; los usan `supply/simulation_runner.py`, `scenarios/runner.py` y
+    `costs/runner.py`) y `causal/runner.py`. Quedan **fuera del alcance de este paquete y pendientes para el paquete Supply/Causal** (DISEÑADO / NO IMPLEMENTADO). `evaluation/actuals.py` (exactitud posterior de pronósticos ya publicados)
+    usa `daily_actuals` = verdad más reciente, que es lo deseado para esa medición; su clasificación de días usa el conocimiento más reciente de las declaraciones (§8).
     `supply/simulation_runner.py` llama a `repo.daily_sales(as_of)`: con la firma pública conservada recibe ahora la vista as-of **estricta** de `as_of` (es lo pedido: «los llamadores existentes la obtienen sin cambios»). En una simulación vigente
     (`as_of` = última venta) los documentos de ese último día recibidos tras su medianoche local con `ingestion_mode = incremental` no entran a esa corrida; afecta solo al último día del re-juego. Pasarle `knowledge` (hoy) es un cambio de una línea
     en el paquete de Supply: **pendiente de decisión del arquitecto**.
+    **El plan del backtest depende de la historia del panel FINAL.** `plan_backtest` (`backtest/rolling.py`) elige el nivel de ventanas (`TIERS`) y los orígenes con `n_days` = días entre la primera venta del panel final y el corte final. Esa longitud se calcula con la
+    verdad disponible, no con lo que se conocía en el origen de cada ventana: si la historia más antigua llegó tarde (carga incremental con fechas de evento viejas), el panel as-of de una ventana puede ser más corto que el que el plan supuso. Cada ventana
+    se arma con sus propios datos y se omite si no tiene ventas visibles (`knowledge.windows[]`), pero la elección del nivel y de los orígenes no es as-of. Efecto acotado: solo ocurre con historia que llegó tarde; si hiciera falta, el plan podría
+    calcularse con la historia visible en el primer origen (cambio de la política de ventanas, no incluido).
 11. **Costo**: la lectura transfiere una fila por celda y ventana (no por línea) pero la agregación de la vista en PostgreSQL crece con las líneas (§5). Con `enable_nestloop = off` (lecturas analíticas) el costo estimado dispara la compilación JIT (0,6–0,9 s por consulta medidos): `analytic_reads()` y las lecturas de versiones la apagan (`SET LOCAL jit = off`).
-12. **Qué es una «ejecución vigente»** (§3): el corte es el último dato (`cutoff ≥ last_sale_date()`), la misma convención de `promotions_known_on`. Un corte que la cobertura declarada limita por debajo del último dato
-    —p. ej. hay ventas parciales de hoy y `complete_through` es ayer— se trata como **histórico**: la carga nocturna de ayer, recibida tras la medianoche con `ingestion_mode = incremental`, no entra a esa ejecución.
-    Pasar una señal explícita de «ejecución vigente» desde `forecast_run.py` / `customer/service.py` lo resolvería, pero esos archivos solo admiten cambios en la carga de datos y no se tocaron: **pendiente de decisión del arquitecto**.
-    Además, reconstruir después un corte que fue vigente NO reproduce al bit esa ejecución (ve menos: no conoce lo recibido tras su medianoche); lo que conoció queda en `knowledge.source.knowledge_date` y en la huella de datos.
+12. **Qué es una «ejecución vigente»** (§3): la que no pidió un corte histórico. **RESUELTO / VERIFICADO**: el llamador lo declara con `live=True` (`load_tenant_data`, `load_customer_data`), de modo que un corte que la cobertura declarada limita por
+    debajo del último dato —p. ej. hay ventas parciales de hoy y `complete_through` es ayer— sigue siendo vigente y conoce la carga nocturna de ayer (recibida tras la medianoche con `ingestion_mode = incremental`). `execute_forecast_run` y
+    `customer/service.py` (entrenamiento y predicción) lo pasan; sin la señal (`live=None`) se infiere del corte pedido (`cutoff ≥ último dato`), que sigue siendo correcto para quien pide un corte histórico. Las pruebas están en §3. Queda una **diferencia
+    deliberada**: las órdenes de compra abiertas (`open_purchase_orders`) y el inventario siguen siendo las del corte limitado (coherentes con `latest_inventory(corte)`); solo las ventas y las promociones conocen hasta hoy.
+    Reconstruir después un corte que fue vigente NO reproduce al bit esa ejecución (ve menos: no conoce lo recibido tras su medianoche); lo que conoció queda en `knowledge.source.knowledge_date` y en la huella de datos.
 13. **Reconstrucción por ventana**: cada ventana con diferencias vuelve a construir su panel y sus variables (≈ el costo de un `build_panel` por ventana); en el Customer Core, una vista de eventos por corte con diferencias (se conservan dos). Sin diferencias no hay costo adicional.
+    **Costo medido del Customer Core con documentos tardíos** (`test_customer_asof_cost.py::test_the_cost_of_late_documents_in_the_customer_dataset_is_reported`, mundo sintético de 400 compradores × 12 productos × 540 días = 28 860 compras-celda, 32 cortes
+    de entrenamiento, `FeatureBuilder` + `build_dataset`; la prueba lo reporta en `-s` y como propiedades): **0,6–1,5 s con todo conocido desde su día (`backfill`) frente a 1,9–4,9 s con el 10 % de las compras recibidas tarde (×3–4)**; la sonda de la
+    revisión midió 0,79 s → 2,59 s en otro arranque (el rango es amplio porque la máquina se compartía con otras suites). El sobrecosto es ≈ 40 ms por vista de corte —la reconstrucción de los eventos del corte: consulta de celdas visibles, agregación por
+    comprador × producto × día y armado de los índices— y crece de forma lineal con las compras-celda; con un millón de celdas serían del orden de 1,4 s por corte distinto (≈ 45 s con 32 cortes). Solo se paga cuando hay documentos tardíos o reemplazados
+    que alteran el corte (`differs_from_truth`); con todo conocido a tiempo hay un solo índice. **Decisión: no se optimizó** (actualización incremental o caché de las vistas): los cortes se piden en orden ascendente y la vista de un corte no sirve al
+    siguiente (añade eventos nuevos y cambia la visibilidad de las filas dinámicas), de modo que una actualización incremental exigiría modificar en sitio los índices de eventos (riesgo de diferencias en las sumas frente a la referencia exacta que hoy fijan
+    las pruebas) para ahorrar segundos frente a minutos de entrenamiento de los modelos. Si el piloto con datos reales muestra un costo relevante, la vía es agregar las filas estáticas una sola vez y recombinar solo las dinámicas por corte.
 14. **Sesgo conservador en el borde de cada ventana con carga nocturna**: las ventanas del backtest y las observaciones del Customer Core aplican la regla estricta del ADR-V25-23, así que con documentos `incremental` que llegan tras la
     medianoche (03:00 del día siguiente) cada ventana entrena sin las ventas de su último día, mientras que el pronóstico vigente sí las conoce (§3). Por eso el backtest es, en ese borde, ligeramente más pesimista que la producción. Es la consecuencia
     literal de la regla (lo que se conocía el día `C`); una alternativa de diseño —un rezago de ingestión típico por fuente— no está implementada y requeriría decisión del arquitecto.
+15. **Preparación de datos (`pipeline/readiness.py`)**: aplica la cobertura declarada igual que `execute_forecast_run` (`SalesCoverage.for_repository`: el corte no la supera, se descarta lo anterior a `complete_from`, los días fuera de ella son
+    `missing_source`) y añade el problema `cutoff_limited_by_coverage` y la cobertura aplicada al informe. IMPLEMENTADO / VERIFICADO: `test_asof_integration.py::test_readiness_applies_the_declared_coverage_like_the_forecast_run`. Diferencia que se
+    conserva: el informe no emite la limitación `coverage_undeclared` (la ejecución sí) porque su lista de problemas es la de calidad de datos, no la del pronóstico; y el contador `missing_days` del informe (días hábiles sin ventas) sigue siendo un
+    aviso de revisión que no distingue días declarados.
+16. **Quiebres largos**: un quiebre de stock de más de 28 días conserva la imputación de siempre (la media móvil se agota y el día queda con su valor observado); el cambio de huecos largos (§8) solo alcanza a `missing_source` y `closed`. Extenderlo a los
+    quiebres cambiaría los resultados del motor anterior; DISEÑADO / NO IMPLEMENTADO (decisión del arquitecto).
+17. **Evaluación posterior**: los días excluidos conservan `forecast_actuals.actual` = 0 (no hay ventas registradas) con `is_censored = true`; quien lea esa tabla debe respetar la marca. El nivel total omite los días excluidos pero conserva los de quiebre
+    (comportamiento anterior). Las declaraciones de calidad se aplican con su estado vigente a pronósticos de cualquier fecha (§12.3).
+18. **Huella del Customer Core**: no incluye la cobertura declarada (`data.coverage`, p. ej. `complete_from`, que sí condiciona el dataset de entrenamiento); su componente `config`/`eligibility` y la fecha efectiva (`as_of`) sí. Observación para el paquete del
+    Customer (el guardado/armado de su huella está en `customer/service.py`, fuera del alcance de este paquete).
 
 ## 13. Pruebas y estado
 
 | Prueba | Qué demuestra | Estado |
 |---|---|---|
 | `tests/unit/test_asof_visibility.py` (31 casos) | Regla de visibilidad (frontera, zonas), backfill, incremental tardío, anulación y corrección posteriores, lo posterior al corte final, ventanas vacías, definiciones de venta/devolución, huella, `at_final`, Customer; conocimiento del corte final (vigente vs histórica, regla literal, validación, huella estable) | IMPLEMENTADO / VERIFICADO |
-| `tests/unit/test_day_status.py` (15 casos) | Clasificación y precedencia, huecos, cobertura, cierres, regla inferida, perfilado, imputación, peso 0, filas del backtest, limitaciones/manifiesto/resumen/métricas, configuración | IMPLEMENTADO / VERIFICADO |
-| `tests/integration/test_asof_integration.py` (19 casos, PostgreSQL) | Escenarios T02 sobre las tablas del contrato; una sola lectura; aislamiento por empresa; fixtures por defecto = SQL anterior; huella; huecos/cierres/cobertura desde la BD; ventana de backtest estable ante perturbaciones posteriores (a nivel de `run_backtest` y de `run_pipeline` completo); ejecución vigente frente a reconstrucción histórica; costo de la lectura | IMPLEMENTADO / VERIFICADO |
-| `tests/integration/test_asof_customer_integration.py` (8 casos, PostgreSQL) | Contenido exacto de `purchases()/returns()`, as-of, variables vs etiquetas, dataset, regresión sin versiones, huella, corte final efectivo, ejecución vigente frente a histórica | IMPLEMENTADO / VERIFICADO |
+| `tests/unit/test_day_status.py` (19 casos) | Clasificación y precedencia, huecos, cobertura, cierres, regla inferida, perfilado, imputación (con huecos largos y días no imputables), peso 0, filas del backtest, limitaciones/manifiesto/resumen/métricas, configuración; huella de datos con huecos, cierres, mapa de fuente y reglas | IMPLEMENTADO / VERIFICADO |
+| `tests/integration/test_asof_integration.py` (24 casos, PostgreSQL) | Escenarios T02 sobre las tablas del contrato; una sola lectura; aislamiento por empresa; fixtures por defecto = SQL anterior; huella (también con cierres y huecos declarados); huecos/cierres/cobertura desde la BD; ventana de backtest estable ante perturbaciones posteriores (a nivel de `run_backtest` y de `run_pipeline` completo); ejecución vigente frente a reconstrucción histórica, también con el corte limitado por la cobertura (de extremo a extremo por `execute_forecast_run`); preparación de datos con cobertura; costo de la lectura | IMPLEMENTADO / VERIFICADO |
+| `tests/integration/test_asof_customer_integration.py` (9 casos, PostgreSQL) | Contenido exacto de `purchases()/returns()`, as-of, variables vs etiquetas, dataset, regresión sin versiones, huella, corte final efectivo, ejecución vigente frente a histórica, ejecución vigente con el corte limitado por la cobertura (entrenamiento y predicción) | IMPLEMENTADO / VERIFICADO |
+| `tests/integration/test_asof_evaluation_integration.py` (6 casos, PostgreSQL) | Evaluación posterior y deriva: caída declarada, inferida, cierre y fuera de cobertura no son ceros ni producen deriva falsa; un deterioro real sigue detectándose; conteo por clase | IMPLEMENTADO / VERIFICADO |
+| `tests/integration/test_asof_timezones_integration.py` (5 casos, PostgreSQL) | La lectura as-of de la base frente a la regla literal en las fronteras ±1 s de `M(C+1)` en Guayaquil, Madrid (primavera y otoño) y Santiago (cambio a medianoche, primavera y otoño) | IMPLEMENTADO / VERIFICADO |
+| `tests/unit/test_customer_asof_cost.py` (1 caso) | Costo medido del dataset del Customer Core con 10 % de compras tardías (§12.13) | IMPLEMENTADO / VERIFICADO |
 | `tests/unit/test_leakage.py`, `test_profiling.py`, `test_coverage.py`, `test_pipeline.py`, `test_snapshot_config.py`, `test_customer_dataset.py` | Pruebas de fuga y cobertura existentes, sin modificar ni debilitar | IMPLEMENTADO / VERIFICADO (pasan en la suite completa) |
-| Suite completa del motor (`cd engine && ENGINE_TEST_DATABASE_URL=… .venv/bin/python -m pytest -q`) | 523 pruebas: las 418 de la línea base, las 73 de este paquete y 32 del paquete de firma de artefactos | IMPLEMENTADO / VERIFICADO: `523 passed, 1 warning in 3870.91s (1:04:30)` con la máquina compartida con otra suite (sin contención, las 73 pruebas nuevas tardan 78,5 s) |
+| Suite completa del motor (`cd engine && ENGINE_TEST_DATABASE_URL=… .venv/bin/python -m pytest -q`, ejecutada desde un directorio sin `.env`) | 548 pruebas: las 524 de la línea base previa a las correcciones de la revisión, **21 nuevas de esas correcciones** (4 en `test_day_status.py`, 4 en `test_asof_integration.py`, 1 en `test_asof_customer_integration.py`, 6 en `test_asof_evaluation_integration.py`, 5 en `test_asof_timezones_integration.py` y 1 en `test_customer_asof_cost.py`) y 3 de `test_hermetic_env.py` (paquete de firma de artefactos, no de este) | IMPLEMENTADO / VERIFICADO: `548 passed, 1 warning in 610.33s (0:10:10)` (31-oct-2026; máquina compartida con otras suites; las 21 pruebas nuevas suman ≈ 13 s de ejecución, 6 s de ellas la de costo del Customer) |
 | Lectura as-of de Supply y Causal | — | DISEÑADO / NO IMPLEMENTADO (§12.10) |
 | Aceptación de `closure` por el backend | — | DISEÑADO / NO IMPLEMENTADO (§12.5) |
 
@@ -343,7 +419,7 @@ conteo) y la clasificación día a día vive en el panel en memoria de cada ejec
 
 | Estado | Elemento |
 |---|---|
-| IMPLEMENTADO / VERIFICADO | Lectura única de `sales_line_versions` con vistas as-of derivadas (`daily_sales`, `daily_returns`, `last_sale_date`, `sales_stats`); backtest as-of por ventana con reales de la verdad final; conocimiento del corte final (vigente: hasta hoy; histórica: hasta el corte); Customer Core con variables al corte y etiquetas con la verdad; clasificación `day_status` (cobertura, huecos, cierres, regla inferida, quiebres); exclusión de métricas y perfilado; imputación y trazabilidad; huella con ventanas de conocimiento; claves de configuración |
-| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo y calendario; lectores de Supply y Causal as-of; aceptación del valor `closure` en el backend; columnas de perfil para días excluidos; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen) |
+| IMPLEMENTADO / VERIFICADO | Lectura única de `sales_line_versions` con vistas as-of derivadas (`daily_sales`, `daily_returns`, `last_sale_date`, `sales_stats`); backtest as-of por ventana con reales de la verdad final; conocimiento del corte final (vigente: hasta hoy, también cuando la cobertura declarada limita el corte, con la señal explícita `live`; histórica: hasta el corte); Customer Core con variables al corte y etiquetas con la verdad; clasificación `day_status` (cobertura, huecos, cierres, regla inferida, quiebres); exclusión de métricas y perfilado; imputación (con propagación del último nivel en huecos largos de fuente ausente o cierre) y trazabilidad (`days_not_imputable`); **exclusión de esos días en la evaluación posterior de pronósticos y en la detección de deriva, con conteo por clase**; huella con ventanas de conocimiento y con la clasificación de días (`day_inputs`, `day_status`); preparación de datos con la cobertura declarada; lectura de PostgreSQL verificada en zonas con horario de verano; costo del Customer con documentos tardíos medido; claves de configuración |
+| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo y calendario; lectores de Supply, Causal, Escenarios y Costos as-of (`supply/simulation_runner.py`, `db/supply_repository.py`, `causal/runner.py`); plan del backtest (`plan_backtest`) con la historia as-of del primer origen; aceptación del valor `closure` en el backend; columnas de perfil para días excluidos; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen); propagación del último nivel en quiebres de más de 28 días; actualización incremental de las vistas por corte del Customer Core (§12.13); cobertura declarada en la huella del Customer Core |
 | BLOQUEADO | Estado histórico real de una carga `backfill` (la fuente no lo entrega) |
 | NO APLICA | Ventanas de conocimiento en entidades que no son documentos de venta; reconstrucción por ventana cuando la carga es solo histórica (se reutiliza la verdad) |

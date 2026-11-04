@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\DataCore\CommitmentController;
 use App\Http\Controllers\Api\DataCore\DataCoverageController;
 use App\Http\Controllers\Api\DataCore\DataCoverageGapController;
 use App\Http\Controllers\Api\DataCore\DataQualityController;
+use App\Http\Controllers\Api\DataCore\QuarantineController;
 use App\Http\Controllers\Api\DataCore\SourceMappingController;
 use App\Http\Controllers\Api\DataCore\SourceSyncController;
 use App\Http\Controllers\Api\DataCore\UnitConversionController;
@@ -38,6 +39,11 @@ Route::middleware(['auth:sanctum', 'throttle:api', 'tenant'])->group(function ()
     Route::post('data-coverage/gaps', [DataCoverageGapController::class, 'store'])->middleware('tenant.ability:imports.manage');
     Route::delete('data-coverage/gaps/{gap}', [DataCoverageGapController::class, 'destroy'])->middleware('tenant.ability:imports.manage')->whereNumber('gap');
     Route::get('data-quality/extended', [DataQualityController::class, 'extended'])->middleware('tenant.ability:data.view');
+    // Cuarentena de ingestión (ADR-V25-24): documentos con hallazgos REVIEW_REQUIRED / QUARANTINED retenidos fuera de Silver.
+    Route::get('data-quality/quarantine', [QuarantineController::class, 'index'])->middleware('tenant.ability:data.view');
+    Route::get('data-quality/quarantine/{quarantine}', [QuarantineController::class, 'show'])->middleware('tenant.ability:data.view')->whereNumber('quarantine');
+    Route::post('data-quality/quarantine/{quarantine}/release', [QuarantineController::class, 'release'])->middleware('tenant.ability:imports.manage')->whereNumber('quarantine');
+    Route::post('data-quality/quarantine/{quarantine}/discard', [QuarantineController::class, 'discard'])->middleware('tenant.ability:imports.manage')->whereNumber('quarantine');
 
     // ── Calendario con alcance y estado de conocimiento ──
     Route::get('calendar-events', [CalendarEventController::class, 'index'])->middleware('tenant.ability:data.view');

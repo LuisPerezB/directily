@@ -90,6 +90,8 @@ class NodeSpec:
     price: float | None = None
     derived: bool = False  # sin pronóstico propio: solo demanda dependiente (insumo)
     u_weights: np.ndarray | None = None  # ponderación de urgencia del faltante por período (ver planner.prepare_problem)
+    shelf_cap: np.ndarray | None = None  # W5-D: tope del stock al cierre de cada período para vender lo nuevo dentro de su vida útil (inf = sin tope)
+    avail_cap: np.ndarray | None = None  # W5-D: tope de lo disponible al INICIO de cada período (arrastre + recepciones) cuando la vida útil < período (inf = sin tope)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property

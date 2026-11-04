@@ -54,7 +54,8 @@ paths:
     post:
       tags: [Autenticación]
       summary: Iniciar sesión (sesión SPA o token Bearer si no hay sesión)
-      description: 5 intentos por minuto por correo + IP. Éxitos y fallos se auditan.
+      description: |-
+        5 intentos por minuto por correo + IP. Éxitos y fallos se auditan. Si la persona tiene el segundo factor (MFA TOTP) activo, una contraseña correcta NO inicia sesión: responde 202 `mfa_required` con un desafío de un solo uso y corta vida (`data.challenge`); la sesión o el token se emiten al completar `POST /auth/mfa/challenge` (V2.5 · W6-A). El token Bearer caduca según `security.tokens.default_ttl_days` (30 días por defecto).
       security: []
       requestBody:
         required: true
@@ -69,6 +70,22 @@ paths:
                 remember: {type: boolean}
       responses:
         '200': {$ref: '#/components/responses/LoginResponse'}
+        '202':
+          description: 'Contraseña correcta; falta el segundo factor (`code` = `mfa_required`)'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  code: {type: string, example: mfa_required}
+                  data:
+                    type: object
+                    properties:
+                      mfa_required: {type: boolean}
+                      challenge: {type: string, description: 'Desafío opaco de un solo uso; se envía a POST /auth/mfa/challenge'}
+                      expires_in: {type: integer, description: Segundos de vigencia}
+                      methods: {type: array, items: {type: string, enum: [totp, recovery_code]}}
         '422': {$ref: '#/components/responses/ValidationError'}
         '429': {$ref: '#/components/responses/Error'}
   /auth/logout:
@@ -81,6 +98,7 @@ paths:
     get:
       tags: [Autenticación]
       summary: Usuario actual y sus empresas
+      description: 'Con un token restringido o ligado a una empresa (V2.5 · W6-A) `tenants` incluye SOLO su empresa: no revela las demás de la persona.'
       responses:
         '200':
           description: OK
@@ -99,6 +117,7 @@ paths:
     put:
       tags: [Autenticación]
       summary: Cambiar contraseña
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo (403 `token_scope_insufficient` con otro).'
       requestBody:
         required: true
         content:
@@ -117,6 +136,7 @@ paths:
     get:
       tags: [Empresas]
       summary: Empresas del usuario
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo; un token restringido, de conector o ligado a una empresa recibe 403 `token_scope_insufficient`.'
       responses:
         '200':
           description: OK
@@ -129,6 +149,7 @@ paths:
     post:
       tags: [Empresas]
       summary: Crear empresa (el usuario queda como propietario, plan trial)
+      description: 'Acción de CUENTA (V2.5 · W6-A): solo con una sesión o un token de inicio de sesión completo (403 `token_scope_insufficient` con un token restringido, de conector o ligado a una empresa).'
       requestBody:
         required: true
         content:
@@ -223,6 +244,7 @@ paths:
     get:
       tags: [Empresas]
       summary: Consumo del período y límites del plan
+      description: '`metrics.series` (series activas) solo se mide si el plan define `max_series`; es un conteo cacheado por empresa y día (aproximación: puede tardar hasta 10 min en reflejar una serie nueva) y es null si no hay tope o no se pudo medir a tiempo.'
       responses:
         '200': {description: OK}
   /tenant/demo-data:
@@ -262,6 +284,7 @@ paths:
     get:
       tags: [Usuarios]
       summary: Miembros (users.manage)
+      description: 'Cada miembro incluye `commercial_role`, `commercial_role_label`, `commercial_scope`, `commercial_role_unexpected` (dato dañado: alcance cerrado y solo lectura hasta corregirlo) (V2.5 · W6-A; se asignan con PUT /tenant/users/{user}/commercial-role) y `mfa_enabled`. Es sensible: con MFA activo exige el segundo factor fresco.'
       responses:
         '200': {description: OK}
     post:
@@ -482,11 +505,13 @@ paths:
       description: |-
         Mismas reglas de normalización y validación que el importador de archivos. Máximo 500 documentos.
 
-        **Versiones (ADR-V25-23).** Un documento existente con contenido distinto se reemplaza archivando antes su versión vigente (cabecera y líneas) en `sales_document_revisions`/`sale_item_revisions`. Si la versión entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR, se descarta (`stale_skipped`) y no se escribe nada; si alguna no lo trae, gana la última ingestión (`updated_without_source_order`).
+        **Versiones (ADR-V25-23).** Un documento existente con contenido distinto se reemplaza archivando antes su versión vigente (cabecera y líneas) en `sales_document_revisions`/`sale_item_revisions`. Si la versión entrante y la almacenada traen `source_recorded_at` y la entrante es ANTERIOR, se descarta (`stale_skipped`) y no se escribe nada; si alguna no lo trae, gana la última ingestión (`updated_without_source_order`), y la marca almacenada NO se borra. Un documento con el mismo contenido no se reescribe; si su `ingestion_mode` almacenado difiere del declarado se cuenta `unchanged_mode_mismatch`.
+
+        **Cota de `source_recorded_at`.** Una marca posterior a ahora + tolerancia (5 minutos por defecto, configurable) o ilegible NO se guarda como orden de versión (queda NULL; el documento sí se escribe) y se cuenta en `future_recorded_at` (`recorded_at_unreadable` es la parte ilegible).
 
         **Modo de ingestión.** `ingestion_mode` (`backfill` | `incremental`); por defecto `incremental`: la versión es conocida desde que Predictily la recibe y un documento que llega tarde no es visible en cortes anteriores. `backfill` declara una carga histórica (conocida desde el inicio de su día de negocio).
 
-        **Tipos y estados.** Un `document_type` o `status` NO vacío que no se reconoce no se cuenta como venta: es un error del documento (`unknown_document_type` / `unknown_document_status`, `dq_class: REVIEW_REQUIRED`) y no se escribe. Vacío = factura / completada.
+        **Tipos y estados.** Un `document_type` o `status` NO vacío que no se reconoce no se cuenta como venta: es un error del documento (`unknown_document_type` / `unknown_document_status`, `dq_class: REVIEW_REQUIRED`) y no se escribe. Vacío = factura / completada. Un documento reconocido que comparte número con otro del lote de tipo no reconocido SE ESCRIBE con sus propias líneas (la numeración suele ser por tipo o serie) y recibe el aviso `document_number_shared_with_unknown_type` (warning, contado en `document_number_shared_with_unknown_type`).
       requestBody:
         required: true
         content:
@@ -532,7 +557,7 @@ paths:
                             unit_cost: {type: number}
                             line_number: {type: integer}
       responses:
-        '200': {description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, rejected, ingestion_mode, ingestion_mode_basis, errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}'}
+        '200': {description: 'data: {created, updated, unchanged, stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch, future_recorded_at, recorded_at_unreadable, document_number_shared_with_unknown_type, rejected, ingestion_mode, ingestion_mode_basis, bronze_object_id (el cuerpo del lote se guarda íntegro en Bronze antes de normalizar), errors:[{index, item?, field, code, severity, message, dq_class?}], warnings}. 409 bronze_unavailable si Bronze no está disponible: no se procesa nada'}
         '422': {description: 'Ningún documento válido ni descartado por versión anterior, o error estructural'}
   /imports:
     parameters: [{$ref: '#/components/parameters/TenantId'}]
@@ -586,7 +611,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/TenantId'}, {$ref: '#/components/parameters/ImportId'}]
     post:
       tags: [Importaciones]
-      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows)
+      summary: Confirmar (solo desde validated; 409 has_errors si hay errores sin skip_invalid_rows; 409 blocked_by_quality si el informe tiene un hallazgo BLOCKER)
       responses:
         '202': {$ref: '#/components/responses/ImportJobResponse'}
         '402': {$ref: '#/components/responses/Error'}
@@ -600,7 +625,7 @@ paths:
       tags: [Importaciones]
       summary: Errores y advertencias por fila
       parameters: [{name: severity, in: query, schema: {type: string, enum: [error, warning]}}, {$ref: '#/components/parameters/Page'}]
-      responses: {'200': {description: 'data: [{row_number, column, error_code, severity, message, raw_value, dq_class}]; dq_class = REVIEW_REQUIRED para unknown_document_type / unknown_document_status (null en los demás)'}}
+      responses: {'200': {description: 'data: [{row_number, column, error_code, severity, message, raw_value, dq_class}]; dq_class = REVIEW_REQUIRED para unknown_document_type / unknown_document_status (null en los demás; document_number_shared_with_unknown_type es un aviso sin dq_class)'}}
   /imports/{import}/errors.csv:
     parameters: [{$ref: '#/components/parameters/TenantId'}, {$ref: '#/components/parameters/ImportId'}]
     get: {tags: [Importaciones], summary: Descargar errores en CSV, responses: {'200': {description: CSV, content: {text/csv: {}}}}}
@@ -650,7 +675,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/TenantId'}]
     get: {tags: [Privacidad], summary: Bitácora de auditoría (audit.view), responses: {'200': {description: OK}}}
   /admin/tenants:
-    get: {tags: [Plataforma], summary: Empresas (superadmin; sin datos de negocio), responses: {'200': {description: OK}, '403': {$ref: '#/components/responses/Error'}}}
+    get: {tags: [Plataforma], summary: 'Empresas (superadmin; sin datos de negocio; el listado NO mide series activas: usage.series es null)', responses: {'200': {description: OK}, '403': {$ref: '#/components/responses/Error'}}}
   /admin/tenants/{uuid}:
     parameters: [{name: uuid, in: path, required: true, schema: {type: string, format: uuid}}]
     patch:
@@ -662,12 +687,30 @@ paths:
             schema:
               type: object
               properties:
-                plan_code: {type: string, enum: [trial, basico, profesional, empresarial]}
+                plan_code: {type: string, enum: [trial, basico, profesional, empresarial, starter, growth, enterprise]}
                 status: {type: string, enum: [active, suspended]}
-                plan_overrides: {type: object}
+                plan_overrides:
+                  type: [object, 'null']
+                  description: 'Límites por contrato (ADR-V25-18): reemplazan los del plan (las listas se reemplazan; los mapas se combinan). Un precio no es una clave válida (422). `null` en un tope = sin tope.'
+                  additionalProperties: false
+                  properties:
+                    max_branches: {type: [integer, 'null'], minimum: 0}
+                    max_series: {type: [integer, 'null'], minimum: 0, description: 'Series activas: pares sucursal × producto con ventas válidas en los últimos 90 días; se exige al solicitar un pronóstico'}
+                    max_active_products: {type: [integer, 'null'], minimum: 0}
+                    max_import_rows_per_month: {type: [integer, 'null'], minimum: 0}
+                    max_forecast_runs_per_day: {type: [integer, 'null'], minimum: 0}
+                    max_users: {type: [integer, 'null'], minimum: 0}
+                    horizons: {type: array, items: {type: integer, enum: [7, 14, 15, 30, 60, 90]}, description: 'Subconjunto del catálogo único de horizontes que la empresa puede usar'}
+                    features: {type: object, additionalProperties: {type: boolean}, description: 'Capacidades: scenarios, api_access, external_indicators, custom_models, customer, roles, assistant...'}
+                    modules: {type: array, items: {type: string}, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    frequencies: {type: array, items: {type: string}, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    connectors: {type: array, items: {type: string}, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    retention_months: {type: [integer, 'null'], minimum: 1, maximum: 240, description: 'DECLARADO: se guarda, ningún módulo lo consulta todavía'}
+                    compute_budget: {type: [object, 'null'], description: 'DECLARADO'}
+                    llm_budget: {type: [object, 'null'], description: 'DECLARADO'}
       responses: {'200': {description: OK}}
   /admin/plans:
-    get: {tags: [Plataforma], summary: Planes, responses: {'200': {description: OK}}}
+    get: {tags: [Plataforma], summary: 'Planes (límites, precio de referencia y metadatos informativos; un precio nunca es un límite)', responses: {'200': {description: OK}}}
   /admin/usage:
     get: {tags: [Plataforma], summary: Consumo mensual por empresa, responses: {'200': {description: OK}}}
 components:
@@ -728,6 +771,7 @@ components:
         email: {type: string}
         locale: {type: string}
         is_superadmin: {type: boolean}
+        mfa_enabled: {type: boolean, description: 'Segundo factor TOTP activo (V2.5 · W6-A)'}
         last_login_at: {type: [string, 'null'], format: date-time}
     TenantSummary:
       type: object
@@ -741,7 +785,7 @@ components:
     TenantSettings:
       type: object
       properties:
-        default_horizon_days: {type: integer, enum: [7, 14, 30, 60, 90]}
+        default_horizon_days: {type: integer, enum: [7, 14, 15, 30, 60, 90]}
         service_level: {type: number, minimum: 0.5, maximum: 0.999}
         review_period_days: {type: integer}
         default_lead_time_days: {type: integer}
@@ -763,8 +807,10 @@ components:
         allow_shared_training: {type: boolean}
         shared_training_consented_at: {type: [string, 'null']}
         data_retention_months: {type: integer}
-        role: {$ref: '#/components/schemas/Role'}
+        role: {$ref: '#/components/schemas/Role', description: 'Rol EFECTIVO: el rol comercial «servicio» pone un techo de solo lectura (viewer)'}
         role_label: {type: string}
+        access_role: {$ref: '#/components/schemas/Role', description: 'Rol de acceso guardado (V2.5 · W6-A); el comercial se suma a él'}
+        commercial_role: {type: [string, 'null'], enum: [gerente, vendedor, servicio, null], description: 'Rol comercial de la persona en esta empresa (V2.5 · W6-A)'}
         abilities: {type: array, items: {type: string}}
         plan: {type: object, properties: {code: {type: string}, name: {type: [string, 'null']}, limits: {type: object}}}
         onboarding:
@@ -809,6 +855,8 @@ components:
         current_price: {type: [number, 'null']}
         current_cost: {type: [number, 'null']}
         is_active: {type: boolean}
+        is_perishable: {type: boolean, description: 'W5-D · el producto vence: el plan lo trata con su vida útil y los vencimientos de sus lotes (FEFO).'}
+        shelf_life_days: {type: [integer, 'null'], description: 'W5-D · vida útil declarada en días desde la recepción; null = no declarada (el plan no inventa vencimientos).'}
         stats: {type: object, properties: {units_90d: {type: number}, revenue_90d: {type: number}, last_sale_date: {type: [string, 'null'], format: date}}}
     ProductInput:
       type: object
@@ -843,11 +891,15 @@ components:
         create_missing_products: {type: boolean, default: true}
         create_missing_branches: {type: boolean, default: false}
         create_missing_categories: {type: boolean, default: true}
-        skip_invalid_rows: {type: boolean, default: false, description: Los documentos con alguna fila inválida se omiten completos}
+        skip_invalid_rows: {type: boolean, default: false, description: 'Los documentos con alguna fila inválida se omiten completos; los de ventas con hallazgos REVIEW_REQUIRED o QUARANTINED se RETIENEN en la cuarentena (GET /data-quality/quarantine) en lugar de descartarse (ADR-V25-24)'}
         ingestion_mode:
           type: [string, 'null']
           enum: [backfill, incremental, null]
           description: 'Solo ventas (ADR-V25-23). Vacío = automático: backfill si la empresa aún no tiene ventas al iniciar la escritura (primera carga histórica); si no, incremental. Al confirmar se guarda aquí el valor resuelto.'
+        value_maps:
+          type: [object, 'null']
+          additionalProperties: true
+          description: 'Solo ventas (ADR-V25-24). `{document_type: {"<crudo>": "<canónico>"}, status: {...}}`: se aplican ANTES del reconocimiento de vocabulario (exacto y, si no, por clave sin tildes ni mayúsculas); el destino debe ser un valor del vocabulario canónico (422 `options.value_maps.<campo>`). Quedan en `metrics.transformations` y en `rules_version` del informe de calidad.'
     ImportJob:
       type: object
       properties:
@@ -867,7 +919,7 @@ components:
         normalized_preview: {type: array, items: {type: object}}
         stats:
           type: object
-          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid, documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes, return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load). En la validación las cifras de versiones son una proyección de lo que hará la confirmación.'
+          description: 'rows_total, rows_valid, rows_error, rows_warning, duplicates_in_file, documents_total, documents_valid, documents_invalid, documents_new, documents_updated, documents_unchanged, voided_documents, credit_notes, return_lines, date_from, date_to, missing_days, products_new, branches_new, previous_import_id; ventas (ADR-V25-23): stale_skipped, revisions_archived, updated_without_source_order, unchanged_mode_mismatch (documentos sin cambios cuyo modo almacenado difiere del declarado), future_recorded_at y recorded_at_unreadable (filas con source_recorded_at posterior a ahora + tolerancia o ilegible: la marca se descarta), document_number_shared_with_unknown_type (documentos reconocidos que comparten número con filas de tipo desconocido: se escriben, con aviso), ingestion_mode, ingestion_mode_basis (declared | first_load | subsequent_load); calidad (ADR-V25-24): documents_quarantined (documentos retenidos en cuarentena con skip_invalid_rows). En la validación las cifras de versiones son una proyección de lo que hará la confirmación.'
         quality_report: {type: [object, 'null'], properties: {score: {type: number}, issues: {type: array, items: {type: object}}, summary: {type: object}}}
         error_message: {type: [string, 'null']}
         created_at: {type: string, format: date-time}

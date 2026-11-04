@@ -100,7 +100,7 @@ def _add(d: dict[int, float], j: int, v: float) -> None:
 
 def build_and_solve(problem: PlanProblem, *, relax: frozenset[str] = frozenset(), coverage_mode: str | None = None,
                     time_limit: float | None = None) -> PlanSolution:
-    """Construye y resuelve el MILP. `relax` ⊆ {budget, supplier_capacity, storage, resource} (diagnóstico).
+    """Construye y resuelve el MILP. `relax` ⊆ {budget, supplier_capacity, storage, resource, shelf_life} (diagnóstico).
 
     El modelo se descompone en componentes independientes (productos/ubicaciones sin restricción en común:
     presupuesto, almacenamiento de una misma sucursal, capacidad de una misma oferta, recetas y recursos). Cada
@@ -292,7 +292,8 @@ def _solve_once(problem: PlanProblem, relax: frozenset[str], coverage_mode: str 
     for node in problem.nodes:
         key = node.key
         for tau in range(node.horizon):
-            I_var[(key, tau)] = m.var(0.0, np.inf, node.holding)
+            i_cap = np.inf if node.shelf_cap is None or tau >= len(node.shelf_cap) or "shelf_life" in relax else float(node.shelf_cap[tau])
+            I_var[(key, tau)] = m.var(0.0, i_cap, node.holding)
             d = float(node.demand[tau])
             w = float(node.u_weights[tau]) if node.u_weights is not None else 1.0
             U_var[(key, tau)] = m.var(0.0, 0.0 if mode == "hard" else d, node.penalty * w)
@@ -377,6 +378,16 @@ def _solve_once(problem: PlanProblem, relax: frozenset[str], coverage_mode: str 
             _add(coefs, U_var[(key, tau)], -1.0)
             rhs = float(node.known_receipts[tau]) - float(node.demand[tau]) + (node.opening if tau == 0 else 0.0)
             m.row(coefs, rhs, rhs, f"balance:{key}:{tau}")
+            # W5-D · vida útil < período: lo disponible al inicio del período (arrastre + recepciones) no puede exceder la demanda de sus primeros S días
+            if "shelf_life" not in relax and node.avail_cap is not None and tau < len(node.avail_cap) and np.isfinite(node.avail_cap[tau]):
+                av: dict[int, float] = {}
+                if tau > 0:
+                    av[I_var[(key, tau - 1)]] = 1.0
+                for j, c in arr_terms.get((key, tau), {}).items():
+                    _add(av, j, c)
+                if av:
+                    m.row(av, -np.inf, float(node.avail_cap[tau]) - float(node.known_receipts[tau]) - (node.opening if tau == 0 else 0.0),
+                          f"shelf_avail:{key}:{tau}")
             if (key, tau) in V_var:
                 m.row({I_var[(key, tau)]: 1.0, V_var[(key, tau)]: 1.0}, node.safety_stock, np.inf, f"ss:{key}:{tau}")
 

@@ -8,16 +8,17 @@ import InlineNotice from '@/components/ui/InlineNotice.vue'
 import KpiCard from '@/components/ui/KpiCard.vue'
 import LoadingState from '@/components/ui/LoadingState.vue'
 import EnvelopePanel from '@/components/forecast/EnvelopePanel.vue'
+import CustomerWindowCell from '@/components/customers/CustomerWindowCell.vue'
 import { customerApi } from '@/api'
 import { isApiError } from '@/api/errors'
 import { useAsync } from '@/composables/useAsync'
 import { useTenantStore } from '@/stores/tenant'
-import { formatExpectedAmount } from '@/utils/customers'
+import { formatExpectedAmount, s05Cause, visibleFlags } from '@/utils/customers'
 import { formatChange, formatDate, formatNumber, formatPercent, formatProbability } from '@/utils/format'
 
 /** Ficha del comprador: frecuencia, productos probables, riesgo de inactividad (no es abandono) y cambio de comportamiento. */
 const props = defineProps<{ id: string }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const tenant = useTenantStore()
 const result = useAsync(() => customerApi.profile(Number(props.id)), { watch: [() => props.id] })
 const profile = computed(() => result.data.value?.data ?? null)
@@ -91,13 +92,22 @@ const count = (v: number | null | undefined, d = 1): string => (v == null ? '—
         <div v-else class="table-wrap">
           <table class="table">
             <caption class="sr-only">{{ t('customers.profile.rankingTitle', { n: h }) }}</caption>
-            <thead><tr><th scope="col">#</th><th scope="col">{{ t('common.product') }}</th><th scope="col" class="num">{{ t('customers.probability') }}</th><th scope="col" class="num">{{ t('customers.expectedQuantity') }}</th><th scope="col" class="num">{{ t('customers.estimatedAmount') }}</th><th scope="col">{{ t('customers.profile.rankedBy') }}</th></tr></thead>
+            <thead><tr><th scope="col">#</th><th scope="col">{{ t('common.product') }}</th><th scope="col" class="num">{{ t('customers.probability') }}</th><th scope="col" class="num">{{ t('customers.expectedQuantity') }}</th><th scope="col" class="num">{{ t('customers.expectedOrders') }}</th><th scope="col">{{ t('customers.window.title') }}</th><th scope="col" class="num">{{ t('customers.estimatedAmount') }}</th><th scope="col">{{ t('customers.profile.rankedBy') }}</th></tr></thead>
             <tbody>
               <tr v-for="r in profile.rankings[String(h)]" :key="r.rank">
                 <td>{{ r.rank }}</td>
                 <td><span class="font-medium block">{{ r.product.name ?? `#${r.product.id}` }}</span><span class="text-xs text-fg-muted">{{ r.product.sku }}</span></td>
                 <td class="num">{{ formatProbability(r.purchase_probability) }}</td>
                 <td class="num">{{ count(r.expected_quantity, 2) }}</td>
+                <td class="num" data-test="orders">
+                  <template v-if="r.expected_orders != null">{{ count(r.expected_orders, 2) }}<span v-if="r.expected_units != null" class="block text-xs text-fg-muted">{{ t('customers.unitsApprox', { n: count(r.expected_units, 1), unit: r.product.unit ?? '' }) }}</span></template>
+                  <template v-else>
+                    <span class="text-fg-muted text-sm" :title="s05Cause(r.quality_flags) ? t(`customers.s05.causeHint.${s05Cause(r.quality_flags)}`) : undefined">{{ t('customers.notEstimated') }}</span>
+                    <span v-if="s05Cause(r.quality_flags)" class="block text-xs text-fg-muted" data-test="orders-cause">{{ t(`customers.s05.cause.${s05Cause(r.quality_flags)}`) }}</span>
+                  </template>
+                  <span v-for="f in visibleFlags(r.quality_flags)" :key="f" class="badge badge-warning block w-fit mt-1" :title="te(`customerFlagHints.${f}`) ? t(`customerFlagHints.${f}`) : undefined">{{ te(`customerFlags.${f}`) ? t(`customerFlags.${f}`) : f }}</span>
+                </td>
+                <td><CustomerWindowCell :window="r.window" :cause="s05Cause(r.quality_flags)" /></td>
                 <td class="num">{{ formatExpectedAmount(r.expected_amount, tenant.currency) }}<span class="block text-xs text-fg-muted">{{ t('customers.amountAssumption') }}</span></td>
                 <td>{{ r.ranking_source ? t(`rankingSources.${r.ranking_source}`) : '—' }}</td>
               </tr>

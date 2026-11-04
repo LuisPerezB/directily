@@ -33,7 +33,7 @@ class CustomerRunResource extends JsonResource
             'is_current' => (bool) $this->is_current,
             'config_version' => $this->config_version,
             'data_snapshot_id' => $this->data_snapshot_id !== null ? (int) $this->data_snapshot_id : null,
-            // Mapa horizonte → modelo servido: objeto JSON aunque las claves sean numéricas (7/30/90) o esté vacío.
+            // Mapa horizonte → modelo servido: objeto JSON aunque las claves sean numéricas (7/14/15/30/90) o esté vacío.
             'model_versions' => JsonMap::of($this->model_versions),
             'summary' => JsonMap::of($this->summary),
             'assumptions' => $this->assumptions ?? [],

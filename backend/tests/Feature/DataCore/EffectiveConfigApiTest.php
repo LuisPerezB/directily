@@ -98,6 +98,31 @@ final class EffectiveConfigApiTest extends TestCase
         $this->putJson('/api/v1/tenant/core-config/supply', [])->assertStatus(422);
     }
 
+    public function test_quality_gates_is_a_configurable_core_validated_by_the_engine(): void
+    {
+        [$tenant, $owner] = $this->createTenantWithUser();
+        $this->actingAsTenantUser($owner, $tenant);
+        Http::fake(function (Request $request) use ($tenant) {
+            $overrides = (array) ($request['overrides'] ?? []);
+            if (str_contains($request->url(), 'validate-config') && array_key_exists('umbral_inventado', $overrides)) {
+                return Http::response(['code' => 'invalid_config', 'message' => 'La configuración contiene claves desconocidas o valores no válidos.',
+                    'errors' => [['key' => 'umbral_inventado', 'code' => 'unknown_key', 'message' => 'Clave desconocida']]], 422);
+            }
+
+            return Http::response($this->engineConfig($tenant->id, 'quality_gates', $overrides), 200);
+        });
+
+        $this->getJson('/api/v1/tenant/effective-config?core=quality_gates')->assertOk()->assertJsonPath('data.core', 'quality_gates');
+        $this->putJson('/api/v1/tenant/core-config/quality_gates', ['overrides' => ['demand_min_history_days' => 60]])->assertOk()
+            ->assertJsonPath('data.tenant_overrides.demand_min_history_days', 60);
+        $stored = json_decode((string) DB::table('tenants')->where('id', $tenant->id)->value('settings'), true);
+        $this->assertSame(['demand_min_history_days' => 60], $stored['cores']['quality_gates']);
+        $this->putJson('/api/v1/tenant/core-config/quality_gates', ['overrides' => ['umbral_inventado' => 1]])->assertStatus(422)
+            ->assertJsonPath('errors.0.code', 'unknown_key');
+        $this->assertSame(['demand_min_history_days' => 60], json_decode((string) DB::table('tenants')->where('id', $tenant->id)->value('settings'), true)['cores']['quality_gates'],
+            'un valor que el motor rechaza no reemplaza al guardado');
+    }
+
     public function test_requires_permission_and_reports_engine_outage(): void
     {
         [$tenant, $owner] = $this->createTenantWithUser();

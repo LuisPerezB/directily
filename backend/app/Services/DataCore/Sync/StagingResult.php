@@ -9,7 +9,7 @@ use Carbon\CarbonImmutable;
 final class StagingResult
 {
     /**
-     * `maxRecordedAt`: máximo de `source_recorded_at` LEGIBLE y no posterior al inicio de la sincronización (candidato a marca de agua).
+     * `maxRecordedAt`: máximo de `source_recorded_at` LEGIBLE y no posterior a la cota (inicio de la sincronización + tolerancia; candidato a marca de agua).
      * `futureRecordedAt` / `unreadableRecordedAt`: filas cuya fecha de registro en la fuente es futura o ilegible; son anomalías y
      * NUNCA adelantan la marca de agua.
      */
@@ -21,5 +21,11 @@ final class StagingResult
         public ?string $maxEventDate = null,
         public int $futureRecordedAt = 0,
         public int $unreadableRecordedAt = 0,
+        /** @var array<string, ?string> columna de la consulta => tipo observado (null = solo NULL en la extracción): huella de esquema */
+        public array $columns = [],
+        /** @var array<string, list<array{from: string, to: mixed, count: int}>> aplicaciones de mapeos de valores (transformaciones) */
+        public array $valueMapHits = [],
+        /** ¿Se capturó la extracción cruda (NDJSON comprimido) para Bronze? Ruta del archivo temporal. */
+        public ?string $rawPath = null,
     ) {}
 }

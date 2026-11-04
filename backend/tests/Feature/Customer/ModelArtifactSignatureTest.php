@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Customer;
 
+use App\Exceptions\DomainStateException;
+use App\Models\ModelRegistry;
 use App\Models\Tenant;
 use App\Services\Forecasting\ModelArtifactVerifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -63,6 +65,18 @@ final class ModelArtifactSignatureTest extends TestCase
         return [$dir.'/'.$name, hash('sha256', $content)];
     }
 
+    /** @var array<int, int> */
+    private array $pipelineRuns = [];
+
+    /** V2.5 · W4 (ADR-V25-07): los modelos del motor llevan su corrida enlazada (origen del pipeline propio = legado servible); sin ella no hay origen. */
+    private function pipelineRun(Tenant $tenant): int
+    {
+        return $this->pipelineRuns[$tenant->id] ??= (int) DB::table('core_runs')->insertGetId([
+            'tenant_id' => $tenant->id, 'core' => 'customer', 'operation' => 'train', 'version' => 1, 'run_type' => 'production', 'status' => 'completed',
+            'options' => '{}', 'assumptions' => '[]', 'limitations' => '[]', 'triggered_by' => 'schedule', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
     /** @param array<string, mixed> $over */
     private function model(Tenant $tenant, string $slot, string $status, string $version, string $file, string $sha, array $over = []): int
     {
@@ -70,7 +84,7 @@ final class ModelArtifactSignatureTest extends TestCase
 
         return (int) DB::table('model_registry')->insertGetId(array_merge([
             'tenant_id' => $tenant->id, 'version' => $version, 'model_family' => 'customer_'.str_replace(':', '_', $slot), 'strategy_level' => 'B', 'scope' => 'tenant',
-            'status' => $status, 'core' => 'customer', 'role' => 'primary', 'artifact_path' => $stored, 'artifact_sha256' => $sha,
+            'status' => $status, 'core' => 'customer', 'role' => 'primary', 'artifact_path' => $stored, 'artifact_sha256' => $sha, 'core_run_id' => $this->pipelineRun($tenant),
             'hyperparameters' => json_encode(['slot' => $slot, 'kind' => 'complex', 'ranking_source' => 'popularity']),
             'artifact_compat' => json_encode(['feature_schema_version' => 'cust-fs-2026.10-v1', 'libraries' => ['lightgbm' => '4.7.0']]),
             'retired_at' => $status === 'retired' ? now()->subDay() : null, 'created_at' => now(), 'updated_at' => now(),
@@ -361,13 +375,44 @@ final class ModelArtifactSignatureTest extends TestCase
         $this->assertDatabaseHas('model_registry', ['id' => $old, 'status' => 'retired']);
     }
 
+    public function test_the_manifest_run_is_compared_with_the_one_the_caller_knows(): void
+    {
+        [$file, $sha] = $this->artifact(7);
+        $this->signArtifactFile($file, 7, ['run_id' => 41]);
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha, 'customer', 41)['ok']);
+        $this->assertSame(ModelArtifactVerifier::REASON_RUN_MISMATCH, $this->verifier()->inspect($file, 7, $sha, 'customer', 42)['reason'], 'otra corrida');
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha, 'customer')['ok'], 'sin corrida conocida no se compara');
+        $this->assertTrue($this->verifier()->inspect($file, 7, $sha)['ok']);
+    }
+
+    public function test_a_demand_registry_row_must_point_to_the_artifact_of_its_own_run(): void
+    {
+        [$tenant] = $this->createTenantWithUser();
+        [$file, $sha] = $this->artifact($tenant->id);
+        $this->signArtifactFile($file, $tenant->id, ['core' => 'demand', 'run_id' => 41]);   // firma legítima del modelo de la corrida 41
+        $row = fn (int $run) => (new ModelRegistry)->forceFill([
+            'tenant_id' => $tenant->id, 'version' => "t{$tenant->id}-r{$run}-lightgbm", 'core' => 'demand', 'forecast_run_id' => $run,
+            'artifact_path' => ltrim(substr($file, strlen($this->dir)), '/'), 'artifact_sha256' => $sha,
+        ]);
+
+        $this->assertSame('verified', $this->verifier()->verify([$row(41)])['status']);
+        // Una fila de otra corrida que reutiliza ese artefacto firmado (p. ej. un modelo antiguo legítimo) se rechaza.
+        try {
+            $this->verifier()->verify([$row(42)]);
+            $this->fail('Debió rechazar la fila de otra corrida.');
+        } catch (DomainStateException $e) {
+            $this->assertSame('rollback_artifact_signature_invalid', $e->errorCode);
+            $this->assertSame(ModelArtifactVerifier::REASON_RUN_MISMATCH, $e->context['reason']);
+        }
+    }
+
     public function test_the_unsigned_mark_left_by_the_engine_blocks_a_rollback_even_when_the_file_is_not_visible(): void
     {
         [$tenant, $user] = $this->createTenantWithUser();
         $compat = json_encode(['feature_schema_version' => 'cust-fs-2026.10-v1', 'libraries' => ['lightgbm' => '4.7.0'], 'signature' => ['status' => 'unsigned', 'algorithm' => null, 'key_id' => null, 'manifest_sha256' => str_repeat('a', 64)]]);
         $old = (int) DB::table('model_registry')->insertGetId([
             'tenant_id' => $tenant->id, 'version' => 'v1-no-visible', 'model_family' => 'customer_h30_probability', 'strategy_level' => 'B', 'scope' => 'tenant', 'status' => 'retired',
-            'core' => 'customer', 'role' => 'primary', 'artifact_path' => $tenant->id.'/customer/run-9/no-visible.joblib', 'artifact_sha256' => str_repeat('b', 64),
+            'core' => 'customer', 'role' => 'primary', 'core_run_id' => $this->pipelineRun($tenant), 'artifact_path' => $tenant->id.'/customer/run-9/no-visible.joblib', 'artifact_sha256' => str_repeat('b', 64),
             'hyperparameters' => json_encode(['slot' => 'h30:probability', 'kind' => 'complex']), 'artifact_compat' => $compat, 'retired_at' => now()->subDay(), 'created_at' => now(), 'updated_at' => now(),
         ]);
 

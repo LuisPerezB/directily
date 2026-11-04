@@ -274,12 +274,15 @@ def test_insufficient_history_abstains_explicitly(db_engine, env):
     row = q(db_engine, "SELECT quality_status, limitations FROM core_runs WHERE id = :r", r=t["run_id"])[0]
     horizons = t["summary"]["horizons"]
     assert horizons["90"]["status"] == "abstained" and "insuficientes" in horizons["90"]["reason"]
+    assert horizons["90"]["reason_code"] in ("coverage_insufficient", "insufficient_horizon"), "estado abstained, motivo con código unificado"
     assert any("H=90" in lim and "abstención" in lim for lim in row["limitations"])
     prod = q(db_engine, "SELECT hyperparameters FROM model_registry WHERE tenant_id = :t AND status = 'production' AND core = 'customer'", t=c)
     assert all(r["hyperparameters"]["horizon_days"] != 90 for r in prod)          # no se inventa un modelo para H=90
     p = run(db_engine, c, "predict", as_of="2026-05-01")
     assert p["status"] == "completed"
     assert 90 not in (p["summary"]["horizons"] or [])
+    h90 = p["summary"]["horizon_support"]["90"]
+    assert h90["status"] == "insufficient_data" and h90["reasons"][0]["reason_code"] == "no_model", "el horizonte sin modelo se abstiene con motivo"
     assert one(db_engine, "SELECT count(*) FROM customer_predictions WHERE tenant_id = :t AND horizon_days = 90", t=c) == 0
 
 
@@ -420,7 +423,7 @@ def test_api_execute_endpoint_requires_token_and_company(client, db_engine, env)
     assert ok.status_code == 200 and ok.json()["operation"] == "predict" and ok.json()["status"] == "completed"
     assert client.post(url, json={"tenant_id": tid, "training_job_id": jid}, headers=AUTH).json()["run_id"] == rid        # idempotente
     caps = client.get("/v1/customer/capabilities", headers=AUTH).json()
-    assert caps["horizons"] == [7, 30, 90] and "isotonic" in caps["calibration"]
+    assert caps["horizons"] == [7, 14, 15, 30, 90] and "isotonic" in caps["calibration"], "catálogo de Customer (sin 60)"
     assert json.dumps(caps["target_definition"]).count("supuesto") >= 1
 
 

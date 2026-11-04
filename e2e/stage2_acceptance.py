@@ -46,6 +46,9 @@ from zoneinfo import ZoneInfo
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+# Catálogo de horizontes de demanda (ADR-V25-02): se lee del contrato compartido backend/motor en lugar de fijarlo aquí,
+# para que el E2E siga la decisión vigente (V2.5 W2-E agregó el 15) sin aflojar la verificación.
+DEMAND_HORIZON_KEYS = {str(h) for h in json.loads((ROOT / "docs/product/horizons.contract.json").read_text(encoding="utf-8"))["demand"]}
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mvp_acceptance as mvp  # noqa: E402  (se reutilizan Client, setup_company, run_import y las esperas)
 
@@ -221,7 +224,7 @@ def check_envelope_demand(run: dict, horizon: int, label: str) -> None:
     beyond = {h: v for h, v in hs.items() if int(h) > horizon}
     status = {h: v.get("status") for h, v in hs.items()}
     check(f"[Demanda] {label}: horizon_support coherente (calculados ≤ {horizon} d con respaldo; los mayores 'not_computed')",
-          set(hs) == {"7", "14", "30", "60", "90"} and all(v["status"] in {"ok", "degraded", "insufficient_data"} for v in computed.values())
+          set(hs) == DEMAND_HORIZON_KEYS and all(v["status"] in {"ok", "degraded", "insufficient_data"} for v in computed.values())
           and all(v["status"] == "not_computed" for v in beyond.values()) and str(horizon) in computed,
           json.dumps(status))
     # con 730 días de historia (≥ 2×H) y un backtest de 90 días, todo horizonte ≤ H debe estar respaldado (ok)

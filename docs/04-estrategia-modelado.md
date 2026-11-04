@@ -18,7 +18,8 @@ No se usa ningún LLM para calcular cifras.
 - **Un día sin ventas no siempre es un cero** (ADR-V25-03, §16): cada día de una serie se clasifica en `day_status`
   (`sale`, `zero_confirmed`, `missing_source`, `stockout_censored`, `closed`). Solo `zero_confirmed` es un cero
   observado; los días de fuente ausente (fuera de la cobertura, en un hueco o inferidos) y los cierres declarados se
-  **excluyen** de las métricas y del perfilado y se imputan igual que los quiebres.
+  **excluyen** de las métricas, del perfilado y de la evaluación posterior de los pronósticos publicados (WAPE/sesgo realizados y
+  alerta de deriva) y se imputan igual que los quiebres (un hueco de más de 21 días propaga el último nivel).
 - **Las ventas se leen tal como se conocían al corte** (ADR-V25-23, §16): un documento cargado tarde o una anulación
   posterior no reescriben un corte pasado.
 - Series sin ventas en 180 días o de productos inactivos no se pronostican (se informa).
@@ -98,9 +99,10 @@ Se prefiere el mayor horizonte que admita un holdout independiente. Con 300–38
 usa h = 60 con holdout en vez de h = 90 sin holdout. Los pasos de producción que exceden el
 horizonte evaluado **ya no se presentan como completos** (ver «Horizontes y abstención» abajo).
 
-**Horizontes 7/14/30/60/90 y abstención explícita (etapa 2 · P1, E2-21).** El motor pronostica
-los cinco horizontes del dominio (Laravel pide solo los que el plan autoriza: básico 7/14/30; resto
-todos). Un horizonte H está **respaldado** únicamente si (1) la historia cubre ≥ 2×H días y (2) el
+**Catálogo de horizontes 7/14/15/30/60/90 y abstención explícita (etapa 2 · P1, E2-21; W2-E · ADR-V25-02).** El
+motor pronostica los seis horizontes del catálogo único (Laravel pide solo los que el plan autoriza: Básico 7/14/30,
+Starter 7/30, Growth y Enterprise 7/15/30 por defecto; catálogo completo habilitable por contrato; ver
+`docs/product/RETAIL_STARTER_GROWTH.md`). Un horizonte H está **respaldado** únicamente si (1) la historia cubre ≥ 2×H días y (2) el
 backtesting tiene ventanas de ≥ H días y observaciones evaluadas. Si no, queda `insufficient_data` con
 sus motivos (`history_lt_2h`, `backtest_horizon_lt_h`, `no_backtest`, `no_evaluated_observations`): el
 número se calcula —la jerarquía y las recomendaciones lo necesitan— pero se marca en cada fila
@@ -108,8 +110,37 @@ número se calcula —la jerarquía y las recomendaciones lo necesitan— pero s
 las filas `granularity='horizon'` de ese H salen **sin intervalo** (no se extrapola). Sin período final
 independiente, los horizontes respaldados quedan `degraded` (métricas optimistas). Por serie, una serie con
 menos de 2×H días de historia queda `insufficient_data` en los pasos de ese horizonte. Ejemplo
-(`tests/unit/test_horizons.py`): 118 días de historia ⇒ backtest de 14 días con holdout ⇒ 7 y 14 `ok`; 30, 60 y
-90 `insufficient_data`. Con 574 días (datos de prueba) o 730 (demo) los cinco horizontes son `ok`.
+(`tests/unit/test_horizons.py`): 118 días de historia ⇒ backtest de 14 días con holdout ⇒ 7 y 14 `ok`; 15, 30, 60 y
+90 `insufficient_data`. Con 574 días (datos de prueba) o 730 (demo) los seis horizontes son `ok`.
+
+*Nombres de la abstención (unificados).* `insufficient_data` es siempre el **estado**; el motivo es un **código**
+(`reasons[].reason_code`): `coverage_insufficient` (la historia no cubre 2×H o no alcanza para un backtest: `history_lt_2h`,
+`no_backtest`) o `insufficient_horizon` (el backtest no tiene ventanas completas de H días: `backtest_horizon_lt_h`,
+`no_evaluated_observations`). Cada motivo conserva su `code` histórico y la API agrega `reason_code` también a las ejecuciones
+anteriores, de modo que las respuestas existentes siguen siendo compatibles (prueba:
+`test_horizon_catalog.py::test_reason_codes_are_unified_while_legacy_codes_stay_for_existing_consumers` y
+`DemandV2ApiTest::test_forecast_run_detail_carries_the_common_envelope_and_the_protocol_manifest`).
+
+*Customer: estado por etapa.* En el **entrenamiento** el estado de un horizonte sin evidencia sigue siendo `abstained` (con `reason_code`
+`coverage_insufficient`, `insufficient_horizon` o `no_identified_buyers`) por compatibilidad con el manifiesto, las pruebas y los consumidores
+existentes (`tier`/`status` del manifiesto). En la **predicción y la API** el mismo horizonte sin modelo utilizable es `insufficient_data` con su
+`reason_code` (`no_model`, `model_unusable`, `no_identified_buyers`) en `summary.horizon_support` y en el 422 `horizon_not_available`. Una corrida
+anterior a W2-E no guardó el motivo: la API informa `unknown_legacy_run` en vez de suponer «sin modelo».
+
+*Horizonte de 15 días.* **IMPLEMENTADO/VERIFICADO.** Pasa por el mismo camino que los demás: el backtest as-of por ventana y el
+período final independiente de W1 (ADR-V25-23). Se evalúa como el error del **total** de 15 días (`model_evaluations.level =
+'horizon_total'`, `level_key = 'H15'`, `evaluation_type = 'backtest'`, `extra.independent_holdout = true`) y se publica en
+`forecast_values` con `granularity = 'horizon'`, `period_days = 15`, intervalo conformal del total y su estado. Pruebas:
+`tests/integration/test_horizon_15_integration.py` (publicación con estado e intervalos; evaluación sobre el período final
+independiente; una anulación y un documento tardío conocidos después del origen del período final **no** cambian ningún número
+evaluado de H15 aunque sí cambian el pronóstico de producción) y `test_horizons.py` (paso 15 ⇒ horizonte 15). Requisitos: historia
+≥ 30 días y backtest con ventanas ≥ 15 días, es decir, en la práctica el escalón de 30 días de la tabla (≥ 150 días de historia, con
+período final independiente). Con 84–149 días el backtest es de 14 días y **H15 queda `insufficient_data`
+(`insufficient_horizon`) aunque H14 esté `ok`**: es la abstención honesta, no un número. *Pendiente (decisión del arquitecto)*: un
+escalón de backtest de 15 días reduciría esa brecha, pero cambia las métricas y salvaguardas de las empresas existentes; no se hizo.
+Los tramos de evaluación diaria (`h1-7`, `h8-14`, `h15-30`, `h31-60`, `h61-90`) son **tramos de pasos** y no cambian: «h15-30» no es el
+horizonte 15 (renombrarlo rompería las claves persistidas, la deriva de `evaluate-actuals` y los consumidores de `by_horizon`).
+El paso 15 de una serie pertenece al horizonte 15 (`horizon_for_step`): hereda su estado, no el del de 30.
 
 **Manifiesto del protocolo (E2-06).** Cada ejecución guarda en `forecast_runs.evaluation_manifest` los
 períodos que usó cada fase, construidos de las filas reales del backtest: orígenes y rangos objetivo de
@@ -226,7 +257,7 @@ escala de cada serie (media de 28 días). Nivel serie: cuantiles asimétricos po
 de horizonte (conteos sesgados). Niveles agregados: simétricos (|error|), más robustos cuando
 las ventanas comparten un sesgo estacional. Más allá del horizonte evaluado los pasos diarios se
 ensanchan con √(paso/paso máximo), **pero quedan marcados `insufficient_data`** (§4) y los totales de
-horizonte de ese H salen sin intervalo. Semanal/mensual y totales del horizonte (7/14/30/60/90) se
+horizonte de ese H salen sin intervalo. Semanal/mensual y totales del horizonte (7/14/15/30/60/90) se
 calibran con sumas de errores del backtest (`granularity = 'week' | 'month' | 'horizon'`).
 
 - **Producción:** residuos del modelo elegido y **servido** en todas las ventanas (incluido el holdout),
@@ -400,9 +431,9 @@ cifras no tienen intervalo de confianza y no certifican exactitud comercial.
 - **Conocimiento as-of (ADR-V25-23)**: una carga histórica (`backfill`) asume el estado final del documento desde su día de negocio (la fuente no
   entrega el historial de estados: una anulación posterior cargada así no se puede reconstruir); inventario, catálogo, costos y calendario no están
   versionados y se leen con su estado vigente; las declaraciones de cobertura, huecos y cierres se aplican con su estado vigente en todas las
-  ventanas. Los lectores de Supply y Causal siguen leyendo el estado vigente de las ventas (`docs/data/TEMPORAL_AVAILABILITY.md` §12). Una ejecución vigente (corte = último
-  dato) conoce hasta hoy —la carga nocturna del último día cuenta—, pero un corte que la cobertura declarada limita por debajo del último dato se trata como histórico
-  (conocimiento hasta el propio corte): ver §16.1 y `TEMPORAL_AVAILABILITY.md` §3 y §12.12.
+  ventanas. Los lectores de Supply y Causal (y los precios/costos derivados de ventas de Supply, Escenarios y Costos) siguen leyendo el estado vigente de las ventas, y el plan del backtest
+  se calcula con la historia del panel final (`docs/data/TEMPORAL_AVAILABILITY.md` §12.10). Una ejecución vigente (la que no pidió un corte histórico) conoce hasta hoy —la carga nocturna del
+  último día cuenta— **aunque la cobertura declarada limite el corte por debajo del último dato**: el llamador lo declara (`live`); ver §16.1 y `TEMPORAL_AVAILABILITY.md` §3 y §12.12.
 - **Regla inferida de días sin fuente (ADR-V25-03)**: activa por defecto y **pendiente de aprobación en el piloto**; confunde un cierre sin declarar
   con una caída de la fuente (con datos sintéticos marca los feriados cerrados), no detecta caídas de más de ≈ 14 días ni sucursales de pocas líneas.
   Los cierres se declaran con `calendar_events.category = 'closure'`, valor nuevo que el backend aún no acepta.
@@ -437,7 +468,7 @@ externos, insumos de abastecimiento, configuración efectiva, reglas de elegibil
 snapshot + configuración + semilla ⇒ mismos valores (`test_pipeline.py::test_reproducible_with_same_seed`,
 `test_snapshot_config.py`, `test_demand_v2_integration.py`). Los componentes `sales` y `costs` se calculan sobre los datos **as-of
 efectivamente usados** e incluyen sus ventanas de conocimiento: dos cortes con las mismas cifras pero distinto conocimiento no comparten huella,
-y lo que ocurra después del corte final no la altera (§16).
+y lo que ocurra después del corte final no la altera (§16); además lleva la clasificación de días (`day_inputs` y `day_status`).
 
 ## 14. Comportamiento de compra por comprador (Customer Core, etapa 2 · P2)
 
@@ -445,7 +476,7 @@ Detalle, definiciones y limitaciones en `docs/architecture/v2/P2-comportamiento.
 agregada: la unidad es comprador × producto, y la demanda agregada y la de compradores son dos vistas de la misma demanda que
 nunca se suman (§14.6).
 
-**14.1 Objetivos (7, 30 y 90 días, con modelos propios por horizonte).** `purchase_probability` = P(≥ 1 compra válida del producto en
+**14.1 Objetivos (7, 14, 15, 30 y 90 días, con modelos propios por horizonte; 60 no aplica a Customer).** `purchase_probability` = P(≥ 1 compra válida del producto en
 `(corte, corte+H]`, todas las sucursales, sin anuladas ni notas de crédito); `quantity_if_purchase` = suma de **todas** las compras
 de la ventana dado ≥ 1; `expected_quantity` = P × cantidad; `expected_amount` = esperanza × último precio neto de la relación
 (supuesto). La etiqueta madura solo si `corte+H ≤` último día completo (cobertura o última venta); la ventana con disponibilidad
@@ -468,7 +499,7 @@ con ventanas 90/180/365.
 
 **14.4b Fuente del ranking (`cust-ranking-v1`, ADR-P2-01).** El ranking servido de productos probables usa, por horizonte, la fuente elegida en el holdout entre probabilidad del modelo servido, popularidad y recencia por precision@5, con popularidad por defecto y margen relativo mínimo de 5 %; la fuente queda en `ranking_source` (modelos, resumen, cada fila del ranking y la API).
 
-**14.5 Coherencia.** Máximo acumulado P7 ≤ P30 ≤ P90 (sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
+**14.5 Coherencia.** Máximo acumulado entre los horizontes servidos (p. ej. P7 ≤ P15 ≤ P30 ≤ P90; sin multiplicar probabilidades), evaluado por par de horizontes y con tasa de corrección registrada.
 
 **14.6 Reconciliación y compromisos.** agregado = Σ max(esperanza, comprometido) + comprometido fuera del modelo + residual; `inconsistent` si compradores > agregado
 (sin alterar probabilidades). Comprometido = pedidos/contratos confirmados, conocidos al corte, no cancelados, con entrega en el horizonte (pendiente = cantidad − cumplida).
@@ -526,8 +557,9 @@ vectorizados; `daily_sales(cutoff)`, `daily_returns`, `last_sale_date` y `sales_
 histórica, `ingestion_mode = 'backfill'`) se leen como antes. IMPLEMENTADO / VERIFICADO (`test_asof_integration.py`, `test_asof_visibility.py`).
 
 **Conocimiento del corte final.** La regla («visible al corte C si `known_from < medianoche local (C+1)`…») es estricta para todo corte **anterior** al final. Para el corte final depende de
-la ejecución: una **ejecución vigente** (corte = último dato) conoce hasta **hoy** —sin esto, con carga incremental el último día aparecería vacío porque sus documentos llegan tras la
-medianoche—, igual que ya hacían las promociones (`promotions_known_on`); una **reconstrucción histórica** (existen ventas posteriores al corte) conoce solo hasta el propio corte, de modo
+la ejecución: una **ejecución vigente** (no se pidió un corte histórico; el llamador lo declara con `live=True`, y sin declararlo se infiere de que el corte pedido sea ≥ el último dato) conoce hasta **hoy**
+—sin esto, con carga incremental el último día aparecería vacío porque sus documentos llegan tras la medianoche—, igual que ya hacían las promociones (`promotions_known_on`), también cuando la
+cobertura declarada limita el corte por debajo del último dato; una **reconstrucción histórica** (se pidió un corte anterior al último dato) conoce solo hasta el propio corte, de modo
 que lo que llegue después no cambia ni sus datos ni su huella. Las ventanas del backtest y las observaciones del Customer Core siguen siendo estrictas. Los reales con que se mide cada ventana
 son la verdad disponible (hasta hoy en la ejecución vigente). Queda en `knowledge.source.knowledge_date`. IMPLEMENTADO / VERIFICADO (`test_asof_visibility.py::test_a_live_*`,
 `test_asof_integration.py::test_a_live_run_*`, `test_asof_customer_integration.py::test_a_live_customer_run_*`).
@@ -547,7 +579,7 @@ son la verdad disponible (hasta hoy en la ejecución vigente). Queda en `knowled
 | `sale` | — | observado |
 | `zero_confirmed` | sí | cero observado (fuente completa, sucursal abierta, sin quiebre) |
 | `stockout_censored` | no | censurado: peso 0, fuera de métricas, imputado (lógica existente) |
-| `missing_source` | no | fuera de `data_coverage`, dentro de `data_coverage_gaps` o inferido: excluido de métricas y perfilado, imputado con la media móvil de 28 días, con su conteo en limitaciones y manifiesto |
+| `missing_source` | no | fuera de `data_coverage`, dentro de `data_coverage_gaps` o inferido: excluido de métricas y perfilado, imputado con la media móvil de 28 días (un hueco de más de 21 días propaga el último nivel en vez de dejar ceros), con su conteo en limitaciones y manifiesto (`days_not_imputable` si algún día no tiene nivel previo) |
 | `closed` | no | `calendar_events` con `category = 'closure'` (empresa o sucursal): igual que `missing_source` |
 
 Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_confirmed`. La **regla inferida** (por defecto activa; claves `day_status_infer_gaps`,
@@ -555,16 +587,22 @@ Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_
 mediana ≥ 5 líneas diarias en los 28 días previos; **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
 IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
 
+**Evaluación posterior y deriva.** La exactitud realizada de pronósticos ya publicados (`evaluation/actuals.py`: `forecast_actuals`, métricas `realized` y alerta `forecast_drift`) **no cuenta como cero observado**
+ningún día `missing_source` ni `closed`: los clasifica con la misma función del entrenamiento (`profiling.days.classify_days`, reglas de la configuración efectiva y declaraciones más recientes), los marca censurados,
+los omite de WAPE/sesgo/cobertura realizados y de la deriva (también del nivel total) y los cuenta por clase (`exclusions`: `stockout_days`, `missing_source_days`, `closed_days`...). Así una caída de la integración
+no se lee como un deterioro del pronóstico, y un deterioro real en los días evaluables sigue detectándose. IMPLEMENTADO / VERIFICADO (`test_asof_evaluation_integration.py`; detalle en `TEMPORAL_AVAILABILITY.md` §8).
+La **huella** de datos incluye la clasificación (`day_inputs`: huecos, cierres y mapa fuente → sucursales; `day_status`: días-serie excluidos), de modo que declarar un cierre o un hueco ya no deja el mismo hash (§9 del mismo documento).
+
 **16.4 Costo.** En los datos de la demo-ferretería (14 k líneas) la lectura de versiones tarda 0,15–0,28 s frente a 0,11–0,20 s de la consulta agregada anterior, y cada vista as-of adicional
 7–11 ms; `load_tenant_data` completo tarda 0,35–0,45 s frente a 0,58–0,89 s del motor anterior (el JIT apagado compensa la lectura de versiones). Con 714 k líneas (12 % tardías) la lectura tarda 4,1 s frente a 0,83 s y cada vista 10–20 ms.
 Una ventana solo reconstruye su panel cuando hay diferencias con la verdad. Con la regla inferida apagada el pronóstico de la demo sintética es idéntico al del motor anterior; con ella activa (por defecto) el total a 90 días sube un 0,23 % y el WAPE
-pasa de 0,4377 a 0,4358 (`TEMPORAL_AVAILABILITY.md` §5).
+pasa de 0,4377 a 0,4358 (`TEMPORAL_AVAILABILITY.md` §5). En el Customer Core, el 10 % de compras tardías multiplica por 3–4 el tiempo de armar el dataset (≈ 40 ms por corte con 29 k compras-celda; no optimizado, `TEMPORAL_AVAILABILITY.md` §12.13).
 
 **16.5 Estado de esta sección.**
 
 | Estado | Elemento |
 |---|---|
-| IMPLEMENTADO / VERIFICADO | Lectura as-of desde `sales_line_versions` (una lectura, vistas derivadas); backtest as-of por ventana con reales de la verdad disponible; conocimiento del corte final (ejecución vigente hasta hoy, reconstrucción histórica hasta el corte); variables del Customer Core al corte y etiquetas con la verdad; clasificación `day_status`, exclusión de métricas y perfilado, imputación y trazabilidad; huella con ventanas de conocimiento (pruebas: `test_asof_visibility.py`, `test_day_status.py`, `test_asof_integration.py`, `test_asof_customer_integration.py`) |
-| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo, costos y calendario; lectura as-of de Supply y Causal; aceptación del valor `closure` en backend, frontend y extensiones; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen); aprobación de la regla inferida (piloto) |
+| IMPLEMENTADO / VERIFICADO | Lectura as-of desde `sales_line_versions` (una lectura, vistas derivadas); backtest as-of por ventana con reales de la verdad disponible; conocimiento del corte final (ejecución vigente hasta hoy, también con el corte limitado por la cobertura; reconstrucción histórica hasta el corte); variables del Customer Core al corte y etiquetas con la verdad; clasificación `day_status`, exclusión de métricas y perfilado, imputación (con propagación del último nivel en huecos largos) y trazabilidad; exclusión de esos días en la evaluación posterior y la deriva; huella con ventanas de conocimiento y con la clasificación de días; lectura de PostgreSQL verificada en zonas con horario de verano (pruebas: `test_asof_visibility.py`, `test_day_status.py`, `test_asof_integration.py`, `test_asof_customer_integration.py`, `test_asof_evaluation_integration.py`, `test_asof_timezones_integration.py`, `test_customer_asof_cost.py`) |
+| DISEÑADO / NO IMPLEMENTADO | Versionado de inventario, catálogo, costos y calendario; lectura as-of de Supply, Causal, Escenarios y Costos; plan del backtest as-of; aceptación del valor `closure` en backend, frontend y extensiones; persistencia día a día de `day_status` en el dataset Gold (hoy solo su resumen); aprobación de la regla inferida (piloto); propagación del último nivel en quiebres largos |
 | BLOQUEADO | Estado histórico real de una carga `backfill` (la fuente no entrega el historial de estados: una anulación posterior cargada así no se puede reconstruir) |
 | NO APLICA | Reconstrucción de panel por ventana cuando la carga es solo histórica (se reutiliza el panel final); ventanas de conocimiento en entidades que no son documentos de venta |

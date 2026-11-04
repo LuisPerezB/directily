@@ -9,7 +9,7 @@
 
 Predictily toma las ventas que usted ya registra en su sistema de facturación, POS o ERP y calcula:
 
-- cuánto se estima que venderá de cada producto, en cada sucursal, en los próximos 7, 14, 30, 60 o 90 días (según su plan);
+- cuánto se estima que venderá de cada producto, en cada sucursal, en los próximos 7, 14, 15, 30, 60 o 90 días (según su plan);
 - qué productos podrían agotarse y cuánto convendría comprar;
 - qué compradores probablemente volverán a comprar, qué productos y cuánto;
 - un plan de compras sugerido que respeta presupuesto, capacidad de almacén y condiciones de sus proveedores;
@@ -107,7 +107,7 @@ corte**, el período cubierto y la **versión de los datos y de la configuració
 
 ## 6. Dashboard comercial
 
-Responde seis preguntas para el horizonte elegido (7, 14, 30, 60 o 90 días, según su plan) y la sucursal seleccionada:
+Responde seis preguntas para el horizonte elegido (7, 14, 15, 30, 60 o 90 días, según su plan) y la sucursal seleccionada:
 
 | Pregunta | Dónde verlo |
 |---|---|
@@ -130,7 +130,7 @@ gráfico se dibuja punteado y sin rangos. La cifra existe, pero **no debe usarse
 
 ## 7. Pronósticos de demanda
 
-Elija el **horizonte** (7, 14, 30, 60 o 90 días; solo aparecen los incluidos en su plan). Muestra el **histórico de ventas** (línea continua) y el **pronóstico** (línea punteada) para la empresa, una
+Elija el **horizonte** (7, 14, 15, 30, 60 o 90 días; solo aparecen los incluidos en su plan). Muestra el **histórico de ventas** (línea continua) y el **pronóstico** (línea punteada) para la empresa, una
 sucursal, una categoría o un producto. Puede ver por día, semana o mes, en unidades o en ingresos.
 
 **Cómo leer las bandas:**
@@ -186,7 +186,7 @@ rangos. La columna **Caso especial** muestra las insignias descritas en «Pronó
 ## 9. Compradores (comportamiento de compra)
 
 Menú **Compradores**. Responde, para cada comprador identificado y cada producto que ya compró, en los próximos
-**7, 30 o 90 días** (los que incluya su plan): ¿volverá a comprar?, ¿cuánto?, ¿cuánto se espera?, ¿cuánto sería en
+**7, 14, 15, 30 o 90 días** (los que incluya su plan; 60 días no existe para compradores): ¿volverá a comprar?, ¿cuánto?, ¿cuánto se espera?, ¿cuánto sería en
 dinero? y ¿a quién conviene contactar?
 
 **Quiénes entran.** Solo compradores identificados que ya compraron ese producto. Las ventas sin comprador y las de
@@ -366,7 +366,7 @@ Además de las métricas anteriores, la pantalla muestra:
 
 | Elemento | Qué significa |
 |---|---|
-| **Error del total de cada horizonte** | Al comprar importa el total de los próximos 7, 14, 30, 60 o 90 días, no el error día a día. Se compara con el método simple. |
+| **Error del total de cada horizonte** | Al comprar importa el total de los próximos 7, 14, 15, 30, 60 o 90 días, no el error día a día. Se compara con el método simple. |
 | **MASE / RMSSE** | Error comparado con repetir lo vendido la semana anterior (calculado solo con datos previos a cada prueba). **Menor que 1** significa que mejora ese método simple. |
 | **Cuantiles P10, P50, P90** | Límites del rango probable y mediana. La mediana dice «no publicada» si no mejoró a la cifra central. Sin período final independiente no se evalúan. |
 | **Amplitud de los rangos** | Qué tan ancho es el rango de 80 % y 95 %, en unidades por serie y día. |

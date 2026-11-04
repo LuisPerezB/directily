@@ -1,4 +1,4 @@
-"""Integración PostgreSQL de la demanda (etapa 2 · P1): horizontes 7/14/30/60/90, huella, configuración,
+"""Integración PostgreSQL de la demanda (etapa 2 · P1): horizontes 7/14/15/30/60/90, huella, configuración,
 manifiesto, cobertura de fuentes, eventos extraordinarios, registro de modelos y modelo servido coherente."""
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from predictily_engine.synthetic import generate_company
 
 pytestmark = pytest.mark.integration
 
-HORIZONS = [7, 14, 30, 60, 90]
+HORIZONS = [7, 14, 15, 30, 60, 90]
 
 
 def _execute(client, run_id, tenant_id, job_id, **extra):
@@ -90,7 +90,7 @@ def _fv(engine, run_id) -> pd.DataFrame:
         return pd.read_sql(text("SELECT * FROM forecast_values WHERE forecast_run_id = :r"), conn, params={"r": run_id})
 
 
-def test_five_horizons_are_written_with_a_status_on_every_row(world, db_engine):
+def test_every_catalog_horizon_is_written_with_a_status_on_every_row(world, db_engine):
     fv = _fv(db_engine, world["r3"])
     hz = fv[(fv["node_key"] == "total") & (fv["granularity"] == "horizon")].sort_values("period_days")
     assert hz["period_days"].tolist() == HORIZONS
@@ -114,7 +114,7 @@ def test_run_records_config_snapshot_manifest_and_envelope_fields(world, db_engi
     assert manifest["holdout"]["independent"] is True and verify(manifest) == []
     assert manifest["config_version"] == run["config_version"]
     body = world["b3"]
-    assert body["quality_status"] == "ok" and set(body["horizon_support"]) == {"7", "14", "30", "60", "90"}
+    assert body["quality_status"] == "ok" and set(body["horizon_support"]) == {"7", "14", "15", "30", "60", "90"}
 
 
 def test_metrics_json_and_horizon_total_rows_are_persisted(world, db_engine):
@@ -392,7 +392,7 @@ def test_short_history_completes_with_explicit_abstention_and_no_invented_interv
         tenant = load_company(conn, co, f"Empresa corta {days} d (prueba ficticia)")
     run_id, body = _run(client, db_engine, tenant)
     assert body["status"] == "completed" and body["quality_status"] == "insufficient_data"
-    assert body["horizon_support"] == {h: "insufficient_data" for h in ("7", "14", "30", "60", "90")}
+    assert body["horizon_support"] == {h: "insufficient_data" for h in ("7", "14", "15", "30", "60", "90")}
     fv = _fv(db_engine, run_id)
     assert not fv.empty and fv["yhat"].notna().all() and (fv["yhat"] >= 0).all()
     assert fv[["lo_80", "hi_80", "lo_95", "hi_95", "p50"]].isna().all().all(), "sin backtest no hay intervalos que mostrar"

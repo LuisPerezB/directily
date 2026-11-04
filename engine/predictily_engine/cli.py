@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -85,7 +87,7 @@ def _cmd_verify_artifact(args: argparse.Namespace) -> int:
     """Verifica un artefacto del registro SIN deserializarlo (firma, clave de confianza, SHA-256, tamaño, empresa)."""
     from predictily_engine.platform.artifacts import verify_stored_artifact
 
-    result = verify_stored_artifact(args.path, tenant_id=args.tenant_id, core=args.core, expected_sha256=args.sha256)
+    result = verify_stored_artifact(args.path, tenant_id=args.tenant_id, core=args.core, expected_sha256=args.sha256, run_id=args.run_id)
     status = result.artifact.status if result.artifact else None
     print(json.dumps({"ok": result.ok, "reason": result.reason, "status": status,
                       "key_id": result.artifact.key_id if result.artifact else None}, ensure_ascii=False, indent=2))
@@ -93,8 +95,11 @@ def _cmd_verify_artifact(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="predictily_engine", description="Motor predictivo de Predictily")
-    sub = parser.add_subparsers(dest="command", required=True)
+    from predictily_engine.demand.horizons import SUPPORTED_HORIZONS  # catálogo único (ADR-V25-02)
+    from predictily_engine.mlops import commands as mlops_commands      # W4-B · CLI de entrenamiento privado por empresa (ADR-V25-19)
+
+    parser = mlops_commands.EsParser(prog="predictily_engine", description="Motor predictivo de Predictily")
+    sub = parser.add_subparsers(dest="command", required=True, title="comandos", parser_class=mlops_commands.EsParser, metavar="comando")
 
     g = sub.add_parser("generate-demo", help="Genera los datasets ficticios de demostración")
     g.add_argument("--out", default="../data/demo")
@@ -105,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--run-id", type=int, required=True)
     r.add_argument("--tenant-id", type=int, required=True)
     r.add_argument("--training-job-id", type=int, default=None)
-    r.add_argument("--horizons", type=int, nargs="+", default=[7, 14, 30, 60, 90])
+    r.add_argument("--horizons", type=int, nargs="+", default=list(SUPPORTED_HORIZONS))
     r.add_argument("--cutoff-date", default=None)
     r.set_defaults(func=_cmd_run)
 
@@ -117,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("evaluate", help="Compara pronósticos pasados con ventas reales")
     e.add_argument("--tenant-id", type=int, required=True)
     e.add_argument("--training-job-id", type=int, default=None)
-    e.add_argument("--lookback-runs", type=int, default=10)
+    e.add_argument("--lookback-runs", type=mlops_commands._int_range(1, 50), default=10, help="Corridas anteriores a evaluar (1 a 50)")
     e.set_defaults(func=_cmd_evaluate)
 
     k = sub.add_parser("keygen", help="Genera un par de claves Ed25519 para firmar artefactos de modelos (ADR-V25-20)")
@@ -131,9 +136,18 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--tenant-id", type=int, required=True)
     v.add_argument("--core", default=None, choices=["demand", "customer"])
     v.add_argument("--sha256", default=None, help="artifact_sha256 del registro")
+    v.add_argument("--run-id", type=int, default=None, help="corrida que registró el modelo (forecast_run_id), si se conoce con certeza")
     v.set_defaults(func=_cmd_verify_artifact)
 
+    mlops_commands.register(sub)
+    parser.epilog = mlops_commands.EPILOG
     args = parser.parse_args(argv)
+    configuration_error = mlops_commands.check_startup_configuration()
+    if configuration_error is not None:
+        print(f"error: {configuration_error}", file=sys.stderr)
+        return mlops_commands.EXIT_CONFIG
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=mlops_commands.configured_log_level(), format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
     return int(args.func(args))
 
 

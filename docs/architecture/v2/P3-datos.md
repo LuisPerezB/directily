@@ -209,9 +209,12 @@ pero no comprobado contra un servidor real; nunca se presenta como disponible) y
   se devuelven por API (solo `has_credentials`), ni aparecen en errores, `last_error` o registros: los mensajes de PDO se sanean.
 - `POST /data-sources/{id}/test` abre la conexión de solo lectura y devuelve versión del servidor y **advertencias** (p. ej. «la cuenta puede
   escribir»). Si falta el controlador PDO lo dice (`ok: false`), no falla.
-- Política de destino (`config/connectors.php`): siempre se bloquean direcciones de metadatos de nube (169.254.0.0/16), `0.0.0.0` y multicast;
-  `PREDICTILY_SQL_DENY_PRIVATE=true` bloquea además redes privadas/loopback y `PREDICTILY_SQL_ALLOWED_HOSTS` fija una lista blanca (recomendado
-  en un SaaS público). No cubre DNS rebinding.
+- Política de destino (`config/connectors.php`, `SqlHostPolicy`; ADR-V25-15, detalle en `docs/07-seguridad-multitenant.md` §13.2): **segura por defecto**.
+  Solo se aceptan nombres RFC 1123 o IP literales canónicos; se resuelven A y AAAA y la conexión usa la IP validada (**sin ventana de DNS rebinding**);
+  siempre se bloquean metadatos de nube (169.254.0.0/16, `fd00:ec2::254`), link-local, `0.0.0.0/8`, multicast y las formas IPv6 que embeben esas IPv4;
+  loopback y redes privadas se deniegan salvo lo declarado en `PREDICTILY_SQL_ALLOWED_HOSTS` (lista de destinos; una IP literal se autoriza a sí misma)
+  y `PREDICTILY_SQL_ALLOWED_CIDRS` (redes privadas autorizadas; un nombre listado solo conecta si resuelve dentro de ellas). `PREDICTILY_SQL_DENY_PRIVATE`
+  ya no existe.
 
 ### 4.3 Consultas autorizadas y política de solo lectura
 

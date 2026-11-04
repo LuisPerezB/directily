@@ -6,6 +6,7 @@ namespace App\Services\Conversation\Tools;
 
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Tenant;
+use App\Services\Conversation\Gateway\DataScope;
 use App\Services\Forecasting\Support\CoreServices;
 
 /** Base común de las herramientas de solo lectura: horizonte autorizado por el plan y límite de filas. */
@@ -19,6 +20,39 @@ abstract class ReadTool implements AssistantTool
     public function ability(): string
     {
         return 'forecast.view';
+    }
+
+    /** Por defecto, resultados que no se atribuyen a un cliente; las herramientas por cliente o de gestión lo sobrescriben. */
+    public function dataScope(): DataScope
+    {
+        return DataScope::Operational;
+    }
+
+    /**
+     * Estado, procedencia (corrida, corte, calidad) y tamaño de las listas del resultado: nada de valores de negocio, nombres ni códigos.
+     *
+     * @return array<string, mixed>
+     */
+    public function summarize(ToolResult $result): array
+    {
+        $summary = ['status' => $result->status];
+        $envelope = $result->envelope ?? [];
+        foreach (['core', 'as_of', 'run_version', 'quality_status', 'result_type'] as $key) {
+            if (isset($envelope[$key]) && (is_scalar($envelope[$key]))) {
+                $summary[$key] = $envelope[$key];
+            }
+        }
+        $rows = [];
+        foreach ((array) ($result->data ?? []) as $key => $value) {
+            if (is_string($key) && preg_match('/^[a-z_]{1,40}$/', $key) === 1 && is_array($value) && array_is_list($value)) {
+                $rows[$key] = count($value);
+            }
+        }
+        if ($rows !== []) {
+            $summary['rows'] = $rows;
+        }
+
+        return $summary;
     }
 
     /**

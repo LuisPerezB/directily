@@ -8,6 +8,7 @@ use App\Exceptions\PlanLimitExceededException;
 use App\Models\Tenant;
 use App\Services\Audit\AuditLogger;
 use App\Services\Plans\PlanLimitService;
+use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -53,7 +54,7 @@ final class CoreServices
     /** @return list<int> Horizontes permitidos por el plan efectivo (plan + overrides). */
     public static function allowedHorizons(Tenant $tenant): array
     {
-        $horizons = app(PlanLimitService::class)->limits($tenant)['horizons'] ?? config('engine.horizons', [7, 14, 30, 60, 90]);
+        $horizons = app(PlanLimitService::class)->limits($tenant)['horizons'] ?? HorizonCatalog::demand();
 
         return array_values(array_map('intval', (array) $horizons));
     }

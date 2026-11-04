@@ -82,7 +82,7 @@ async function confirm(): Promise<void> {
         <label class="label" for="mr-status">{{ t('modelRegistry.filter') }}</label>
         <select id="mr-status" v-model="statusFilter" class="select !w-auto">
           <option value="">{{ t('modelRegistry.allStatuses') }}</option>
-          <option v-for="s in ['production', 'validated', 'retired', 'failed', 'candidate']" :key="s" :value="s">{{ t(`status.model.${s}`) }}</option>
+          <option v-for="s in ['production', 'validated', 'approved', 'retired', 'rejected', 'failed', 'candidate']" :key="s" :value="s">{{ t(`status.model.${s}`) }}</option>
         </select>
       </div>
     </div>

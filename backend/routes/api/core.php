@@ -30,7 +30,7 @@ Route::prefix('auth')->group(function (): void {
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
-        Route::put('password', [AuthController::class, 'changePassword']);
+        Route::put('password', [AuthController::class, 'changePassword'])->middleware('account.full');
     });
 });
 
@@ -40,8 +40,9 @@ Route::get('tenant/export/{export}/download', [TenantExportController::class, 'd
     ->name('tenant.export.download');
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
-    Route::get('tenants', [TenantController::class, 'index']);
-    Route::post('tenants', [TenantController::class, 'store']);
+    // V2.5 · W6-A: listar y crear empresas son acciones de CUENTA (revelan o amplían todo lo que la persona puede): solo con sesión o un token de inicio de sesión completo.
+    Route::get('tenants', [TenantController::class, 'index'])->middleware('account.full');
+    Route::post('tenants', [TenantController::class, 'store'])->middleware('account.full');
 
     Route::get('import-templates/{entityType}', [ImportController::class, 'template']);
     Route::get('import-fields/{entityType}', [ImportController::class, 'fieldDefinitions']);

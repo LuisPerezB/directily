@@ -18,7 +18,7 @@ import { useUiStore } from '@/stores/ui'
 import { shortHash } from '@/utils/envelope'
 import { applyDraftValue, configIssues, formatConfigValue, issuesByKey, parseConfigValue, profileOfSource, sourceKind, valuesEqual } from '@/utils/configEdit'
 
-const CORES: ConfigCore[] = ['demand', 'customer', 'supply', 'cost', 'scenario']
+const CORES: ConfigCore[] = ['demand', 'customer', 'supply', 'cost', 'scenario', 'promotion']
 const { t } = useI18n()
 const { can } = useAbility()
 const ui = useUiStore()
@@ -111,6 +111,8 @@ const extension = computed<PlatformExtensions | null>(() => extensions.data.valu
       </div>
       <p v-if="config.data.value?.config_version" class="text-sm text-fg-muted m-0">{{ t('effectiveConfig.version') }}: <span class="font-mono" :title="config.data.value.config_version">{{ shortHash(config.data.value.config_version) }}</span></p>
     </div>
+
+    <InlineNotice v-if="core === 'promotion'" kind="info" :title="t('effectiveConfig.promotionTitle')" data-test="promotion-config-note">{{ t('effectiveConfig.promotionNote') }}</InlineNotice>
 
     <p v-if="profile" class="text-sm m-0" data-test="profile-applied">
       {{ t('effectiveConfig.profileApplied', { code: profile.code, version: profile.version }) }}

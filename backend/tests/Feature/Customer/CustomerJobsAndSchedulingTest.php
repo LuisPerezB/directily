@@ -163,7 +163,7 @@ class CustomerJobsAndSchedulingTest extends TestCase
         $this->artisan('predictily:customer-predict')->expectsOutputToContain('programación manual')
             ->expectsOutputToContain('el plan no incluye horizontes')->expectsOutputToContain('Predicciones programadas: 1')->assertSuccessful();
         $run = CoreRun::withoutTenantScope()->where('tenant_id', $basic->id)->firstOrFail();
-        $this->assertSame([7, 30], $run->horizons);        // plan Básico: 7/30; la recencia cambia aunque no haya ventas nuevas
+        $this->assertSame([7, 14, 30], $run->horizons);        // plan Básico (7/14/30) ∩ Customer; la recencia cambia aunque no haya ventas nuevas
     }
 
     // ── entrenamiento semanal ──

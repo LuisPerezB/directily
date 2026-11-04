@@ -25,7 +25,7 @@ const prediction = (over: Partial<CustomerPrediction> = {}): CustomerPrediction 
 const page = (rows: CustomerPrediction[], env = envelope()) => ({ data: rows, meta: { current_page: 1, per_page: 25, total: rows.length, last_page: 1 }, envelope: env, ranking_source: 'popularity', definitions: { purchase_probability: 'Probabilidad de al menos una compra válida.' } })
 
 beforeEach(() => { api.predictions.mockReset(); api.reconciliation.mockReset(); api.evaluation.mockReset() })
-const mountPredictions = (horizon: 7 | 30 | 90 = 30) => mount(CustomerPredictions, { props: { horizon }, global: { plugins: [setupTenant('analyst')] } })
+const mountPredictions = (horizon: 7 | 14 | 15 | 30 | 90 = 30) => mount(CustomerPredictions, { props: { horizon }, global: { plugins: [setupTenant('analyst')] } })
 
 describe('Compradores: predicciones', () => {
   it('rotula el monto como estimación con supuesto de precio, nunca como venta confirmada', async () => {
@@ -79,6 +79,21 @@ describe('Compradores: predicciones', () => {
     expect(buttons.map((b) => b.text())).toEqual(['Ver 7 días', 'Ver 30 días'])
     await buttons[1]!.trigger('click')
     expect(w.emitted('update:horizon')![0]).toEqual([30])
+  })
+
+  it('el horizonte de 15 días sin modelo se abstiene con su motivo unificado y ofrece los horizontes disponibles', async () => {
+    api.predictions.mockRejectedValue(new ApiError(422, {
+      message: 'sin predicciones a 15 días', code: 'horizon_not_available', available_horizons: [7, 30], quality_status: 'insufficient_data', reason_code: 'no_model',
+      reasons: [{ code: 'no_model', reason_code: 'no_model', message: 'No hay modelo en producción para 15 días: entrene primero.' }],
+    } as never, 'x'))
+    const w = mountPredictions(15)
+    await flushPromises()
+    const state = w.get('[data-test="horizon-not-available"]')
+    expect(state.attributes('data-reason-code')).toBe('no_model')
+    expect(state.text()).toContain('Sin predicciones a 15 días')
+    expect(w.get('[data-test="horizon-not-available-reason"]').text()).toBe('Sin modelo en producción')
+    expect(w.find('[data-test="amount"]').exists()).toBe(false)
+    expect(api.predictions).toHaveBeenCalledWith(expect.objectContaining({ horizon: 15 }))
   })
 
   it('sin ninguna predicción y calidad "datos insuficientes" se abstiene en lugar de mostrar una tabla vacía', async () => {

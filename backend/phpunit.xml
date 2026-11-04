@@ -18,6 +18,8 @@
         </include>
     </source>
     <php>
+        <!-- Igual que el php.ini CLI de Docker (backend/docker/php/cli.ini): la suite completa supera los 128 MB por defecto de PHP. -->
+        <ini name="memory_limit" value="1024M"/>
         <env name="APP_ENV" value="testing"/>
         <!-- PostgreSQL real (FKs compuestas, jsonb, índices parciales). Sobrescribible: DB_DATABASE=predictily_test_b2 php artisan test -->
         <env name="DB_CONNECTION" value="pgsql"/>
@@ -33,5 +35,57 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- El origen de la SPA de las pruebas (AuthTest) no depende del .env de desarrollo. -->
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1,127.0.0.1:5173" force="true"/>
+        <!--
+          Hermeticidad (W1-B): el backend/.env de desarrollo define la lista blanca SQL de 127.0.0.1 y las claves de firma; sin
+          estas líneas cambiaría el resultado de las pruebas de SSRF y de firma. force="true" gana al .env y, con las líneas <server> (Laravel lee
+          $_SERVER además de $_ENV), también a variables exportadas en el entorno del proceso.
+          Las pruebas que necesitan una lista blanca la declaran con config([...]). Los límites de XLSX se fijan a sus valores por
+          defecto (config/upload_safety.php) por la misma razón.
+        -->
+        <env name="PREDICTILY_SQL_ALLOWED_HOSTS" value="" force="true"/>
+        <env name="PREDICTILY_SQL_ALLOWED_CIDRS" value="" force="true"/>
+        <env name="PREDICTILY_SQL_MAX_ROWS" value="2000000" force="true"/>
+        <env name="ENGINE_TRUSTED_PUBLIC_KEYS" value="" force="true"/>
+        <env name="ENGINE_ALLOW_UNSIGNED_ARTIFACTS" value="false" force="true"/>
+        <env name="ENGINE_ARTIFACTS_DIR" value="" force="true"/>
+        <!-- W6-A: seguridad Enterprise hermética: RLS apagado, MFA del superadministrador no obligatorio y vigencias de tokens por defecto, aunque el .env de desarrollo diga otra cosa. -->
+        <env name="PREDICTILY_RLS_ENABLED" value="false" force="true"/>
+        <env name="PREDICTILY_MFA_SUPERADMIN_REQUIRED" value="false" force="true"/>
+        <env name="PREDICTILY_MFA_STEP_UP_TTL" value="600" force="true"/>
+        <env name="PREDICTILY_TOKEN_DEFAULT_TTL_DAYS" value="30" force="true"/>
+        <env name="PREDICTILY_TOKEN_MAX_TTL_DAYS" value="365" force="true"/>
+        <env name="PREDICTILY_CONNECTOR_TOKEN_TTL_DAYS" value="365" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_ENTRIES" value="1000" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_ENTRY_MB" value="512" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_TOTAL_MB" value="1024" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB" value="32" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_RATIO" value="100" force="true"/>
+        <env name="PREDICTILY_XLSX_MAX_COLUMNS" value="500" force="true"/>
+        <env name="PREDICTILY_XLSX_ANALYSIS_MAX_SCANNED_ROWS" value="20000" force="true"/>
+        <env name="PREDICTILY_XLSX_ANALYSIS_MAX_SHEET_MB" value="8" force="true"/>
+        <env name="PREDICTILY_XLSX_ANALYSIS_TIMEOUT" value="10" force="true"/>
+        <server name="PREDICTILY_SQL_ALLOWED_HOSTS" value="" force="true"/>
+        <server name="PREDICTILY_SQL_ALLOWED_CIDRS" value="" force="true"/>
+        <server name="PREDICTILY_SQL_MAX_ROWS" value="2000000" force="true"/>
+        <server name="ENGINE_TRUSTED_PUBLIC_KEYS" value="" force="true"/>
+        <server name="ENGINE_ALLOW_UNSIGNED_ARTIFACTS" value="false" force="true"/>
+        <server name="ENGINE_ARTIFACTS_DIR" value="" force="true"/>
+        <server name="PREDICTILY_RLS_ENABLED" value="false" force="true"/>
+        <server name="PREDICTILY_MFA_SUPERADMIN_REQUIRED" value="false" force="true"/>
+        <server name="PREDICTILY_MFA_STEP_UP_TTL" value="600" force="true"/>
+        <server name="PREDICTILY_TOKEN_DEFAULT_TTL_DAYS" value="30" force="true"/>
+        <server name="PREDICTILY_TOKEN_MAX_TTL_DAYS" value="365" force="true"/>
+        <server name="PREDICTILY_CONNECTOR_TOKEN_TTL_DAYS" value="365" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_ENTRIES" value="1000" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_ENTRY_MB" value="512" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_TOTAL_MB" value="1024" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_SHARED_STRINGS_MB" value="32" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_RATIO" value="100" force="true"/>
+        <server name="PREDICTILY_XLSX_MAX_COLUMNS" value="500" force="true"/>
+        <server name="PREDICTILY_XLSX_ANALYSIS_MAX_SCANNED_ROWS" value="20000" force="true"/>
+        <server name="PREDICTILY_XLSX_ANALYSIS_MAX_SHEET_MB" value="8" force="true"/>
+        <server name="PREDICTILY_XLSX_ANALYSIS_TIMEOUT" value="10" force="true"/>
     </php>
 </phpunit>

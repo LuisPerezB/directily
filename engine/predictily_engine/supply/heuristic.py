@@ -57,6 +57,19 @@ def heuristic_plan(problem: PlanProblem) -> PlanSolution:
                 return False
         return True
 
+    def fits_shelf(node, res):
+        """W5-D: el stock de fin de período de una compra nueva no puede exceder lo vendible dentro de su vida útil, ni lo disponible al inicio de un
+        período más que la demanda de sus primeros S días cuando la vida útil es menor que el período."""
+        if node.shelf_cap is not None:
+            n = min(len(node.shelf_cap), len(res.inventory))
+            if not bool(np.all(res.inventory[:n] <= node.shelf_cap[:n] + 1e-6)):
+                return False
+        if node.avail_cap is not None:
+            m = min(len(node.avail_cap), len(res.peak))
+            if not bool(np.all(res.peak[:m] <= node.avail_cap[:m] + 1e-6)):
+                return False
+        return True
+
     order = sorted(nodes, key=lambda k: -nodes[k].penalty)
     for key in order:
         node = nodes[key]
@@ -110,7 +123,7 @@ def heuristic_plan(problem: PlanProblem) -> PlanSolution:
                         if ta < node.horizon:
                             trial[ta] += lots * lot
                         new_res = _simulate_node(node, trial, zero[key], zero[key], ss_from, [])
-                        if fits_storage(key, new_res):
+                        if fits_storage(key, new_res) and fits_shelf(node, new_res):
                             break
                         lots -= 1
                     if lots < min_lots:

@@ -245,7 +245,7 @@ class JsonObjectContractTest extends TestCase
         $this->assertJsonObjectAt($show, 'data.summary.horizon_support', [7, 30]);
         $this->assertJsonObjectAt($show, 'data.envelope.model_version', [7, 30]);
         $this->assertJsonObjectAt($show, 'data.envelope.target_definition');
-        $this->assertJsonObjectAt($show, 'data.envelope.horizon_support', [7, 14, 30, 60, 90]);
+        $this->assertJsonObjectAt($show, 'data.envelope.horizon_support', [7, 14, 15, 30, 60, 90]);
         $this->assertJsonListAt($show, 'data.envelope.assumptions');
         $this->assertJsonListAt($show, 'data.envelope.limitations');
         $this->assertSame(['Ingresos = unidades × precio'], $this->rawJsonAt($show, 'data.envelope.assumptions'));
@@ -261,7 +261,7 @@ class JsonObjectContractTest extends TestCase
         $this->assertJsonObjectAt($series, 'data.envelope.model_version', [7, 30]);
         $this->assertJsonObjectAt($series, 'data.meta.models');
         $accuracy = $api->getJson('/api/v1/accuracy/summary')->assertOk();
-        $this->assertJsonObjectAt($accuracy, 'data.horizon_support', [7, 14, 30, 60, 90]);
+        $this->assertJsonObjectAt($accuracy, 'data.horizon_support', [7, 14, 15, 30, 60, 90]);
         $this->assertJsonObjectAt($accuracy, 'data.evaluation_manifest', []);
     }
 

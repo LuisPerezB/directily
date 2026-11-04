@@ -85,7 +85,8 @@ const sortedRows = computed(() => {
 </script>
 
 <template>
-  <div class="table-wrap" :aria-busy="loading">
+  <!-- Con un título la tabla es una región con nombre y foco: si se desborda en horizontal se puede desplazar con el teclado. -->
+  <div class="table-wrap" :aria-busy="loading" v-bind="caption ? { role: 'region', tabindex: 0, 'aria-label': caption } : {}">
     <table class="table">
       <caption v-if="caption" class="sr-only">{{ caption }}</caption>
       <thead>

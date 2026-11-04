@@ -25,12 +25,15 @@ export interface SqlFormState {
   sslmode: string
   source_timezone: string
   sync_schedule: 'manual' | 'hourly' | 'daily'
+  /** Solo SQL Server: cifrado TLS de la conexión y confianza en el certificado del servidor (como el ODBC Driver 18). */
+  encrypt: boolean
+  trust_server_certificate: boolean
   username: string
   password: string
 }
 
 export function emptySqlForm(connectorKey = 'sql_postgresql', timezone = 'America/Guayaquil'): SqlFormState {
-  return { name: '', connector_key: connectorKey, host: '', port: defaultPort(connectorKey), database: '', sslmode: 'prefer', source_timezone: timezone, sync_schedule: 'manual', username: '', password: '' }
+  return { name: '', connector_key: connectorKey, host: '', port: defaultPort(connectorKey), database: '', sslmode: 'prefer', source_timezone: timezone, sync_schedule: 'manual', encrypt: true, trust_server_certificate: false, username: '', password: '' }
 }
 
 /**
@@ -47,6 +50,10 @@ export function buildSqlPayload(form: SqlFormState, mode: 'create' | 'update'): 
     sslmode: form.sslmode,
     source_timezone: form.source_timezone,
     sync_schedule: form.sync_schedule,
+  }
+  if (form.connector_key === 'sql_sqlserver') {
+    config.encrypt = form.encrypt
+    config.trust_server_certificate = form.trust_server_certificate
   }
   const hasCredentials = form.username !== '' || form.password !== ''
   const credentials = hasCredentials ? { username: form.username, password: form.password } : undefined

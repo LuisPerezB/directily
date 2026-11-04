@@ -2,7 +2,7 @@
 
 El pipeline puro vive en `predictily_engine.pipeline.core`; aquí están las piezas que lo completan:
 
-- `horizons`: horizontes 7/14/30/60/90 y abstención explícita cuando la historia no los respalda.
+- `horizons`: horizontes 7/14/15/30/60/90 y abstención explícita cuando la historia no los respalda.
 - `evaluation`: métricas (WAPE/MAE/RMSE/sesgo, MASE/RMSSE, pinball P10/P50/P90, amplitud, dinero).
 - `lifecycle`: productos nuevos, descontinuados, aperturas/cierres de sucursal y eventos extraordinarios.
 - `coverage`: completitud declarada de la fuente de ventas (`data_coverage`).

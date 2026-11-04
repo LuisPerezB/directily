@@ -90,6 +90,14 @@ class TenantRepository:
         )
         return None if df.empty else df.iloc[0].to_dict()
 
+    # ── factores externos (ADR-V25-25; lectura en db/factors_repository.py) ──
+    def factors(self):
+        """Lector de factores externos de ESTA empresa (indicadores, observaciones, eventos y precios confirmados). Resuelve los
+        indicadores por identificador con precedencia explícita entre el público y el privado: nunca los combina (R-178)."""
+        from predictily_engine.db.factors_repository import FactorsRepository
+
+        return FactorsRepository(self.conn, self.tenant_id)
+
     # ── catálogos ──
     def branches(self) -> pd.DataFrame:
         return self._read(

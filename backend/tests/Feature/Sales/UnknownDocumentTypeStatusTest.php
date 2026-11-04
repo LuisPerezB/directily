@@ -146,16 +146,42 @@ final class UnknownDocumentTypeStatusTest extends TestCase
         $this->assertSame(0, DB::table('sales')->count());
     }
 
-    public function test_an_unknown_type_does_not_poison_a_valid_other_document_with_the_same_number(): void
+    public function test_an_unknown_type_row_stays_an_error_while_the_recognized_document_with_the_same_number_is_written_with_a_warning(): void
     {
-        // Misma numeración: «Otro» (válido) y «Cotización» (desconocido) no comparten clave de documento.
+        // Misma numeración: «Otro» (válido) y «Cotización» (desconocido). En los ERP la numeración suele ser por tipo o serie (la factura
+        // 100 y la proforma 100 son documentos distintos), así que:
+        //  (a) la fila de tipo desconocido sigue siendo error REVIEW_REQUIRED y no se escribe;
+        //  (b) el documento reconocido con el mismo número SE ESCRIBE completo, con sus propias líneas (jamás se mezcla con la desconocida);
+        //  (c) queda un AVISO (no error) `document_number_shared_with_unknown_type` sobre el documento reconocido, contado en las
+        //      estadísticas y el resumen de calidad, para que el caso sea visible.
         $rows = [
             $this->row('X-1', 'Otro', ''),
             $this->row('X-1', 'Cotización', ''),
+            $this->row('X-2', 'Otro', ''),
         ];
         $job = $this->uploadAndValidate($this->tenant, $this->csv(self::SALES_HEADERS, $rows));
-        $this->assertSame(1, $job->stats['rows_error']);
-        $this->assertSame(1, $job->stats['documents_valid']);
-        $this->assertSame(1, $job->stats['documents_new']);
+        $this->assertSame(1, $job->stats['rows_error'], 'solo la fila de tipo desconocido es error');
+        $this->assertSame(2, $job->stats['documents_valid']);
+        $this->assertSame(2, $job->stats['documents_new']);
+        $this->assertSame(1, $job->stats['document_number_shared_with_unknown_type'], 'un documento reconocido comparte número con filas de tipo desconocido');
+
+        $errors = collect($this->getJson("/api/v1/imports/{$job->id}/errors?per_page=100")->assertOk()->json('data'));
+        $this->assertSame(['unknown_document_type'], $errors->where('severity', 'error')->pluck('error_code')->all(), '(a) el error sigue siendo solo el del tipo desconocido');
+        $warning = $errors->firstWhere('error_code', 'document_number_shared_with_unknown_type');
+        $this->assertSame(['warning', 'X-1', null], [$warning['severity'], $warning['raw_value'], $warning['dq_class']], '(c) aviso, no error, sin clase de revisión');
+        $this->assertNotContains('ambiguous_document_type', $errors->pluck('error_code')->all());
+        $report = $this->getJson("/api/v1/imports/{$job->id}")->assertOk()->json('data.quality_report');
+        $this->assertSame(1, $report['summary']['document_number_shared_with_unknown_type']);
+        $this->assertSame(['warning', 1], [
+            collect($report['issues'])->firstWhere('code', 'document_number_shared_with_unknown_type')['severity'],
+            collect($report['issues'])->firstWhere('code', 'document_number_shared_with_unknown_type')['count'],
+        ]);
+
+        // (b) Con skip_invalid_rows se escribe lo reconocido: X-1 (tipo «other», su única línea) y X-2; la fila «Cotización» no.
+        $this->putJson("/api/v1/imports/{$job->id}/mapping", ['mapping' => $job->suggested_mapping, 'options' => ['skip_invalid_rows' => true]])->assertAccepted();
+        $this->postJson("/api/v1/imports/{$job->id}/confirm")->assertAccepted();
+        $stored = DB::table('sales')->where('tenant_id', $this->tenant->id)->orderBy('document_number')->get(['id', 'document_number', 'document_type'])
+            ->mapWithKeys(fn ($s) => [$s->document_number => [$s->document_type, DB::table('sale_items')->where('sale_id', $s->id)->count()]])->all();
+        $this->assertSame(['X-1' => ['other', 1], 'X-2' => ['other', 1]], $stored);
     }
 }

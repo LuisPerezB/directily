@@ -144,7 +144,9 @@ class ExportController extends AnalyticsController
             "precision_modelos_v{$run->version}.csv",
             ['tipo_evaluacion', 'nivel', 'clave', 'horizonte_dias', 'modelo', 'es_referencia', 'es_seleccionado', 'wape', 'mae', 'rmse', 'sesgo', 'cobertura_80', 'cobertura_95', 'observaciones', 'ventanas'],
             function () use ($run, $request) {
-                $query = ModelEvaluation::query()->where('forecast_run_id', $run->id)
+                // V2.5 · W3-D: el CSV de siempre; las filas de segmento y del shadow solo con `level=segment` / `evaluation_type=shadow_prospective`.
+                $query = ModelEvaluation::query()->classicView($request->validated('level'), $request->validated('evaluation_type'))
+                    ->where('forecast_run_id', $run->id)
                     ->when($request->validated('evaluation_type'), fn ($q, $v) => $q->where('evaluation_type', $v))
                     ->when($request->validated('level'), fn ($q, $v) => $q->where('level', $v))
                     ->orderBy('id');

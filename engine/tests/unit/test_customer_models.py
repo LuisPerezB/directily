@@ -27,7 +27,7 @@ from predictily_engine.customer.models import quantity_objectives
 from predictily_engine.customer.outputs import choose_ranking_source, compute_activity, evaluate_activity, top_k_products
 from predictily_engine.customer.predict import predict_all
 from predictily_engine.customer.protocol import FULL_BLOCKS, plan_blocks
-from predictily_engine.customer.serving import enforce_nested, enforce_nested_quantity, serve_probability
+from predictily_engine.customer.serving import enforce_nested, enforce_nested_quantity, rescale_quantity_interval, serve_probability
 from predictily_engine.customer.synthetic import generate_world
 from predictily_engine.customer.train import evaluate_coherence, train_horizon
 from predictily_engine.platform.config import resolve_config
@@ -286,6 +286,24 @@ def test_expected_quantity_stays_non_decreasing_across_horizons():
     assert stats["corrected_rate_h30"] == pytest.approx(0.5)
 
 
+def test_the_quantity_interval_follows_the_coherence_adjusted_quantity():
+    # E2E de la etapa 2 (1-nov-2026): la coherencia subía q_90 y el punto quedaba fuera de su propio intervalo del 80 %.
+    p = {7: np.array([.5, .2]), 30: np.array([.6, .3])}
+    q = {7: np.array([4.0, 4.0]), 30: np.array([2.0, 5.0])}
+    lo = {7: np.array([3.0, 3.0]), 30: np.array([1.0, 4.0])}
+    hi = {7: np.array([5.0, 5.0]), 30: np.array([2.5, 6.0])}
+    qq, _ = enforce_nested_quantity(p, q)
+    for h in (7, 30):
+        lo_c, hi_c, adj = rescale_quantity_interval(q[h], qq[h], lo[h], hi[h])
+        assert ((lo_c <= qq[h] + 1e-12) & (qq[h] <= hi_c + 1e-12)).all()
+        np.testing.assert_allclose(lo_c[~adj], lo[h][~adj])            # sin ajuste el intervalo no cambia
+        np.testing.assert_allclose(hi_c[~adj], hi[h][~adj])
+    lo_c, hi_c, adj = rescale_quantity_interval(q[30], qq[30], lo[30], hi[30])
+    assert adj.tolist() == [True, False]
+    ratio = qq[30][0] / q[30][0]                                       # 2.0 → 3.333…: escala de la cantidad
+    assert lo_c[0] == pytest.approx(1.0 * ratio) and hi_c[0] == pytest.approx(2.5 * ratio)
+
+
 def test_coherence_correction_is_evaluated_and_recorded(trained):
     co = evaluate_coherence(trained["bundle"], trained["results"])
     assert co["evaluated"] and co["rule"] == "cumulative_max" and set(co["pairs"]) == {"7_30", "30_90"}
@@ -305,6 +323,8 @@ def test_predictions_are_coherent_across_horizons(trained):
     assert (e[7] <= e[30] + 1e-9).all() and (e[30] <= e[90] + 1e-9).all()
     ids = out.predictions
     np.testing.assert_allclose(ids["expected_quantity"], ids["purchase_probability"] * ids["quantity_if_purchase"], rtol=1e-9)
+    # la cantidad servida queda dentro de su propio intervalo también cuando la coherencia la ajustó
+    assert ((ids["quantity_lo"] <= ids["quantity_if_purchase"] + 1e-9) & (ids["quantity_if_purchase"] <= ids["quantity_hi"] + 1e-9)).all()
 
 
 # ───────────────────────────── abstención con pocos datos (E2-21) ─────────────────────────────

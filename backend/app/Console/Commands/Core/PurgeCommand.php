@@ -6,8 +6,10 @@ namespace App\Console\Commands\Core;
 
 use App\Models\Tenant;
 use App\Services\Audit\AuditLogger;
+use App\Services\DataCore\Bronze\BronzePurger;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -34,6 +36,15 @@ final class PurgeCommand extends Command
         foreach ($expired as $tenant) {
             $this->line("Empresa a eliminar: #{$tenant->id}");
             if (! $dry) {
+                // V2.5 · W2-B: los originales Bronze (pueden traer datos personales) se borran con la empresa; si falla, se reintenta en la próxima corrida.
+                try {
+                    app(BronzePurger::class)->eraseTenant($tenant);
+                } catch (\Throwable $e) {
+                    $this->error("No se pudieron borrar los originales Bronze de la empresa #{$tenant->id}: no se elimina todavía.");
+                    Log::error('Bronze: fallo al borrar los originales de una empresa eliminada', ['tenant_id' => $tenant->id, 'error' => $e->getMessage()]);
+
+                    continue;
+                }
                 $disk->deleteDirectory("tenants/{$tenant->id}");
                 $audit->log('tenant.purged', null, ['tenant_id' => $tenant->id], null);
                 DB::table('tenants')->where('id', $tenant->id)->delete();

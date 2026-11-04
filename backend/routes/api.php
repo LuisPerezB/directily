@@ -22,4 +22,22 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/customer.php';
     require __DIR__.'/api/supply.php';
     require __DIR__.'/api/platform.php';
+    // V2.5 · W2-F: Factor Intelligence y taxonomía (catálogo de factores, eventos, taxonomía, perfiles; concesiones desactivadas por bandera).
+    require __DIR__.'/api/intelligence.php';
+    // V2.5 · W2-B: linaje (Bronze), reconciliación e identidades (alias).
+    require __DIR__.'/api/lineage.php';
+    // V2.5 · W4-A: ciclo de vida del registro de modelos (detalle, validar, aprobar, rechazar, promover).
+    require __DIR__.'/api/models.php';
+    // V2.5 · W5-A: Revenue Radar y Agenda Comercial (fachadas V2.2: radar, ficha del comprador, pronósticos agregados y preparación de abastecimiento).
+    require __DIR__.'/api/radar.php';
+    // V2.5 · W5-B: Decision Engine y workflow (recomendaciones, transiciones con segregación e idempotencia, parámetros de la empresa).
+    require __DIR__.'/api/decision.php';
+    // V2.5 · W6-A: seguridad Enterprise (MFA TOTP, tokens con alcance, roles comerciales, política de seguridad y revocación de dispositivos del Bridge).
+    require __DIR__.'/api/security.php';
+    // V2.5 · W6-D: Intelligence Gateway (auditoría de llamadas a herramientas y contrato de canal de mensajería; WhatsApp solo contrato: 404 sin proveedor).
+    require __DIR__.'/api/gateway.php';
+    // V2.5 · W6-B: Predictily Bridge (registro de dispositivos, latido, URL prefirmada de subida a Bronze, checkpoints y revocación).
+    require __DIR__.'/api/bridge.php';
+    // V2.5 · W6-C: Auto Mapper (descubrimiento de esquema de solo lectura, propuesta determinista, plantillas versionadas con huella y deriva).
+    require __DIR__.'/api/mapping.php';
 });

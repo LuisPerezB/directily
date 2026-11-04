@@ -34,6 +34,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_AUDIT_DIR = "docs/roadmap/audit/2026-10-31"
+# Progreso por oleada: cada archivo JSON registra cambios de estado de requisitos y defectos con evidencia, SIN tocar la
+# auditoría base (que es evidencia de la línea base). Se aplican en orden de nombre de archivo.
+PROGRESS_DIR = "docs/roadmap/audit/progress"
+DEFECT_STATES = ("corregido", "corregido parcialmente", "mitigado", "diferido")
 OUT_DIR = "docs/roadmap"
 GENERATOR = "infra/scripts/v25_roadmap_docs.py"
 SPEC_PATH = "docs/roadmap/sources/PREDICTILY_V2_5_ENTERPRISE_MASTER_RECONCILIADO.md"
@@ -394,6 +398,7 @@ class Ctx:
                                          if r.get("status_auditor") else None)
                 self.reqs.append(e)
         self.by_id = {r["id"]: r for r in self.reqs}
+        self.progress, self.defect_progress = load_progress(root, self)
         self.reqs_by_area = {k: [r for r in self.reqs if r["area"] == k] for k in AREA_KEYS}
         self.sources = self.v1.get("sources", [])
         self.v2_sources = self.v2.get("sources", [])
@@ -419,6 +424,78 @@ class Ctx:
         self.pkg_basis = collections.Counter()   # cómo se asignó el paquete de cada defecto
         self.ledger_text = ""
         self.blocked = classify_blocked(self)
+
+
+def load_progress(root: Path, ctx: "Ctx"):
+    """Aplica `docs/roadmap/audit/progress/*.json` sobre los requisitos (copias) y devuelve (archivos, progreso de defectos).
+
+    Formato: {"meta": {"wave", "date", "commit", "summary"}, "requirements": [{"id", "status", "gap"?, "evidence": [...], "note"}],
+    "defects": [{"area", "index", "title_prefix", "state", "evidence": [...], "note"}]}. `status_baseline` conserva el estado de la
+    auditoría; un requisito IMPLEMENTADO debe llegar con `gap` vacío y con evidencia (la prueba que lo afirma)."""
+    pdir = root / PROGRESS_DIR
+    files, defects = [], {}
+    if not pdir.is_dir():
+        return files, defects
+    areas = {a["key"]: a for a in ctx.areas}
+    for f in sorted(pdir.glob("*.json")):
+        rel = f.relative_to(root).as_posix()
+        p = load_json(f)
+        meta = p.get("meta") or {}
+        wave = meta.get("wave")
+        if not wave:
+            raise InputError(f"{rel}: falta meta.wave")
+        changed = []
+        for e in p.get("requirements", []):
+            r = ctx.by_id.get(e.get("id"))
+            if r is None:
+                raise InputError(f"{rel}: requisito desconocido {e.get('id')!r}")
+            status = str(e.get("status", "")).strip().upper().replace(" ", "_")
+            if status not in STATUSES:
+                raise InputError(f"{rel}: {e['id']}: estado {status!r} fuera de {STATUSES}")
+            if not e.get("evidence"):
+                raise InputError(f"{rel}: {e['id']}: un cambio de estado exige evidencia")
+            r.setdefault("status_baseline", r["status"])
+            before = r["status"]
+            r["status"] = status
+            if "gap" in e:
+                r["gap"] = e["gap"]
+            r["evidence"] = list(r.get("evidence") or []) + [f"{wave}: {x}" for x in e["evidence"]]
+            r.setdefault("progress", []).append(dict(e, wave=wave, file=rel, before=before))
+            changed.append((r["id"], before, status))
+        for e in p.get("defects", []):
+            a = areas.get(e.get("area"))
+            idx = e.get("index")
+            if a is None or not isinstance(idx, int) or not (0 <= idx < len(a["data"]["defects"])):
+                raise InputError(f"{rel}: defecto inexistente {e.get('area')!r} #{idx!r}")
+            title = a["data"]["defects"][idx].get("title", "")
+            if not title.startswith(str(e.get("title_prefix", ""))) or not e.get("title_prefix"):
+                raise InputError(f"{rel}: {e['area']} #{idx}: title_prefix no coincide con el título del defecto")
+            if e.get("state") not in DEFECT_STATES:
+                raise InputError(f"{rel}: {e['area']} #{idx}: estado {e.get('state')!r} fuera de {DEFECT_STATES}")
+            if not e.get("evidence"):
+                raise InputError(f"{rel}: {e['area']} #{idx}: falta evidencia")
+            defects[(e["area"], idx)] = dict(e, wave=wave, file=rel)
+        files.append(dict(file=rel, meta=meta, changed=changed, defects=len(p.get("defects", []))))
+    return files, defects
+
+
+def progress_section(ctx: "Ctx", number: str) -> list[str]:
+    """Sección «Progreso por oleada» (cambios de estado registrados después de la auditoría base)."""
+    L = ["", f"### {number} Progreso por oleada (después de la auditoría base)", ""]
+    if not ctx.progress:
+        return L + ["Sin cambios registrados: los estados son los de la auditoría base.", ""]
+    L += [f"Cambios registrados en `{PROGRESS_DIR}/` (la auditoría base no se modifica). Estado de cada requisito: el vigente; "
+          "«antes» es el de la auditoría.", ""]
+    rows = []
+    for p in ctx.progress:
+        m = p["meta"]
+        moves = collections.Counter(f"{b} → {s}" for _, b, s in p["changed"] if b != s)
+        rows.append([esc(m.get("wave", "")), esc(m.get("date", "")), f"`{esc(m.get('commit', '—'))}`", num(len(p["changed"])),
+                     cell(" · ".join(f"{k} {v}" for k, v in sorted(moves.items())) or "—", 200), num(p["defects"]),
+                     cell(m.get("summary", ""), 300), f"[{esc(Path(p['file']).name)}]({esc(Path(p['file']).relative_to(OUT_DIR).as_posix())})"])
+    L.append(md_table(["Oleada", "Fecha", "Commit", "Requisitos", "Cambios", "Defectos", "Resumen", "Archivo"], rows, "lllrlrll"))
+    L.append("")
+    return L
 
 
 def parse_owner_blocks(plan_text: str):
@@ -476,12 +553,17 @@ def responsible(r) -> str:
 def state_cell(r) -> str:
     s = r["status"]
     v = r["verdict"]
-    if not v:
-        return esc(s)
-    t = f"{s} ✓ {v}"
+    t = s if not v else f"{s} ✓ {v}"
     if v in ("DOWNGRADED", "UPGRADED") and r["status_auditor_n"]:
         t += f" (antes {r['status_auditor_n']})"
+    if r.get("progress"):
+        t += f" · {r['progress'][-1]['wave']} (auditoría: {r['status_baseline']})"
     return esc(t)
+
+
+def defect_state(ctx: "Ctx", area: str, index: int) -> str:
+    p = ctx.defect_progress.get((area, index))
+    return f"{p['state']} ({p['wave']})" if p else "abierto"
 
 
 def source_cell(ctx: Ctx, r) -> str:
@@ -897,8 +979,11 @@ def build_risks(ctx: Ctx):
                 ctx.pkg_basis["sin relación"] += 1
             repro = bool(REPRO_RE.search(d.get("evidence", "") + " " + ver.get("note", "")))
             refuted = verdict == "REFUTED"
+            progress = ctx.defect_progress.get((a["key"], i))
             if refuted:
                 state = "descartado (refutado en la verificación)"
+            elif progress:
+                state = f"{progress['state']} ({progress['wave']})"
             elif w1:
                 state = "en corrección (W1)"
             else:
@@ -1380,6 +1465,7 @@ def build_gap(ctx: Ctx) -> str:
         rows.append([esc(a["key"])] + counter_row(c, SEVERITIES) + [num(len(a["data"]["defects"])), num(len(a["data"]["conflicts"]))])
     rows.append(["**Total**"] + [f"**{sev.get(s, 0)}**" for s in SEVERITIES] + [f"**{len(defects)}**", f"**{conflicts}**"])
     L.append(md_table(["Módulo"] + list(SEVERITIES) + ["Defectos", "Conflictos"], rows, "l" + "r" * 5))
+    L += progress_section(ctx, "2.5")
     # 3. verificación
     L += ["", "## 3. Estadística de la verificación adversarial", "",
           "Requisitos originales del auditor = requisitos finales − ADDED. «Rebajados» y «subidos» cambiaron de estado; "
@@ -1463,8 +1549,8 @@ def build_gap(ctx: Ctx) -> str:
         link = f"[{rid}]({OUT_FILES['risk']}#{rid.lower()})" if rid != "—" else "—"
         v = (d.get("verification") or {}).get("verdict")
         rows.append([link, esc(k), esc(d.get("severity", "")), cell(d.get("title"), 220), cell(d.get("evidence"), 240),
-                     cell(d.get("fix"), 260), esc(v) if v else "—"])
-    L.append(md_table(["Riesgo", "Módulo", "Severidad", "Título", "Evidencia", "Corrección", "Verif."], rows))
+                     cell(d.get("fix"), 260), esc(v) if v else "—", esc(defect_state(ctx, k, i))])
+    L.append(md_table(["Riesgo", "Módulo", "Severidad", "Título", "Evidencia", "Corrección", "Verif.", "Estado"], rows))
     # 6. conflictos
     L += ["", "## 6. Conflictos", "",
           "Conflictos entre lo que existe y lo que V2.5 exige, con la propuesta de resolución de cada auditor.", ""]

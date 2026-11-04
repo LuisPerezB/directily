@@ -33,6 +33,6 @@ return [
         // Artefactos legados SIN firma: solo con true explícito (entorno local). Nunca acepta firmas inválidas ni claves desconocidas.
         'allow_unsigned' => filter_var(env('ENGINE_ALLOW_UNSIGNED_ARTIFACTS', false), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true,
     ],
-    // Horizontes de demanda del dominio (ADR-V2-10). Que un plan los autorice es otra cosa (config/predictily.php).
-    'horizons' => [7, 14, 30, 60, 90],
+    // Los horizontes del dominio ya no se declaran aquí: el catálogo ÚNICO es `predictily.horizons.catalog` (ADR-V25-02; App\Support\Horizons\HorizonCatalog).
+    // Que un plan los autorice es otra cosa (`plans.limits.horizons`).
 ];

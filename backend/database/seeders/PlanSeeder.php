@@ -17,6 +17,7 @@ final class PlanSeeder extends Seeder
                 'name' => $plan['name'],
                 'description' => $plan['description'],
                 'limits' => $plan['limits'],
+                'metadata' => $plan['metadata'] ?? null,
                 'monthly_price_usd' => $plan['monthly_price_usd'],
                 'is_active' => true,
             ]);

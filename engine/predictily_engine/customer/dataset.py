@@ -1,7 +1,7 @@
 """Dataset de cortes históricos comprador × producto con etiquetas por horizonte.
 
 Para cada corte `c` de una rejilla cronológica se construyen los candidatos observables al corte y sus
-variables (solo pasado); para cada H ∈ {7, 30, 90} se calculan las etiquetas de la ventana (c, c+H]:
+variables (solo pasado); para cada H del catálogo de Customer (7, 14, 15, 30, 90) se calculan las etiquetas de la ventana (c, c+H]:
 
 - `purchase` = ≥ 1 compra válida (sin anuladas ni notas de crédito); `qty` = suma de TODAS las compras
   válidas de la ventana (devoluciones aparte, columna `returned_qty`);

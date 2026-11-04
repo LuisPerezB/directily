@@ -13,21 +13,29 @@ MASE/RMSSE (escala = naive estacional 7 con datos de entrenamiento previos a cad
 de P10/P50/P90 y amplitud media de los intervalos 80/95 (solo con holdout independiente), métricas en
 DINERO separadas de las de unidades, tamaños de muestra y exclusiones. Ninguna cifra desconocida se
 reemplaza por cero: queda `null`.
+
+W3-A: con un `SegmentContext` (configuración `segment_metrics_enabled`, activa por defecto) cada alcance agrega, DESPUÉS de las filas
+anteriores, las filas `level = 'segment'` por horizonte y segmento (`demand.segments`: WAPE con denominador y cobertura, métrica
+alternativa para ceros, comparación baseline vs ML, estabilidad entre ventanas). Las filas anteriores no cambian.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from predictily_engine.backtest.metrics import pinball_loss, summarize
+from predictily_engine.backtest.metrics import pinball_loss, summarize, wape_status
 from predictily_engine.backtest.rolling import BUCKET_DAYS, horizon_bucket
+from predictily_engine.demand import segments as seg_metrics
 from predictily_engine.demand.horizons import SUPPORTED_HORIZONS
 from predictily_engine.intervals.conformal import day_bucket, hit_rates, loo_coverage, score_intervals
 from predictily_engine.models.registry import BASELINE_FAMILY
 from predictily_engine.selection.selector import Selection, selected_rows
+
+log = logging.getLogger(__name__)
 
 # Contrato con Laravel: `evaluation_type='backtest'` son las métricas PRINCIPALES.
 EVALUATION_PRIMARY = "backtest"
@@ -186,8 +194,14 @@ def build_metrics(row: Any, ctx: dict[str, Any], quant: dict[str, Any] | None = 
         exclusions.update(excluded_detail)
     elif excluded_stockout is not None:
         exclusions["stockout_days"] = int(excluded_stockout)
+    # W3-A (V25-SEL-013): todo WAPE declara su denominador (Σ reales) y su estado. La columna `wape` de estas filas no se modifica (los
+    # consumidores existentes la leen tal cual); `wape_unstable` solo avisa que el denominador es menor que `wape_min_denominator`.
+    den = _num(get("sum_actual"))
+    w_status = wape_status(den, float(ctx.get("wape_min_denominator") or 0.0))
     metrics: dict[str, Any] = {
         "metrics_version": METRICS_VERSION,
+        "denominator": {"sum_actual": den, "unit": "unidades", "min_required": float(ctx.get("wape_min_denominator") or 0.0)},
+        "wape_status": w_status, "wape_unstable": w_status != "ok",
         "mase": _num(get("mase")), "rmsse": _num(get("rmsse")), "scale": SCALE_DEFINITION,
         "pinball_p10": None, "pinball_p50": None, "pinball_p90": None, "pinball_p50_yhat_as_median": None,
         "interval_width_80": None, "interval_width_95": None,
@@ -263,22 +277,25 @@ def horizon_total_rows(family: str, test: pd.DataFrame, ctx: dict[str, Any], hor
 
 
 def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, cat: pd.Series,
-               ctx: dict[str, Any], detail: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+               ctx: dict[str, Any], detail: bool, seg: seg_metrics.SegmentContext | None = None
+               ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Métricas de las ventanas `test` para cada familia y para la selección `sel` (fila compuesta).
 
-    Devuelve (filas, info) con info = {"quantiles": métricas de cuantiles de la selección o None}."""
+    Devuelve (filas, info) con info = {"quantiles": métricas de cuantiles de la selección o None}. Con `seg` (W3-A) agrega al final
+    las filas `level='segment'` por horizonte y segmento."""
     rows: list[dict[str, Any]] = []
     info: dict[str, Any] = {"quantiles": None}
     if test.empty:
         return rows, info
+    scored_by_family: dict[str, pd.DataFrame | None] = {}
     clean = with_keys(test, cat)
     excluded = int(len(test) - len(clean))
     winners_by_class = {c: sel.family_for(c) for c in clean["demand_class"].dropna().unique()}
     for fam, sub in clean.groupby("family"):
         cov = (None, None)
         if fam == BASELINE_FAMILY:
-            cov, _, _ = coverage(test[test["family"] == fam],
-                                 None if calib is None else calib[calib["family"] == fam])
+            cov, _, scored_by_family[BASELINE_FAMILY] = coverage(test[test["family"] == fam],
+                                                                 None if calib is None else calib[calib["family"] == fam])
         excl = exclusion_detail(test[test["family"] == fam])
         rows.append(metric_row(fam, "overall", None, summarize(sub, ["family"]).iloc[0], ctx, cov=cov,
                                excluded_detail=excl))
@@ -299,6 +316,7 @@ def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, c
         s = with_keys(sel_test, cat).assign(fam="selection")
         q_all = quantile_metrics(scored)
         info["quantiles"] = q_all
+        scored_by_family[seg_metrics.SELECTION_FAMILY] = scored
         q_bucket: dict[str, Any] = {}
         q_class: dict[str, Any] = {}
         if scored is not None and not scored.empty:
@@ -326,19 +344,33 @@ def scope_rows(test: pd.DataFrame, calib: pd.DataFrame | None, sel: Selection, c
         # Nivel total (agregado): el error del total es mucho menor que el de cada producto.
         tot = daily_total(sel_test).assign(fam="selection")
         rows.append(metric_row("selection", "total", "total", summarize(tot, ["fam"]).iloc[0], ctx, is_selected=True))
-        # Total de H días (7/14/30/60/90) por serie y ventana: el error que importa para planear compras.
+        # Total de H días (7/14/15/30/60/90) por serie y ventana: el error que importa para planear compras.
         rows += horizon_total_rows("selection", sel_test, ctx, is_selected=True)
     base = test[test["family"] == BASELINE_FAMILY]
     if not base.empty:
         btot = daily_total(base).assign(fam=BASELINE_FAMILY)
         rows.append(metric_row(BASELINE_FAMILY, "total", "total", summarize(btot, ["fam"]).iloc[0], ctx))
         rows += horizon_total_rows(BASELINE_FAMILY, base, ctx)
+    if seg is not None and not sel_test.empty:
+        # Las métricas por segmento son ADITIVAS y están aisladas: si fallan no se pierde ninguna fila anterior ni se aborta la ejecución
+        # (el llamador registra la limitación `segment_metrics_unavailable`). Reciben las filas SIN anotar y las anotan por su cuenta.
+        try:
+            calib_sel = selected_rows(calib, None, sel) if calib is not None and not calib.empty else None
+            rows += seg_metrics.segment_rows(test, calib, sel_test, ctx, seg.config, scored_by_family, calib_sel,
+                                             annotator=lambda d: seg_metrics.annotate(d, cat, seg))
+        except Exception as exc:   # noqa: BLE001
+            log.exception("Las métricas por segmento fallaron en el alcance %s; se omiten", ctx.get("scope"))
+            info["segment_error"] = f"{type(exc).__name__}: {exc}"[:300]
     return rows, info
 
 
 def evaluate(bt: pd.DataFrame, selection: Selection, eval_selection: Selection | None, cat: pd.Series,
-             currency: str | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+             currency: str | None = None, segments: seg_metrics.SegmentContext | None = None,
+             wape_min_denominator: float = 0.0) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Filas de `model_evaluations` + info = {"quantiles": cuantiles del holdout o None, "p50": decisión}.
+
+    `segments` (W3-A): contexto de tramo de volumen y vida de la serie (`demand.segments.build_context`); sin él no se calculan las
+    filas `level='segment'`. `wape_min_denominator`: umbral con que cada fila declara si su WAPE es estable (`metrics.wape_status`).
 
     `metrics.pinball_p50` solo se informa si la mediana se PUBLICA (evaluada y mejor que la media como
     mediana); si no, queda null y la pinball de la mediana candidata va en `pinball_p50_candidate`."""
@@ -348,16 +380,18 @@ def evaluate(bt: pd.DataFrame, selection: Selection, eval_selection: Selection |
         in_holdout = bt["is_holdout"].astype(bool)
         hold, windows = bt[in_holdout], bt[~in_holdout]
         primary = {"evaluation_type": EVALUATION_PRIMARY, "scope": SCOPE_HOLDOUT, "cutoffs": iso_dates(hold["cutoff"]),
-                   "currency": currency}
+                   "currency": currency, "wape_min_denominator": wape_min_denominator}
         secondary = {"evaluation_type": EVALUATION_SELECTION_WINDOWS, "scope": SCOPE_SELECTION_WINDOWS,
-                     "cutoffs": iso_dates(windows["cutoff"]), "currency": currency}
-        r1, info = scope_rows(hold, windows, eval_selection, cat, primary, detail=True)
-        r2, _ = scope_rows(windows, None, eval_selection, cat, secondary, detail=False)
+                     "cutoffs": iso_dates(windows["cutoff"]), "currency": currency, "wape_min_denominator": wape_min_denominator}
+        r1, info = scope_rows(hold, windows, eval_selection, cat, primary, detail=True, seg=segments)
+        r2, info2 = scope_rows(windows, None, eval_selection, cat, secondary, detail=False, seg=segments)
+        if info2.get("segment_error") and not info.get("segment_error"):
+            info["segment_error"] = info2["segment_error"]
         rows = r1 + r2
     else:
         ctx = {"evaluation_type": EVALUATION_PRIMARY, "scope": SCOPE_SELECTION_WINDOWS,
-               "cutoffs": iso_dates(bt["cutoff"]), "currency": currency}
-        rows, info = scope_rows(bt, None, selection, cat, ctx, detail=True)
+               "cutoffs": iso_dates(bt["cutoff"]), "currency": currency, "wape_min_denominator": wape_min_denominator}
+        rows, info = scope_rows(bt, None, selection, cat, ctx, detail=True, seg=segments)
     decision = p50_decision(info["quantiles"])
     for r in rows:
         m = r["metrics"]

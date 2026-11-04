@@ -269,6 +269,9 @@ class FeatureBuilder:
         self.day_max = int(universe_ev["day"].max())
         last = to_day(data.last_complete_day()) if data.last_complete_day() is not None else self.day_max
         self.last_complete = int(last_day if last_day is not None else last)
+        # Ejecución vigente cuyo corte efectivo (`last_complete`) quedó por debajo de lo cargado (cobertura declarada): las variables de
+        # ESE corte conocen hasta HOY (la carga nocturna de su último día cuenta); las de los cortes anteriores, solo lo suyo.
+        self._live_day = self.last_complete if (getattr(data, "live", False) and self._versions is not None) else None
         hi_day = max(self.day_max, self.last_complete, extend_to or 0) + max(max_horizon, 90) + 30
         lo_day = self.day_min - 400
         self.calendar = _CalendarIndex(max(lo_day, 0), hi_day, data.branches)
@@ -342,22 +345,25 @@ class FeatureBuilder:
 
     def events_at(self, c: int) -> _Events:
         """Índices con lo que se conocía al corte `c` (día entero). Coinciden con los de la verdad (`ev`, `cstore`, ...) salvo que
-        haya versiones cuya visibilidad dependa del corte; en ese caso se arma una vista propia (se conservan las dos últimas)."""
+        haya versiones cuya visibilidad dependa del corte; en ese caso se arma una vista propia (se conservan las dos últimas). En una
+        ejecución vigente, el corte efectivo (`last_complete`) conoce hasta hoy aunque esté por debajo de lo cargado."""
         if not self._dynamic or c >= self._truth_day:
             return self._truth
         day = pd.Timestamp(from_day(int(c)))
-        if not self._versions.differs_from_truth(day):
+        live = self._live_day is not None and int(c) == self._live_day
+        knowledge = self._versions.knowledge if live else None
+        if not live and not self._versions.differs_from_truth(day):
             return self._truth
         view = self._views.get(int(c))
         if view is None:
-            cells = self._versions.purchase_cells(day)
+            cells = self._versions.purchase_cells(day, knowledge)
             if len(cells):
                 ev = self._event_frame(cells)
             else:
                 ev = pd.DataFrame({"customer_id": np.zeros(0, np.int64), "product_id": np.zeros(0, np.int64), "day": np.zeros(0, np.int64),
                                    "qty": np.zeros(0), "net": np.zeros(0), "gross": np.zeros(0), "disc": np.zeros(0),
                                    "branch_id": np.zeros(0), "currency": pd.Series(dtype=object)})
-            view = self._build_events(ev, self._versions.return_cells(day))
+            view = self._build_events(ev, self._versions.return_cells(day, knowledge))
             while len(self._views) >= 2:
                 self._views.pop(next(iter(self._views)))
             self._views[int(c)] = view

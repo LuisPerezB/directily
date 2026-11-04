@@ -34,6 +34,8 @@ watch(
       port: typeof c.port === 'number' ? c.port : defaultPort(s.connector_key),
       database: String(c.database ?? ''),
       sslmode: String(c.sslmode ?? 'prefer'),
+      encrypt: c.encrypt === undefined ? true : c.encrypt === true,
+      trust_server_certificate: c.trust_server_certificate === true,
       source_timezone: String(c.source_timezone ?? 'America/Guayaquil'),
       sync_schedule: (['manual', 'hourly', 'daily'].includes(String(c.sync_schedule)) ? c.sync_schedule : 'manual') as SqlFormState['sync_schedule'],
     }

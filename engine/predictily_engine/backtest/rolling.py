@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from predictily_engine.data.asof import with_knowledge
+from predictily_engine.availability.contracts import FeatureContractError
 from predictily_engine.features.builder import FeatureBuilder, last_known_price
 from predictily_engine.models.ml import LightGBMGlobal
 from predictily_engine.models.registry import STATISTICAL
@@ -228,9 +229,11 @@ def asof_windows(data: Any, panel: Panel, features: FeatureBuilder, horizon_end:
     versions = getattr(data, "sales_versions", None)
     if versions is None or not versions.has_dynamic:
         return None
+    # W6-E: la política del constructor (`features.options()`: factores, precios confirmados, features deshabilitadas y zona) viaja a cada ventana
+    # reconstruida; con los valores por defecto el constructor de la ventana es el mismo de siempre.
     return AsOfWindows(data, panel, features,
                        lambda df: FeatureBuilder(df, data.branches, data.promotions, horizon_end,
-                                                 promotion_revisions=data.promotion_revisions), rules)
+                                                 promotion_revisions=data.promotion_revisions, **features.options()), rules)
 
 
 def run_backtest(
@@ -271,6 +274,8 @@ def run_backtest(
                 tr, ref = wf.training_frame(cutoff, ids)
                 model = LightGBMGlobal(seed=seed, n_jobs=n_jobs).fit(tr)
                 preds.append(model.predict(plan.horizon, wf.future_frame(cutoff, ids, plan.horizon, ref)))
+            except FeatureContractError:
+                raise  # una feature sin contrato es un defecto de programación: no se disfraza de fallo de LightGBM
             except Exception:  # el backtest continúa con los estadísticos
                 log.exception("LightGBM falló en la ventana %s", cutoff.date())
         fc = pd.concat(preds, ignore_index=True)
@@ -303,8 +308,11 @@ def run_backtest(
     return out
 
 
-# Tramos del horizonte alineados con los cinco horizontes del dominio (7/14/30/60/90): (clave, desde, hasta,
-# horizon_days que la fila representa). Antes: h1-7, h8-30 y h31-90.
+# Tramos de PASOS del horizonte (error diario por rango de días): (clave, desde, hasta, horizon_days que la fila representa).
+# Antes: h1-7, h8-30 y h31-90. Son tramos de evaluación, no horizontes del catálogo: el horizonte de 15 días se evalúa como TOTAL
+# (level='horizon_total', level_key='H15', demand/evaluation.horizon_total_rows) con el mismo backtest as-of y el mismo
+# período final independiente; no tiene un tramo diario propio (renombrar «h15-30» rompería las claves ya persistidas, la deriva
+# de evaluate-actuals y los consumidores de by_horizon).
 HORIZON_BUCKETS = [("h1-7", 1, 7, 7), ("h8-14", 8, 14, 14), ("h15-30", 15, 30, 30), ("h31-60", 31, 60, 60),
                    ("h61-90", 61, 90, 90)]
 BUCKET_DAYS = {b[0]: b[3] for b in HORIZON_BUCKETS}

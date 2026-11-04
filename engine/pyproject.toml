@@ -31,6 +31,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "httpx==0.28.1"]
+# W4-B · opcionales (no son dependencias del motor; importación perezosa con mensaje explícito si faltan):
+s3 = ["boto3==1.43.123"]        # controlador S3 del almacén de objetos (platform/object_store.py); verificado SOLO contra un emulador (moto), AWS real BLOQUEADO
+mlops = ["pyarrow==26.0.0"]     # exportación local autorizada (mlops/exports.py): tablas minimizadas en Parquet dentro del contenedor cifrado
 
 [project.scripts]
 predictily-engine = "predictily_engine.cli:main"

@@ -1,0 +1,529 @@
+{
+ "meta": {
+  "wave": "W1",
+  "date": "2026-11-01",
+  "commit": "11c7086 · c44076e · eea5321 (+ integración)",
+  "summary": "Correcciones P0 de W1 (ventas versionadas con tiempo de conocimiento y lectura as-of en el motor, clasificación de días sin datos, SSRF, ZIP bomb y firma Ed25519 de artefactos): 7 de los 13 defectos HIGH corregidos y 6 corregidos parcialmente."
+ },
+ "defects": [
+  {
+   "area": "cliente",
+   "index": 0,
+   "title_prefix": "Compras y devoluciones se leen con el es",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/integration/test_asof_customer_integration.py::test_purchases_and_returns_are_asof_to_the_cutoff",
+    "engine/tests/integration/test_asof_customer_integration.py::test_features_are_asof_to_each_cutoff_and_labels_use_the_latest_knowledge",
+    "engine/tests/integration/test_asof_customer_integration.py::test_the_dataset_has_asof_features_and_latest_knowledge_labels_per_cutoff",
+    "engine/tests/integration/test_asof_customer_integration.py::test_purchases_and_returns_contain_exactly_the_valid_documents",
+    "engine/tests/integration/test_asof_customer_integration.py::test_the_customer_fingerprint_covers_the_knowledge_windows",
+    "engine/tests/unit/test_asof_visibility.py::test_purchase_versions_give_the_customer_core_the_same_visibility_rule",
+    "engine/predictily_engine/db/customer_repository.py::CustomerRepository.purchase_versions / purchases / returns",
+    "engine/predictily_engine/data/asof.py::PurchaseVersions; engine/predictily_engine/customer/features.py::FeatureBuilder.events_at (variables al corte; etiquetas con la verdad más reciente)"
+   ],
+   "note": "Variables al corte y etiquetas con el conocimiento más reciente (documentado). Limitaciones: el supuesto de una carga backfill (conocida desde su día de negocio; BLOQUEADO por el origen) no se declara en la envoltura del Customer Core, solo en la documentación y en la huella con las ventanas de conocimiento; inventario y catálogo no están versionados."
+  },
+  {
+   "area": "conectores",
+   "index": 0,
+   "title_prefix": "La marca de agua de la sincronización in",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_a_future_recorded_at_does_not_advance_the_watermark_and_is_reported",
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_unreadable_recorded_at_is_an_anomaly_and_falls_back_to_the_sync_start",
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_a_poisoned_previous_watermark_is_bounded_when_it_is_read",
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_the_sync_and_the_normalizer_share_the_same_recorded_at_bound",
+    "backend/tests/Feature/Sales/SalesWriterHardeningTest.php::test_normalizer_bound_is_now_plus_a_configurable_tolerance",
+    "backend/app/Services/DataCore/Sync/SourceSyncService.php::boundedWatermark / run",
+    "backend/app/Services/DataCore/Sync/CanonicalStager.php::trackRecorded; backend/app/Services/Sales/SalesLineNormalizer.php::recordedAtBound"
+   ],
+   "note": "Marca de agua = min(máx. source_recorded_at legible, inicio de la sincronización); futuros e ilegibles se cuentan (future_recorded_at) y no la adelantan. Pendiente del campo fix: alerta tras N sincronizaciones consecutivas con 0 filas (DISEÑADO / NO IMPLEMENTADO); la cobertura inferida (CoverageService) sigue avanzando con consultas vacías. Las pruebas de sincronización necesitan la BD «ERP de origen»; sin ella se omiten."
+  },
+  {
+   "area": "conectores",
+   "index": 1,
+   "title_prefix": "Un reintento o lote tardío con una versi",
+   "state": "corregido",
+   "evidence": [
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_older_incoming_version_is_stale_skipped_and_writes_nothing",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_stale_documents_do_not_create_catalog_rows_and_do_not_block_the_rest_of_the_batch",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_equal_or_newer_source_timestamp_is_applied_and_ordered",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_missing_source_timestamp_lets_the_last_ingestion_win_and_is_counted",
+    "backend/tests/Feature/Sales/SalesImportIngestionModeTest.php::test_import_updates_archive_versions_and_report_the_new_statistics",
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_an_older_version_from_the_source_is_stale_skipped_by_the_sync",
+    "backend/tests/Feature/Sales/SalesWriterHardeningTest.php::test_an_update_without_a_source_timestamp_keeps_the_stored_mark_and_is_still_counted",
+    "backend/tests/Feature/Sales/SalesWriterHardeningTest.php::test_a_discarded_future_mark_cannot_make_later_real_versions_stale",
+    "backend/app/Services/Sales/SalesDocumentWriter.php::write / sourceOrder"
+   ],
+   "note": "Orden por source_recorded_at: la versión anterior se descarta como stale_skipped sin escribir nada, en CSV (import), REST (/sales/batch) y SQL. Sin marca de origen gana la última ingestión y se contabiliza (updated_without_source_order; no hay secuencia por documento). La prueba SQL necesita la BD «ERP de origen»."
+  },
+  {
+   "area": "conectores",
+   "index": 2,
+   "title_prefix": "La política SSRF de los conectores SQL e",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_numeric_forms_and_malformed_hosts_are_rejected_before_any_resolution",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_cloud_metadata_link_local_multicast_and_transition_forms_are_always_denied",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_a_and_aaaa_are_resolved_and_every_answer_must_be_allowed",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_private_networks_are_denied_by_default",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_loopback_cannot_be_authorized_in_production",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_the_validated_ip_is_pinned_so_a_second_resolution_cannot_change_the_destination",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_ipv6_targets_are_pinned_in_every_dialect",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_postgres_connects_to_the_pinned_ip_without_ever_resolving_the_name",
+    "backend/tests/Feature/DataCore/SqlSourceHostPolicyApiTest.php::test_numeric_host_forms_are_rejected_when_the_source_is_saved",
+    "backend/tests/Feature/DataCore/SqlSourceHostPolicyApiTest.php::test_metadata_loopback_and_private_destinations_leave_the_source_inactive_with_a_generic_message",
+    "backend/tests/Unit/DataCore/SqlQueryGuardTest.php::test_host_policy_always_blocks_cloud_metadata",
+    "backend/tests/Unit/DataCore/SqlQueryGuardTest.php::test_host_policy_denies_private_networks_by_default_and_enforces_a_closed_allow_list",
+    "backend/app/Services/Connectors/Sql/SqlHostPolicy.php::resolve / syntaxError / normalize",
+    "backend/app/Services/Connectors/Sql/SqlNetworkClassifier.php, SqlResolvedTarget.php, SystemHostResolver.php",
+    "backend/config/connectors.php (sin interruptor que abra la política; allowed_hosts / allowed_cidrs)"
+   ],
+   "note": "El vector de la auditoría (metadatos, loopback, redes internas, hexadecimal, IPv4 mapeada en IPv6, AAAA, rebinding) queda cerrado y probado. Pendiente respecto al campo fix: la lista blanca de destinos NO es obligatoria (en producción un destino público se acepta sin PREDICTILY_SQL_ALLOWED_HOSTS; solo loopback, redes privadas y metadatos se deniegan por defecto); la fijación de IP en MySQL y SQL Server solo está verificada a nivel de DSN (sin servidor de pruebas; con Encrypt=1 el certificado debe cubrir la IP); no se limitan puertos ni se exige TLS; los mensajes del controlador de un destino permitido siguen llegando hasta 400 caracteres."
+  },
+  {
+   "area": "datos",
+   "index": 0,
+   "title_prefix": "Las ventas cargadas tarde contaminan cor",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_asof_visibility.py::test_incremental_document_loaded_late_is_invisible_before_its_ingestion_and_visible_after",
+    "engine/tests/integration/test_asof_integration.py::test_incremental_document_loaded_late_is_invisible_before_its_ingestion_and_visible_after",
+    "engine/tests/integration/test_asof_integration.py::test_a_backtest_window_does_not_change_when_data_known_after_its_cutoff_is_perturbed",
+    "engine/tests/integration/test_asof_integration.py::test_documents_with_the_default_column_values_behave_as_before",
+    "engine/tests/integration/test_asof_integration.py::test_the_sales_fingerprint_changes_with_the_knowledge_windows_even_if_the_values_are_equal",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_batch_defaults_to_incremental_and_a_late_document_is_not_visible_before_its_arrival",
+    "backend/tests/Feature/Sales/SalesImportIngestionModeTest.php::test_first_import_is_backfill_and_the_second_is_incremental_by_default",
+    "engine/predictily_engine/data/asof.py::SalesVersions / PurchaseVersions (regla de visibilidad en días locales)",
+    "engine/predictily_engine/db/repository.py::TenantRepository.sales_versions / daily_sales",
+    "backend/database/migrations/2026_03_01_000100_add_sales_knowledge_time_and_revisions.php (sales_document_revisions, sale_item_revisions, vista sales_line_versions)",
+    "backend/app/Services/Sales/SalesDocumentWriter.php::write / archiveVersions / closeOlderWindows / sourceOrder",
+    "backend/app/Services/Sales/IngestionModeResolver.php::forImport / forBatch / forSync"
+   ],
+   "note": "La fuente única es la vista sales_line_versions con ventana [known_from, known_until) por versión. En lugar de «marcar como inestables» los cortes con cargas posteriores, la reconstrucción as-of es reproducible y el manifiesto registra por ventana lo no conocido aún (lines_not_yet_known / lines_later_replaced). Una carga backfill se asume conocida desde su día de negocio (BLOQUEADO por el origen: la fuente no entrega el historial de estados). Inventario, catálogo, costos y calendario no están versionados; los lectores de Supply, Causal, Escenarios y Costos aún leen el estado vigente (docs/data/TEMPORAL_AVAILABILITY.md §12)."
+  },
+  {
+   "area": "datos",
+   "index": 1,
+   "title_prefix": "Una anulación o corrección posterior ree",
+   "state": "corregido",
+   "evidence": [
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_incremental_update_archives_header_and_lines_with_correct_windows",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_status_change_to_voided_is_recorded_as_status_changed",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_header_only_and_mixed_changes_are_classified",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_backfill_reload_collapses_versions_into_an_empty_window",
+    "backend/tests/Feature/Sales/SalesVersionWindowsInvariantTest.php::test_every_sequence_of_two_to_four_writes_keeps_zero_or_one_visible_version_per_cutoff",
+    "engine/tests/unit/test_asof_visibility.py::test_a_voided_document_is_counted_before_the_voiding_and_excluded_after",
+    "engine/tests/integration/test_asof_integration.py::test_a_later_voiding_is_counted_before_it_and_excluded_after",
+    "engine/tests/integration/test_asof_integration.py::test_a_later_correction_changes_the_quantity_only_from_its_knowledge_date",
+    "backend/database/migrations/2026_03_01_000100_add_sales_knowledge_time_and_revisions.php (sales_document_revisions, sale_item_revisions, vista sales_line_versions)",
+    "backend/app/Services/Sales/SalesDocumentWriter.php::write / archiveVersions / closeOlderWindows / sourceOrder",
+    "backend/app/Services/Sales/IngestionModeResolver.php::forImport / forBatch / forSync",
+    "engine/predictily_engine/data/asof.py::SalesVersions / PurchaseVersions (regla de visibilidad en días locales)",
+    "engine/predictily_engine/db/repository.py::TenantRepository.sales_versions / daily_sales"
+   ],
+   "note": "La versión reemplazada se archiva (cabecera y líneas) antes de sobrescribir; invariante de ventanas disjuntas probada con 336 secuencias en dos zonas horarias. El estado histórico de una carga backfill o anterior a la migración no se puede reconstruir (BLOQUEADO por el origen); las filas previas a los arreglos conservan sus ventanas (sin migración de datos)."
+  },
+  {
+   "area": "datos",
+   "index": 2,
+   "title_prefix": "Tipos y estados de documento desconocido",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Feature/Sales/UnknownDocumentTypeStatusTest.php::test_unknown_type_and_status_are_review_required_errors_and_are_not_written",
+    "backend/tests/Feature/Sales/UnknownDocumentTypeStatusTest.php::test_empty_status_is_completed_and_empty_type_is_invoice",
+    "backend/tests/Feature/Sales/UnknownDocumentTypeStatusTest.php::test_batch_reports_review_required_errors_in_the_error_detail_and_writes_nothing_for_them",
+    "backend/tests/Feature/Sales/DocumentVocabularyTest.php::test_unrecognized_statuses_are_null_never_a_sale",
+    "backend/tests/Feature/Sales/DocumentVocabularyTest.php::test_unrecognized_document_types_are_null",
+    "backend/tests/Feature/Sales/DocumentVocabularyTest.php::test_normalizer_turns_unknown_type_and_status_into_review_required_errors",
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_an_unknown_source_status_needs_review_and_a_value_map_resolves_it",
+    "backend/app/Services/Imports/Parsing/ValueParser.php::documentType / documentStatus",
+    "backend/app/Services/Sales/SalesLineNormalizer.php; backend/app/Services/Imports/Support/Issue.php::DQ_CLASS_BY_CODE"
+   ],
+   "note": "Un tipo o estado no vacío y desconocido ya no se cuenta como venta: error de fila unknown_document_type / unknown_document_status con dq_class REVIEW_REQUIRED, el documento no se escribe y la confirmación se bloquea (o se omite con skip_invalid_rows). Pendiente del campo fix: cuarentena persistente y revisable (quarantine_records) y value_maps de tipo y estado en la importación de archivos (hoy solo en la sincronización SQL); el mapeo automático de «Estado» sigue interpretando 1/si/true como anulado (datos.json #23, MEDIUM). Un documento reconocido con el mismo número que una fila de tipo desconocido se escribe con el aviso document_number_shared_with_unknown_type."
+  },
+  {
+   "area": "datos",
+   "index": 3,
+   "title_prefix": "Los huecos internos de la fuente (caída ",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_day_status.py::test_a_declared_gap_is_missing_source_never_a_zero_and_is_imputed",
+    "engine/tests/unit/test_day_status.py::test_closures_by_scope_and_precedence_between_the_statuses",
+    "engine/tests/unit/test_day_status.py::test_the_inferred_rule_marks_a_day_without_any_line_in_a_regular_branch",
+    "engine/tests/unit/test_day_status.py::test_lightgbm_weight_is_zero_on_excluded_days",
+    "engine/tests/unit/test_day_status.py::test_backtest_rows_flag_excluded_days_so_metrics_never_score_them",
+    "engine/tests/unit/test_day_status.py::test_zero_proportion_of_the_profile_ignores_missing_source_and_closed_days",
+    "engine/tests/integration/test_asof_integration.py::test_a_source_outage_is_missing_source_when_declared_and_when_inferred_but_never_a_zero",
+    "engine/tests/integration/test_asof_evaluation_integration.py::test_a_declared_outage_is_missing_source_not_zero_demand_and_does_not_produce_drift",
+    "backend/tests/Feature/DataCore/CoverageGapsApiTest.php::test_declare_list_filter_and_delete_a_gap",
+    "engine/predictily_engine/profiling/days.py::classify_days / infer_missing_days / DayRules",
+    "engine/predictily_engine/profiling/series.py::build_panel (day_status, day_basis, imputación y peso 0)",
+    "backend/app/Http/Controllers/Api/DataCore/DataCoverageGapController.php (GET/POST/DELETE /api/v1/data-coverage/gaps, routes/api/datacore.php)"
+   ],
+   "note": "Pendiente: la categoría de calendario `closure` aún no la acepta el backend ni la UI (el motor ya la lee; hoy solo puede existir si se carga por otra vía); la clasificación día a día no se persiste (solo su resumen en informe de calidad, manifiesto y huella; ADR-V25-03 la pide en el dataset Gold); la regla inferida (por defecto activa) debe aprobarse en el piloto; la cobertura inferida sigue avanzando con consultas vacías (datos.json #5, MEDIUM)."
+  },
+  {
+   "area": "demanda",
+   "index": 0,
+   "title_prefix": "Las ventas cargadas tarde o anuladas des",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/integration/test_asof_integration.py::test_a_backtest_window_does_not_change_when_data_known_after_its_cutoff_is_perturbed",
+    "engine/tests/integration/test_asof_integration.py::test_the_holdout_window_trains_with_what_was_known_at_its_origin",
+    "engine/tests/integration/test_asof_integration.py::test_the_full_pipeline_records_the_knowledge_it_used_and_window_zero_ignores_what_was_known_later",
+    "engine/tests/integration/test_asof_integration.py::test_what_happens_after_the_final_cutoff_cannot_change_a_past_cutoff_or_its_fingerprint",
+    "engine/tests/integration/test_asof_integration.py::test_a_later_voiding_is_counted_before_it_and_excluded_after",
+    "engine/tests/integration/test_asof_integration.py::test_one_read_of_the_versions_serves_every_cutoff",
+    "engine/tests/unit/test_asof_visibility.py::test_what_happens_after_the_final_cutoff_cannot_change_a_past_view",
+    "engine/predictily_engine/backtest/rolling.py::AsOfWindows / asof_windows / run_backtest (cada ventana entrena con lo conocido en su corte)",
+    "engine/predictily_engine/platform/snapshot.py::frame_hash (huella con las ventanas de conocimiento); engine/predictily_engine/demand/snapshot.py",
+    "engine/predictily_engine/data/asof.py::SalesVersions / PurchaseVersions (regla de visibilidad en días locales)",
+    "engine/predictily_engine/db/repository.py::TenantRepository.sales_versions / daily_sales"
+   ],
+   "note": "Backtest y holdout entrenan as-of su corte; los reales de cada ventana son la verdad al corte final (documentado en el manifiesto). plan_backtest elige niveles y orígenes con la historia del panel final (no as-of; efecto acotado a historia que llegó tarde). Una carga backfill se asume conocida desde su día de negocio (BLOQUEADO por el origen: la fuente no entrega el historial de estados). Inventario, catálogo, costos y calendario no están versionados; los lectores de Supply, Causal, Escenarios y Costos aún leen el estado vigente (docs/data/TEMPORAL_AVAILABILITY.md §12)."
+  },
+  {
+   "area": "demanda",
+   "index": 1,
+   "title_prefix": "Los huecos internos de la fuente (caída ",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_day_status.py::test_a_declared_gap_is_missing_source_never_a_zero_and_is_imputed",
+    "engine/tests/unit/test_day_status.py::test_closures_by_scope_and_precedence_between_the_statuses",
+    "engine/tests/unit/test_day_status.py::test_the_inferred_rule_marks_a_day_without_any_line_in_a_regular_branch",
+    "engine/tests/unit/test_day_status.py::test_lightgbm_weight_is_zero_on_excluded_days",
+    "engine/tests/unit/test_day_status.py::test_backtest_rows_flag_excluded_days_so_metrics_never_score_them",
+    "engine/tests/unit/test_day_status.py::test_zero_proportion_of_the_profile_ignores_missing_source_and_closed_days",
+    "engine/tests/integration/test_asof_integration.py::test_a_source_outage_is_missing_source_when_declared_and_when_inferred_but_never_a_zero",
+    "engine/tests/integration/test_asof_evaluation_integration.py::test_a_declared_outage_is_missing_source_not_zero_demand_and_does_not_produce_drift",
+    "backend/tests/Feature/DataCore/CoverageGapsApiTest.php::test_declare_list_filter_and_delete_a_gap",
+    "engine/predictily_engine/profiling/days.py::classify_days / infer_missing_days / DayRules",
+    "engine/predictily_engine/profiling/series.py::build_panel (day_status, day_basis, imputación y peso 0)",
+    "backend/app/Http/Controllers/Api/DataCore/DataCoverageGapController.php (GET/POST/DELETE /api/v1/data-coverage/gaps, routes/api/datacore.php)"
+   ],
+   "note": "Pendiente: la categoría de calendario `closure` aún no la acepta el backend ni la UI (el motor ya la lee; hoy solo puede existir si se carga por otra vía); la clasificación día a día no se persiste (solo su resumen en informe de calidad, manifiesto y huella; ADR-V25-03 la pide en el dataset Gold); la regla inferida (por defecto activa) debe aprobarse en el piloto; la cobertura inferida sigue avanzando con consultas vacías (datos.json #5, MEDIUM)."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 0,
+   "title_prefix": "joblib.load deserializa un pickle con el",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_coherent_sha_and_no_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_invalid_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_an_unknown_signing_key_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_altered_bytes_are_rejected_before_deserializing",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_of_another_company_is_rejected",
+    "engine/tests/unit/test_artifact_signing.py::test_an_unsigned_artifact_is_rejected_by_default_and_loaded_only_with_the_explicit_flag",
+    "engine/tests/unit/test_artifact_signing.py::test_the_legacy_flag_never_accepts_invalid_signatures_unknown_keys_or_other_companies",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_loads_and_its_manifest_binds_tenant_core_run_and_data",
+    "engine/tests/unit/test_artifact_signing.py::test_deserialization_uses_the_verified_bytes_not_the_file_on_disk",
+    "engine/tests/integration/test_customer_integration.py::test_a_production_artifact_without_a_valid_signature_degrades_to_the_validated_reference",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_rollback_to_an_unsigned_artifact_is_rejected_and_nothing_changes",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_rollback_to_an_artifact_with_an_invalid_signature_is_rejected_even_with_the_flag",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_a_signature_produced_by_the_python_engine_is_verified_by_sodium",
+    "engine/predictily_engine/platform/signing.py::verify_artifact_file / deserialize (único joblib.load del motor, tras verificar) / write_manifest",
+    "engine/predictily_engine/platform/artifacts.py::save_signed_artifact / verify_stored_artifact / confine_stored_path",
+    "engine/predictily_engine/customer/service.py::load_artifact; engine/predictily_engine/pipeline/forecast_run.py::_save_signed_artifact",
+    "engine/predictily_engine/cli.py (keygen, verify-artifact)",
+    "backend/app/Services/Forecasting/ModelArtifactVerifier.php::inspect (sodium_crypto_sign_verify_detached)"
+   ],
+   "note": "Manifiesto canónico firmado con Ed25519 verificado (firma, SHA-256, tamaño, empresa, core) ANTES de joblib.load y desde los mismos bytes; sin firma, clave desconocida o alterado se rechaza sin ejecutar el payload; la reversión del backend verifica con sodium. Pendiente del campo fix: formatos sin pickle (LightGBM model_to_string / JSON) y deserialización en subproceso sin credenciales de BD; entrenar y servir comparten proceso (quien ejecute código en el motor puede firmar); ENGINE_ALLOW_UNSIGNED_ARTIFACTS (false por defecto) admite legados sin firma si se activa; sin re-firmado de legados ni KMS/HSM. Claves reales en la pila Docker/E2E: BLOQUEADO (decisión del propietario)."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 0,
+   "title_prefix": "La política anti-SSRF de los conectores ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_numeric_forms_and_malformed_hosts_are_rejected_before_any_resolution",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_cloud_metadata_link_local_multicast_and_transition_forms_are_always_denied",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_a_and_aaaa_are_resolved_and_every_answer_must_be_allowed",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_private_networks_are_denied_by_default",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_loopback_cannot_be_authorized_in_production",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_the_validated_ip_is_pinned_so_a_second_resolution_cannot_change_the_destination",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_ipv6_targets_are_pinned_in_every_dialect",
+    "backend/tests/Unit/DataCore/SqlHostPolicyTest.php::test_postgres_connects_to_the_pinned_ip_without_ever_resolving_the_name",
+    "backend/tests/Feature/DataCore/SqlSourceHostPolicyApiTest.php::test_numeric_host_forms_are_rejected_when_the_source_is_saved",
+    "backend/tests/Feature/DataCore/SqlSourceHostPolicyApiTest.php::test_metadata_loopback_and_private_destinations_leave_the_source_inactive_with_a_generic_message",
+    "backend/tests/Unit/DataCore/SqlQueryGuardTest.php::test_host_policy_always_blocks_cloud_metadata",
+    "backend/tests/Unit/DataCore/SqlQueryGuardTest.php::test_host_policy_denies_private_networks_by_default_and_enforces_a_closed_allow_list",
+    "backend/app/Services/Connectors/Sql/SqlHostPolicy.php::resolve / syntaxError / normalize",
+    "backend/app/Services/Connectors/Sql/SqlNetworkClassifier.php, SqlResolvedTarget.php, SystemHostResolver.php",
+    "backend/config/connectors.php (sin interruptor que abra la política; allowed_hosts / allowed_cidrs)"
+   ],
+   "note": "El vector de la auditoría (metadatos, loopback, redes internas, hexadecimal, IPv4 mapeada en IPv6, AAAA, rebinding) queda cerrado y probado. Pendiente respecto al campo fix: la lista blanca de destinos NO es obligatoria (en producción un destino público se acepta sin PREDICTILY_SQL_ALLOWED_HOSTS; solo loopback, redes privadas y metadatos se deniegan por defecto); la fijación de IP en MySQL y SQL Server solo está verificada a nivel de DSN (sin servidor de pruebas; con Encrypt=1 el certificado debe cubrir la IP); no se limitan puertos ni se exige TLS; los mensajes del controlador de un destino permitido siguen llegando hasta 400 caracteres."
+  },
+  {
+   "area": "seguridad_ui",
+   "index": 1,
+   "title_prefix": "Sin protección ZIP bomb: un XLSX de 680 ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_audit_bomb_is_rejected_in_under_two_seconds",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_a_forged_directory_that_declares_a_tiny_sheet_is_rejected_by_counting_the_real_bytes",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_default_limits_accept_the_real_history_profile_of_99334_lines",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_nested_archives_are_rejected_by_extension_and_by_magic_bytes",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_audit_case_of_63_mb_of_nodes_before_the_first_row_is_cut_with_the_default_limits",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_interactive_time_budget_applies_to_the_sheet_scan",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_the_audit_bomb_is_rejected_with_413_a_stable_code_and_without_reading_it",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_a_forged_central_directory_is_rejected_at_upload_by_counting_the_real_bytes",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_a_file_named_xlsx_that_is_not_a_workbook_is_rejected_with_422",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_the_analysis_is_bounded_by_the_interactive_window_but_the_queued_validation_is_not",
+    "backend/app/Services/Imports/Reading/ZipArchiveInspector.php::inspect",
+    "backend/app/Services/Imports/Reading/ZipReadGuard.php::run / checkDeadline; XlsxReader.php::headers / rows",
+    "backend/app/Http/Requests/Core/StoreImportRequest.php; backend/config/upload_safety.php"
+   ],
+   "note": "La bomba de la auditoría (680 KB, 23 s de CPU) se rechaza en ≈ 2 ms con 413 y código estable; la inspección cuenta los bytes REALES de cada parte, limita entradas, tamaño, razón y anidados, y la lectura interactiva está acotada en columnas, bytes de hoja y 10 s de reloj. Pendiente del campo fix: mover el análisis de encabezados a la cola con timeout corto (sigue síncrono en la petición, acotado); los límites de lectura se informan como importación failed (HTTP 201) y no con código HTTP estable; la lectura en cola no tiene tope de filas."
+  },
+  {
+   "area": "cliente",
+   "index": 12,
+   "title_prefix": "La prueba de «anuladas y notas de crédit",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/integration/test_asof_customer_integration.py::test_purchases_and_returns_contain_exactly_the_valid_documents",
+    "engine/tests/unit/test_asof_visibility.py::test_cells_follow_the_definition_of_valid_sales_and_returns",
+    "engine/predictily_engine/db/customer_repository.py::CustomerRepository.purchases / returns"
+   ],
+   "note": "Prueba contra PostgreSQL con un documento de cada tipo y estado (invoice, sales_note, other, credit_note, voided, pending), dos sucursales el mismo día, comprador genérico y anónimo; afirma el contenido exacto de purchases() y returns()."
+  },
+  {
+   "area": "cliente",
+   "index": 9,
+   "title_prefix": "Los artefactos joblib se cargan tras ver",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_coherent_sha_and_no_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_stored_paths_cannot_leave_the_company_directory",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_of_another_company_is_rejected",
+    "engine/predictily_engine/platform/artifacts.py::confine_stored_path / verify_stored_artifact; engine/predictily_engine/customer/service.py::load_artifact"
+   ],
+   "note": "Firma/procedencia verificada antes de deserializar y ruta confinada a <ENGINE_ARTIFACTS_DIR>/<empresa>/ (absolutas ajenas y '..' rechazadas). Pendiente: alternativa de formato sin pickle para los modelos."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 1,
+   "title_prefix": "resolve_stored_path no confina la ruta g",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_stored_paths_cannot_leave_the_company_directory",
+    "engine/tests/unit/test_artifact_signing.py::test_legacy_stored_paths_inside_the_company_directory_still_resolve",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_relative_paths_cannot_leave_the_artifacts_directory",
+    "engine/predictily_engine/platform/artifacts.py::confine_stored_path",
+    "backend/app/Services/Forecasting/ModelArtifactVerifier.php::locate / within"
+   ],
+   "note": "Motor: la ruta se normaliza y se confina a la carpeta de la empresa. Backend: rechaza '..' y enlaces fuera del directorio, pero ModelArtifactVerifier::locate sigue aceptando rutas absolutas de filas antiguas (su autenticidad la garantiza la firma, no el confinamiento). Pendiente: backfill idempotente que migre las filas legadas a ruta relativa."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 21,
+   "title_prefix": "TOCTOU en load_artifact: el SHA-256 se c",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_deserialization_uses_the_verified_bytes_not_the_file_on_disk",
+    "engine/tests/unit/test_artifact_signing.py::test_only_verified_artifacts_can_be_deserialized",
+    "engine/predictily_engine/platform/signing.py::deserialize (joblib.load(BytesIO) sobre los bytes verificados)"
+   ],
+   "note": "Una sola lectura: SHA-256, firma y deserialización usan los mismos bytes."
+  },
+  {
+   "area": "modelos_aws",
+   "index": 22,
+   "title_prefix": "Un artefacto de otro tenant se carga sin",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_of_another_company_is_rejected",
+    "engine/tests/unit/test_artifact_signing.py::test_stored_paths_cannot_leave_the_company_directory",
+    "engine/predictily_engine/platform/artifacts.py::confine_stored_path; engine/predictily_engine/customer/service.py::load_artifact(row, tenant_id)"
+   ],
+   "note": "El cargador valida la ruta bajo <ENGINE_ARTIFACTS_DIR>/<empresa>/ y el manifiesto firmado liga la empresa. Pendiente: backfill idempotente de las filas heredadas a ruta relativa."
+  },
+  {
+   "area": "demanda",
+   "index": 16,
+   "title_prefix": "El artefacto joblib (pickle) de LightGBM",
+   "state": "corregido",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_demand_artifacts_are_signed_with_the_demand_core",
+    "engine/tests/integration/test_demand_v2_integration.py::test_demand_artifacts_are_signed_and_the_registry_records_the_signature",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_a_demand_registry_row_must_point_to_the_artifact_of_its_own_run",
+    "engine/predictily_engine/pipeline/forecast_run.py::_save_signed_artifact"
+   ],
+   "note": "Los artefactos LightGBM de demanda se guardan con manifiesto firmado y la reversión del backend lo verifica. La demanda no recarga el artefacto (se reajusta en cada corrida)."
+  },
+  {
+   "area": "conectores",
+   "index": 10,
+   "title_prefix": "Importadores de archivos sin límites de ",
+   "state": "corregido parcialmente",
+   "evidence": [
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_audit_bomb_is_rejected_in_under_two_seconds",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_a_forged_directory_that_declares_a_tiny_sheet_is_rejected_by_counting_the_real_bytes",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_default_limits_accept_the_real_history_profile_of_99334_lines",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_nested_archives_are_rejected_by_extension_and_by_magic_bytes",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_audit_case_of_63_mb_of_nodes_before_the_first_row_is_cut_with_the_default_limits",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_interactive_time_budget_applies_to_the_sheet_scan",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_an_extreme_compression_ratio_is_rejected_with_413",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_too_many_entries_and_nested_archives_are_rejected_with_422",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_limits_are_configurable_per_environment",
+    "backend/app/Services/Imports/Reading/ZipArchiveInspector.php::inspect",
+    "backend/app/Services/Imports/Reading/ZipReadGuard.php::run / checkDeadline; XlsxReader.php::headers / rows",
+    "backend/app/Http/Requests/Core/StoreImportRequest.php; backend/config/upload_safety.php"
+   ],
+   "note": "XLSX: límites configurables de entradas, tamaño descomprimido por entrada y total, razón de compresión, columnas y filas recorridas en la vista previa, con bomba sintética probada. Pendiente: tope de filas de la lectura en cola, código file_too_large y límites equivalentes para CSV/TXT."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "V25-AVL-010",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_asof_visibility.py::test_incremental_document_loaded_late_is_invisible_before_its_ingestion_and_visible_after",
+    "engine/tests/integration/test_asof_integration.py::test_incremental_document_loaded_late_is_invisible_before_its_ingestion_and_visible_after",
+    "engine/tests/integration/test_asof_integration.py::test_a_backtest_window_does_not_change_when_data_known_after_its_cutoff_is_perturbed",
+    "engine/tests/integration/test_asof_customer_integration.py::test_features_are_asof_to_each_cutoff_and_labels_use_the_latest_knowledge",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_batch_defaults_to_incremental_and_a_late_document_is_not_visible_before_its_arrival",
+    "engine/predictily_engine/data/asof.py::SalesVersions; backend/app/Services/Sales/SalesDocumentWriter.php::write"
+   ],
+   "note": "Test T02 de documento cargado tarde: invisible antes de su ingestión y visible después, en la lectura de ventas, en las ventanas del backtest y en las variables del Customer Core. Cubre el modo incremental; una carga backfill se asume conocida desde su día de negocio (BLOQUEADO por el origen). Inventario y catálogo siguen sin versión (V25-AVL-015)."
+  },
+  {
+   "id": "V25-AVL-013",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_asof_visibility.py::test_a_voided_document_is_counted_before_the_voiding_and_excluded_after",
+    "engine/tests/integration/test_asof_integration.py::test_a_later_voiding_is_counted_before_it_and_excluded_after",
+    "engine/tests/integration/test_asof_customer_integration.py::test_purchases_and_returns_are_asof_to_the_cutoff",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_status_change_to_voided_is_recorded_as_status_changed",
+    "backend/app/Services/Sales/SalesDocumentWriter.php::archiveVersions; engine/predictily_engine/data/asof.py::SalesVersions"
+   ],
+   "note": "Factura vigente al corte y anulada después: la reconstrucción del corte la incluye y la posterior la excluye, reproducible desde sales_document_revisions."
+  },
+  {
+   "id": "V25-BRG-057",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_older_incoming_version_is_stale_skipped_and_writes_nothing",
+    "backend/tests/Feature/Sales/SalesTemporalWriteTest.php::test_missing_source_timestamp_lets_the_last_ingestion_win_and_is_counted",
+    "backend/tests/Feature/Sales/SalesImportIngestionModeTest.php::test_import_updates_archive_versions_and_report_the_new_statistics",
+    "backend/tests/Feature/DataCore/SqlSyncTemporalContractTest.php::test_an_older_version_from_the_source_is_stale_skipped_by_the_sync",
+    "backend/tests/Feature/Sales/SalesWriterHardeningTest.php::test_a_discarded_future_mark_cannot_make_later_real_versions_stale",
+    "backend/app/Services/Sales/SalesDocumentWriter.php::write / sourceOrder"
+   ],
+   "note": "v2 y luego v1: el documento queda en v2 y el lote v1 reporta stale_skipped sin error, en REST, importación de archivos y SQL; sin source_recorded_at gana la última recibida y se contabiliza (updated_without_source_order). La prueba SQL necesita la BD «ERP de origen»."
+  },
+  {
+   "id": "V25-SEC-033",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_audit_bomb_is_rejected_in_under_two_seconds",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_a_forged_directory_that_declares_a_tiny_sheet_is_rejected_by_counting_the_real_bytes",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_default_limits_accept_the_real_history_profile_of_99334_lines",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_nested_archives_are_rejected_by_extension_and_by_magic_bytes",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_audit_case_of_63_mb_of_nodes_before_the_first_row_is_cut_with_the_default_limits",
+    "backend/tests/Unit/Imports/ZipArchiveInspectorTest.php::test_the_interactive_time_budget_applies_to_the_sheet_scan",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_the_audit_bomb_is_rejected_with_413_a_stable_code_and_without_reading_it",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_a_forged_central_directory_is_rejected_at_upload_by_counting_the_real_bytes",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_a_file_named_xlsx_that_is_not_a_workbook_is_rejected_with_422",
+    "backend/tests/Feature/Core/XlsxUploadHardeningTest.php::test_the_analysis_is_bounded_by_the_interactive_window_but_the_queued_validation_is_not",
+    "backend/app/Services/Imports/Reading/ZipArchiveInspector.php::inspect",
+    "backend/app/Services/Imports/Reading/ZipReadGuard.php::run / checkDeadline; XlsxReader.php::headers / rows",
+    "backend/app/Http/Requests/Core/StoreImportRequest.php; backend/config/upload_safety.php"
+   ],
+   "note": "Inspección del directorio ZIP y recuento de los bytes reales antes de abrir; límites de entradas, tamaño descomprimido, razón, anidados y tiempo; la bomba de la auditoría se rechaza en ≈ 2 ms con 413 (el criterio de aceptación decía 422 archivo_sospechoso; el código estable es xlsx_*) y el histórico real de 99 334 líneas pasa con los límites por defecto. El análisis de encabezados sigue síncrono en la petición pero acotado (ver defecto seguridad_ui #2)."
+  },
+  {
+   "id": "V25-REG-045",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_coherent_sha_and_no_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_invalid_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_an_unknown_signing_key_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_altered_bytes_are_rejected_before_deserializing",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_of_another_company_is_rejected",
+    "engine/tests/unit/test_artifact_signing.py::test_an_unsigned_artifact_is_rejected_by_default_and_loaded_only_with_the_explicit_flag",
+    "engine/tests/unit/test_artifact_signing.py::test_the_legacy_flag_never_accepts_invalid_signatures_unknown_keys_or_other_companies",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_loads_and_its_manifest_binds_tenant_core_run_and_data",
+    "engine/tests/unit/test_artifact_signing.py::test_deserialization_uses_the_verified_bytes_not_the_file_on_disk",
+    "engine/tests/integration/test_customer_integration.py::test_a_production_artifact_without_a_valid_signature_degrades_to_the_validated_reference",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_rollback_to_an_unsigned_artifact_is_rejected_and_nothing_changes",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_rollback_to_an_artifact_with_an_invalid_signature_is_rejected_even_with_the_flag",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_a_signature_produced_by_the_python_engine_is_verified_by_sodium",
+    "engine/predictily_engine/platform/signing.py::verify_artifact_file / deserialize (único joblib.load del motor, tras verificar) / write_manifest",
+    "engine/predictily_engine/platform/artifacts.py::save_signed_artifact / verify_stored_artifact / confine_stored_path",
+    "engine/predictily_engine/customer/service.py::load_artifact; engine/predictily_engine/pipeline/forecast_run.py::_save_signed_artifact",
+    "engine/predictily_engine/cli.py (keygen, verify-artifact)",
+    "backend/app/Services/Forecasting/ModelArtifactVerifier.php::inspect (sodium_crypto_sign_verify_detached)"
+   ],
+   "note": "Un joblib con __reduce__ malicioso y SHA-256 coherente, sin firma, con firma inválida o con clave desconocida se rechaza antes de deserializar y el payload no se ejecuta; el único joblib.load del motor ocurre tras verificar y sobre los mismos bytes. Límites: ENGINE_ALLOW_UNSIGNED_ARTIFACTS (false por defecto, solo local) admite legados sin firma; entrenamiento y serving comparten proceso; sin KMS/HSM; claves reales en Docker/E2E BLOQUEADO (decisión del propietario)."
+  },
+  {
+   "id": "V25-CUS-038",
+   "status": "IMPLEMENTADO",
+   "gap": "",
+   "evidence": [
+    "engine/tests/integration/test_asof_customer_integration.py::test_features_are_asof_to_each_cutoff_and_labels_use_the_latest_knowledge",
+    "engine/tests/integration/test_asof_customer_integration.py::test_the_dataset_has_asof_features_and_latest_knowledge_labels_per_cutoff",
+    "engine/tests/integration/test_asof_customer_integration.py::test_purchases_and_returns_are_asof_to_the_cutoff",
+    "engine/tests/integration/test_asof_customer_integration.py::test_the_customer_fingerprint_covers_the_knowledge_windows",
+    "engine/tests/unit/test_customer_dataset.py::test_features_ignore_everything_after_the_cutoff",
+    "engine/predictily_engine/db/customer_repository.py::CustomerRepository.purchase_versions; engine/predictily_engine/customer/features.py::FeatureBuilder.events_at"
+   ],
+   "note": "Variables as-of al corte (documento cargado tarde y anulación posterior no entran; promociones y precios posteriores tampoco) y etiquetas con el conocimiento más reciente, documentado. El supuesto de las cargas backfill no se declara en la envoltura del Customer Core."
+  },
+  {
+   "id": "V25-REG-051",
+   "status": "PARCIAL",
+   "gap": "Faltan formatos sin pickle (LightGBM model_to_string / JSON), la deserialización en subproceso sin credenciales de BD y separar el despliegue que entrena del que sirve; ENGINE_ALLOW_UNSIGNED_ARTIFACTS (false por defecto) deja una vía explícita para legados sin firma.",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_coherent_sha_and_no_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_malicious_pickle_with_invalid_signature_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_an_unknown_signing_key_is_rejected_without_side_effects",
+    "engine/tests/unit/test_artifact_signing.py::test_altered_bytes_are_rejected_before_deserializing",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_of_another_company_is_rejected",
+    "engine/tests/unit/test_artifact_signing.py::test_an_unsigned_artifact_is_rejected_by_default_and_loaded_only_with_the_explicit_flag",
+    "engine/tests/unit/test_artifact_signing.py::test_the_legacy_flag_never_accepts_invalid_signatures_unknown_keys_or_other_companies",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_loads_and_its_manifest_binds_tenant_core_run_and_data",
+    "engine/tests/unit/test_artifact_signing.py::test_deserialization_uses_the_verified_bytes_not_the_file_on_disk",
+    "engine/predictily_engine/platform/signing.py::verify_artifact_file / deserialize (único joblib.load del motor, tras verificar) / write_manifest",
+    "engine/predictily_engine/platform/artifacts.py::save_signed_artifact / verify_stored_artifact / confine_stored_path",
+    "engine/predictily_engine/customer/service.py::load_artifact; engine/predictily_engine/pipeline/forecast_run.py::_save_signed_artifact"
+   ],
+   "note": "La procedencia se verifica con firma Ed25519 antes de deserializar (el pickle malicioso con SHA-256 coherente se rechaza sin efecto lateral), pero el formato sigue siendo joblib/pickle."
+  },
+  {
+   "id": "V25-REG-073",
+   "status": "PARCIAL",
+   "gap": "El backend (ModelArtifactVerifier::locate) acepta rutas absolutas de filas antiguas y no compara el prefijo de la ruta con la empresa de la fila (sí compara la empresa del manifiesto firmado); falta el backfill idempotente de las filas legadas a ruta relativa y el motivo explícito artifact_path_outside_tenant (el motor responde artifact_path_invalid).",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_stored_paths_cannot_leave_the_company_directory",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_of_another_company_is_rejected",
+    "engine/tests/unit/test_artifact_signing.py::test_legacy_stored_paths_inside_the_company_directory_still_resolve",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_relative_paths_cannot_leave_the_artifacts_directory",
+    "backend/tests/Feature/Customer/ModelArtifactSignatureTest.php::test_rollback_rejects_a_signed_artifact_of_another_company",
+    "engine/predictily_engine/platform/artifacts.py::confine_stored_path; backend/app/Services/Forecasting/ModelArtifactVerifier.php::locate / inspect"
+   ],
+   "note": "El motor confina el artefacto a <ENGINE_ARTIFACTS_DIR>/<empresa>/ (absolutas ajenas, '..' y enlaces rechazados) antes de abrirlo; el backend rechaza '..' y enlaces fuera del directorio."
+  },
+  {
+   "id": "V25-REG-028",
+   "status": "PARCIAL",
+   "gap": "Falta el subcomando documentado `sign` (la firma se aplica al guardar el artefacto con la clave del entorno de entrenamiento) y el re-firmado de artefactos legados; la CLI expone keygen y verify-artifact.",
+   "evidence": [
+    "engine/tests/unit/test_artifact_signing.py::test_keygen_creates_a_0600_private_file_prints_only_the_public_key_and_refuses_to_overwrite",
+    "engine/tests/unit/test_artifact_signing.py::test_a_signed_artifact_loads_and_its_manifest_binds_tenant_core_run_and_data",
+    "engine/tests/unit/test_artifact_signing.py::test_the_registry_row_records_the_signature_summary_in_artifact_compat",
+    "engine/tests/unit/test_artifact_signing.py::test_verify_artifact_command_reports_the_verification_without_deserializing",
+    "engine/predictily_engine/cli.py (keygen, verify-artifact); engine/predictily_engine/platform/signing.py::write_manifest"
+   ],
+   "note": "Firma Ed25519 con la clave del entorno de entrenamiento y registro de key_id y huella del manifiesto en artifact_compat.signature; par de claves generado con keygen (privada 0600, nunca impresa)."
+  }
+ ]
+}

@@ -213,6 +213,8 @@ def _shortfalls(problem: PlanProblem, ev, activity, offers) -> list[dict[str, An
                             reasons.append("storage_capacity")
                 if any(a["binding"] for a in binding_res):
                     reasons.append("resource_capacity")
+                if _blocked_by_shelf_life(problem, node, res, offs, b, tau):
+                    reasons.append("shelf_life")      # W5-D: todo pedido posible dejaría más stock del vendible dentro de su vida útil: no se compra lo que vencería
                 if not reasons:
                     reasons.append("economic")
             uniq = sorted(set(reasons))
@@ -222,6 +224,34 @@ def _shortfalls(problem: PlanProblem, ev, activity, offers) -> list[dict[str, An
                         "demand": round(float(node.demand[tau]), 4), "unmet": round(float(res.unmet[tau]), 4),
                         "reason": uniq[0] if len(uniq) == 1 else "mixed", "reasons": uniq})
     return out
+
+
+def _blocked_by_shelf_life(problem: PlanProblem, node, res, offs, branch: int, tau: int) -> bool:
+    """¿Todo pedido que llegaría a tiempo para el período `tau` quedaría fuera del tope por vida útil? Dos topes (aproximación suficiente):
+    (a) stock de cierre + (cantidad mínima comprable − lo no atendido que ese pedido sí vendería en el período) > tope de arrastre, y
+    (b) con vida útil menor que el período, lo disponible al inicio del período + cantidad mínima > tope de disponibilidad (demanda de sus primeros días)."""
+    if (node.shelf_cap is None and node.avail_cap is None) or not offs:
+        return False
+    R = problem.period_days
+    options = 0
+    for o in offs:
+        q_min = max(o.moq, o.lot, EPS)
+        for t in range(problem.n_periods):
+            a = arrival_period(t, o.lead(branch), R)
+            if a > tau:
+                break
+            if a >= node.horizon or not o.valid_on(problem.issue_date(t)):
+                continue
+            cap_end = float(node.shelf_cap[a]) if node.shelf_cap is not None and a < len(node.shelf_cap) else np.inf
+            cap_av = float(node.avail_cap[a]) if node.avail_cap is not None and a < len(node.avail_cap) else np.inf
+            if not np.isfinite(cap_end) and not np.isfinite(cap_av):
+                return False
+            options += 1
+            after_end = float(res.inventory[a]) + max(q_min - float(res.unmet[a]), 0.0)
+            after_avail = float(res.peak[a]) + q_min
+            if after_end <= cap_end + 1e-6 and after_avail <= cap_av + 1e-6:
+                return False
+    return options > 0
 
 
 def summarize(problem: PlanProblem, sol: PlanSolution) -> dict[str, Any]:
