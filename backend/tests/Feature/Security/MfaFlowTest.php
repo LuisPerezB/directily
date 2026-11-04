@@ -260,6 +260,7 @@ final class MfaFlowTest extends TestCase
             'tokens de la empresa (users.manage)' => fn () => $api()->getJson('/api/v1/tenant/tokens'),
             'rol comercial (users.manage)' => fn () => $api()->putJson("/api/v1/tenant/users/{$user->id}/commercial-role", ['commercial_role' => null]),
             'fuentes de datos y token de conector (datasources.manage)' => fn () => $api()->postJson("/api/v1/data-sources/{$source->id}/tokens"),
+            'dispositivos del Bridge (datasources.manage)' => fn () => $api()->getJson('/api/v1/bridge/devices'),
             'aprobación de modelos (models.approve)' => fn () => $api()->postJson('/api/v1/models/999/approve'),
             'promoción de modelos (models.approve)' => fn () => $api()->postJson('/api/v1/models/999/promote'),
             'rechazo de modelos (models.approve)' => fn () => $api()->postJson('/api/v1/models/999/reject', ['reason' => 'x']),

@@ -1,0 +1,42 @@
+# Predictily Bridge · configuración de EJEMPLO (sin secretos). Copiar a <home>/config.toml con permisos 0600/0640.
+# Verificación: predictily-bridge check-config --pin   (valida las consultas con el guardia SELECT y muestra la huella a fijar)
+
+[server]
+url = "https://app.predictily.example"      # HTTPS obligatorio (http solo a localhost con allow_insecure_localhost = true, para pruebas)
+# ca_bundle = "C:/ProgramData/Predictily/Bridge/ca-corporativa.pem"
+
+[agent]
+batch_rows = 5000
+spool_max_mb = 512                            # búfer cifrado local ante caída de red (acotado)
+overlap_minutes = 120                         # relee 2 h antes de la marca de agua (cambios en curso)
+interval_seconds = 900
+heartbeat_seconds = 60
+source_timezone = "America/Guayaquil"         # zona de las fechas SIN zona del ERP (obligatoria con recorded_at_column)
+require_readonly_account = true               # se niega a extraer si la cuenta puede escribir. Por defecto es true en MySQL y SQL Server; en el resto, false (recomendado true en producción)
+# templates_sha256 = "…"                      # huella de las plantillas revisadas (check-config --pin)
+
+[source]
+kind = "postgresql"                           # postgresql | sqlite | mysql | sqlserver | csv | excel
+host = "erp.interno.cliente"
+port = 5432
+database = "erp"
+user = "predictily_lector"                    # cuenta con GRANT SELECT únicamente
+sslmode = "require"                           # TLS obligatorio por defecto. Un PostgreSQL LOCAL sin TLS (solo pruebas): sslmode = "prefer" o "disable", de forma explícita. Producción: "verify-full"
+password_secret = "source_password"           # guardada cifrada con: predictily-bridge secret set source_password
+# password_env = "ERP_PASSWORD"               # alternativa: variable de entorno del servicio
+
+# Una consulta SELECT por entidad y versión, REVISADA POR EL CLIENTE. Los alias de columna son los campos canónicos de Predictily.
+# `order_by`: columnas del resultado que ordenan TOTALMENTE las filas (llave única, NOT NULL): permiten reanudar sin repetir lotes.
+# `recorded_at_column`: fecha de modificación en el ERP (marca de agua acotada al inicio de la extracción).
+[[templates]]
+id = "erp.ejemplo.sales"
+entity = "sales"
+version = 1
+recorded_at_column = "source_recorded_at"
+order_by = ["document_number", "line_number"]
+sql = '''
+SELECT f.num_factura AS document_number, f.tipo AS document_type, f.estado AS status, f.fecha_emision AS issued_at, f.cod_sucursal AS branch_code,
+       l.linea AS line_number, l.cod_item AS product_sku, l.cantidad AS quantity, l.precio_unit AS unit_price, f.modificado_en AS source_recorded_at
+FROM facturas f JOIN factura_lineas l ON l.id_factura = f.id_factura
+WHERE f.modificado_en >= :since
+'''

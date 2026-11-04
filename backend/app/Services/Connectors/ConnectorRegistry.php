@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Connectors;
 
 use App\Services\Connectors\Connectors\AbstractConnector;
+use App\Services\Connectors\Connectors\BridgeConnector;
 use App\Services\Connectors\Connectors\ContificoConnector;
 use App\Services\Connectors\Connectors\GenericCsvConnector;
 use App\Services\Connectors\Connectors\GenericExcelConnector;
@@ -24,7 +25,9 @@ final class ConnectorRegistry
     {
         foreach ([new GenericCsvConnector, new GenericExcelConnector, new GenericRestConnector, new ContificoConnector, new GenericOdbcConnector,
             // Etapa 2 · P3: conectores SQL de solo lectura (ADR-V2-13).
-            new PostgresSqlConnector, new MySqlSqlConnector, new SqlServerSqlConnector] as $connector) {
+            new PostgresSqlConnector, new MySqlSqlConnector, new SqlServerSqlConnector,
+            // V2.5 · W6-B: agente Bridge de solo lectura en la red del cliente (ADR-V25-10).
+            new BridgeConnector] as $connector) {
             $this->connectors[$connector->key()] = $connector;
         }
     }

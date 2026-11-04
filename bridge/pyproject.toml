@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predictily-bridge"
+version = "0.1.0"
+description = "Predictily Bridge: agente de SOLO LECTURA que extrae del ERP del cliente y sube lotes comprimidos a Predictily (ADR-V25-10)"
+requires-python = ">=3.12,<3.13"
+license = { text = "Propietario" }
+# Dependencias mínimas y SIN relación con el motor. Solo `cryptography` es obligatoria (firma Ed25519 del dispositivo y cifrado local AES-GCM).
+dependencies = [
+    "cryptography==50.0.2",
+]
+
+[project.optional-dependencies]
+# Controladores de origen (cada uno solo si se usa; SQLite y los archivos CSV usan la biblioteca estándar).
+postgres = ["psycopg[binary]==3.3.6"]
+mysql = ["PyMySQL==1.1.1"]          # implemented_untested: sin servidor de pruebas
+sqlserver = ["pyodbc==5.2.0"]       # implemented_untested: sin servidor de pruebas (ODBC Driver 18 for SQL Server en el equipo)
+excel = ["openpyxl==3.1.5"]
+keyring = ["keyring==25.6.0"]       # almacén de claves del sistema (Keychain, Credential Locker, Secret Service)
+dev = ["pytest==9.1.1", "psycopg[binary]==3.3.6", "openpyxl==3.1.5"]
+# DISEÑADO (no construido aquí: requiere host Windows): ver docs/integrations/BRIDGE_WINDOWS.md
+windows-package = ["pyinstaller==6.11.1", "pywin32==308"]
+
+[project.scripts]
+predictily-bridge = "predictily_bridge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "postgres: requiere la base «ERP de origen» ficticia en PostgreSQL (BRIDGE_TEST_PG_DSN o valores por defecto locales)",
+]
+filterwarnings = ["error::DeprecationWarning:predictily_bridge"]

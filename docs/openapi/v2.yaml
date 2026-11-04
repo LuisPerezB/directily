@@ -33,6 +33,7 @@ tags:
 - {name: Revenue Radar}
 - {name: Outcomes y ROI}
 - {name: Seguridad Enterprise}
+- {name: Bridge}
 paths:
   /assistant/messages:
     post:
@@ -5534,8 +5535,372 @@ paths:
         '422': {$ref: '#/components/responses/Validation'}
       x-ability: settings.manage
   # <<< W6-A seguridad Enterprise
+  # >>> W6-B predictily bridge (ADR-V25-10; §4)
+  /data-sources/{dataSource}/bridge/enrolments:
+    post:
+      tags: [Bridge]
+      summary: Generar un código de registro de un solo uso para un agente Bridge
+      description: |-
+        Un administrador genera un **código de registro** ligado a UNA fuente de datos con el conector `predictily_bridge`. El código se muestra **una sola vez** (de él solo se guarda el SHA-256), caduca (60 minutos por defecto, máximo 24 h) y se consume de forma atómica al canjearlo (`POST /bridge/enrol`). Una fuente de otro conector responde 422 `not_a_bridge_source`.
+
+        Habilidad requerida: `datasources.manage`.
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {name: dataSource, in: path, required: true, schema: {type: integer}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_name_hint: {type: [string, 'null'], maxLength: 120, description: Nombre sugerido para el dispositivo (informativo)}
+                ttl_minutes: {type: [integer, 'null'], minimum: 1, maximum: 1440}
+      responses:
+        '201':
+          description: Código de registro (se muestra una sola vez)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeEnrolmentCode'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Validation'}
+      x-ability: datasources.manage
+  /bridge/devices:
+    get:
+      tags: [Bridge]
+      summary: Dispositivos Bridge de la empresa
+      description: |-
+        Lista los dispositivos con su estado (`active`: con latido reciente; `offline`: sin latido en 15 minutos; `revoked`), huella de la clave pública, versión, plataforma, último latido y la salud informada por el agente (informativa). **Nunca** devuelve el token ni su hash.
+
+        Habilidad requerida: `datasources.manage`.
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {name: data_source_id, in: query, schema: {type: integer}}
+      - {name: status, in: query, schema: {type: string, enum: [all, active, revoked], default: all}}
+      responses:
+        '200':
+          description: Dispositivos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/BridgeDevice'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Validation'}
+      x-ability: datasources.manage
+  /bridge/devices/{device}:
+    get:
+      tags: [Bridge]
+      summary: Detalle de un dispositivo Bridge con sus checkpoints
+      description: |-
+        Incluye, por entidad, la marca de agua confirmada, el cursor de la extracción en curso y el último lote confirmado.
+
+        Habilidad requerida: `datasources.manage`.
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {$ref: '#/components/parameters/BridgeDeviceId'}
+      responses:
+        '200':
+          description: Dispositivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeDevice'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+      x-ability: datasources.manage
+  /bridge/devices/{device}/revoke:
+    post:
+      tags: [Bridge]
+      summary: Revocar un dispositivo Bridge (efecto inmediato)
+      description: |-
+        Desde ese instante el token, la firma y cualquier URL prefirmada ya emitida dejan de servir (cada petición relee el estado del dispositivo): un dispositivo revocado no sube nada (401 `device_revoked`). Idempotente. Si era el último dispositivo activo de la fuente, la fuente queda `inactive`. El agente, al enterarse, borra su búfer local.
+
+        Habilidad requerida: `datasources.manage`.
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {$ref: '#/components/parameters/BridgeDeviceId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: [string, 'null'], maxLength: 200}
+      responses:
+        '200':
+          description: Dispositivo revocado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeDevice'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+      x-ability: datasources.manage
+  /bridge/devices/{device}/checkpoints/{entity}:
+    delete:
+      tags: [Bridge]
+      summary: Reiniciar el checkpoint de una entidad (pedir una carga completa nueva)
+      description: |-
+        Borra la marca de agua y el cursor de la entidad para ese dispositivo. Los datos ya recibidos NO se tocan: al reenviar los mismos lotes el servidor responde `duplicate` (idempotente por SHA-256). El agente lo detecta en su siguiente ciclo y vuelve a extraer completo. Queda en la bitácora.
+
+        Habilidad requerida: `datasources.manage`.
+      parameters:
+      - {$ref: '#/components/parameters/TenantHeader'}
+      - {$ref: '#/components/parameters/BridgeDeviceId'}
+      - {name: entity, in: path, required: true, schema: {type: string, pattern: '^[a-z_]{2,30}$'}}
+      responses:
+        '204': {description: Checkpoint reiniciado}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+      x-ability: datasources.manage
+  /bridge/enrol:
+    post:
+      tags: [Bridge]
+      summary: Registrar un dispositivo con el código de un solo uso (agente)
+      description: |-
+        Ruta **pública**, acotada por IP (10 intentos por minuto). El agente genera su par Ed25519 **localmente** y envía solo la clave pública y una **prueba de posesión** (firma de código, clave y hora). El servidor guarda la huella (SHA-256 de la clave pública) y el hash del token; el **token se devuelve una sola vez**. Un código desconocido, vencido o ya usado responde igual (422 `invalid_enrolment_code`, sin oráculo). Una clave pública ya activa responde 409 `public_key_in_use`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BridgeEnrolRequest'}
+      responses:
+        '201':
+          description: Dispositivo registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeEnrolResponse'}
+        '409': {description: 'La clave pública ya está registrada (code public_key_in_use)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {$ref: '#/components/responses/Validation'}
+        '429': {description: Demasiados intentos}
+  /bridge/heartbeat:
+    post:
+      tags: [Bridge]
+      summary: Latido del agente (salud y límites)
+      description: |-
+        Actualiza `last_seen_at`, versión y plataforma, y recuerda 24 h la salud informada (pendientes, búfer, errores, entidades, huellas de las plantillas, modo de solo lectura de la fuente). Responde los límites vigentes. La salud es informativa y no contiene secretos.
+
+        Autenticación del dispositivo: `Authorization: Bearer brt_…` **y** firma Ed25519 de la petición (ver el esquema de seguridad `bridgeDevice`).
+      security: [{bridgeDevice: []}]
+      parameters:
+      - {$ref: '#/components/parameters/BridgeKey'}
+      - {$ref: '#/components/parameters/BridgeTimestamp'}
+      - {$ref: '#/components/parameters/BridgeNonce'}
+      - {$ref: '#/components/parameters/BridgeSignature'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BridgeHeartbeatRequest'}
+      responses:
+        '200':
+          description: Contrato vigente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeContract'}
+        '401': {$ref: '#/components/responses/BridgeUnauthorized'}
+        '423': {description: La empresa no está activa (code tenant_inactive)}
+        '429': {description: Demasiadas peticiones}
+  /bridge/checkpoints:
+    get:
+      tags: [Bridge]
+      summary: Checkpoints confirmados del dispositivo
+      description: |-
+        La **verdad** de lo confirmado: el agente reconcilia con ella al iniciar cada ciclo (si perdió su estado local reanuda desde el cursor del servidor; si no hay fila, una carga completa nueva).
+
+        Autenticación del dispositivo: token + firma.
+      security: [{bridgeDevice: []}]
+      parameters:
+      - {$ref: '#/components/parameters/BridgeKey'}
+      - {$ref: '#/components/parameters/BridgeTimestamp'}
+      - {$ref: '#/components/parameters/BridgeNonce'}
+      - {$ref: '#/components/parameters/BridgeSignature'}
+      responses:
+        '200':
+          description: Checkpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/BridgeCheckpoint'}
+        '401': {$ref: '#/components/responses/BridgeUnauthorized'}
+    post:
+      tags: [Bridge]
+      summary: Confirmar un checkpoint tras el acuse de un lote
+      description: |-
+        «Checkpoints confirmados solo tras el acuse del servidor». Un checkpoint **intermedio** (`run_complete=false`) exige el lote citado (`batch_sha256`, con su posición `run_batch_index` dentro de la extracción `run_id`) ya registrado en Bronze para la misma empresa, entidad y fuente del dispositivo (409 `batch_not_found` si no) y **sin haber fallado** (409 `batch_failed` si el lote falló al procesarse o está en cuarentena), y guarda el cursor opaco (≤ 200 caracteres). Cada lote confirmado entra en un **libro por extracción**: otra posición ocupada por otro lote responde 409 `run_batch_conflict`.
+
+        Al **completar** la extracción (`run_complete=true`, con `run_batches` = cuántos lotes tuvo; 0 si no hubo filas) el servidor comprueba el libro: los lotes de la extracción son exactamente 1…N, sin huecos (409 `run_incomplete`, con `context.missing`) y ninguno fallido (409 `batch_failed`); solo entonces se fija la marca de agua, que el agente acota al inicio de su extracción (misma regla que `SourceSyncService`) y el servidor vuelve a acotar: nunca en el futuro (422 `watermark_in_future`) y nunca retrocede (409 `watermark_regression`). Una extracción sin lotes (`run_batches=0`) no cita ninguno (su marca no tiene otra prueba que la cota). Idempotente.
+
+        Autenticación del dispositivo: token + firma.
+      security: [{bridgeDevice: []}]
+      parameters:
+      - {$ref: '#/components/parameters/BridgeKey'}
+      - {$ref: '#/components/parameters/BridgeTimestamp'}
+      - {$ref: '#/components/parameters/BridgeNonce'}
+      - {$ref: '#/components/parameters/BridgeSignature'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BridgeCheckpointCommitRequest'}
+      responses:
+        '200':
+          description: Checkpoint confirmado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeCheckpoint'}
+        '401': {$ref: '#/components/responses/BridgeUnauthorized'}
+        '409': {description: 'Lote no encontrado para esta fuente (batch_not_found) o marca de agua que retrocede (watermark_regression)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {$ref: '#/components/responses/Validation'}
+  /bridge/uploads:
+    post:
+      tags: [Bridge]
+      summary: Declarar un lote y obtener su URL prefirmada de subida
+      description: |-
+        El agente declara entidad, SHA-256, tamaño, filas y columnas del lote NDJSON comprimido (gzip). El servidor valida (entidad permitida, límites, columnas = campos canónicos de la entidad, obligatorios presentes) y responde:
+
+        - `duplicate`: ese contenido YA está en Bronze (idempotencia por SHA-256); no hay URL. Si su procesamiento había fallado se vuelve a encolar.
+        - `upload`: una **ruta relativa prefirmada** (`path`) que vence (10 minutos por defecto) y fija empresa, dispositivo, entidad, SHA-256, tamaño, tipo y metadatos. El agente la une a SU URL de servidor configurada: el servidor nunca puede enviarlo a otro host.
+
+        Errores: 409 `source_inactive`, 409 `batch_conflict` (mismo contenido en otra fuente de la empresa), 409 `batch_quarantined` (ese contenido incumplió el contrato y está en cuarentena), 413 `batch_too_large`, 422 `unknown_columns` / `missing_required_columns` / `entity_not_allowed`, y **429 `quota_exceeded`** (cuota diaria de bytes subidos por empresa, con `Retry-After` hasta el reinicio a las 00:00 UTC; el agente conserva los lotes en su búfer). Los lotes ya recibidos (`duplicate`) no consumen cuota.
+
+        Autenticación del dispositivo: token + firma.
+      security: [{bridgeDevice: []}]
+      parameters:
+      - {$ref: '#/components/parameters/BridgeKey'}
+      - {$ref: '#/components/parameters/BridgeTimestamp'}
+      - {$ref: '#/components/parameters/BridgeNonce'}
+      - {$ref: '#/components/parameters/BridgeSignature'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BridgeUploadDeclareRequest'}
+      responses:
+        '200':
+          description: El lote ya existe (duplicate)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeUploadDeclaration'}
+        '201':
+          description: URL prefirmada emitida (upload)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeUploadDeclaration'}
+        '401': {$ref: '#/components/responses/BridgeUnauthorized'}
+        '409': {description: 'Fuente inactiva (source_inactive) o contenido de otra fuente (batch_conflict)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: 'Lote demasiado grande (batch_too_large)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {$ref: '#/components/responses/Validation'}
+        '429': {description: 'Demasiadas peticiones, o cuota diaria de la empresa agotada (quota_exceeded; trae Retry-After)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /bridge/uploads/{device}/{sha256}:
+    put:
+      tags: [Bridge]
+      summary: Subir UN lote por su URL prefirmada
+      description: |-
+        La **firma de la URL** (relativa, emitida por el servidor en `POST /bridge/uploads`) autoriza la subida de un solo lote de un solo dispositivo; no lleva token. Aun así se relee el estado del dispositivo: uno revocado no sube nada (401 `device_revoked`). El cuerpo se copia a un archivo temporal acotado al tamaño declarado y se comprueban tamaño y SHA-256 (422 `size_mismatch` / `checksum_mismatch`: no se guarda nada). Después se **valida el lote COMPLETO en flujo, ANTES de guardar nada**: gzip real (bytes `1f 8b 08`; 422 `batch_invalid`), cada línea un objeto JSON (422 `invalid_row`) con claves dentro de las columnas declaradas —una columna extra que aparezca solo en la fila 2 se rechaza (422 `unknown_columns`)—, valores escalares y acotados (2000 caracteres; los arreglos u objetos anidados son 422 `invalid_row`), número de filas **igual al declarado** (422 `row_count_mismatch`) y límites de filas, bytes descomprimidos y **relación de descompresión** frente a bombas de compresión (413 `batch_too_large`). Si todo coincide se registra en Bronze (`bridge_batch`, clave generada por el servidor `tenants/<uuid>/bronze/<entidad>/<aaaa>/<mm>/<sha256>.ndjson.gz`, procedencia del dispositivo, huella y deriva de esquema) y se encola el procesamiento por el pipeline de importación existente (cola `imports`). Reenviar el mismo contenido responde 200 `duplicate` sin registrar ni importar de nuevo. Una firma inválida o vencida responde 403.
+      security: [{bridgeSignedUrl: []}]
+      parameters:
+      - {name: device, in: path, required: true, schema: {type: integer}}
+      - {name: sha256, in: path, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      - {name: e, in: query, required: true, description: Entidad (firmada), schema: {type: string}}
+      - {name: n, in: query, required: true, description: Tamaño declarado en bytes (firmado), schema: {type: integer}}
+      - {name: r, in: query, description: Filas declaradas (firmado), schema: {type: integer}}
+      - {name: t, in: query, required: true, description: Uuid de la empresa (firmado), schema: {type: string, format: uuid}}
+      - {name: c, in: query, required: true, description: 'Columnas declaradas: JSON en base64 URL-safe (firmado)', schema: {type: string}}
+      - {name: expires, in: query, required: true, schema: {type: integer}}
+      - {name: signature, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema: {type: string, format: binary}
+      responses:
+        '200':
+          description: El lote ya estaba registrado (duplicate)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeUploadResult'}
+        '201':
+          description: Lote registrado en Bronze
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/BridgeUploadResult'}
+        '401': {$ref: '#/components/responses/BridgeUnauthorized'}
+        '403': {description: Firma de la URL inválida o vencida}
+        '413': {description: 'Cuerpo mayor que el declarado, o lote que supera los límites de filas, bytes descomprimidos o relación de descompresión (batch_too_large)'}
+        '415': {description: 'El tipo de contenido debe ser application/gzip'}
+        '422': {$ref: '#/components/responses/Validation'}
+  # <<< W6-B predictily bridge
 components:
+  # >>> W6-B predictily bridge (esquemas de seguridad)
+  securitySchemes:
+    bridgeDevice:
+      type: http
+      scheme: bearer
+      bearerFormat: brt_<token del dispositivo>
+      description: |-
+        Credencial del agente Bridge: token del dispositivo (`Authorization: Bearer brt_…`, del que el servidor solo guarda el SHA-256) **más** firma Ed25519 de la petición con la clave privada del dispositivo, que nunca sale de él. Encabezados: `X-Bridge-Key` (clave pública, base64 URL-safe; su SHA-256 debe coincidir con la huella registrada), `X-Bridge-Timestamp` (época en segundos, ±5 min), `X-Bridge-Nonce` (un solo uso) y `X-Bridge-Signature` (firma sobre `PREDICTILY-BRIDGE-V1\nMÉTODO\nRUTA\nCONSULTA\nTIMESTAMP\nNONCE\nSHA256(cuerpo)`). Un token robado sin la clave privada no sirve; una petición capturada no se puede repetir.
+    bridgeSignedUrl:
+      type: apiKey
+      in: query
+      name: signature
+      description: URL prefirmada de UN lote (firma relativa emitida por el servidor en `POST /bridge/uploads`; vence).
+  # <<< W6-B predictily bridge (esquemas de seguridad)
+  # >>> W6-B predictily bridge (respuestas)
+  responses:
+    BridgeUnauthorized:
+      description: |-
+        Credencial del dispositivo rechazada. `code`: `device_unauthorized` (token ausente o desconocido), `device_revoked` (el agente deja de enviar y borra su búfer), `device_signature_invalid`, `device_clock_skew` (trae `context.server_time`) o `device_replay`.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+  # <<< W6-B predictily bridge (respuestas)
   parameters:
+    # >>> W6-B predictily bridge (parámetros y respuestas)
+    BridgeDeviceId: {name: device, in: path, required: true, description: Id del dispositivo Bridge., schema: {type: integer}}
+    BridgeKey: {name: X-Bridge-Key, in: header, required: true, description: 'Clave pública Ed25519 del dispositivo (32 bytes, base64 URL-safe sin relleno); su SHA-256 debe coincidir con la huella registrada.', schema: {type: string}}
+    BridgeTimestamp: {name: X-Bridge-Timestamp, in: header, required: true, description: Época en segundos (tolerancia ±5 minutos)., schema: {type: integer}}
+    BridgeNonce: {name: X-Bridge-Nonce, in: header, required: true, description: 'Valor de un solo uso (16-64 caracteres base64 URL-safe); una repetición responde 401 device_replay.', schema: {type: string}}
+    BridgeSignature: {name: X-Bridge-Signature, in: header, required: true, description: 'Firma Ed25519 (base64 URL-safe) del mensaje canónico de la petición.', schema: {type: string}}
+    # <<< W6-B predictily bridge (parámetros y respuestas)
+    MappingTemplateId: {name: template, in: path, required: true, description: 'Id de la plantilla de mapeo.', schema: {type: integer}}
     MappingId:
       name: mapping
       in: path
@@ -5605,6 +5970,140 @@ components:
     RadarDirection: {name: direction, in: query, schema: {type: string, enum: [asc, desc]}}
     # <<< W5-A revenue radar (parámetros)
   schemas:
+    # >>> W6-B predictily bridge (esquemas)
+    BridgeEnrolmentCode:
+      type: object
+      description: Código de registro de un solo uso (se muestra una vez; el servidor solo guarda su SHA-256).
+      properties:
+        code: {type: string, example: BRG-0123-4567-89AB-CDEF-GHJK, description: '100 bits aleatorios en alfabeto Crockford; se tolera minúsculas, espacios y guiones'}
+        expires_at: {type: string, format: date-time}
+        data_source_id: {type: integer}
+        single_use: {type: boolean}
+        note: {type: string}
+    BridgeEnrolRequest:
+      type: object
+      required: [code, device_name, public_key, proof, timestamp]
+      properties:
+        code: {type: string, maxLength: 64}
+        device_name: {type: string, maxLength: 120}
+        public_key: {type: string, description: 'Clave pública Ed25519 (32 bytes) en base64 URL-safe sin relleno'}
+        proof: {type: string, description: 'Firma Ed25519 de `PREDICTILY-BRIDGE-ENROL-V1\nSHA256(código normalizado)\npublic_key\ntimestamp` con la clave privada del dispositivo'}
+        timestamp: {type: integer, description: Época en segundos (±5 min)}
+        agent_version: {type: [string, 'null'], maxLength: 40}
+        platform: {type: [string, 'null'], enum: [windows, linux, macos, other, null]}
+    BridgeContract:
+      type: object
+      description: Contrato vigente que el servidor comunica al agente.
+      properties:
+        protocol: {type: integer, example: 1}
+        server_time: {type: integer, description: Época del servidor (para detectar deriva de reloj)}
+        status: {type: string, description: Solo en el latido.}
+        source_status: {type: string, description: Estado de la fuente (solo en el latido).}
+        entities: {type: array, items: {type: string}, description: Entidades que un dispositivo puede entregar (solo `sales` está verificada de punta a punta)}
+        limits:
+          type: object
+          properties:
+            max_batch_bytes: {type: integer}
+            max_batch_rows: {type: integer}
+            upload_url_ttl_seconds: {type: integer}
+            max_checkpoint_length: {type: integer, example: 200}
+    BridgeEnrolResponse:
+      allOf:
+      - {$ref: '#/components/schemas/BridgeContract'}
+      - type: object
+        properties:
+          device_id: {type: integer}
+          token: {type: string, description: 'Token del dispositivo (`brt_…`): se devuelve UNA vez; el servidor solo guarda su SHA-256'}
+          tenant: {type: object, properties: {uuid: {type: string, format: uuid}}}
+          data_source: {type: object, properties: {id: {type: integer}, name: {type: string}}}
+    BridgeHeartbeatRequest:
+      type: object
+      properties:
+        agent_version: {type: [string, 'null'], maxLength: 40}
+        platform: {type: [string, 'null'], enum: [windows, linux, macos, other, null]}
+        health:
+          type: [object, 'null']
+          description: 'Salud informada por el agente (informativa; se acota y no contiene secretos).'
+          properties:
+            status: {type: string}
+            pending_batches: {type: integer}
+            spool_bytes: {type: integer}
+            last_error: {type: [string, 'null'], maxLength: 300}
+            last_success_at: {type: [string, 'null'], format: date-time}
+            warnings: {type: array, maxItems: 10, items: {type: string}}
+            entities: {type: array, items: {type: object, additionalProperties: true}}
+            templates: {type: array, items: {type: object, properties: {entity: {type: string}, id: {type: string}, version: {type: integer}, sha256: {type: string}}}, description: 'Huellas de las plantillas de consulta locales (el servidor NUNCA envía SQL)'}
+            source: {type: object, properties: {kind: {type: string}, read_only_enforcement: {type: string}, writable_account: {type: boolean}}}
+    BridgeDevice:
+      type: object
+      properties:
+        id: {type: integer}
+        data_source_id: {type: integer}
+        name: {type: string}
+        status: {type: string, enum: [active, offline, revoked]}
+        public_key_fingerprint: {type: string, description: SHA-256 de la clave pública del dispositivo}
+        agent_version: {type: [string, 'null']}
+        platform: {type: [string, 'null']}
+        registered_at: {type: string, format: date-time}
+        last_seen_at: {type: [string, 'null'], format: date-time}
+        revoked_at: {type: [string, 'null'], format: date-time}
+        revoked_by: {type: [integer, 'null']}
+        health: {type: object, additionalProperties: true}
+        checkpoints: {type: array, items: {$ref: '#/components/schemas/BridgeCheckpoint'}, description: Solo en el detalle.}
+    BridgeCheckpoint:
+      type: object
+      properties:
+        entity: {type: string}
+        watermark: {type: [string, 'null'], format: date-time, description: 'Marca de agua confirmada de la última extracción completa (acotada al inicio de la extracción)'}
+        checkpoint: {type: [string, 'null'], maxLength: 200, description: Cursor opaco de la extracción en curso}
+        bronze_object_id: {type: [integer, 'null'], description: Último lote confirmado}
+        updated_at: {type: [string, 'null'], format: date-time}
+    BridgeCheckpointCommitRequest:
+      type: object
+      required: [entity, run_id, run_complete]
+      properties:
+        entity: {type: string}
+        run_id: {type: string, pattern: '^[A-Za-z0-9_-]{4,40}$', description: Identificador de la extracción (el mismo en todos sus lotes)}
+        batch_sha256: {type: [string, 'null'], pattern: '^[A-Fa-f0-9]{64}$', description: 'Lote que se confirma (obligatorio en un checkpoint intermedio; opcional al completar, donde la prueba es el libro de la extracción)'}
+        run_batch_index: {type: [integer, 'null'], minimum: 1, description: Posición (1…N) del lote dentro de la extracción (obligatoria si se cita un lote)}
+        run_batches: {type: [integer, 'null'], minimum: 0, description: 'Total de lotes de la extracción (obligatorio al completar; 0 si no hubo filas)'}
+        checkpoint: {type: [string, 'null'], maxLength: 200, description: 'Cursor opaco tras el lote (obligatorio si run_complete=false; debe ser nulo si true)'}
+        watermark: {type: [string, 'null'], format: date-time, description: 'Marca de agua (obligatoria si run_complete=true; nula si false)'}
+        run_complete: {type: boolean}
+    BridgeUploadDeclareRequest:
+      type: object
+      required: [entity, sha256, size_bytes, row_count, content_type, columns]
+      properties:
+        entity: {type: string}
+        sha256: {type: string, pattern: '^[A-Fa-f0-9]{64}$', description: SHA-256 de los bytes comprimidos que se subirán}
+        size_bytes: {type: integer, minimum: 1}
+        row_count: {type: integer, minimum: 1}
+        content_type: {type: string, enum: [application/gzip]}
+        columns: {type: object, additionalProperties: {type: [string, 'null']}, description: 'Columna → tipo observado; las columnas deben ser campos canónicos de la entidad'}
+        source_timezone: {type: [string, 'null'], description: Zona horaria de las fechas sin zona del origen}
+        run_id: {type: [string, 'null']}
+        seq: {type: [integer, 'null']}
+        run_mode: {type: [string, 'null'], enum: [full, incremental, null]}
+        template_version: {type: [integer, 'null']}
+    BridgeUploadDeclaration:
+      type: object
+      properties:
+        status: {type: string, enum: [upload, duplicate]}
+        bronze_object_id: {type: integer, description: Solo en `duplicate`.}
+        processing: {type: string, enum: [queued, running, completed, needs_review, failed], description: Solo en `duplicate`.}
+        method: {type: string, example: PUT}
+        path: {type: string, description: Ruta relativa prefirmada (se une a la URL del servidor configurada en el agente)}
+        headers: {type: object, additionalProperties: true}
+        expires_at: {type: string, format: date-time}
+    BridgeUploadResult:
+      type: object
+      properties:
+        status: {type: string, enum: [stored, duplicate]}
+        bronze_object_id: {type: integer}
+        sha256: {type: string}
+        size_bytes: {type: integer}
+        processing: {type: string, enum: [queued, running, completed, needs_review, failed]}
+    # <<< W6-B predictily bridge (esquemas)
     # >>> W5-A revenue radar y agenda comercial (esquemas)
     RadarWindow:
       type: object

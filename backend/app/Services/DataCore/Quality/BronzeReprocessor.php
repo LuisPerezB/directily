@@ -10,6 +10,7 @@ use App\Models\ImportJob;
 use App\Models\SourceMapping;
 use App\Models\SourceSync;
 use App\Models\Tenant;
+use App\Services\Bridge\BridgeBatchProcessor;
 use App\Services\DataCore\Bronze\BronzeStore;
 use App\Services\DataCore\Sync\CanonicalImportRunner;
 use App\Services\DataCore\Sync\CanonicalStager;
@@ -66,7 +67,9 @@ final class BronzeReprocessor
         return match ($object->kind) {
             'file_upload' => $this->file($tenant, $object, $contents, $force),
             'sql_extract' => $this->sql($tenant, $object, $contents, $force),
-            'api_batch', 'bridge_batch' => $this->batch($tenant, $object, $contents, $force),
+            'api_batch' => $this->batch($tenant, $object, $contents, $force),
+            // V2.5 · W6-B: el lote del Bridge es NDJSON gzip de filas canónicas (no el cuerpo JSON de POST /sales/batch): lo reprocesa su propio servicio.
+            'bridge_batch' => app(BridgeBatchProcessor::class)->reprocess($tenant, $object, $force),
             default => throw new DomainStateException('Tipo de objeto Bronze no reprocesable: '.$object->kind, 'unsupported_kind'),
         };
     }

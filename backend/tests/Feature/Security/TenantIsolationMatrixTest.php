@@ -102,6 +102,8 @@ final class TenantIsolationMatrixTest extends TestCase
     /** Rutas SIN autenticación de usuario, revisadas una a una (la autenticación del Bridge es por dispositivo: token + firma). */
     private const PUBLIC_ROUTES = [
         'POST api/v1/auth/register', 'POST api/v1/auth/login', 'POST api/v1/auth/mfa/challenge',
+        'POST api/v1/bridge/enrol', 'POST api/v1/bridge/heartbeat', 'GET api/v1/bridge/checkpoints', 'POST api/v1/bridge/checkpoints', 'POST api/v1/bridge/uploads',
+        'PUT api/v1/bridge/uploads/{device}/{sha256}',
         // Con la bandera de concesiones apagada «no existen» (404 antes de autenticar): el verbo OPTIONS queda sin autenticación a propósito.
         'OPTIONS api/v1/intelligence/shared-forecast-grants', 'OPTIONS api/v1/intelligence/shared-forecast-grants/{grantId}', 'OPTIONS api/v1/intelligence/shared-forecast-grants/{grantId}/activate',
         'OPTIONS api/v1/intelligence/shared-forecast-grants/{grantId}/revoke', 'OPTIONS api/v1/intelligence/shared-forecast-grants/{grantId}/accesses',
@@ -546,6 +548,7 @@ final class TenantIsolationMatrixTest extends TestCase
         $reviewed = [
             'Console/Commands/Core/PurgeCommand.php' => 'purga de empresas vencidas: borra el árbol tenants/{id}/ de cada una',
             'Http/Controllers/Api/Core/TenantExportController.php' => 'descarga el ZIP de una exportación de SU empresa, tras comprobar pertenencia y habilidad',
+            'Services/Bridge/BridgeBatchIntake.php' => 'comprueba la existencia de un objeto Bronze ya registrado (fila con alcance de empresa)',
             'Services/DataCore/Bronze/BronzePurger.php' => 'borra tenants/{uuid}/bronze de UNA empresa',
             'Services/DataCore/Bronze/FilesystemBronzeStore.php' => 'rutas tenants/{uuid}/bronze/… (la empresa va en la ruta)',
             'Services/Imports/ImportService.php' => 'rutas tenants/{id}/imports/{uuid}',
@@ -609,6 +612,7 @@ final class TenantIsolationMatrixTest extends TestCase
             'Services/Plans/PlanLimitService.php' => 'clave plans:active_series:{empresa}:{día}',
             'Services/Conversation/AssistantLimiter.php' => 'claves tenant:{empresa}:assistant:…',
             'Services/Outcomes/BootstrapInterval.php' => 'clave = SHA-256 de las entradas numéricas del remuestreo (direccionada por contenido; sin identificadores ni datos de empresa)',
+            'Services/Bridge/BridgeDeviceService.php' => 'clave por dispositivo (id único global, fila con alcance de empresa)',
             'Services/Auth/Mfa/MfaStepUp.php' => 'clave por token o por persona (la persona es global: el segundo factor es de la persona)',
             'Services/Auth/Mfa/MfaChallenge.php' => 'clave = SHA-256 del desafío aleatorio de un solo uso (y su candado)',
             'Services/Auth/Mfa/MfaService.php' => 'contadores y bloqueos por persona + IP y por IP (el segundo factor es de la persona, no de la empresa)',

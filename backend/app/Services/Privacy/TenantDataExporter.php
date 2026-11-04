@@ -143,6 +143,10 @@ final class TenantDataExporter
         //    de mapeo de la empresa (las públicas, con tenant_id NULL, no son datos de la empresa) y auditoría del Intelligence Gateway. ──
         'bridge_devices' => ['id', 'data_source_id', 'name', 'public_key_fingerprint', 'agent_version', 'platform', 'registered_at', 'last_seen_at', 'revoked_at', 'revoked_by', 'created_at', 'updated_at'],
         'bridge_checkpoints' => ['id', 'bridge_device_id', 'entity', 'watermark', 'checkpoint', 'bronze_object_id', 'updated_at'],
+        // Códigos de registro del Bridge (W6-B): metadatos de quién los generó, cuándo vencen y quién los consumió; SIN `code_hash` (credencial de un solo uso).
+        'bridge_enrolment_codes' => ['id', 'data_source_id', 'device_name_hint', 'created_by', 'expires_at', 'consumed_at', 'consumed_by_device_id', 'created_at'],
+        // Libro de lotes confirmados por corrida del Bridge (W6-B): metadatos de la extracción de la empresa.
+        'bridge_run_batches' => ['id', 'bridge_device_id', 'entity', 'run_id', 'batch_index', 'bronze_object_id', 'row_count', 'created_at'],
         'mapping_templates' => ['id', 'system_kind', 'vendor', 'entity', 'version', 'schema_fingerprint', 'field_map', 'value_maps', 'confidence', 'status', 'approved_by', 'approved_at', 'created_at', 'updated_at'],
         'gateway_tool_calls' => ['id', 'user_id', 'channel', 'tool', 'decision', 'arguments', 'result_summary', 'latency_ms', 'created_at'],
     ];

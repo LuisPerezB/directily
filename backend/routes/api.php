@@ -34,4 +34,6 @@ Route::prefix('v1')->group(function (): void {
     require __DIR__.'/api/decision.php';
     // V2.5 · W6-A: seguridad Enterprise (MFA TOTP, tokens con alcance, roles comerciales, política de seguridad y revocación de dispositivos del Bridge).
     require __DIR__.'/api/security.php';
+    // V2.5 · W6-B: Predictily Bridge (registro de dispositivos, latido, URL prefirmada de subida a Bronze, checkpoints y revocación).
+    require __DIR__.'/api/bridge.php';
 });

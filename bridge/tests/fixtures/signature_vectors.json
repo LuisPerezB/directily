@@ -1,0 +1,56 @@
+{
+ "_note": "Vectores de la firma de peticiones del Bridge (Ed25519 es determinista). Los verifican bridge/tests/test_signature_vectors.py y backend/tests/Unit/Bridge/BridgeSignatureVectorsTest.php. Semilla de PRUEBA, no es un secreto real.",
+ "seed_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+ "public_key_b64": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+ "fingerprint": "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c",
+ "requests": [
+  {
+   "method": "POST",
+   "path": "/api/v1/bridge/heartbeat",
+   "query": "",
+   "timestamp": 1760000000,
+   "nonce": "AAECAwQFBgcICQoL",
+   "body": "{\"agent_version\":\"0.1.0\",\"platform\":\"linux\"}",
+   "message": "PREDICTILY-BRIDGE-V1\nPOST\n/api/v1/bridge/heartbeat\n\n1760000000\nAAECAwQFBgcICQoL\nba9f9eb0fd5ba3b4fa1af348a61ff261930b6c178c6df30bfeb703fe02c0951f",
+   "signature": "6xM02YZHBKhCFJEWHBdoyRUZ7So64_CCmAif3En6OJ85II2OSXkLGT-fmR8OeKyS8m1GoGD0QpQyqMRRFd6CAQ"
+  },
+  {
+   "method": "GET",
+   "path": "/api/v1/bridge/checkpoints",
+   "query": "",
+   "timestamp": 1760000001,
+   "nonce": "bm9uY2UtMDAwMDAwMg",
+   "body": "",
+   "message": "PREDICTILY-BRIDGE-V1\nGET\n/api/v1/bridge/checkpoints\n\n1760000001\nbm9uY2UtMDAwMDAwMg\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "signature": "OL2sJgPBUI2VbNiRW6QBitUy69rGl3wulnGRxplE4PPxzkqbfXCZOLxoi6SeBEO5ppZkZXfAOjLgMSEWvN1ZBw"
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/bridge/uploads",
+   "query": "",
+   "timestamp": 1760000002,
+   "nonce": "Zm9vYmFyYmF6cXV4",
+   "body": "{\"entity\":\"sales\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"size_bytes\":123,\"row_count\":4,\"content_type\":\"application/gzip\",\"columns\":{\"document_number\":\"string\"},\"nota\":\"áéí ñ € \\u00fc\"}",
+   "message": "PREDICTILY-BRIDGE-V1\nPOST\n/api/v1/bridge/uploads\n\n1760000002\nZm9vYmFyYmF6cXV4\nff6328d6ba0f66f9b21001d4d527f5a069d4f7373b7251de2782ad1317b61c6c",
+   "signature": "K67AFtRXKlMMKfqG4nDitAfucTDabTbiGLQXgkfzzwI7nRDB4PSj7fOOKWxSligDTYtlG4_N5YhPcQfVA1hFDg"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/v1/bridge/uploads/7/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+   "query": "e=sales&n=10&expires=1760000600",
+   "timestamp": 1760000003,
+   "nonce": "dGVzdC1ub25jZS0wMDA",
+   "body": "binary",
+   "message": "PREDICTILY-BRIDGE-V1\nPUT\n/api/v1/bridge/uploads/7/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\ne=sales&n=10&expires=1760000600\n1760000003\ndGVzdC1ub25jZS0wMDA\n9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd",
+   "signature": "5ady3IAOmvPhr39cwXRwhKJ4f2BcpBkbY0O05OPumLd7cBHQqJjZDfLKh5NQ1rE9YsezFYABvJwm7b-WBVNwBw"
+  }
+ ],
+ "enrol": {
+  "code": "BRG-0123-4567-89AB-CDEF-GHJK",
+  "normalized": "0123456789ABCDEFGHJK",
+  "code_hash": "a6b239e79989fa88083024f6fa3518b4f917667d90dc8408053fcf0cfc8cfb8a",
+  "timestamp": 1760000100,
+  "message": "PREDICTILY-BRIDGE-ENROL-V1\na6b239e79989fa88083024f6fa3518b4f917667d90dc8408053fcf0cfc8cfb8a\nA6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\n1760000100",
+  "proof": "Tp98ElbCvMv1Zg3mC78gV_OT3Qp8DRORWWZxNmrG5QDqRApQgTgGqMCruYWI-B8rV0jFAOLFg4J8c_lf2DuQCg"
+ }
+}
