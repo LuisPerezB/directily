@@ -11,6 +11,7 @@ use App\Services\Forecasting\Exceptions\EngineNotFoundException;
 use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
+use App\Services\Forecasting\Support\EngineCircuit;
 use App\Support\Horizons\HorizonCatalog;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
@@ -111,7 +112,11 @@ class EngineClient
     private function send(string $method, string $path, array $payload, int $timeout, bool $authenticated = true): array
     {
         try {
-            $response = $this->request($timeout, $authenticated)->{$method}($path, $method === 'get' ? null : $payload);
+            // Bajo el cortacircuitos (ADR-V26-01 · F6): con el motor caído falla al instante. /health pasa siempre: es la comprobación.
+            $response = app(EngineCircuit::class)->call(
+                fn () => $this->request($timeout, $authenticated)->{$method}($path, $method === 'get' ? null : $payload),
+                probe: $path === '/health',
+            );
         } catch (ConnectionException $e) {
             throw new EngineUnavailableException(
                 'El motor predictivo no respondió: '.$e->getMessage(),

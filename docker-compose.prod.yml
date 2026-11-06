@@ -43,6 +43,12 @@ services:
   queue-forecasting:
     environment:
       APP_URL: https://${PREDICTILY_DOMAIN}
+  queue-forecasting-light:
+    environment:
+      APP_URL: https://${PREDICTILY_DOMAIN}
+  queue-batch:
+    environment:
+      APP_URL: https://${PREDICTILY_DOMAIN}
   scheduler:
     environment:
       APP_URL: https://${PREDICTILY_DOMAIN}

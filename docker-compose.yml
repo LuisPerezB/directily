@@ -25,6 +25,11 @@ x-backend-env: &backend-env
   APP_TIMEZONE: UTC
   LOG_CHANNEL: stderr
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Alertas operativas (ADR-V26-01 · F5): tarea programada o trabajo de cola fallido → CRITICAL con `ops_alert` en el registro. Con
+  # OPS_ALERT_LOG_CHANNEL=slack y LOG_SLACK_WEBHOOK_URL también llega a Slack (misma alerta: una vez cada OPS_ALERT_THROTTLE_SECONDS).
+  OPS_ALERT_LOG_CHANNEL: ${OPS_ALERT_LOG_CHANNEL:-}
+  OPS_ALERT_THROTTLE_SECONDS: ${OPS_ALERT_THROTTLE_SECONDS:-900}
+  LOG_SLACK_WEBHOOK_URL: ${LOG_SLACK_WEBHOOK_URL:-}
   DB_CONNECTION: pgsql
   DB_HOST: postgres
   DB_PORT: "5432"
@@ -38,6 +43,8 @@ x-backend-env: &backend-env
   QUEUE_CONNECTION: redis
   # Debe ser MAYOR que el --timeout del worker de pronósticos (1000 s) para no duplicar trabajos.
   REDIS_QUEUE_RETRY_AFTER: "1100"
+  # Conexión `redis-long` (worker `queue`): MAYOR que el $timeout más largo de importación, bridge, sincronización y exportación (3600 s).
+  REDIS_LONG_QUEUE_RETRY_AFTER: "3700"
   CACHE_STORE: redis
   SESSION_DRIVER: redis
   SESSION_LIFETIME: ${SESSION_LIFETIME:-120}
@@ -49,6 +56,16 @@ x-backend-env: &backend-env
   ENGINE_URL: http://engine:8100
   ENGINE_API_TOKEN: ${ENGINE_API_TOKEN:?Defina ENGINE_API_TOKEN en .env}
   ENGINE_TIMEOUT: ${ENGINE_TIMEOUT:-900}
+  # Cola de los trabajos CORTOS del motor (predicción diaria de clientes, evaluación contra reales, preparación de datos), que atiende
+  # el worker `queue-forecasting-light`: así no esperan detrás de los entrenamientos (ADR-V26-01 · F3). Para volver a una sola cola,
+  # ENGINE_LIGHT_QUEUE=forecasting (el worker ligero queda ocioso: su cola `forecasting-light` está fija en su comando).
+  ENGINE_LIGHT_QUEUE: ${ENGINE_LIGHT_QUEUE:-forecasting-light}
+  # Cortacircuitos hacia el motor (ADR-V26-01 · F6): con el motor caído las llamadas fallan al instante y los trabajos se aplazan sin
+  # gastar intentos hasta que vuelve. ENGINE_CIRCUIT_ENABLED=false lo apaga (comportamiento anterior).
+  ENGINE_CIRCUIT_ENABLED: ${ENGINE_CIRCUIT_ENABLED:-true}
+  # Cola de los trabajos por empresa del ciclo diario (radar, decisiones, medición de resultados), que atiende el worker `queue-batch`
+  # (ADR-V26-01 · F4). Para volver a la cola general, PIPELINE_QUEUE=default (el worker `queue-batch` queda ocioso).
+  PIPELINE_QUEUE: ${PIPELINE_QUEUE:-batch}
   # Mismo volumen que el motor (montado en solo lectura abajo): el backend verifica la firma Ed25519 y el SHA-256 de los artefactos al
   # revertir modelos. Solo claves PÚBLICAS (kid:clave, las mismas que el motor): el backend NUNCA recibe la clave privada de firma.
   ENGINE_ARTIFACTS_DIR: /data/artifacts
@@ -151,11 +168,13 @@ services:
       <<: *backend-env
       RUN_MIGRATIONS: "true"
 
-  # Worker de importaciones y tareas generales.
+  # Worker de importaciones y tareas generales. Usa la conexión `redis-long` (retry_after 3700 s): sus trabajos declaran $timeout de
+  # hasta 3600 s, que manda sobre --timeout. Al detenerse termina el trabajo en curso; el periodo de gracia lo cubre para que un
+  # despliegue no lo mate a medias (con tries=1 quedaría fallido). Si no hay trabajo en curso, se detiene de inmediato.
   queue:
     <<: *backend-service
-    command: ["php", "artisan", "queue:work", "redis", "--queue=imports,default", "--tries=2", "--timeout=600", "--memory=1024", "--max-time=3600", "--sleep=3"]
-    stop_grace_period: 60s
+    command: ["php", "artisan", "queue:work", "redis-long", "--queue=imports,default", "--tries=2", "--timeout=600", "--memory=1024", "--max-time=3600", "--sleep=3"]
+    stop_grace_period: ${QUEUE_STOP_GRACE_PERIOD:-3660s}
     healthcheck:
       disable: true
     depends_on:
@@ -166,7 +185,8 @@ services:
   queue-forecasting:
     <<: *backend-service
     command: ["php", "artisan", "queue:work", "redis", "--queue=forecasting", "--tries=2", "--timeout=1000", "--memory=512", "--max-time=7200", "--sleep=3"]
-    stop_grace_period: 120s
+    # Cubre el --timeout del worker (1000 s) para no matar un pronóstico en curso al desplegar.
+    stop_grace_period: ${FORECASTING_STOP_GRACE_PERIOD:-1020s}
     healthcheck:
       disable: true
     depends_on:
@@ -174,6 +194,33 @@ services:
         condition: service_started
       engine:
         condition: service_healthy
+
+  # Worker de los trabajos cortos del motor (ADR-V26-01 · F3). Corre a la vez que `queue-forecasting`: el motor recibe hasta dos
+  # llamadas simultáneas (ENGINE_WORKERS debe ser ≥ 2 y ENGINE_MEMORY_LIMIT cubrir un entrenamiento más una predicción).
+  queue-forecasting-light:
+    <<: *backend-service
+    command: ["php", "artisan", "queue:work", "redis", "--queue=forecasting-light", "--tries=2", "--timeout=1000", "--memory=512", "--max-time=7200", "--sleep=3"]
+    stop_grace_period: ${FORECASTING_STOP_GRACE_PERIOD:-1020s}
+    healthcheck:
+      disable: true
+    depends_on:
+      backend:
+        condition: service_started
+      engine:
+        condition: service_healthy
+
+  # Worker del ciclo diario por empresa (ADR-V26-01 · F4): radar, decisiones y medición de resultados, un trabajo por empresa. No llama
+  # al motor. Con UN worker las etapas de una empresa corren en el orden en que se encolan (radar → decisiones → resultados); con más
+  # (`--scale queue-batch=N`) van más rápido, pero dos etapas de la misma empresa pueden coincidir.
+  queue-batch:
+    <<: *backend-service
+    command: ["php", "artisan", "queue:work", "redis", "--queue=batch", "--tries=2", "--timeout=900", "--memory=512", "--max-time=3600", "--sleep=3"]
+    stop_grace_period: ${BATCH_STOP_GRACE_PERIOD:-920s}
+    healthcheck:
+      disable: true
+    depends_on:
+      backend:
+        condition: service_started
 
   # Programador (evaluación diaria vs reales, pronósticos programados, purgas).
   scheduler:

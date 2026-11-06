@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Console\Commands\Outcomes;
 
+use App\Jobs\Pipeline\RunOutcomesStage;
 use App\Models\Tenant;
 use App\Services\Outcomes\OutcomeMeasurementService;
+use App\Services\Pipeline\OutcomesStageRunner;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -23,12 +25,13 @@ final class MeasureOutcomesCommand extends Command
     /** Código estable del error de una empresa (la causa queda en el registro de la aplicación). */
     public const ERROR_TENANT_FAILED = 'outcomes_tenant_failed';
 
-    protected $signature = 'predictily:outcomes-measure {--tenant= : Id de una sola empresa} {--dry-run : Solo cuenta lo que mediría, sin escribir} {--lag= : Margen de espera en días (por omisión, el de la empresa)}';
+    protected $signature = 'predictily:outcomes-measure {--tenant= : Id de una sola empresa} {--dry-run : Solo cuenta lo que mediría, sin escribir} {--lag= : Margen de espera en días (por omisión, el de la empresa)} {--queue : Encola un trabajo por empresa en vez de medir aquí}';
 
     protected $description = 'Mide los outcomes (acción → evento observable posterior) de las recomendaciones cuya ventana ya cerró, con clasificación honesta (idempotente)';
 
-    public function handle(OutcomeMeasurementService $service): int
+    public function handle(OutcomeMeasurementService $service, OutcomesStageRunner $runner): int
     {
+        $dryRun = (bool) $this->option('dry-run');
         $lag = $this->option('lag');
         if ($lag !== null && (! ctype_digit((string) $lag) || (int) $lag > 90)) {
             $this->error('--lag debe ser un entero entre 0 y 90.');
@@ -47,9 +50,29 @@ final class MeasureOutcomesCommand extends Command
         if ($only !== null) {
             $query->whereKey((int) $only);
         }
-        $query->each(function (Tenant $tenant) use ($service, $lag, &$total, &$failed): void {
+        // ADR-V26-01 · F4: como lo lanza el planificador. No mide aquí: encola un trabajo por empresa (RunOutcomesStage), de modo que una
+        // empresa lenta no retrasa a las demás y la que falla se reintenta sola. El margen (--lag) es el de cada empresa.
+        if ($this->option('queue')) {
+            if ($dryRun || $lag !== null) {
+                $this->error('--queue no se puede combinar con --dry-run ni con --lag.');
+
+                return self::INVALID;
+            }
+            $queued = 0;
+            $query->each(function (Tenant $tenant) use (&$queued): void {
+                RunOutcomesStage::dispatch((int) $tenant->getKey());
+                $queued++;
+            });
+            $this->info("Empresas encoladas: {$queued}");
+
+            return self::SUCCESS;
+        }
+        $query->each(function (Tenant $tenant) use ($service, $runner, $dryRun, $lag, &$total, &$failed): void {
             try {
-                $report = $service->measure($tenant, CarbonImmutable::now(), (bool) $this->option('dry-run'), $lag === null ? null : (int) $lag);
+                // Sin --dry-run pasa por OutcomesStageRunner, que además deja constancia de la etapa en `pipeline_stages`.
+                $report = $dryRun
+                    ? $service->measure($tenant, CarbonImmutable::now(), true, $lag === null ? null : (int) $lag)
+                    : $runner->run($tenant, $lag === null ? null : (int) $lag);
             } catch (Throwable $e) {
                 // El detalle (puede traer SQL o datos) queda en el registro de la aplicación; la salida lleva solo un código estable.
                 Log::error('Outcomes: empresa con error', ['tenant_id' => $tenant->getKey(), 'exception' => $e::class, 'error' => $e->getMessage()]);

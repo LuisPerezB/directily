@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Jobs\Forecasting;
 
 use App\Jobs\Middleware\SetTenantContext;
+use App\Jobs\Middleware\WaitForEngine;
 use App\Models\TrainingJob;
 use App\Services\Forecasting\EngineClient;
 use App\Services\Forecasting\Exceptions\EngineException;
+use App\Services\Forecasting\Support\EngineQueue;
 use App\Services\Forecasting\TrainingJobRecorder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -34,7 +36,7 @@ class EvaluateActuals implements ShouldBeUnique, ShouldQueue
         public int $lookbackRuns = 10,
         public string $triggeredBy = 'schedule',
     ) {
-        $this->onQueue((string) config('engine.queue', 'forecasting'));
+        $this->onQueue(EngineQueue::light());
     }
 
     public function uniqueId(): string
@@ -51,7 +53,8 @@ class EvaluateActuals implements ShouldBeUnique, ShouldQueue
     /** @return list<object> */
     public function middleware(): array
     {
-        return [new SetTenantContext];
+        // WaitForEngine (ADR-V26-01 · F6): con el motor caído el trabajo vuelve a la cola con espera en vez de llamar a un motor que no está.
+        return [new SetTenantContext, new WaitForEngine];
     }
 
     public function handle(EngineClient $engine, TrainingJobRecorder $recorder): void

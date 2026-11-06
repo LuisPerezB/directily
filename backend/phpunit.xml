@@ -35,6 +35,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Cortacircuitos del motor (ADR-V26-01 · F6) apagado por defecto en las pruebas: muchas simulan fallos de conexión seguidos y cada una
+             debe ver solo el suyo. Las pruebas del cortacircuitos lo encienden con config(['engine.circuit.enabled' => true]). -->
+        <env name="ENGINE_CIRCUIT_ENABLED" value="false"/>
         <!-- El origen de la SPA de las pruebas (AuthTest) no depende del .env de desarrollo. -->
         <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1,127.0.0.1:5173" force="true"/>
         <!--

@@ -399,7 +399,7 @@ final class ImportService
         if (in_array($job->entity_type, [ImportEntity::Sales->value, ImportEntity::Inventory->value], true)
             && class_exists(RefreshReadiness::class)) {
             try {
-                RefreshReadiness::dispatch($job->tenant_id)->onQueue('forecasting');
+                RefreshReadiness::dispatch($job->tenant_id);   // la cola la fija el propio trabajo (trabajos cortos del motor)
             } catch (Throwable $e) {
                 Log::warning('No se pudo programar la evaluación de preparación de datos', ['error' => $e->getMessage()]);
             }

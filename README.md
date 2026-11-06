@@ -59,7 +59,7 @@ Node.js 22.
 git clone <repositorio> predictily && cd predictily
 make setup          # crea .env con APP_KEY, contraseñas y token interno aleatorios
 make up             # construye y levanta: postgres, redis, backend, queue, queue-forecasting,
-                    # scheduler, engine y web
+                    # queue-forecasting-light, queue-batch, scheduler, engine y web
 make seed           # planes y datos base
 make demo           # (opcional) 2 empresas DEMO con datos ficticios + primer pronóstico
 ```
@@ -76,7 +76,9 @@ Servicios y red:
 | `web` | nginx: SPA + proxy FastCGI a php-fpm | `:8080` |
 | `backend` | php-fpm (API) + migraciones al iniciar | interno |
 | `queue` | worker de importaciones y tareas generales | interno |
-| `queue-forecasting` | worker de pronósticos (llama al motor) | interno |
+| `queue-forecasting` | worker de pronósticos y entrenamientos (llama al motor) | interno |
+| `queue-forecasting-light` | worker de los trabajos cortos del motor: predicción diaria de clientes, evaluación vs reales, preparación de datos | interno |
+| `queue-batch` | worker del ciclo diario por empresa: radar, decisiones y medición de resultados (un trabajo por empresa) | interno |
 | `scheduler` | evaluación diaria vs reales, pronósticos programados, purgas | interno |
 | `engine` | motor FastAPI | **solo red interna** |
 | `postgres`, `redis` | datos, colas, caché, sesiones | **solo red interna** |
@@ -229,6 +231,22 @@ reproducibilidad, procesamiento asíncrono y seguridad de endpoints. Detalle por
 | [Pendientes](docs/pendientes.md) | Dependencias externas y funcionalidades futuras |
 | [OpenAPI](docs/openapi/) | Especificaciones de la API pública y del motor |
 | [Despliegue](infra/scripts/deploy.md) | VPS, TLS, firewall, respaldos |
+| [ADR-V26-01](docs/architecture/adr/ADR-V26-01-aislamiento-de-fallos-y-desacople.md) | Aislamiento de fallos entre procesos: colas, ciclo diario por empresa, cortacircuitos y regla de capas |
+
+### Documentos de trabajo en la raíz
+
+Están en la raíz a propósito: otros documentos, comentarios del código y el paquete de evidencia los citan por esa ruta.
+**No moverlos ni renombrarlos**: cuatro de ellos figuran con su ruta y su SHA-256 en
+[`docs/validation/2026-10-28/FILES-SHA256.json`](docs/validation/2026-10-28/FILES-SHA256.json).
+
+| Documento | Qué es | Vigencia |
+|---|---|---|
+| [EJECUCION-PREDICTILY.md](EJECUCION-PREDICTILY.md) | Guía de entrada: qué leer y en qué orden, preparación del entorno y orden de implementación | Vigente |
+| [instrucctions.md](instrucctions.md) | Instrucción de la etapa 2; su sección 6 es la que citan los documentos de arquitectura y varias migraciones | Vigente |
+| [V25-ESTADO-Y-PROXIMOS-PASOS.md](V25-ESTADO-Y-PROXIMOS-PASOS.md) | Estado de V2.5, pendientes y próximos pasos | Vigente |
+| [VALIDACION-PREDICTILY-2026-10-28.md](VALIDACION-PREDICTILY-2026-10-28.md) | Informe de validación de la etapa 1 (hallazgos F1–F7) | Informe fechado |
+| [PROMPT-ETAPA-2-ORIGINAL-RECUPERADO.md](PROMPT-ETAPA-2-ORIGINAL-RECUPERADO.md) | Extracto del prompt V2 original; antecedente, no la instrucción vigente | Histórico |
+| `reports/` | Informes de V2.5. `reports/private/` (ignorado por git) recibe los resultados del piloto | Vigente |
 
 ---
 

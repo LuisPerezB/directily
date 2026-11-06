@@ -11,6 +11,7 @@ use App\Services\Forecasting\Exceptions\EngineNotFoundException;
 use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
+use App\Services\Forecasting\Support\EngineCircuit;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -30,8 +31,9 @@ class CustomerEngineClient
     public function execute(int $coreRunId, int $tenantId, ?int $trainingJobId): array
     {
         try {
-            $response = $this->request((int) config('engine.timeout', 900))
-                ->post("/v1/customer/runs/{$coreRunId}/execute", ['tenant_id' => $tenantId, 'training_job_id' => $trainingJobId]);
+            // Bajo el cortacircuitos (ADR-V26-01 · F6): con el motor caído falla al instante en vez de esperar la conexión.
+            $response = app(EngineCircuit::class)->call(fn () => $this->request((int) config('engine.timeout', 900))
+                ->post("/v1/customer/runs/{$coreRunId}/execute", ['tenant_id' => $tenantId, 'training_job_id' => $trainingJobId]));
         } catch (ConnectionException $e) {
             throw new EngineUnavailableException('El motor predictivo no respondió: '.$e->getMessage(), previous: $e);
         }
@@ -43,7 +45,7 @@ class CustomerEngineClient
     public function capabilities(): array
     {
         try {
-            $response = $this->request((int) config('engine.short_timeout', 60))->get('/v1/customer/capabilities');
+            $response = app(EngineCircuit::class)->call(fn () => $this->request((int) config('engine.short_timeout', 60))->get('/v1/customer/capabilities'));
         } catch (ConnectionException $e) {
             throw new EngineUnavailableException('El motor predictivo no respondió: '.$e->getMessage(), previous: $e);
         }

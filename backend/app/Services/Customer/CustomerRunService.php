@@ -13,6 +13,7 @@ use App\Models\Tenant;
 use App\Models\TrainingJob;
 use App\Models\User;
 use App\Services\Customer\Exceptions\CustomerRunConflictException;
+use App\Services\Forecasting\Support\ActiveRuns;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Services\Plans\PlanLimitService;
 use App\Support\Horizons\HorizonCatalog;
@@ -120,8 +121,8 @@ class CustomerRunService
             ]);
             if ($dispatch) {
                 $jobClass = $operation === 'train' ? RunCustomerTraining::class : RunCustomerPrediction::class;
+                // La cola la decide cada trabajo (queueName()): entrenamiento en la de trabajos largos, predicción en la de cortos.
                 $jobClass::dispatch($tenant->getKey(), $run->getKey(), $job->getKey())
-                    ->onQueue((string) config('engine.queue', 'forecasting'))
                     ->afterCommit();
             }
 
@@ -139,10 +140,7 @@ class CustomerRunService
     /** Corrida de la misma operación en cola o en proceso que aún no se considera vencida. */
     public function activeRun(string $operation): ?CoreRun
     {
-        $staleBefore = CarbonImmutable::now()->subMinutes((int) config('engine.stale_run_minutes', 120));
-
-        return CoreRun::query()->where('core', 'customer')->where('operation', $operation)
-            ->whereIn('status', ['queued', 'running'])->where('created_at', '>=', $staleBefore)->latest('id')->first();
+        return ActiveRuns::apply(CoreRun::query()->where('core', 'customer')->where('operation', $operation))->latest('id')->first();
     }
 
     /**

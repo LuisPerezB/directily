@@ -2,15 +2,19 @@
 
 declare(strict_types=1);
 
-namespace App\Services\DataCore\Platform;
+namespace App\Services\Forecasting;
 
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
+use App\Services\Forecasting\Support\EngineCircuit;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
 /**
  * Cliente de las rutas /v1/platform del motor (configuración efectiva y extensiones). El motor lee SOLO la empresa
  * indicada; el backend siempre pasa la empresa del contexto, nunca un identificador recibido del usuario.
+ *
+ * Vive junto a los demás clientes del motor (antes en DataCore\Platform): usa sus excepciones y su cortacircuitos, y así la capa de
+ * ingesta no depende de la de núcleos predictivos (ADR-V26-01 · F7). Solo lo usan los controladores de configuración efectiva.
  */
 class PlatformEngineClient
 {
@@ -49,7 +53,8 @@ class PlatformEngineClient
             if ($token = config('engine.token')) {
                 $request = $request->withToken((string) $token);
             }
-            $response = $method === 'get' ? $request->get($path, $payload) : $request->post($path, $payload);
+            // Bajo el cortacircuitos (ADR-V26-01 · F6): con el motor caído la pantalla recibe el error al instante.
+            $response = app(EngineCircuit::class)->call(fn () => $method === 'get' ? $request->get($path, $payload) : $request->post($path, $payload));
         } catch (ConnectionException $e) {
             throw new EngineUnavailableException('El motor predictivo no respondió: '.$e->getMessage(), previous: $e);
         }

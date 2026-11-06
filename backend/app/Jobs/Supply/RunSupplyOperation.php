@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Jobs\Supply;
 
+use App\Jobs\Concerns\WaitsForEngine;
 use App\Jobs\Middleware\SetTenantContext;
+use App\Jobs\Middleware\WaitForEngine;
 use App\Models\CoreRun;
 use App\Models\Tenant;
 use App\Models\TrainingJob;
@@ -31,7 +33,7 @@ use Throwable;
  */
 abstract class RunSupplyOperation implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, WaitsForEngine;
 
     public int $tries = 2;
 
@@ -57,7 +59,8 @@ abstract class RunSupplyOperation implements ShouldQueue
     /** @return list<object> */
     public function middleware(): array
     {
-        return [new SetTenantContext];
+        // WaitForEngine (ADR-V26-01 · F6): con el motor caído el trabajo se aplaza en vez de gastar sus intentos.
+        return [new SetTenantContext, new WaitForEngine];
     }
 
     public function handle(SupplyEngineClient $engine, TrainingJobRecorder $jobs): void

@@ -77,6 +77,39 @@ class ForecastRunApiTest extends TestCase
         $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(202)->assertJsonPath('data.version', 2);
     }
 
+    // ADR-V26-01 · F3: la vigencia de una ejecución en curso se mide desde que empezó, no desde que se pidió.
+    public function test_a_run_that_started_recently_still_blocks_even_if_it_waited_long_in_the_queue(): void
+    {
+        Queue::fake();
+        [$tenant, $user] = $this->createTenantWithUser();
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(202);
+        DB::table('forecast_runs')->update(['status' => 'running', 'created_at' => now()->subHours(5), 'started_at' => now()->subMinutes(10)]);
+
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'forecast_run_in_progress');
+    }
+
+    public function test_a_run_that_started_long_ago_does_not_block_new_requests(): void
+    {
+        Queue::fake();
+        [$tenant, $user] = $this->createTenantWithUser();
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(202);
+        DB::table('forecast_runs')->update(['status' => 'running', 'created_at' => now()->subHours(5), 'started_at' => now()->subHours(3)]);
+
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(202)->assertJsonPath('data.version', 2);
+    }
+
+    public function test_a_queued_run_keeps_blocking_while_it_waits_within_the_queued_window(): void
+    {
+        Queue::fake();
+        [$tenant, $user] = $this->createTenantWithUser();
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(202);
+        DB::table('forecast_runs')->update(['created_at' => now()->subHours(3)]);   // más que stale_run_minutes (120), menos que stale_queued_minutes (240)
+
+        $this->actingAsTenantUser($user, $tenant)->postJson('/api/v1/forecast-runs')->assertStatus(409);
+    }
+
     public function test_validation_and_permissions(): void
     {
         Queue::fake();

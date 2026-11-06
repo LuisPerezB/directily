@@ -18,9 +18,27 @@ return [
     // Reintentos SOLO ante errores de conexión (no ante respuestas HTTP del motor).
     'connection_retries' => (int) env('ENGINE_CONNECTION_RETRIES', 2),
     'retry_sleep_ms' => (int) env('ENGINE_RETRY_SLEEP_MS', 500),
-    // Una ejecución queued/running más antigua que esto se considera vencida (no bloquea nuevas).
+    // Una ejecución EN CURSO (running) se considera vencida pasados estos minutos desde que empezó (no bloquea nuevas).
     'stale_run_minutes' => (int) env('ENGINE_STALE_RUN_MINUTES', 120),
+    // Una ejecución EN COLA (queued) se considera vencida pasados estos minutos desde que se pidió: tope de seguridad por si el
+    // trabajo se perdió. Mayor que el anterior porque esperar en cola es normal (App\Services\Forecasting\Support\ActiveRuns).
+    'stale_queued_minutes' => (int) env('ENGINE_STALE_QUEUED_MINUTES', 240),
+    // Cola de los trabajos largos del motor: entrenamiento y pronóstico.
     'queue' => env('ENGINE_QUEUE', 'forecasting'),
+    // Cola de los trabajos cortos del motor (predicción diaria de clientes, evaluación contra reales, preparación de datos).
+    // Vacío = la misma que `queue`. Definirla exige un worker que la atienda (App\Services\Forecasting\Support\EngineQueue).
+    'light_queue' => env('ENGINE_LIGHT_QUEUE'),
+    // Cortacircuitos hacia el motor (App\Services\Forecasting\Support\EngineCircuit; ADR-V26-01 · F6).
+    'circuit' => [
+        'enabled' => filter_var(env('ENGINE_CIRCUIT_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        // Llamadas seguidas sin lograr conectar tras las que se abre (cada llamada ya reintenta la conexión `connection_retries` veces).
+        'failure_threshold' => (int) env('ENGINE_CIRCUIT_FAILURES', 3),
+        // Segundos que permanece abierto antes de dejar pasar llamadas de prueba; también lo que se aplaza cada trabajo.
+        'open_seconds' => (int) env('ENGINE_CIRCUIT_OPEN_SECONDS', 60),
+        // Veces que un trabajo se aplaza esperando al motor antes de intentarlo de todos modos y fallar por la vía normal
+        // (60 × 60 s ≈ 1 hora; debe quedar por debajo de `stale_queued_minutes`).
+        'max_deferrals' => (int) env('ENGINE_CIRCUIT_MAX_DEFERRALS', 60),
+    ],
     // Directorio de artefactos de modelos del motor (la MISMA variable ENGINE_ARTIFACTS_DIR, apuntando al mismo volumen compartido).
     // El motor guarda `model_registry.artifact_path` relativo a este directorio; con él el backend verifica el SHA-256 al revertir
     // modelos. Sin configurar (o sin acceso al volumen) no verifica y lo informa explícitamente: lo verifica el motor al cargar.
