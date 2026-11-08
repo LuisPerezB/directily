@@ -617,6 +617,8 @@ final class TenantIsolationMatrixTest extends TestCase
             'Services/Auth/Mfa/MfaStepUp.php' => 'clave por token o por persona (la persona es global: el segundo factor es de la persona)',
             'Services/Auth/Mfa/MfaChallenge.php' => 'clave = SHA-256 del desafío aleatorio de un solo uso (y su candado)',
             'Services/Auth/Mfa/MfaService.php' => 'contadores y bloqueos por persona + IP y por IP (el segundo factor es de la persona, no de la empresa)',
+            'Services/Forecasting/Support/EngineCircuit.php' => 'claves globales engine:circuit:{failures|open|alerted} del motor compartido: solo contadores y banderas, sin datos ni identificadores de empresa',
+            'Support/Ops/OpsAlert.php' => 'clave ops-alert:{código}:{sha1(origen)} para no repetir una alerta de plataforma; el valor es 1, sin datos de empresa',
         ];
         $found = [];
         foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(base_path('app'), RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {

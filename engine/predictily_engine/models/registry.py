@@ -31,14 +31,31 @@ FAMILIES: dict[str, FamilyInfo] = {
     "timesfm": FamilyInfo("timesfm", "E", "foundation", "TimesFM 2.5 (experimental, desactivado)", {}),
 }
 
+# Variantes con perfil semanal (`<base>_dow`): la familia base, que no ve el día de la semana, por los factores de día de la semana
+# de cada serie (`statistical.weekday_profile`: últimos 56 días, encogidos hacia el perfil común con peso n / (n + 28)). Sin ellas, en
+# un negocio que casi no vende un día (domingos de una distribuidora por rutas) los modelos planos reparten la demanda por igual
+# entre los 7 días: sobrestiman ese día y subestiman los demás. Compiten en TODAS las clases (el backtest decide) cuando la empresa
+# las activa con `weekday_profile_models` (configuración de Demanda, apagada por defecto: ver `pipeline/core.py`).
+WEEKDAY_SUFFIX = "_dow"
+WEEKDAY_PROFILE_DAYS = 56
+WEEKDAY_PROFILE_SHRINK = 28.0
+WEEKDAY_BASES = ("window_average", "croston_sba", "adida", "tsb")
+for _base in WEEKDAY_BASES:
+    _info = FAMILIES[_base]
+    FAMILIES[_base + WEEKDAY_SUFFIX] = FamilyInfo(
+        _base + WEEKDAY_SUFFIX, "A", "statistical", f"{_info.label} con perfil semanal",
+        {**_info.hyperparameters, "weekday_profile_days": WEEKDAY_PROFILE_DAYS, "weekday_profile_shrink": WEEKDAY_PROFILE_SHRINK})
+del _base, _info
+WEEKDAY_FAMILIES = [b + WEEKDAY_SUFFIX for b in WEEKDAY_BASES]
+
 STATISTICAL = [f for f, i in FAMILIES.items() if i.kind == "statistical"]
 BASELINE_FAMILY = "seasonal_naive"
 SIMPLE_FALLBACKS = ("seasonal_naive", "window_average")
 
 # Candidatos por clase de demanda (el baseline siempre se evalúa y se reporta).
 CANDIDATES_BY_CLASS = {
-    "smooth": ["naive", "seasonal_naive", "window_average", "auto_ets", "lightgbm_global"],
-    "erratic": ["naive", "seasonal_naive", "window_average", "auto_ets", "lightgbm_global"],
-    "intermittent": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", "lightgbm_global"],
-    "lumpy": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", "lightgbm_global"],
+    "smooth": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_FAMILIES, "lightgbm_global"],
+    "erratic": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_FAMILIES, "lightgbm_global"],
+    "intermittent": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_FAMILIES, "lightgbm_global"],
+    "lumpy": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_FAMILIES, "lightgbm_global"],
 }

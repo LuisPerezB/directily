@@ -318,6 +318,7 @@ IMPLEMENTADO / VERIFICADO: `test_asof_visibility.py::test_the_digest_covers_know
 | `day_status_infer_gaps` | `true` | booleano | Activa la regla inferida de días sin fuente; los huecos, coberturas y cierres DECLARADOS se aplican siempre |
 | `day_status_infer_min_median_lines` | `5` | 1 – 100 000 | Mediana mínima de líneas diarias de la sucursal en la ventana previa |
 | `day_status_infer_lookback_days` | `28` | 7 – 90 | Ventana previa (se exigen al menos la mitad de sus días con datos) |
+| `day_status_infer_same_weekday` | `true` | booleano | Exige además que ese mismo día de la semana sea habitual en las `lookback // 7` semanas previas (un día que la sucursal no suele vender es un cero observado) |
 
 Se configuran por empresa en `tenants.settings.cores.demand` (validación en `validate_overrides`: claves desconocidas, tipos y rangos). `build_panel(data)` sin reglas solo clasifica lo declarado;
 `run_pipeline` aplica `DayRules.from_config(...)` de la configuración efectiva, que queda registrada en el run.

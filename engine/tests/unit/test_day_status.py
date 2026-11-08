@@ -204,8 +204,11 @@ def test_declared_closures_have_priority_over_the_inferred_rule_and_do_not_count
     data = hand_data(skip=tuple((1, day(k).strftime("%Y-%m-%d")) for k in sundays), lines=3)  # 2 × 3 = 6 líneas diarias
     undeclared = build_panel(data, DayRules())
     assert status_of(undeclared, 1, sundays[1])[0] == "zero_confirmed", "con menos de la mitad de la ventana con datos no se infiere"
-    assert all(status_of(undeclared, 1, k)[0] == "missing_source" for k in sundays if k >= 15), \
-        "limitación documentada: el cierre recurrente sin declarar se infiere como fuente ausente"
+    assert all(status_of(undeclared, 1, k)[0] == "zero_confirmed" for k in sundays), \
+        "con la condición del mismo día de la semana, el cierre recurrente sin declarar es un cero observado"
+    legacy = build_panel(data, DayRules(infer_same_weekday=False))
+    assert all(status_of(legacy, 1, k)[0] == "missing_source" for k in sundays if k >= 15), \
+        "sin ella (comportamiento anterior) se infería cada semana como fuente ausente"
     closures = pd.DataFrame([{"branch_id": 1, "starts_on": day(k), "ends_on": day(k), "code": f"domingo-{k}"} for k in sundays])
     declared = build_panel(replace(data, closures=closures), DayRules())
     assert all(status_of(declared, 1, k) == ("closed", "declared") for k in sundays)
@@ -316,6 +319,36 @@ def test_the_inferred_rule_is_configurable_and_active_by_default():
     assert tuned.infer_gaps is False and tuned.infer_min_median_lines == 12.0
     errors = validate_overrides("demand", {"day_status_infer_min_median_lines": 0, "day_status_infer_lookback_days": 3, "day_status_infer_gaps": "si"})
     assert {e["key"] for e in errors} == {"day_status_infer_min_median_lines", "day_status_infer_lookback_days", "day_status_infer_gaps"}
+
+
+def test_a_weekday_the_branch_never_sells_is_a_zero_not_a_source_gap():
+    """Distribuidora por rutas que no vende los domingos: con la condición del mismo día de la semana, el domingo vacío es un cero
+    observado (antes se marcaba sin fuente cada semana y se imputaba como un día normal); una caída real un martes sigue inferida."""
+    sundays = [k for k in range(84) if day(k).dayofweek == 6]
+    tuesday = next(k for k in range(56, 84) if day(k).dayofweek == 1)
+    data = hand_data(n_days=84, lines=4, skip=tuple((1, day(k).strftime("%Y-%m-%d")) for k in sundays) + ((1, day(tuesday).strftime("%Y-%m-%d")),))
+    late_sunday = next(k for k in sundays if k > tuesday)
+    on = build_panel(data, DayRules())
+    assert status_of(on, 1, late_sunday) == ("zero_confirmed", None)
+    assert all(status_of(on, 1, k)[0] == "zero_confirmed" for k in sundays), "ningún domingo es una caída de la fuente"
+    assert status_of(on, 1, tuesday) == ("missing_source", "inferred"), "un martes sin líneas sigue siendo un hueco inferido"
+    row = on.df[(on.df["product_id"] == 1) & (on.df["ds"] == day(late_sunday))].iloc[0]
+    assert row["y"] == 0.0, "el domingo entrena como cero observado, no imputado con un día normal"
+    off = build_panel(data, DayRules(infer_same_weekday=False))                 # comportamiento anterior
+    assert status_of(off, 1, late_sunday) == ("missing_source", "inferred")
+    assert status_of(off, 1, tuesday) == ("missing_source", "inferred")
+    # con la mitad de las semanas previas (2 de 4) ya hay evidencia del mismo día: dos martes regulares bastan para inferir el hueco
+    early_gap = hand_data(n_days=40, lines=4, skip=((1, day(19).strftime("%Y-%m-%d")),))   # día 19: martes con 2 martes previos
+    assert day(19).dayofweek == 1 and status_of(build_panel(early_gap, DayRules()), 1, 19) == ("missing_source", "inferred")
+
+
+def test_the_same_weekday_condition_is_configurable_and_on_by_default():
+    assert CORE_DEFAULTS["demand"]["day_status_infer_same_weekday"] is True
+    assert DayRules.from_config(resolve_config("demand", {}, None)[0]).infer_same_weekday is True
+    tuned = DayRules.from_config(resolve_config("demand", {"cores": {"demand": {"day_status_infer_same_weekday": False}}}, None)[0])
+    assert tuned.infer_same_weekday is False and tuned.as_dict()["infer_same_weekday"] is False
+    errors = validate_overrides("demand", {"day_status_infer_same_weekday": "si"})
+    assert {e["key"] for e in errors} == {"day_status_infer_same_weekday"}
 
 
 def test_profile_at_keeps_the_day_columns_for_past_cutoffs():

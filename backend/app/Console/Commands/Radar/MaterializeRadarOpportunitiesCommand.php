@@ -60,43 +60,43 @@ class MaterializeRadarOpportunitiesCommand extends Command
 
         $failed = false;
         $tenants->each(function (Tenant $tenant) use ($runner, $service, $runs, $context, $horizons, &$failed): bool {
-                try {
-                    if ($this->option('dry-run')) {
-                        $this->dryRun($tenant, $service, $runs, $context, $horizons);
-
-                        return true;
-                    }
-                    $outcome = $runner->run($tenant, $horizons, (bool) $this->option('force'));
-                } catch (RadarException $e) {
-                    $this->error("✗ {$e->getMessage()}");
-                    $failed = true;
-
-                    return false;   // sin Decision Engine no tiene sentido seguir con las demás empresas
-                } catch (Throwable $e) {
-                    $this->warn("✗ {$tenant->name}: {$e->getMessage()}");
-                    $failed = true;
+            try {
+                if ($this->option('dry-run')) {
+                    $this->dryRun($tenant, $service, $runs, $context, $horizons);
 
                     return true;
                 }
+                $outcome = $runner->run($tenant, $horizons, (bool) $this->option('force'));
+            } catch (RadarException $e) {
+                $this->error("✗ {$e->getMessage()}");
+                $failed = true;
 
-                $result = $outcome['result'];
-                match (true) {
-                    $outcome['reason'] === 'plan_without_customer' => $this->line("· {$tenant->name}: el plan no incluye comportamiento de compra"),
-                    $outcome['reason'] === 'no_prediction_run' => $this->line("· {$tenant->name}: sin predicción de comportamiento completada"),
-                    $outcome['status'] === PipelineStage::WAITING => $this->line("… {$tenant->name}: la predicción de hoy sigue en curso; el radar se lanzará al terminar"),
-                    $outcome['status'] === PipelineStage::BLOCKED => $this->warn("✗ {$tenant->name}: bloqueado, la predicción de hoy falló (no se propone con la de ayer)"),
-                    $result !== null => $this->info("✓ {$tenant->name}: {$result->candidates} candidatas, {$result->created} nuevas, {$result->existing} ya existentes, {$result->failed} con error"),
-                    default => $this->line("· {$tenant->name}: {$outcome['status']}"),
-                };
-                if ($outcome['status'] === PipelineStage::BLOCKED || ($result !== null && $result->failed > 0)) {
-                    $failed = true;   // el planificador y quien opera deben enterarse: código de salida distinto de cero
-                }
-                foreach ($result?->errors ?? [] as $error) {
-                    $this->warn("  ! {$error}");
-                }
+                return false;   // sin Decision Engine no tiene sentido seguir con las demás empresas
+            } catch (Throwable $e) {
+                $this->warn("✗ {$tenant->name}: {$e->getMessage()}");
+                $failed = true;
 
                 return true;
-            });
+            }
+
+            $result = $outcome['result'];
+            match (true) {
+                $outcome['reason'] === 'plan_without_customer' => $this->line("· {$tenant->name}: el plan no incluye comportamiento de compra"),
+                $outcome['reason'] === 'no_prediction_run' => $this->line("· {$tenant->name}: sin predicción de comportamiento completada"),
+                $outcome['status'] === PipelineStage::WAITING => $this->line("… {$tenant->name}: la predicción de hoy sigue en curso; el radar se lanzará al terminar"),
+                $outcome['status'] === PipelineStage::BLOCKED => $this->warn("✗ {$tenant->name}: bloqueado, la predicción de hoy falló (no se propone con la de ayer)"),
+                $result !== null => $this->info("✓ {$tenant->name}: {$result->candidates} candidatas, {$result->created} nuevas, {$result->existing} ya existentes, {$result->failed} con error"),
+                default => $this->line("· {$tenant->name}: {$outcome['status']}"),
+            };
+            if ($outcome['status'] === PipelineStage::BLOCKED || ($result !== null && $result->failed > 0)) {
+                $failed = true;   // el planificador y quien opera deben enterarse: código de salida distinto de cero
+            }
+            foreach ($result?->errors ?? [] as $error) {
+                $this->warn("  ! {$error}");
+            }
+
+            return true;
+        });
 
         return $failed ? self::FAILURE : self::SUCCESS;
     }

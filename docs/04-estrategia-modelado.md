@@ -45,7 +45,7 @@ Cada fila del backtest guarda la clase de su serie en el corte de su ventana (`d
 
 | Nivel | Estado en el MVP | Modelos |
 |---|---|---|
-| **A** Estadístico | ✅ Activo | Naive, Seasonal Naive (7), Promedio móvil 28 días, AutoETS estacional semanal (modelo `ZNZ`, sin tendencia: 7× más rápido que la búsqueda completa con el mismo error en los datos demo), Croston SBA, ADIDA, TSB (intermitentes) |
+| **A** Estadístico | ✅ Activo | Naive, Seasonal Naive (7), Promedio móvil 28 días, AutoETS estacional semanal (modelo `ZNZ`, sin tendencia: 7× más rápido que la búsqueda completa con el mismo error en los datos demo), Croston SBA, ADIDA, TSB (intermitentes) y sus variantes con perfil semanal (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la semana de cada serie, últimos 56 días encogidos hacia el perfil común; compiten en todas las clases cuando la empresa activa `weekday_profile_models`, apagado por defecto porque cambian qué modelo gana) |
 | **B** Global reutilizable | ✅ Activo por empresa | LightGBM global (MLForecast) entrenado con TODAS las series de la empresa: lags 1/7/14/28, medias y desviaciones móviles, media del mismo día de semana, calendario de Ecuador, promoción, precio relativo, sucursal, categoría, región y nivel de la serie; objetivo Tweedie (conteos con ceros); recursivo |
 | **B** entre empresas | ⏳ Diseñado, no activo | Requiere `tenants.allow_shared_training = true`, base jurídica (LOPDP) y evaluación; anonimizar IDs no vuelve anónimos los datos |
 | **C** Sectorial | ⏳ Diseñado | `model_registry.scope = 'sector'`, `tenant_id NULL`; se activará con datos suficientes y autorizados del sector |
@@ -584,7 +584,9 @@ son la verdad disponible (hasta hoy en la ejecución vigente). Queda en `knowled
 
 Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_confirmed`. La **regla inferida** (por defecto activa; claves `day_status_infer_gaps`,
 `day_status_infer_min_median_lines` = 5 y `day_status_infer_lookback_days` = 28) marca `missing_source` con base `inferred` un día en que una sucursal no registra ninguna línea pese a una
-mediana ≥ 5 líneas diarias en los 28 días previos; **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
+mediana ≥ 5 líneas diarias en los 28 días previos y, con `day_status_infer_same_weekday` (por defecto activa), si ese mismo día de la semana también es habitual (mediana de los
+mismos días de las 4 semanas previas ≥ 5): un día que la sucursal no suele vender (los domingos de una distribuidora por rutas) es un cero observado, no una caída de la fuente;
+**debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
 IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
 
 **Evaluación posterior y deriva.** La exactitud realizada de pronósticos ya publicados (`evaluation/actuals.py`: `forecast_actuals`, métricas `realized` y alerta `forecast_drift`) **no cuenta como cero observado**

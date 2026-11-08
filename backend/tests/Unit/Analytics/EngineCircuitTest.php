@@ -83,7 +83,14 @@ final class EngineCircuitTest extends TestCase
     public function test_the_health_check_passes_while_open_and_a_response_from_the_engine_closes_it(): void
     {
         $down = true;
-        Http::fake(fn () => $down ? throw new ConnectionException(self::REFUSED) : Http::response(['status' => 'ok']));
+        // Por referencia: una función flecha copia $down al crearse y seguiría «caída» después de `$down = false`.
+        Http::fake(function () use (&$down) {
+            if ($down) {
+                throw new ConnectionException(self::REFUSED);
+            }
+
+            return Http::response(['status' => 'ok']);
+        });
         $client = app(EngineClient::class);
         $this->open();
 

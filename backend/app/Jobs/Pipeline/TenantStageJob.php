@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs\Pipeline;
 
+use App\Jobs\Middleware\SetTenantContext;
 use App\Models\Tenant;
 use App\Services\Pipeline\PipelineQueue;
 use Illuminate\Bus\Queueable;
@@ -46,6 +47,16 @@ abstract class TenantStageJob implements ShouldBeUnique, ShouldQueue
     public function uniqueId(): string
     {
         return $this->stage().'-stage:'.$this->tenantId;
+    }
+
+    /**
+     * Toda la etapa corre con la empresa en contexto (y su RLS), no solo las partes que la fijan por dentro.
+     *
+     * @return list<object>
+     */
+    public function middleware(): array
+    {
+        return [new SetTenantContext];
     }
 
     /** @return list<int> */

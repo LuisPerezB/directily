@@ -23,15 +23,9 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        manualChunks(id: string) {
-          if (id.includes('node_modules/echarts') || id.includes('node_modules/zrender')) return 'charts'
-          if (id.includes('node_modules/vue-i18n') || id.includes('node_modules/@intlify')) return 'i18n'
-          if (id.includes('node_modules/')) return 'vendor'
-          return undefined
-        },
-      },
-    },
+    // Sin agrupación manual de paquetes: con `manualChunks` (vendor/charts/i18n) Rolldown generaba ciclos entre paquetes
+    // (api → vendor → charts → api, con su ayudante interno alojado en `api`) y charts se ejecutaba antes de tiempo:
+    // «e is not a function» y la SPA no arrancaba en producción. La división automática no deja ciclos y ECharts queda
+    // en su propio paquete, cargado solo por las vistas con gráficos. Si se vuelve a agrupar, comprobar que no haya ciclos.
   },
 })
