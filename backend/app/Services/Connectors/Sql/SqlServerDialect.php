@@ -38,6 +38,11 @@ final class SqlServerDialect extends AbstractSqlDialect
         if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
             $options[constant('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')] = $settings->statementTimeout;
         }
+        // pdo_sqlsrv fija la codificación con este atributo (UTF-8 es su valor por defecto): `CharacterSet` en el DSN solo
+        // existe en sqlsrv_connect y aquí hace fallar la conexión con «invalid keyword» (comprobado contra SQL Server 2022).
+        if (defined('PDO::SQLSRV_ATTR_ENCODING') && defined('PDO::SQLSRV_ENCODING_UTF8')) {
+            $options[constant('PDO::SQLSRV_ATTR_ENCODING')] = constant('PDO::SQLSRV_ENCODING_UTF8');
+        }
 
         return new PDO($dsn, $username, $password, $options);
     }
@@ -54,7 +59,7 @@ final class SqlServerDialect extends AbstractSqlDialect
         $this->assertSafeDsnPart('database', $settings->database);
         $server = str_contains($address, ':') ? '['.$address.']' : $address;
 
-        return sprintf('sqlsrv:Server=%s,%d;Database=%s;LoginTimeout=%d;Encrypt=%d;TrustServerCertificate=%d;ApplicationIntent=ReadOnly;CharacterSet=UTF-8',
+        return sprintf('sqlsrv:Server=%s,%d;Database=%s;LoginTimeout=%d;Encrypt=%d;TrustServerCertificate=%d;ApplicationIntent=ReadOnly',
             $server, $settings->port, $settings->database, $settings->connectTimeout, $settings->encrypt ? 1 : 0, $settings->trustServerCertificate ? 1 : 0);
     }
 
