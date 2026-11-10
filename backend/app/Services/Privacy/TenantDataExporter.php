@@ -132,6 +132,8 @@ final class TenantDataExporter
         // ── V2.5 · W4 MLOps (ADR-V25-07): transiciones auditadas del registro y medición de uso por empresa (sin published_object_key) ──
         'model_registry_events' => ['id', 'model_registry_id', 'from_status', 'to_status', 'actor_user_id', 'actor_kind', 'reason', 'evidence', 'created_at'],
         'tenant_usage_records' => ['id', 'period', 'metric', 'quantity', 'unit', 'source', 'source_ref', 'created_at'],
+        // ── ADR-V26-01 · F1: historial de etapas del ciclo diario de la empresa (códigos y conteos; sin datos de clientes) ──
+        'pipeline_stages' => ['id', 'business_date', 'stage', 'status', 'blocked_by', 'reason', 'source_ref', 'detail', 'started_at', 'finished_at', 'created_at', 'updated_at'],
         // ── V2.5 · W5 flujo empresarial (ADR-V25-12/-13/-14): recomendaciones del Decision Engine, su workflow auditado, asignación a
         //    experimentos, outcomes medidos y lotes de inventario (perecibles). Datos de negocio de la empresa: se exportan completos. ──
         'decision_recommendations' => ['id', 'kind', 'as_of', 'horizon_days', 'entity_type', 'customer_id', 'product_id', 'branch_id', 'source_core_run_id', 'source_forecast_run_id', 'data_snapshot_id', 'model_versions', 'probability', 'interval', 'assumptions', 'constraints', 'availability', 'action_cost', 'expected_gross_value', 'expected_contribution', 'incremental_estimate', 'incremental_evidence', 'attribution_label', 'score', 'score_formula_version', 'uncertainty', 'explanation', 'policy', 'priority', 'owner_user_id', 'assigned_user_id', 'status', 'agenda_status', 'experiment_group', 'proposed_by_kind', 'proposed_by_user_id', 'expires_at', 'next_step', 'idempotency_key', 'created_at', 'updated_at'],

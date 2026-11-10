@@ -25,12 +25,19 @@ línea de venta ni devolución, pese a que la mediana de sus líneas diarias en 
 regular y de pronto no registra nada es, con mucha más probabilidad, una caída de la fuente que una demanda cero; tratarlo como
 cero sesgaría los modelos a la baja. Limitaciones: confunde un cierre sin declarar (feriado, inventario, corte de energía) con
 una caída de la fuente (por eso los cierres se declaran en el calendario y tienen prioridad), no detecta caídas de más de la
-mitad de la ventana ni de sucursales sin historial suficiente (mínimo la mitad de la ventana con datos) y un cierre semanal
-recurrente (p. ej. domingos) se marcaría cada semana si no se declara.
+mitad de la ventana ni de sucursales sin historial suficiente (mínimo la mitad de la ventana con datos).
+
+Mismo día de la semana (`infer_same_weekday`, activo por defecto): además, ese MISMO día de la semana debe ser habitual en la
+sucursal (mediana de líneas de los mismos días de las `infer_lookback_days // 7` semanas previas ≥ `infer_min_median_lines`,
+con al menos la mitad de esas semanas con datos). Sin esta condición, un día de la semana que habitualmente no se vende
+(p. ej. los domingos de una distribuidora por rutas) se marcaba sin fuente cada semana y se rellenaba con un día normal: los
+modelos aprendían domingos de venta normal y esos días quedaban fuera de la evaluación. Con ella, ese día es un cero observado.
+Sin historia suficiente del mismo día de la semana se aplica solo la condición general.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -56,17 +63,19 @@ class DayRules:
     infer_gaps: bool = True
     infer_min_median_lines: float = 5.0
     infer_lookback_days: int = 28
+    infer_same_weekday: bool = True
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any] | None) -> "DayRules":
         cfg = cfg or {}
         return cls(infer_gaps=bool(cfg.get("day_status_infer_gaps", True)),
                    infer_min_median_lines=float(cfg.get("day_status_infer_min_median_lines", 5)),
-                   infer_lookback_days=int(cfg.get("day_status_infer_lookback_days", 28)))
+                   infer_lookback_days=int(cfg.get("day_status_infer_lookback_days", 28)),
+                   infer_same_weekday=bool(cfg.get("day_status_infer_same_weekday", True)))
 
     def as_dict(self) -> dict[str, Any]:
         return {"infer_gaps": self.infer_gaps, "infer_min_median_lines": self.infer_min_median_lines,
-                "infer_lookback_days": self.infer_lookback_days}
+                "infer_lookback_days": self.infer_lookback_days, "infer_same_weekday": self.infer_same_weekday}
 
 
 NO_INFERENCE = DayRules(infer_gaps=False)  # solo lo declarado (cobertura, huecos y cierres): comportamiento por defecto de `build_panel`
@@ -184,7 +193,8 @@ def infer_missing_days(data: Any, branches: np.ndarray, day0: int, n_days: int, 
 
     La mediana de líneas diarias de los `infer_lookback_days` días previos (sin contar los días ya declarados como ausentes
     o cerrados ni los anteriores a la primera venta de la sucursal) debe ser ≥ `infer_min_median_lines` y se exigen al menos
-    la mitad de esos días con datos. Una devolución ese día cuenta como actividad de la fuente."""
+    la mitad de esos días con datos. Una devolución ese día cuenta como actividad de la fuente. Con `infer_same_weekday`, el
+    mismo día de la semana también debe ser habitual (ver el docstring del módulo)."""
     out = np.zeros((n_days, len(branches)), dtype=bool)
     sales = getattr(data, "sales", None)
     if sales is None or sales.empty or len(branches) == 0:
@@ -217,7 +227,22 @@ def infer_missing_days(data: Any, branches: np.ndarray, day0: int, n_days: int, 
     med = pd.DataFrame(base).shift(1).rolling(lookback, min_periods=max(lookback // 2, 1)).median().to_numpy()
     with np.errstate(invalid="ignore"):
         regular = med >= float(rules.infer_min_median_lines)
+    if rules.infer_same_weekday:
+        regular &= _same_weekday_regular(base, lookback, float(rules.infer_min_median_lines))
     return regular & ~activity & ~skip & ~before_first
+
+
+def _same_weekday_regular(base: np.ndarray, lookback: int, min_lines: float) -> np.ndarray:
+    """¿Es habitual vender ESE día de la semana? Mediana de líneas de los mismos días de las `lookback // 7` semanas previas
+    ≥ `min_lines`. Con menos de la mitad de esas semanas con datos no hay evidencia y no se restringe (True)."""
+    weeks = max(lookback // 7, 1)
+    frame = pd.DataFrame(base)
+    same = np.stack([frame.shift(7 * k).to_numpy() for k in range(1, weeks + 1)])
+    observed = (~np.isnan(same)).sum(axis=0)
+    with warnings.catch_warnings(), np.errstate(invalid="ignore"):
+        warnings.simplefilter("ignore", RuntimeWarning)   # «All-NaN slice»: celdas sin ninguna semana observada (quedan NaN y no restringen)
+        median = np.nanmedian(same, axis=0)
+        return np.where(observed >= max(weeks // 2, 1), median >= min_lines, True)
 
 
 def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayRules | None = None,

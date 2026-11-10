@@ -47,6 +47,13 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "day_status_infer_gaps": True,
         "day_status_infer_min_median_lines": 5,
         "day_status_infer_lookback_days": 28,
+        # Además exige que ESE día de la semana sea habitual (mediana de los mismos días de las semanas previas): un día que la sucursal
+        # no suele vender (p. ej. domingos de una distribuidora por rutas) es un cero observado, no una caída de la fuente.
+        "day_status_infer_same_weekday": True,
+        # Variantes con perfil semanal de los modelos planos (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la
+        # semana; ver `models/registry.py`). Apagadas por defecto: cambian qué modelo gana, así que se activan por empresa al aprobarlo en
+        # el piloto (p. ej. un negocio que casi no vende un día de la semana).
+        "weekday_profile_models": False,
         # ── W3-A · métricas por horizonte y segmento (docs/ml/FORECAST_VALIDATION.md §3). TODOS son valores INICIALES de diseño, «a aprobar
         # en el piloto» con datos reales; ninguno es universal y ninguno cambia lo servido (solo qué métricas se persisten y cómo se marcan). ──
         # Interruptor: apagado no calcula ni persiste las filas level='segment' (las demás métricas no cambian).

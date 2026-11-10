@@ -58,7 +58,7 @@ from predictily_engine.inventory.recommendations import (
     required_coverage_days,
 )
 from predictily_engine.models.ml import LightGBMGlobal
-from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL
+from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL, WEEKDAY_FAMILIES
 from predictily_engine.models.statistical import forecast_statistical
 from predictily_engine.pipeline.data import TenantData
 from predictily_engine.platform.config import config_hash, effective_config_record
@@ -269,6 +269,10 @@ def run_pipeline(
         warnings.append(f"{len(full_ids)} series superan el límite de LightGBM ({max_series_lgbm}); "
                         "se usan modelos estadísticos.")
     families = list(STATISTICAL) + (["lightgbm_global"] if use_lgbm else [])
+    if not core_config.get("weekday_profile_models", False):
+        # Variantes con perfil semanal: se activan por empresa (`weekday_profile_models`). Cambian qué modelo gana (en los datos
+        # sintéticos dejan sin clase a LightGBM), así que entran por decisión expresa en el piloto, no para todas las empresas.
+        families = [f for f in families if f not in WEEKDAY_FAMILIES]
     if force_families:
         families = [f for f in families if f in force_families] or families
 

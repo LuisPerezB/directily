@@ -224,6 +224,10 @@
     "croston_sba": "Croston SBA (demanda intermitente)",
     "adida": "ADIDA (demanda intermitente)",
     "tsb": "TSB (demanda intermitente)",
+    "window_average_dow": "Promedio móvil con perfil semanal",
+    "croston_sba_dow": "Croston SBA con perfil semanal",
+    "adida_dow": "ADIDA con perfil semanal",
+    "tsb_dow": "TSB con perfil semanal",
     "lightgbm_global": "Machine learning global (LightGBM)",
     "selection": "Selección por patrón de demanda",
     "timesfm": "Modelo fundacional (experimental)"

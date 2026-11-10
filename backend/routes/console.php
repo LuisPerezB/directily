@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Ops\OpsAlert;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -48,12 +49,13 @@ Schedule::command('predictily:usage-snapshot')
     ->withoutOverlapping()->onOneServer();
 
 // ── Revenue Radar (V2.5 · W5-A): tras la predicción diaria de comportamiento (04:20), propone al Decision Engine las oportunidades de la predicción vigente (idempotente) ──
-Schedule::command('predictily:radar-materialize')
+// ADR-V26-01 · F4: con --queue el comando no ejecuta la etapa; encola un trabajo por empresa (cola del ciclo diario). Una empresa lenta o con error ya no retrasa a las demás.
+Schedule::command('predictily:radar-materialize --queue')
     ->dailyAt('04:50')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
 
 // ── Decision Engine (V2.5 · W5-B): genera las recomendaciones tras la predicción de comportamiento (04:20) y el radar (04:50); vence las caducadas cada hora (ambos idempotentes, por empresa) ──
-Schedule::command('predictily:decisions-generate')
+Schedule::command('predictily:decisions-generate --queue')
     ->dailyAt('05:30')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
 Schedule::command('predictily:decisions-expire')
@@ -61,6 +63,14 @@ Schedule::command('predictily:decisions-expire')
     ->withoutOverlapping()->onOneServer();
 
 // ── Outcomes (V2.5 · W5-C): mide lo ocurrido en la ventana de cada recomendación cuya ventana ya cerró (más el margen de espera de documentos tardíos), tras generar y vencer las decisiones (05:30 y cada hora); idempotente, por empresa ──
-Schedule::command('predictily:outcomes-measure')
+Schedule::command('predictily:outcomes-measure --queue')
     ->dailyAt('06:10')->timezone('America/Guayaquil')
     ->withoutOverlapping()->onOneServer();
+
+// ── Operación (ADR-V26-01 · F5): toda tarea que termine con código distinto de cero genera una alerta operativa (config/ops.php).
+//    Debe quedar AL FINAL del archivo: recorre las tareas ya definidas, así cubre también las que se añadan arriba. ──
+foreach (Schedule::events() as $event) {
+    $event->onFailure(static function () use ($event): void {
+        app(OpsAlert::class)->scheduledTaskFailed((string) $event->command, $event->exitCode);
+    });
+}

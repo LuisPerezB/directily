@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\DataCore;
 
 use App\Http\Controllers\Controller;
-use App\Services\DataCore\Platform\PlatformEngineClient;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
+use App\Services\Forecasting\PlatformEngineClient;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 

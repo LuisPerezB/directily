@@ -11,12 +11,15 @@ use App\Services\DataCore\Bronze\BronzeStore;
 use App\Services\DataCore\Bronze\FilesystemBronzeStore;
 use App\Services\Decision\DecisionEngine;
 use App\Services\Tenancy\TenantRls;
+use App\Support\Ops\OpsAlert;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
@@ -45,6 +48,17 @@ class AppServiceProvider extends ServiceProvider
 
         // V2.5 · W6-A: un rollback deshace los `SET` hechos dentro de la transacción; si RLS está activo, la empresa del contexto se vuelve a fijar en la conexión (sin efecto con la bandera apagada).
         Event::listen(TransactionRolledBack::class, static fn () => TenantRls::reassert());
+
+        // ADR-V26-01 · F5: todo trabajo de cola que queda fallido (intentos agotados, fail() o timeout) genera una alerta operativa.
+        Queue::failing(static function (JobFailed $event): void {
+            app(OpsAlert::class)->jobFailed(
+                job: $event->job->resolveName(),
+                queue: $event->job->getQueue(),
+                connection: (string) $event->connectionName,
+                tenantId: OpsAlert::tenantIdFromPayload($event->job->getRawBody()),
+                exception: $event->exception::class,
+            );
+        });
 
         // 5 intentos por minuto por combinación email + IP.
         RateLimiter::for('login', function (Request $request) {

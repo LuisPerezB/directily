@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend-8010",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "cd backend && DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib exec php artisan serve --host=127.0.0.1 --port=8010"],
+      "port": 8010
+    }
+  ]
+}

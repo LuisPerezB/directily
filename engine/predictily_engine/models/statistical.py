@@ -12,7 +12,47 @@ os.environ.setdefault("NIXTLA_ID_AS_COL", "1")
 from statsforecast import StatsForecast  # noqa: E402
 from statsforecast.models import ADIDA, TSB, AutoETS, CrostonSBA, Naive, SeasonalNaive, WindowAverage  # noqa: E402
 
-from predictily_engine.models.registry import STATISTICAL  # noqa: E402
+from predictily_engine.models.registry import (  # noqa: E402
+    STATISTICAL,
+    WEEKDAY_PROFILE_DAYS,
+    WEEKDAY_PROFILE_SHRINK,
+    WEEKDAY_SUFFIX,
+)
+
+
+def weekday_profile(train: pd.DataFrame, days: int = WEEKDAY_PROFILE_DAYS,
+                    shrink: float = WEEKDAY_PROFILE_SHRINK) -> pd.DataFrame:
+    """Factores por día de la semana (0 = lunes) de cada serie, con media 1 en la semana.
+
+    Se estiman en los últimos `days` días del entrenamiento: el perfil de la serie (venta media de cada día de la semana entre su
+    media) se encoge hacia el perfil común de todas las series (el ritmo semanal del negocio) con peso n / (n + `shrink`), n = días
+    con venta de la serie en la ventana. Así una serie con poca venta toma el ritmo del negocio y una regular, el suyo. Una serie
+    sin datos en la ventana usa el perfil común; sin ventas en absoluto, factores 1.
+    Devuelve unique_id, dow, factor."""
+    t = train[["unique_id", "ds", "y"]].copy()
+    if t.empty:
+        return pd.DataFrame(columns=["unique_id", "dow", "factor"])
+    t["ds"] = pd.to_datetime(t["ds"])
+    recent = t[t["ds"] > t["ds"].max() - pd.Timedelta(days=days)].copy()
+    recent["dow"] = recent["ds"].dt.dayofweek
+    total = recent.groupby("dow")["y"].sum().reindex(range(7), fill_value=0.0).astype(float)
+    common = (total / total.mean()).to_numpy() if total.mean() > 0 else np.ones(7)
+    by_dow = recent.groupby(["unique_id", "dow"])["y"].mean().unstack().reindex(columns=range(7))
+    level = by_dow.mean(axis=1)
+    own = by_dow.div(level.where(level > 0), axis=0).to_numpy(dtype=float)
+    own = np.where(np.isnan(own), common[None, :], own)
+    n = (recent["y"] > 0).groupby(recent["unique_id"]).sum().reindex(by_dow.index).fillna(0).to_numpy(dtype=float)
+    weight = (n / (n + shrink))[:, None]
+    factors = weight * own + (1 - weight) * common[None, :]
+    mean = factors.mean(axis=1, keepdims=True)
+    factors = np.where(mean > 0, factors / np.where(mean > 0, mean, 1.0), 1.0)
+    out = pd.DataFrame(factors, index=by_dow.index, columns=range(7)).stack().rename("factor").reset_index()
+    out.columns = ["unique_id", "dow", "factor"]
+    absent = sorted(set(t["unique_id"]) - set(out["unique_id"]))
+    if absent:
+        out = pd.concat([out, pd.DataFrame({"unique_id": np.repeat(absent, 7), "dow": np.tile(np.arange(7), len(absent)),
+                                            "factor": np.tile(common, len(absent))})], ignore_index=True)
+    return out
 
 
 def _build(families: list[str]):
@@ -33,17 +73,29 @@ def forecast_statistical(train: pd.DataFrame, h: int, families: list[str] | None
 
     Devuelve formato largo: unique_id, ds, family, yhat (≥ 0). Si un modelo falla en una
     serie, StatsForecast usa SeasonalNaive como respaldo.
+
+    Las familias `<base>_dow` son la familia base (plana: no ve el día de la semana) multiplicada por el perfil semanal de cada
+    serie (`weekday_profile`); conservan el total semanal de la base y solo lo reparten como vende el negocio.
     """
     families = [f for f in (families or STATISTICAL) if f in STATISTICAL]
     if train.empty or not families:
         return pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
-    sf = StatsForecast(models=_build(families), freq="D", n_jobs=1,
+    profiled = [f for f in families if f.endswith(WEEKDAY_SUFFIX)]
+    base = list(dict.fromkeys([f for f in families if f not in profiled] + [f.removesuffix(WEEKDAY_SUFFIX) for f in profiled]))
+    sf = StatsForecast(models=_build(base), freq="D", n_jobs=1,
                        fallback_model=SeasonalNaive(season_length=7))
     fc = sf.forecast(h=h, df=train[["unique_id", "ds", "y"]])
-    long = fc.melt(id_vars=["unique_id", "ds"], value_vars=[f for f in families if f in fc.columns],
+    long = fc.melt(id_vars=["unique_id", "ds"], value_vars=[f for f in base if f in fc.columns],
                    var_name="family", value_name="yhat")
     long["yhat"] = np.clip(long["yhat"].astype(float).fillna(0.0), 0, None)
-    return long
+    if profiled:
+        extra = long[long["family"].isin([f.removesuffix(WEEKDAY_SUFFIX) for f in profiled])].copy()
+        extra["dow"] = pd.to_datetime(extra["ds"]).dt.dayofweek
+        extra = extra.merge(weekday_profile(train), on=["unique_id", "dow"], how="left")
+        extra["yhat"] = extra["yhat"] * extra["factor"].fillna(1.0)
+        extra["family"] = extra["family"] + WEEKDAY_SUFFIX
+        long = pd.concat([long, extra[long.columns]], ignore_index=True)
+    return long[long["family"].isin(families)].reset_index(drop=True)
 
 
 def window_average_short(train: pd.DataFrame, cutoff: pd.Timestamp, h: int) -> pd.DataFrame:

@@ -11,6 +11,7 @@ use App\Models\Tenant;
 use App\Models\TrainingJob;
 use App\Models\User;
 use App\Services\Forecasting\Exceptions\ForecastRunConflictException;
+use App\Services\Forecasting\Support\ActiveRuns;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Support\Horizons\HorizonCatalog;
 use App\Support\Tenancy\TenantContext;
@@ -112,13 +113,7 @@ class ForecastRunService
     /** Ejecución en cola o en proceso que aún no se considera vencida. */
     public function activeRun(): ?ForecastRun
     {
-        $staleBefore = CarbonImmutable::now()->subMinutes((int) config('engine.stale_run_minutes', 120));
-
-        return ForecastRun::query()
-            ->active()
-            ->where('created_at', '>=', $staleBefore)
-            ->latest('id')
-            ->first();
+        return ActiveRuns::apply(ForecastRun::query())->latest('id')->first();
     }
 
     /** Mayor horizonte soportado por el motor e incluido en el plan; null si el plan no incluye ninguno. */

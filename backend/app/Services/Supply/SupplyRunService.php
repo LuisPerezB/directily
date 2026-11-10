@@ -11,6 +11,7 @@ use App\Models\CoreRun;
 use App\Models\Tenant;
 use App\Models\TrainingJob;
 use App\Models\User;
+use App\Services\Forecasting\Support\ActiveRuns;
 use App\Services\Forecasting\Support\CoreServices;
 use App\Services\Supply\Exceptions\SupplyRunConflictException;
 use App\Support\Tenancy\TenantContext;
@@ -95,10 +96,7 @@ class SupplyRunService
     /** Corrida de la misma operación en cola o en proceso que aún no se considera vencida. */
     public function activeRun(string $core, string $operation): ?CoreRun
     {
-        $staleBefore = CarbonImmutable::now()->subMinutes((int) config('engine.stale_run_minutes', 120));
-
-        return CoreRun::query()->where('core', $core)->where('operation', $operation)
-            ->whereIn('status', ['queued', 'running'])->where('created_at', '>=', $staleBefore)->latest('id')->first();
+        return ActiveRuns::apply(CoreRun::query()->where('core', $core)->where('operation', $operation))->latest('id')->first();
     }
 
     /** Plan vigente (is_current) o, en su defecto, el último de PRODUCCIÓN completado (nunca uno retroactivo). */

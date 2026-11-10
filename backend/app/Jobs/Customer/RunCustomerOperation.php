@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace App\Jobs\Customer;
 
+use App\Jobs\Concerns\WaitsForEngine;
 use App\Jobs\Middleware\SetTenantContext;
+use App\Jobs\Middleware\WaitForEngine;
 use App\Models\CoreRun;
 use App\Models\Tenant;
 use App\Models\TrainingJob;
 use App\Services\Customer\CustomerEngineClient;
 use App\Services\Customer\CustomerRunRecorder;
 use App\Services\Forecasting\Exceptions\EngineException;
+use App\Services\Forecasting\Support\EngineQueue;
 use App\Services\Forecasting\TrainingJobRecorder;
 use App\Services\Models\Usage\TenantUsageMeter;
 use App\Support\Tenancy\TenantContext;
@@ -33,7 +36,7 @@ use Throwable;
  */
 abstract class RunCustomerOperation implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, WaitsForEngine;
 
     public int $tries = 2;
 
@@ -47,7 +50,13 @@ abstract class RunCustomerOperation implements ShouldQueue
         public int $trainingJobId,
     ) {
         $this->timeout = (int) config('engine.timeout', 900) + 60;
-        $this->onQueue((string) config('engine.queue', 'forecasting'));
+        $this->onQueue(static::queueName());
+    }
+
+    /** Cola de la operación: el entrenamiento es un trabajo largo; la predicción diaria lo redefine como trabajo corto. */
+    public static function queueName(): string
+    {
+        return EngineQueue::heavy();
     }
 
     /** @return list<int> */
@@ -59,7 +68,8 @@ abstract class RunCustomerOperation implements ShouldQueue
     /** @return list<object> */
     public function middleware(): array
     {
-        return [new SetTenantContext];
+        // WaitForEngine (ADR-V26-01 · F6): con el motor caído el trabajo se aplaza en vez de gastar sus intentos.
+        return [new SetTenantContext, new WaitForEngine];
     }
 
     public function handle(CustomerEngineClient $engine, TrainingJobRecorder $jobs): void
@@ -76,6 +86,7 @@ abstract class RunCustomerOperation implements ShouldQueue
         if ($run->status === 'completed') {
             $jobs->markSucceeded($job, ['core_run_id' => $run->id, 'status' => 'completed']);
             app(TenantUsageMeter::class)->recordCoreRun($run);   // idempotente: repone la medición si un intento anterior no llegó a registrarla
+            $this->notifyFinished($run);
 
             return;
         }
@@ -97,6 +108,22 @@ abstract class RunCustomerOperation implements ShouldQueue
             $run->forceFill(['status' => 'completed', 'completed_at' => now()])->save();
         }
         app(TenantUsageMeter::class)->recordCoreRun($run);           // V2.5 · W4: segundos de entrenamiento/inferencia de la empresa (sin precios)
+        $this->notifyFinished($run);
+    }
+
+    /** Punto de extensión: la corrida llegó a un estado final (completada o fallida). Corre con el contexto de la empresa. */
+    protected function runFinished(CoreRun $run): void {}
+
+    /** Avisar del fin de la corrida nunca debe convertir en fallida una corrida que terminó bien, ni ocultar el fallo original. */
+    private function notifyFinished(CoreRun $run): void
+    {
+        try {
+            $this->runFinished($run);
+        } catch (Throwable $e) {
+            Log::warning('Customer Core: no se pudo avisar del fin de la corrida', [
+                'tenant_id' => $this->tenantId, 'core_run_id' => $run->getKey(), 'exception' => $e::class,
+            ]);
+        }
     }
 
     public function failed(?Throwable $exception): void
@@ -114,6 +141,7 @@ abstract class RunCustomerOperation implements ShouldQueue
             }
             if ($run !== null) {
                 app(CustomerRunRecorder::class)->markFailed($run, $message);
+                $this->notifyFinished($run->refresh());
             }
         });
     }

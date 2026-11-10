@@ -91,7 +91,8 @@ dev-backend: ## API Laravel en :8000
 
 .PHONY: dev-queue
 dev-queue: ## Worker de colas (imports, forecasting, default)
-	cd backend && $(PHP) artisan queue:work redis --queue=imports,forecasting,default --tries=2 --timeout=1000 --memory=1024
+	@# Un solo worker para las tres colas: usa `redis-long` (retry_after 3700 s) porque las importaciones declaran hasta 3600 s.
+	cd backend && $(PHP) artisan queue:work redis-long --queue=imports,forecasting,default --tries=2 --timeout=1000 --memory=1024
 
 .PHONY: dev-scheduler
 dev-scheduler: ## Programador de tareas

@@ -11,6 +11,7 @@ use App\Services\Forecasting\Exceptions\EngineNotFoundException;
 use App\Services\Forecasting\Exceptions\EngineServerException;
 use App\Services\Forecasting\Exceptions\EngineUnavailableException;
 use App\Services\Forecasting\Exceptions\InsufficientDataException;
+use App\Services\Forecasting\Support\EngineCircuit;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -57,7 +58,8 @@ class SupplyEngineClient
     private function send(string $method, string $path, array $payload, int $timeout): array
     {
         try {
-            $response = $this->request($timeout)->{$method}($path, $method === 'get' ? null : $payload);
+            // Bajo el cortacircuitos (ADR-V26-01 · F6): con el motor caído falla al instante en vez de esperar la conexión.
+            $response = app(EngineCircuit::class)->call(fn () => $this->request($timeout)->{$method}($path, $method === 'get' ? null : $payload));
         } catch (ConnectionException $e) {
             throw new EngineUnavailableException('El motor predictivo no respondió: '.$e->getMessage(), previous: $e);
         }

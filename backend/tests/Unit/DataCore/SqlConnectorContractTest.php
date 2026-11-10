@@ -115,6 +115,18 @@ final class SqlConnectorContractTest extends TestCase
         $this->runServerContract($dialect, new SqlConnectionSettings($host, (int) (getenv('TEST_MYSQL_PORT') ?: 3306), (string) getenv('TEST_MYSQL_DATABASE')), (string) getenv('TEST_MYSQL_USERNAME'), (string) getenv('TEST_MYSQL_PASSWORD'));
     }
 
+    public function test_sqlserver_dsn_only_uses_keywords_pdo_sqlsrv_accepts(): void
+    {
+        // pdo_sqlsrv rechaza `CharacterSet` en el DSN («invalid keyword»): la codificación va como atributo PDO (visto contra SQL Server 2022).
+        $dsn = (new SqlServerDialect)->dsn(new SqlConnectionSettings('10.0.0.5', 1433, 'RT_ERP', trustServerCertificate: true));
+
+        $this->assertStringStartsWith('sqlsrv:Server=10.0.0.5,1433;Database=RT_ERP;', $dsn);
+        $this->assertStringContainsString('ApplicationIntent=ReadOnly', $dsn);
+        $this->assertStringNotContainsStringIgnoringCase('CharacterSet', $dsn);
+        $keywords = array_map(fn (string $part) => strstr($part, '=', true), explode(';', substr($dsn, strlen('sqlsrv:'))));
+        $this->assertSame(['Server', 'Database', 'LoginTimeout', 'Encrypt', 'TrustServerCertificate', 'ApplicationIntent'], $keywords);
+    }
+
     public function test_sqlserver_server_contract(): void
     {
         $dialect = new SqlServerDialect;

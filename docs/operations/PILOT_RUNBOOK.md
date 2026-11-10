@@ -68,6 +68,20 @@ porque las bases de Soyoda y Resgasa solo son accesibles desde su red (VPN).
 3. Informe en `reports/private/V25_PILOT_BASELINE.md`, con fecha de corte, huella del dataset y versiones de
    modelos. Solo se publica en el repositorio un resumen sin datos identificables, si el propietario lo autoriza.
 
+## 5 bis. Lecciones del primer pull real con SQL Server (2026-11-06)
+
+Sin datos del cliente: solo lo que cambia la forma de ejecutar los pasos 1–4.
+
+| Tema | Qué pasa | Qué hacer |
+|---|---|---|
+| OpenSSL en macOS (Homebrew) | El ODBC Driver 18 carga OpenSSL desde `/opt/homebrew/opt/openssl/lib`. Si `openssl` ya apunta a OpenSSL 4, toda conexión falla con «OpenSSL library could not be loaded». | Arrancar cada proceso PHP que conecte (servidor, worker, pruebas) con `DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib`, invocando `php` directamente: los scripts con `#!/usr/bin/env` pierden las variables `DYLD_*`. |
+| DSN de `pdo_sqlsrv` | `CharacterSet` no es válido en el DSN de PDO («invalid keyword»). | Corregido en `SqlServerDialect` (la codificación va como atributo PDO) y cubierto por prueba. |
+| Fuente creada con la prueba fallida | Queda `inactive` y una prueba posterior correcta no la reactiva: la sincronización responde `source_inactive`. | `PATCH /api/v1/data-sources/{id}` con `{"status": "active"}` tras una prueba correcta. |
+| Vista previa en SQL Server | Envuelve la consulta en una tabla derivada: no admite `WITH` (CTE) ni `ORDER BY` de nivel superior. | Escribir la consulta con tablas derivadas y `UNION ALL`. |
+| Intercalaciones mezcladas | Tablas del mismo ERP con `SQL_Latin1_General_CP1_CI_AS` y `Modern_Spanish_CI_AS`: los `JOIN`/`UNION` fallan. | `COLLATE DATABASE_DEFAULT` en cada texto que se compara o se une. |
+| Consultas históricas pesadas | `statement_timeout_seconds` vale 60 por defecto. | Declararlo en la configuración de la fuente (máximo 600). |
+| Tablas de «histórico» del ERP | Algunas son registros de sincronización con copias repetidas del mismo documento. | Verificar unicidad por clave natural antes de mapear y deduplicar dentro de la consulta. |
+
 ## 6. Lo que este runbook no cubre todavía
 
 Evaluación prospectiva (requiere una ventana futura acordada con el cliente: Gate E), Revenue Radar, Decision

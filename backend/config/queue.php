@@ -73,6 +73,20 @@ return [
             'after_commit' => false,
         ],
 
+        // Trabajos largos (ADR-V26-01 · F2): importación, bridge, sincronización SQL y exportación declaran $timeout de hasta 3600 s.
+        // Misma instancia de Redis y mismas claves de cola que `redis`; solo cambia retry_after, que aplica el WORKER al reservar
+        // el trabajo. Por eso basta con que el worker de `imports,default` arranque con esta conexión (`queue:work redis-long`):
+        // quien encola no cambia. retry_after debe superar el mayor $timeout de esos trabajos; si no, Redis los reentrega mientras
+        // siguen corriendo (lo vigila tests/Unit/Core/QueueRetryAfterTest.php).
+        'redis-long' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => env('REDIS_QUEUE', 'default'),
+            'retry_after' => (int) env('REDIS_LONG_QUEUE_RETRY_AFTER', 3700),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
         'deferred' => [
             'driver' => 'deferred',
         ],
