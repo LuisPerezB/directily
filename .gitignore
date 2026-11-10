@@ -15,6 +15,12 @@ engine/.pytest_cache/
 engine/storage/artifacts/
 engine/.ruff_cache/
 engine/.mypy_cache/
+# mcp (servidores MCP: siembra y análisis)
+mcp/.venv/
+mcp/**/__pycache__/
+mcp/.pytest_cache/
+mcp/build/
+mcp/src/*.egg-info/
 # frontend
 frontend/node_modules/
 frontend/dist/

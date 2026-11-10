@@ -316,6 +316,9 @@ En `commercial_scope`, `role: null` significa **sin rol comercial** (alcance de 
 - Un `commercial_role` guardado desconocido **cierra** (solo lectura operativa) por HTTP y por el resolvedor; W6-A lo registra además como «inesperado». La validación al escribir (enum/`CHECK`) es de W6-A.
 - El texto de los borradores (puede incluir el nombre de pila del contacto) vive en caché hasta confirmarse o caducar; con un caché que no sea persistente, un borrador pendiente se pierde (se crea otro).
 - El plazo por herramienta corta las consultas a PostgreSQL pero **no interrumpe** el tiempo de CPU en PHP (solo descarta el resultado al terminar).
+- El **servidor MCP de análisis** (`mcp/`, `docs/integrations/MCP_SERVERS.md`, 10-nov-2026) **no pasa por este gateway**: es un cliente de las rutas de resultados equivalentes, con el token personal de la persona. Conserva la autorización (habilidad, empresa y alcance
+  comercial las aplica la API) y el solo lectura, pero **no** tiene `NumericGrounding`, `InjectionGuard` ni fila en `gateway_tool_calls`, y la respuesta la redacta un modelo que Predictily no controla. Ninguna garantía de este documento se le extiende. Un canal `mcp` de
+  este gateway (ruta que ejecute herramientas con `channel: mcp`, apagada por defecto y con consentimiento por empresa) queda **DISEÑADO / NO IMPLEMENTADO**: cambia la garantía «ninguna ruta ejecuta herramientas fuera del asistente» y su prueba.
 
 ## 15. Cómo verificarlo
 
