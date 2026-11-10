@@ -33,6 +33,7 @@ Navegador ─► nginx (web) ─► SPA Vue 3 + TypeScript
 | `backend/` | API pública, autenticación, roles, aislamiento multi-tenant, importación y validación, orquestación, simulador, exportaciones, auditoría | Laravel 13 · PHP 8.3 · Sanctum · OpenSpout |
 | `engine/` | Motor predictivo interno: perfilado, características (calendario de Ecuador), backtesting rolling-origin, selección de modelos, intervalos, reconciliación, inventario, precisión | Python 3.12 · FastAPI · StatsForecast · MLForecast + LightGBM · scikit-learn |
 | `frontend/` | SPA: landing, onboarding, asistente de importación, dashboard, pronósticos, inventario, precisión, simulador | Vue 3 · TypeScript · Vite · Pinia · ECharts · Tailwind |
+| `mcp/` | Servidores MCP para agentes: **siembra** de datos desde el sistema del cliente y consulta de **análisis** con el LLM que la persona elija. Clientes de la API pública con el token de cada persona; no tocan la base ni el motor | Python ≥ 3.12 · SDK MCP · httpx |
 | `data/demo/` | Datasets **ficticios** reproducibles (semilla fija) de dos empresas demo | CSV |
 | `docs/` | Requisitos, arquitectura, modelo de datos, flujos, contratos, seguridad, backlog, manuales | Markdown + Mermaid |
 | `infra/` | nginx, Caddy (TLS), inicialización de PostgreSQL, respaldos y despliegue | — |
@@ -195,6 +196,7 @@ make test-engine     # cd engine && .venv/bin/python -m pytest
 make test-frontend   # cd frontend && npx vitest run && npm run type-check
 make lint
 make compose-check   # valida docker-compose.yml y docker-compose.prod.yml
+make mcp-setup && make test-mcp   # servidores MCP (venv propio; API simulada, sin red ni base)
 ```
 
 Las pruebas cubren aislamiento multi-tenant, permisos, importación y deduplicación, validación,
@@ -232,6 +234,7 @@ reproducibilidad, procesamiento asíncrono y seguridad de endpoints. Detalle por
 | [OpenAPI](docs/openapi/) | Especificaciones de la API pública y del motor |
 | [Despliegue](infra/scripts/deploy.md) | VPS, TLS, firewall, respaldos |
 | [ADR-V26-01](docs/architecture/adr/ADR-V26-01-aislamiento-de-fallos-y-desacople.md) | Aislamiento de fallos entre procesos: colas, ciclo diario por empresa, cortacircuitos y regla de capas |
+| [Servidores MCP](docs/integrations/MCP_SERVERS.md) | Agentes con el token de la persona: siembra de datos y consulta de análisis; garantías, límites y qué falta verificar. Uso: [`mcp/README.md`](mcp/README.md) |
 
 ### Documentos de trabajo en la raíz
 
@@ -259,6 +262,7 @@ predictily/
 │   └── docker/           php.ini, php-fpm, entrypoint
 ├── engine/               motor Python (predictily_engine/, tests/, Dockerfile)
 ├── frontend/             SPA Vue 3 (src/, Dockerfile → nginx)
+├── mcp/                  servidores MCP de siembra y análisis (src/predictily_mcp/, tests/)
 ├── data/demo/            datasets ficticios
 ├── docs/                 documentación y OpenAPI
 ├── infra/

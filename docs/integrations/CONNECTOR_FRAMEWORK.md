@@ -100,3 +100,9 @@ y se detiene con 409 `reprocess_would_overwrite_newer` si sobrescribiría una ve
 
 Sin servidor de pruebas para MySQL ni SQL Server; sin ERP real de ningún cliente; instalador y servicio de Windows **BLOQUEADOS** (`BRIDGE_WINDOWS.md`); descarga de mapeos aprobados / vínculo con `mapping_templates` (W6-C) **DISEÑADO**;
 umbrales (tamaños de lote, solape, vigencias, límites de tasa) son valores iniciales **a aprobar en el piloto**, no universales.
+
+## 7. Orquestación por agentes (MCP)
+
+El servidor MCP de siembra (`mcp/`, `MCP_SERVERS.md`) **no es un conector ni una cuarta forma de traer datos**: con el token personal de una persona orquesta las rutas de la API de este documento (registrar la fuente SQL, descubrir el esquema,
+mapear, sincronizar, cargar archivos y verificar). Todo lo que escribe pasa por el mismo camino de § 1 y por las mismas reglas de § 3 (credenciales cifradas, política anti-SSRF, `SqlQueryGuard`, mapeo aprobado antes de sincronizar). Aprobar un mapeo
+sigue siendo una acción humana: el servidor pide la confirmación a la persona en su cliente MCP. **IMPLEMENTADO / VERIFICADO contra una API simulada; sin ejecutar contra un backend real.**

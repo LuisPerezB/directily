@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predictily-mcp"
+version = "0.1.0"
+description = "Servidores MCP de Predictily: siembra de datos (ingesta) y consulta de análisis, como clientes de la API pública con el token de cada persona"
+requires-python = ">=3.12"
+license = { text = "Propietario" }
+# Sin relación con el motor ni con el backend: solo hablan con la API pública /api/v1.
+dependencies = [
+    "mcp==2.3.0",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0"]
+
+[project.scripts]
+predictily-mcp = "predictily_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

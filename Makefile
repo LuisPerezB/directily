@@ -130,6 +130,16 @@ test-engine: ## Pruebas del motor (pytest)
 test-frontend: ## Pruebas del frontend (vitest) y verificación de tipos
 	cd frontend && npx vitest run && npm run type-check
 
+# Servidores MCP (mcp/): clientes de la API pública; venv propio, sin relación con el del motor. Ver mcp/README.md.
+.PHONY: mcp-setup
+mcp-setup: ## Instala los servidores MCP (siembra y análisis) en mcp/.venv
+	test -d mcp/.venv || $(PYTHON) -m venv mcp/.venv
+	mcp/.venv/bin/python -m pip install --upgrade pip && mcp/.venv/bin/python -m pip install -e './mcp[dev]'
+
+.PHONY: test-mcp
+test-mcp: ## Pruebas de los servidores MCP (API simulada; sin red ni base)
+	cd mcp && .venv/bin/python -m pytest -q
+
 .PHONY: lint
 lint: ## Linters: pint (PHP), ruff (Python), eslint (TS/Vue)
 	cd backend && vendor/bin/pint --test
