@@ -2123,3 +2123,99 @@ html:not(.js) .lp-carousel__nav {
     transition: none;
   }
 }
+
+/* ── «Para quién»: cada sector con su icono, su pregunta y su fotografía ──
+   La fotografía queda detrás del texto y solo se ve al pasar el puntero, al llegar con el teclado o al fijar la
+   tarjeta con un toque. Los colores del texto salen de variables: el estado «con foto» solo las cambia. */
+.lp-sector {
+  --sector-fg: var(--fg);
+  --sector-muted: var(--muted);
+  --sector-accent: var(--brand-strong);
+  --sector-chip: var(--bg-soft);
+  --sector-chip-line: var(--line);
+  --sector-on: 0;
+  position: relative;
+  isolation: isolate;
+  height: 100%;
+  min-height: 16rem;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    transform 0.35s var(--ease),
+    border-color 0.25s,
+    box-shadow 0.35s;
+}
+.lp-sector__photo {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--sector-on);
+  transform: scale(calc(1.1 - 0.1 * var(--sector-on)));
+  transition:
+    opacity 0.45s var(--ease),
+    transform 0.9s var(--ease);
+}
+/* Velo oscuro sobre la fotografía: el texto blanco se lee igual en la foto más clara y en la más oscura. */
+.lp-sector::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgb(7 10 15 / 0.42) 0%, rgb(7 10 15 / 0.78) 36%, rgb(7 10 15 / 0.92) 100%);
+  opacity: var(--sector-on);
+  transition: opacity 0.45s var(--ease);
+}
+.lp-sector .lp-icon {
+  border-color: var(--sector-chip-line);
+  background: var(--sector-chip);
+  color: var(--sector-accent);
+}
+.lp-sector .lp-h4 {
+  color: var(--sector-fg);
+  transition: color 0.3s;
+}
+.lp-sector .lp-text {
+  color: var(--sector-muted);
+  transition: color 0.3s;
+}
+.lp-sector__question {
+  margin-bottom: 0.6rem;
+  font-size: 0.94rem;
+  font-style: italic;
+  font-weight: 540;
+  color: var(--sector-accent);
+  transition: color 0.3s;
+}
+.lp-sector.is-pinned,
+.lp-sector:focus-visible {
+  --sector-fg: #fff;
+  --sector-muted: rgb(255 255 255 / 0.88);
+  --sector-accent: #9be7ec;
+  --sector-chip: rgb(255 255 255 / 0.14);
+  --sector-chip-line: rgb(255 255 255 / 0.34);
+  --sector-on: 1;
+  border-color: transparent;
+  box-shadow: var(--shadow-md);
+}
+/* Solo donde hay puntero de verdad: en pantallas táctiles el «hover» se queda pegado tras tocar. */
+@media (hover: hover) {
+  .lp-sector:hover {
+    --sector-fg: #fff;
+    --sector-muted: rgb(255 255 255 / 0.88);
+    --sector-accent: #9be7ec;
+    --sector-chip: rgb(255 255 255 / 0.14);
+    --sector-chip-line: rgb(255 255 255 / 0.34);
+    --sector-on: 1;
+    transform: translateY(-4px);
+    border-color: transparent;
+    box-shadow: var(--shadow-md);
+  }
+}
+.lp-sector-hint {
+  margin-top: 1rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}

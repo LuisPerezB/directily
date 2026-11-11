@@ -10,6 +10,7 @@ import { Icon, type IconName } from './components/Icon'
 import { Logo } from './components/Logo'
 import { ProductPreview } from './components/ProductPreview'
 import { Reveal } from './components/Reveal'
+import { SectorCards } from './components/SectorCards'
 import { StepFlow } from './components/StepFlow'
 import type { LandingLang } from './copy/types'
 import { contactConfig } from './lib/contact'
@@ -275,14 +276,8 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         <section id="sectores" className="lp-section lp-section--soft">
           <div className="lp-wrap">
             <Heading kicker={copy.sectors.kicker} title={copy.sectors.title} lead={copy.sectors.lead} />
-            <ul className="lp-grid lp-grid--3">
-              {copy.sectors.items.map((sector, i) => (
-                <Reveal as="li" key={sector.title} delay={(i % 3) * 80} className="lp-card lp-card--hover">
-                  <h3 className="lp-h4">{sector.title}</h3>
-                  <p className="lp-text">{sector.text}</p>
-                </Reveal>
-              ))}
-            </ul>
+            <SectorCards items={copy.sectors.items} />
+            <p className="lp-sector-hint">{copy.sectors.hint}</p>
             <Reveal className="lp-other">
               <div>
                 <h3 className="lp-h4">{copy.sectors.other.title}</h3>

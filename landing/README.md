@@ -104,6 +104,10 @@ La página es estática y no guarda nada: sin cookies, sin analítica y sin recu
   11-nov-2026, sin modificar). Son marcas de sus titulares: se muestran sin recolorear, sobre fondo claro y con la
   aclaración «no es socio ni está avalado» que está en `src/copy/`. Si alguna empresa pide retirarlo, se borra su
   archivo y su entrada en `tech.items`.
+- `public/media/sectors/` y `src/components/SectorCards.tsx` — las tarjetas de «Para quién»: cada sector tiene su
+  icono, su pregunta (`sectors.items[].question`) y una fotografía de fondo que aparece al pasar el puntero, al llegar
+  con el teclado o al tocar la tarjeta. Las fotografías son **ilustrativas, generadas con IA** (no son de clientes) y
+  la página lo dice. Para añadir un sector: su texto en `src/copy/`, su entrada en `SECTOR_IDENTITY` y su `.webp`.
 - `src/components/ProductPreview.tsx` — la vista previa interactiva del producto (pronóstico por
   horizonte, inventario y decisiones). Usa **datos ficticios** y lo dice en pantalla: no es una
   captura con datos de un cliente.

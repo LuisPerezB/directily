@@ -136,7 +136,10 @@ export interface LandingCopy {
     kicker: string
     title: SplitTitle
     lead: string
-    items: readonly TitledText[]
+    /** `question`: la pregunta que esa empresa se hace a diario, en primera persona, para que se reconozca en la tarjeta. */
+    items: readonly (TitledText & { question: string })[]
+    /** Cómo ver la fotografía de cada tarjeta, y aviso de que las imágenes son ilustrativas. */
+    hint: string
     other: TitledText & { cta: string }
   }
   /** Dónde corre el producto: autohospedado, servidor dedicado (VPS) o plataforma compartida. */
