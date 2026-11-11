@@ -246,6 +246,7 @@ def run_backtest(
     use_lgbm: bool,
     progress: Callable[[float], None] | None = None,
     windows: AsOfWindows | None = None,
+    holiday_adjustment: bool = False,
 ) -> pd.DataFrame:
     """Devuelve filas: unique_id, window, cutoff, ds, step, family, yhat, actual, stockout, scale,
     demand_class (clase de la serie en el corte de la ventana) e is_holdout.
@@ -257,7 +258,10 @@ def run_backtest(
 
     `windows` (ADR-V25-23): entrega el panel y las variables de cada origen tal como se conocían en su corte; sin él, todas
     las ventanas usan `panel`/`features` (comportamiento previo). Los reales (`actual`, `price_act`) y la marca de día no
-    evaluable (`stockout`, `day_status`) salen SIEMPRE del panel final (`panel`): la verdad disponible al corte final."""
+    evaluable (`stockout`, `day_status`) salen SIEMPRE del panel final (`panel`): la verdad disponible al corte final.
+
+    `holiday_adjustment` (interruptor `holiday_adjustment_models`): los modelos estadísticos que no son referencia se ajustan por feriados
+    en cada ventana con lo conocido en SU corte (`models/holidays.py`); apagado, nada cambia."""
     stat_fams = [f for f in families if f in STATISTICAL]
     results = []
     origins = plan.origins
@@ -268,7 +272,8 @@ def run_backtest(
         if not ids:
             continue
         train = wp.df[(wp.df["ds"] <= cutoff) & wp.df["unique_id"].isin(ids)]
-        preds = [forecast_statistical(train[["unique_id", "ds", "y"]], plan.horizon, stat_fams)]
+        holidays = wf.holiday_days(cutoff, ids) if holiday_adjustment and wf is not None else None
+        preds = [forecast_statistical(train[["unique_id", "ds", "y"]], plan.horizon, stat_fams, holidays=holidays)]
         if use_lgbm and LightGBMGlobal.can_train(train):
             try:
                 tr, ref = wf.training_frame(cutoff, ids)

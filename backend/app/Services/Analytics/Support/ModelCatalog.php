@@ -19,6 +19,7 @@ final class ModelCatalog
         'croston_sba_dow' => 'Croston SBA con perfil semanal',
         'adida_dow' => 'ADIDA con perfil semanal',
         'tsb_dow' => 'TSB con perfil semanal',
+        'weekday_average' => 'Promedio de los últimos mismos días de la semana',
         'lightgbm_global' => 'LightGBM global (machine learning)',
         'timesfm' => 'TimesFM (experimental)',
         'selection' => 'Selección por patrón de demanda',

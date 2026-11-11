@@ -48,14 +48,24 @@ for _base in WEEKDAY_BASES:
 del _base, _info
 WEEKDAY_FAMILIES = [b + WEEKDAY_SUFFIX for b in WEEKDAY_BASES]
 
+# «Mismo día de la semana»: media de las últimas k observaciones del MISMO día de la semana de cada serie. Tiene el reparto semanal por
+# construcción y reacciona rápido a un cambio de nivel (es ruidosa: por eso compite y no se impone). Entra con el mismo interruptor que las
+# variantes `*_dow` (`weekday_profile_models`); no es una variante de una base plana, así que no forma parte de `WEEKDAY_FAMILIES`.
+WEEKDAY_AVERAGE = "weekday_average"
+WEEKDAY_AVERAGE_K = 4
+FAMILIES[WEEKDAY_AVERAGE] = FamilyInfo(WEEKDAY_AVERAGE, "A", "statistical", "Promedio de los últimos 4 mismos días de la semana",
+                                       {"k": WEEKDAY_AVERAGE_K})
+# Todo lo que `weekday_profile_models` enciende (y lo que el pipeline retira cuando está apagado).
+WEEKDAY_SWITCH_FAMILIES = [*WEEKDAY_FAMILIES, WEEKDAY_AVERAGE]
+
 STATISTICAL = [f for f, i in FAMILIES.items() if i.kind == "statistical"]
 BASELINE_FAMILY = "seasonal_naive"
 SIMPLE_FALLBACKS = ("seasonal_naive", "window_average")
 
 # Candidatos por clase de demanda (el baseline siempre se evalúa y se reporta).
 CANDIDATES_BY_CLASS = {
-    "smooth": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_FAMILIES, "lightgbm_global"],
-    "erratic": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_FAMILIES, "lightgbm_global"],
-    "intermittent": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_FAMILIES, "lightgbm_global"],
-    "lumpy": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_FAMILIES, "lightgbm_global"],
+    "smooth": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
+    "erratic": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
+    "intermittent": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
+    "lumpy": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
 }

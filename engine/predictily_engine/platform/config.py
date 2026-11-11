@@ -56,6 +56,11 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         # competido en el backtest (series nuevas o de historia escasa y filas servidas con el respaldo plano) se reparte con el ritmo
         # semanal del negocio (`statistical.common_weekday_profile`): mismo total semanal, otro reparto por día.
         "weekday_profile_models": False,
+        # Ajuste de feriados de los modelos estadísticos (`models/holidays.py`): sin él solo LightGBM conoce el calendario; los estadísticos
+        # pronostican un feriado como un día normal y aprenden la caída de un feriado pasado como demanda. Encendido: el entrenamiento de las
+        # familias que no son referencia se limpia de feriados pasados y los feriados del horizonte se multiplican por el factor estimado de
+        # cada feriado (venta real / esperable del negocio). Apagado por defecto: cambia qué modelo gana, así que se activa por empresa.
+        "holiday_adjustment_models": False,
         # Días de la semana en que la empresa OPERA (0 = lunes … 6 = domingo). `None` (por defecto) = los 7 días: nada cambia. Declarada,
         # los demás días de la semana son cierres (`closed`, base `declared`) en toda la historia y en el horizonte: no son ceros observados
         # (no inflan la intermitencia ni entran a las métricas) y se pronostican en cero. Es una decisión de la empresa, nunca automática:

@@ -49,7 +49,7 @@ describe('claves de traducción', () => {
       'status.severity': ['info', 'warning', 'critical'],
       roles: ['owner', 'admin', 'analyst', 'viewer'],
       sectors: ['ferreteria', 'distribuidora', 'repuestos_automotrices', 'repuestos_agricolas', 'retail_multisucursal', 'importadora', 'consumo_recurrente', 'otro'],
-      models: ['naive', 'seasonal_naive', 'window_average', 'auto_ets', 'croston_sba', 'adida', 'tsb', 'window_average_dow', 'croston_sba_dow', 'adida_dow', 'tsb_dow', 'lightgbm_global', 'timesfm'],
+      models: ['naive', 'seasonal_naive', 'window_average', 'auto_ets', 'croston_sba', 'adida', 'tsb', 'window_average_dow', 'croston_sba_dow', 'adida_dow', 'tsb_dow', 'weekday_average', 'lightgbm_global', 'timesfm'],
       levels: ['total', 'branch', 'category', 'branch_category', 'product', 'series'],
       'imports.entities': ['sales', 'products', 'inventory', 'lead_times', 'branches', 'suppliers', 'promotions', 'commitments', 'calendar_events', 'unit_conversions', 'warehouses'],
       'imports.entityHints': ['sales', 'products', 'inventory', 'lead_times', 'branches', 'suppliers', 'promotions', 'commitments', 'calendar_events', 'unit_conversions', 'warehouses'],
