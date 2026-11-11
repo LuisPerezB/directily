@@ -62,6 +62,14 @@ Para que la página aparezca en Google hace falta, además (no lo hace el build)
 
 La aplicación (`VITE_APP_URL`) no debe indexarse: es una zona con inicio de sesión.
 
+## Despliegue (Vercel)
+
+`vercel.json` fija el build (`npm run build` → `dist/`), la barra final de las direcciones (`/en/`) y las cabeceras de
+seguridad (Vercel no lee `public/_headers`). El proyecto de Vercel apunta a la carpeta `landing/` del repositorio y
+publica cada cambio de `main`. Las variables `VITE_*` se definen en el proyecto de Vercel (Settings → Environment
+Variables), no en el repositorio. El DNS del dominio vive en Cloudflare: los registros hacia Vercel van **sin proxy**
+(nube gris), para que Vercel emita el certificado.
+
 ## Seguridad
 
 La página es estática y no guarda nada: sin cookies, sin analítica y sin recursos de terceros.
