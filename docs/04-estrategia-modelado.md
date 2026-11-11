@@ -45,7 +45,7 @@ Cada fila del backtest guarda la clase de su serie en el corte de su ventana (`d
 
 | Nivel | Estado en el MVP | Modelos |
 |---|---|---|
-| **A** Estadístico | ✅ Activo | Naive, Seasonal Naive (7), Promedio móvil 28 días, AutoETS estacional semanal (modelo `ZNZ`, sin tendencia: 7× más rápido que la búsqueda completa con el mismo error en los datos demo), Croston SBA, ADIDA, TSB (intermitentes) y sus variantes con perfil semanal (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la semana de cada serie, últimos 56 días encogidos hacia el perfil común; compiten en todas las clases cuando la empresa activa `weekday_profile_models`, apagado por defecto porque cambian qué modelo gana) |
+| **A** Estadístico | ✅ Activo | Naive, Seasonal Naive (7), Promedio móvil 28 días, AutoETS estacional semanal (modelo `ZNZ`, sin tendencia: 7× más rápido que la búsqueda completa con el mismo error en los datos demo), Croston SBA, ADIDA, TSB (intermitentes) y sus variantes con perfil semanal (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la semana de cada serie, últimos 56 días encogidos hacia el perfil común; compiten en todas las clases cuando la empresa activa `weekday_profile_models`, apagado por defecto porque cambian qué modelo gana). Con ese mismo interruptor, lo que se sirve plano sin competir en el backtest (series nuevas o de historia escasa y filas servidas con el respaldo `window_average`) se reparte con el ritmo semanal del negocio (`common_weekday_profile`: unidades por día de la semana de las series activas en los últimos 56 días); conserva el total semanal, no tiene perfil propio ni por sucursal y queda anotado en los supuestos de la ejecución |
 | **B** Global reutilizable | ✅ Activo por empresa | LightGBM global (MLForecast) entrenado con TODAS las series de la empresa: lags 1/7/14/28, medias y desviaciones móviles, media del mismo día de semana, calendario de Ecuador, promoción, precio relativo, sucursal, categoría, región y nivel de la serie; objetivo Tweedie (conteos con ceros); recursivo |
 | **B** entre empresas | ⏳ Diseñado, no activo | Requiere `tenants.allow_shared_training = true`, base jurídica (LOPDP) y evaluación; anonimizar IDs no vuelve anónimos los datos |
 | **C** Sectorial | ⏳ Diseñado | `model_registry.scope = 'sector'`, `tenant_id NULL`; se activará con datos suficientes y autorizados del sector |
@@ -420,7 +420,8 @@ cifras no tienen intervalo de confianza y no certifican exactitud comercial.
   congelado, §9): incluyen el efecto de cambios de precio posteriores al origen.
 - Las series nuevas o de historia escasa se pronostican con un nivel plano (mediana de categoría o promedio
   propio): no aprenden estacionalidad hasta tener ≥ 28 días; quedan marcadas `insufficient_data` en los
-  horizontes que su historia no respalda.
+  horizontes que su historia no respalda. Con `weekday_profile_models` activo ese nivel se reparte entre los días
+  con el ritmo semanal del negocio (no el de la serie ni el de su sucursal); el nivel semanal sigue siendo el mismo.
 - El cierre de sucursal solo se reconoce si está declarado (`branches.is_active = false`; no hay fecha de cierre):
   una sucursal que deja de vender sin declaración se trata como series sin ventas recientes (abstención).
 - La cobertura de ventas (`data_coverage`) limita el corte de **toda** la empresa al menor `complete_through`
@@ -454,6 +455,7 @@ Detalle y contratos en `docs/architecture/v2/P1-demanda.md`.
 | Sucursal cerrada (declarada) | cero explícito | `branch_closed_declared` |
 | Sucursal abierta hace ≤ 90 días | la serie empieza en su primera venta | `branch_opening` |
 | Evento extraordinario conocido al corte | bandera opcional; no cambia el valor; calidad `degraded` en sus fechas | `exceptional_event` |
+| Día cerrado del horizonte (cierre `closure` del calendario, de la empresa o de la sucursal, o día de la semana fuera de `operating_weekdays`) | cero explícito, con intervalos en cero, en todas las familias; un nodo agregado queda sin intervalo si todas sus series están cerradas ese día | `closed_day` |
 
 **Cobertura de fuentes.** `data_coverage` (ventas): el corte no supera el menor `complete_through`
 declarado; lo posterior (y lo anterior a `complete_from`) es dato **ausente**, no cero. Sin declaración:
@@ -587,6 +589,11 @@ Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_
 mediana ≥ 5 líneas diarias en los 28 días previos y, con `day_status_infer_same_weekday` (por defecto activa), si ese mismo día de la semana también es habitual (mediana de los
 mismos días de las 4 semanas previas ≥ 5): un día que la sucursal no suele vender (los domingos de una distribuidora por rutas) es un cero observado, no una caída de la fuente;
 **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
+**Días de la semana sin operación** (`operating_weekdays`, sin definir por defecto): la empresa declara qué días opera y los demás son `closed`: no son ceros observados
+(una serie que vende todos los días hábiles deja de medirse como esporádica), no entran a las métricas y se pronostican en cero. Como todo día excluido, para los modelos
+que exigen series contiguas se imputan con el nivel de los días limpios; el cero se aplica al publicar. Salvaguarda: si en los últimos 56 días más del 1 % de las unidades
+se vendió en días declarados sin operación, la declaración no se aplica (`operating_weekdays_not_applied`). El motor nunca la activa solo: la preparación de datos solo la
+sugiere (`weekday_without_sales`). IMPLEMENTADO / VERIFICADO (`test_operating_days.py`).
 IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
 
 **Evaluación posterior y deriva.** La exactitud realizada de pronósticos ya publicados (`evaluation/actuals.py`: `forecast_actuals`, métricas `realized` y alerta `forecast_drift`) **no cuenta como cero observado**

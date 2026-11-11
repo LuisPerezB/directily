@@ -52,8 +52,16 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "day_status_infer_same_weekday": True,
         # Variantes con perfil semanal de los modelos planos (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la
         # semana; ver `models/registry.py`). Apagadas por defecto: cambian qué modelo gana, así que se activan por empresa al aprobarlo en
-        # el piloto (p. ej. un negocio que casi no vende un día de la semana).
+        # el piloto (p. ej. un negocio que casi no vende un día de la semana). Encendidas, además, lo que se sirve PLANO sin haber
+        # competido en el backtest (series nuevas o de historia escasa y filas servidas con el respaldo plano) se reparte con el ritmo
+        # semanal del negocio (`statistical.common_weekday_profile`): mismo total semanal, otro reparto por día.
         "weekday_profile_models": False,
+        # Días de la semana en que la empresa OPERA (0 = lunes … 6 = domingo). `None` (por defecto) = los 7 días: nada cambia. Declarada,
+        # los demás días de la semana son cierres (`closed`, base `declared`) en toda la historia y en el horizonte: no son ceros observados
+        # (no inflan la intermitencia ni entran a las métricas) y se pronostican en cero. Es una decisión de la empresa, nunca automática:
+        # si en las últimas 8 semanas más del 1 % de las unidades se vendió en días declarados sin operación, la declaración NO se aplica
+        # y la ejecución lo informa (`operating_weekdays_not_applied`); ver `profiling/days.py`.
+        "operating_weekdays": None,
         # ── W3-A · métricas por horizonte y segmento (docs/ml/FORECAST_VALIDATION.md §3). TODOS son valores INICIALES de diseño, «a aprobar
         # en el piloto» con datos reales; ninguno es universal y ninguno cambia lo servido (solo qué métricas se persisten y cómo se marcan). ──
         # Interruptor: apagado no calcula ni persiste las filas level='segment' (las demás métricas no cambian).
@@ -384,6 +392,7 @@ CONFIG_CONSTRAINTS: dict[tuple[str, str], dict[str, Any]] = {
     ("demand", "horizons"): {"subset_of": list(HORIZONS["demand"]), "non_empty": True},
     ("demand", "day_status_infer_min_median_lines"): {"min": 1, "max": 100000},
     ("demand", "day_status_infer_lookback_days"): {"min": 7, "max": 90},
+    ("demand", "operating_weekdays"): {"weekdays": True, "min_weekdays": 3},
     # W3-A · métricas por segmento
     ("demand", "wape_min_denominator"): {"min": 0.0, "max": 1_000_000_000},
     ("demand", "segment_min_series"): {"min": 1, "max": 100000},
@@ -539,6 +548,21 @@ def _list_errors(value: list[Any], rule: dict[str, Any]) -> str | None:
     return None
 
 
+def _weekdays_error(value: Any, min_days: int) -> str | None:
+    """Días de la semana en que se opera: nulo (todos) o lista de enteros 0–6 sin repetir, con al menos `min_days`."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or any(isinstance(v, bool) or not isinstance(v, int) for v in value):
+        return "debe ser nulo (todos los días) o una lista de enteros entre 0 (lunes) y 6 (domingo)"
+    if any(v < 0 or v > 6 for v in value):
+        return "cada día debe estar entre 0 (lunes) y 6 (domingo)"
+    if len(set(value)) != len(value):
+        return "no puede repetir días"
+    if len(value) < min_days:
+        return f"debe incluir al menos {min_days} días de operación"
+    return None
+
+
 def validate_overrides(core: str, overrides: dict[str, Any] | None, origin: str = "tenant") -> list[dict[str, Any]]:
     """Valida un conjunto de valores contra el esquema del core. No modifica nada. Devuelve la lista de errores."""
     if core not in CORE_DEFAULTS:
@@ -557,6 +581,11 @@ def validate_overrides(core: str, overrides: dict[str, Any] | None, origin: str 
             errors.append({"key": key, "code": "invalid_number", "message": "debe ser un número finito (no NaN ni infinito)"})
             continue
         rule = CONFIG_CONSTRAINTS.get((core, key), {})
+        if rule.get("weekdays"):      # lista de días de la semana (0 = lunes … 6 = domingo) o nulo (= todos)
+            problem = _weekdays_error(value, int(rule.get("min_weekdays", 1)))
+            if problem:
+                errors.append({"key": key, "code": "invalid_weekdays", "message": problem})
+            continue
         if isinstance(value, list) and any(k.startswith("list_") for k in rule):      # W3-C: listas numéricas
             problem = _list_errors(value, rule)
             if problem:

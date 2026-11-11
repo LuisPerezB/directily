@@ -2,6 +2,27 @@
 
 **Área:** backend + motor · **Prioridad:** alta · **Esfuerzo:** bajo (cierres) + medio (días sin operación).
 
+**Estado: implementado el 10/11/2026** (rama `feat/cambio-04-cierres-y-dias-sin-operacion`, sobre la del cambio `01`).
+Parte A: `closure` en `CalendarEvent::CATEGORIES`, en el importador (sinónimos `cierre`, `cerrado`, `sin_operacion`…; solo con alcance
+`tenant` o `branch`; sin la advertencia de `known_at`) y, por tanto, en la API; opción «Cierre» y etiqueta `closed_day` en la SPA.
+Parte B: clave `operating_weekdays` (`platform/config.py`), `DayRules.operating_weekdays` y la salvaguarda en `profiling/days.py`,
+cero explícito del horizonte en `pipeline/core.py` (`closed_future_rows`), aviso `weekday_without_sales` y días hábiles en
+`profiling/readiness.py`. Pruebas: `engine/tests/unit/test_operating_days.py` y `backend/tests/Feature/DataCore/CalendarEventsTest.php`.
+
+**Correcciones a lo escrito abajo, tras verificarlo en el código:**
+- **Declarar un cierre NO elimina la imputación de ese día, y no debe.** Un día `closed` se imputa igual que uno `missing_source`
+  (`profiling/series.py`, media móvil de los días limpios) para que los modelos de series contiguas no aprendan una caída. El criterio
+  «desaparecen las unidades imputadas» era incorrecto. Lo que cambia al declararlo: el día pasa de «fuente ausente inferida» a
+  «cierre declarado» (desaparece la limitación `days_missing_source_inferred`), deja de depender de la regla inferida y, si el
+  cierre cae en el horizonte, se pronostica en cero. En el piloto B el pronóstico con el carnaval declarado es idéntico.
+- **La salvaguarda mide ventas recientes, no todo el histórico:** si en los últimos 56 días más del 1 % de las unidades se vendió
+  en días declarados sin operación, la declaración no se aplica (`operating_weekdays_not_applied`). Un día mal declarado no borra
+  ventas del entrenamiento (el valor observado se conserva); el riesgo real es pronosticar cero un día que sí vende.
+- **Los días sin operación se imputan para los modelos y el cero se aplica al publicar.** Por eso la clasificación mejora (el ADI
+  baja) sin forzar ceros dentro del backtest, que es lo que el experimento E2 desaconsejaba.
+- No se añadió un bloqueo en la interfaz ni una pantalla para `operating_weekdays`: se declara por la configuración del core de
+  Demanda (`PUT /tenant/core-config/demand`), validada por el motor.
+
 ## Problema
 
 1. **No se pueden declarar cierres desde el producto.** El motor ya trata un `calendar_events.category = 'closure'` como día

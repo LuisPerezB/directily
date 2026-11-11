@@ -37,6 +37,7 @@ from predictily_engine.demand import evaluation as ev
 from predictily_engine.demand import horizons as hz
 from predictily_engine.demand import segments as seg_metrics
 from predictily_engine.demand.lifecycle import (
+    LABEL_CLOSED_DAY,
     LABEL_EXCEPTIONAL,
     LifecyclePlan,
     flag_events,
@@ -58,12 +59,19 @@ from predictily_engine.inventory.recommendations import (
     required_coverage_days,
 )
 from predictily_engine.models.ml import LightGBMGlobal
-from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL, WEEKDAY_FAMILIES
-from predictily_engine.models.statistical import forecast_statistical
+from predictily_engine.models.registry import (
+    BASELINE_FAMILY,
+    FAMILIES,
+    STATISTICAL,
+    WEEKDAY_BASES,
+    WEEKDAY_FAMILIES,
+    WEEKDAY_PROFILE_DAYS,
+)
+from predictily_engine.models.statistical import common_weekday_profile, forecast_statistical
 from predictily_engine.pipeline.data import TenantData
 from predictily_engine.platform.config import config_hash, effective_config_record
 from predictily_engine.platform.snapshot import DataSnapshot
-from predictily_engine.profiling.days import DayRules
+from predictily_engine.profiling.days import DayRules, closed_future_rows, operating_weekdays_applied
 from predictily_engine.profiling.readiness import compute_readiness
 from predictily_engine.profiling.series import Panel, build_panel
 from predictily_engine.quality.assessment import QualityAssessment, assess_demand
@@ -371,8 +379,18 @@ def run_pipeline(
                                         "intervalos y las etiquetas corresponden al modelo servido.")})
     active_ids = set(active["unique_id"])
     short_ids = [u for u in active["unique_id"] if u not in set(full_ids)]
+    # Ritmo semanal del negocio para lo que se sirve PLANO sin haber competido en el backtest (series nuevas o de historia escasa y
+    # filas servidas con el respaldo plano): mismo interruptor que las variantes `*_dow`. Sin él, en un negocio que no vende un día
+    # de la semana esas series reparten su nivel por igual entre los 7 días y son casi toda la venta pronosticada de ese día.
+    # El perfil es el común de las series activas (no hay historia para uno propio ni perfil por sucursal); apagado ⇒ None y nada cambia.
+    business_weekday: np.ndarray | None = None
+    weekday_applied = {"short_series": 0, "fallback_series": 0}
+    if core_config.get("weekday_profile_models", False):
+        business_weekday = common_weekday_profile(
+            panel.df.loc[(panel.df["ds"] <= cutoff) & panel.df["unique_id"].isin(active_ids), ["unique_id", "ds", "y"]])
     if short_ids:
-        preds.append(short_forecast(lifecycle, short_ids, cutoff, fc_horizon))
+        preds.append(short_forecast(lifecycle, short_ids, cutoff, fc_horizon, weekday_factors=business_weekday))
+        weekday_applied["short_series"] = len(short_ids) if business_weekday is not None else 0
         n_cat = int((lifecycle.short_family.reindex(short_ids) == "category_benchmark").sum())
         warnings.append(f"{len(short_ids)} series con historia escasa o menos de 28 días usan respaldo etiquetado "
                         f"({n_cat} con la mediana de su categoría, el resto con el promedio de su historia).")
@@ -390,10 +408,7 @@ def run_pipeline(
         m = chosen == fam
         if fam in wide:
             yhat[m] = wide.loc[m, fam].to_numpy()
-    miss = np.isnan(yhat)
-    if miss.any() and selection.fallback in wide:
-        yhat[miss] = wide.loc[miss, selection.fallback].to_numpy()
-        fam_used[miss] = selection.fallback
+    weekday_applied["fallback_series"] = fill_missing_with_fallback(wide, yhat, fam_used, selection.fallback, business_weekday)
     short_family = wide["unique_id"].map(lifecycle.short_family).fillna("window_average").to_numpy(dtype=object)
     fam_used = np.where(fam_used == "__short__", short_family, fam_used)
     series_fc = wide[["unique_id", "ds", "demand_class"]].copy()
@@ -462,6 +477,24 @@ def run_pipeline(
     series_fc.loc[ex_mask & series_fc["case_label"].isna().to_numpy(), "case_label"] = LABEL_EXCEPTIONAL
     series_fc.loc[ex_mask & (series_fc["quality_status"] == hz.STATUS_OK).to_numpy(), "quality_status"] = hz.STATUS_DEGRADED
 
+    # ── Días del horizonte declarados cerrados: cero explícito ──
+    # Un cierre del calendario (`closure`) o un día de la semana sin operación (`operating_weekdays`, si la clasificación del panel lo
+    # aplicó) no puede tener venta: valor e intervalos a cero en todas las familias y fila etiquetada. Los nodos agregados suman el
+    # cero y, si TODAS sus series están cerradas ese día, tampoco tienen intervalo (`open_rows`).
+    by_calendar, by_weekday = closed_future_rows(series_fc["branch_id"].to_numpy(), series_fc["ds"].to_numpy(), data.closures,
+                                                 operating_weekdays_applied(panel.day_summary))
+    closed_fc = by_calendar | by_weekday
+    if closed_fc.any():
+        series_fc.loc[closed_fc, ["yhat", "lo_80", "hi_80", "lo_95", "hi_95"]] = 0.0
+        series_fc.loc[closed_fc & series_fc["p50"].notna().to_numpy(), "p50"] = 0.0
+        series_fc.loc[closed_fc, "case_label"] = LABEL_CLOSED_DAY
+    series_fc["open_rows"] = (~closed_fc).astype(float)
+    in_horizon = (series_fc["step"] <= horizon).to_numpy()
+    closed_info = {
+        "series_days": int((closed_fc & in_horizon).sum()), "dates": int(series_fc.loc[closed_fc & in_horizon, "ds"].nunique()),
+        "by_calendar_closure": int((by_calendar & in_horizon).sum()), "by_operating_weekdays": int((by_weekday & ~by_calendar & in_horizon).sum()),
+    }
+
     # ── Ingresos con supuesto de precio ──
     price = last_known_price(panel.df, cutoff)
     fallback_price = data.products.set_index("product_id")["current_price"]
@@ -484,7 +517,7 @@ def run_pipeline(
     # ── Reconciliación jerárquica + intervalos agregados ──
     progress("reconciling", 80)
     t3 = time.perf_counter()
-    agg_fc = aggregate(series_fc, ["yhat", "revenue_yhat"], ["ds", "step"], AGG_LEVELS)
+    agg_fc = aggregate(series_fc, ["yhat", "revenue_yhat", "open_rows"], ["ds", "step"], AGG_LEVELS)
     node_hist = aggregate(panel.df.assign(y_clean=panel.df["y"]), ["y_clean"], ["ds"], AGG_LEVELS)
     # Escala de cada nodo en cada ventana: con el conocimiento de ESA ventana (ADR-V25-23), no con la historia final.
     window_hist = {}
@@ -522,6 +555,7 @@ def run_pipeline(
     else:
         for c in ("lo_80", "hi_80", "lo_95", "hi_95"):
             agg_fc[c] = np.nan
+    agg_fc.loc[(agg_fc["open_rows"] <= 0).to_numpy(), ["lo_80", "hi_80", "lo_95", "hi_95"]] = 0.0   # nodo con todas sus series cerradas ese día
     agg_fc["p50"] = np.nan  # la suma de medianas no es la mediana de la suma: solo hay P50 a nivel serie-día
     product_node = agg_fc["level"] == "product"
     agg_fc["unit_price_assumed"] = np.where(product_node & (agg_fc["yhat"] > 0),
@@ -619,6 +653,17 @@ def run_pipeline(
         "Cada ventana del backtest entrena con los datos tal como se conocían en su corte; los reales con que se evalúa son la "
         "verdad disponible al corte final (versión vigente de cada documento a esa fecha).",
     ]
+    if closed_info["series_days"]:
+        assumptions.append(
+            f"{closed_info['series_days']} series-día del horizonte ({closed_info['dates']} fechas) están declaradas cerradas "
+            f"({closed_info['by_calendar_closure']} por cierres del calendario, {closed_info['by_operating_weekdays']} por días de la "
+            "semana sin operación): se pronostican en cero, con intervalos en cero, y se etiquetan `closed_day`.")
+    if weekday_applied["short_series"] or weekday_applied["fallback_series"]:
+        assumptions.append(
+            f"Las series nuevas o de historia escasa ({weekday_applied['short_series']}) y las servidas con el respaldo plano "
+            f"({weekday_applied['fallback_series']}) reparten su nivel diario con el ritmo semanal del negocio (unidades por día de "
+            f"la semana de las series activas en los últimos {WEEKDAY_PROFILE_DAYS} días): el total de una semana completa no "
+            "cambia, solo su reparto entre días. No tienen perfil propio ni por sucursal.")
     snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage,
                               factors=factor_outcome.snapshot_block() if factor_outcome is not None else None)
     families_info = _families_info(served, selection, series_fc, bt, active, failed)
@@ -654,7 +699,8 @@ def run_pipeline(
         "max_supported_horizon": max((h for h, v in support.items() if v["status"] != hz.STATUS_INSUFFICIENT), default=None),
         "p50": p50_info, "served": served_info,
         "special_cases": {**lifecycle.summary,
-                          "exceptional_events": {"flag_enabled": flag_on, "used": ex_used, "stats": ex_stats}},
+                          "exceptional_events": {"flag_enabled": flag_on, "used": ex_used, "stats": ex_stats},
+                          "closed_days_in_horizon": closed_info},
         "coverage": data.coverage, "limitations": limitations, "limitation_codes": [x["code"] for x in limitations],
         "assumptions": assumptions, "config_version": config_version, "data_snapshot_hash": snapshot.hash,
         "history_days": history_days, "horizon_days": horizon, "horizons_requested": list(horizons),
@@ -703,6 +749,25 @@ def run_pipeline(
 
 # ───────────────────────────── auxiliares ─────────────────────────────
 
+def fill_missing_with_fallback(wide: pd.DataFrame, yhat: np.ndarray, fam_used: np.ndarray, fallback: str,
+                               business_weekday: np.ndarray | None) -> int:
+    """Rellena EN SITIO las filas sin pronóstico de su familia (`yhat` NaN) con el respaldo y las etiqueta con él.
+
+    `wide`: una fila por (unique_id, ds) con una columna por familia. Con `business_weekday` (ritmo semanal del negocio: 7 factores
+    de media 1, índice 0 = lunes; solo con `weekday_profile_models`) un respaldo PLANO (`WEEKDAY_BASES`: no ve el día de la semana)
+    se reparte con ese ritmo; un respaldo que ya tiene día de la semana (`seasonal_naive`) no se toca.
+    Devuelve cuántas series recibieron el respaldo con el ritmo del negocio (0 si no se aplicó)."""
+    miss = np.isnan(yhat)
+    if not miss.any() or fallback not in wide:
+        return 0
+    yhat[miss] = wide.loc[miss, fallback].to_numpy()
+    fam_used[miss] = fallback
+    if business_weekday is None or fallback not in WEEKDAY_BASES:
+        return 0
+    yhat[miss] = yhat[miss] * np.asarray(business_weekday, dtype=float)[pd.to_datetime(wide.loc[miss, "ds"]).dt.dayofweek.to_numpy()]
+    return int(wide.loc[miss, "unique_id"].nunique())
+
+
 def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
     """Limitaciones de la semántica de días (ADR-V25-03) con sus conteos: nada se excluye o imputa en silencio."""
     out: list[dict[str, str]] = []
@@ -735,9 +800,23 @@ def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
             "contiguas, pero siguen fuera de las métricas y de la proporción de ceros del perfilado.")})
     if closed:
         out.append({"code": "days_closed", "message": (
-            f"{closed} días-serie corresponden a cierres declarados en el calendario (`closure`): no son ceros observados y se excluyen "
-            "de las métricas." + tail)})
+            f"{closed} días-serie corresponden a cierres declarados (cierres del calendario `closure` o días de la semana sin "
+            "operación): no son ceros observados y se excluyen de las métricas." + tail)})
+    weekdays = (day_summary.get("notes") or {}).get("operating_weekdays") or {}
+    if weekdays and not weekdays.get("applied"):
+        out.append({"code": "operating_weekdays_not_applied", "message": (
+            f"Los días de operación declarados ({_weekday_names(weekdays.get('weekdays') or [])}) NO se aplicaron: en los últimos "
+            f"{weekdays.get('guard_days')} días el {float(weekdays.get('recent_units_share_on_closed_weekdays') or 0):.1%} de las unidades se "
+            f"vendió en días declarados sin operación (máximo admitido {float(weekdays.get('guard_max_share') or 0):.0%}). Esos días se "
+            "tratan como días normales; revise la declaración en la configuración de Demanda (`operating_weekdays`).")})
     return out
+
+
+WEEKDAY_NAMES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
+
+def _weekday_names(days: list[int]) -> str:
+    return ", ".join(WEEKDAY_NAMES[int(d)] for d in days if 0 <= int(d) <= 6)
 
 
 def _knowledge(data: TenantData, windows: AsOfWindows | None) -> dict[str, Any]:

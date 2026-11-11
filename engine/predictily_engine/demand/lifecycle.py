@@ -17,6 +17,9 @@ identificados. Nada se resuelve en silencio y ningún desconocido se convierte e
 - **Apertura de sucursal**: sucursal cuya primera venta ocurrió ≥ 60 días después de la primera de la
   empresa y hace ≤ 90 días: sus series con < 90 días de historia se etiquetan `branch_opening` (la serie
   empieza en su primera venta; la estacionalidad de la sucursal aún no se conoce).
+- **Día cerrado del horizonte** (`closed_day`): un día futuro con un cierre declarado en el calendario
+  (`calendar_events.category = 'closure'`, de la empresa o de la sucursal) o en un día de la semana que la empresa declaró sin
+  operación (`operating_weekdays`) se pronostica en **cero explícito**, con intervalos en cero (`pipeline/core.py`).
 - **Evento extraordinario** (`calendar_events.category = 'exceptional'`): **bandera opcional**; solo cuentan
   los eventos cuyo `known_at` es ≤ corte (los de `known_at` desconocido no se usan y se informan). No cambia
   el valor pronosticado: marca las filas dentro del evento (`exceptional_event`, calidad `degraded`).
@@ -49,6 +52,7 @@ LABEL_NO_RECENT = "no_recent_sales"
 LABEL_BRANCH_CLOSED = "branch_closed_declared"
 LABEL_BRANCH_OPENING = "branch_opening"
 LABEL_EXCEPTIONAL = "exceptional_event"
+LABEL_CLOSED_DAY = "closed_day"   # día del horizonte declarado cerrado (cierre del calendario o día de la semana sin operación): cero explícito
 ZERO_FAMILY = "declared_zero"
 CATEGORY_FAMILY = "category_benchmark"
 
@@ -192,16 +196,22 @@ def plan_lifecycle(profile: pd.DataFrame, panel_df: pd.DataFrame, cutoff: pd.Tim
                          summary=summary)
 
 
-def short_forecast(plan: LifecyclePlan, ids: list[str], cutoff: pd.Timestamp, h: int) -> pd.DataFrame:
-    """Pronóstico plano (unique_id, ds, family, yhat) de las series nuevas o de historia escasa."""
+def short_forecast(plan: LifecyclePlan, ids: list[str], cutoff: pd.Timestamp, h: int,
+                   weekday_factors: np.ndarray | None = None) -> pd.DataFrame:
+    """Pronóstico (unique_id, ds, family, yhat) de las series nuevas o de historia escasa: su nivel diario, plano.
+
+    Con `weekday_factors` (7 factores de media 1, índice 0 = lunes: el ritmo semanal del negocio,
+    `statistical.common_weekday_profile`), el nivel de cada día se multiplica por el factor de su día de la semana: una semana
+    completa conserva su total y solo cambia el reparto entre días. Estas series no tienen historia para un perfil propio."""
     ids = [i for i in ids if i in plan.short_levels.index]
     if not ids:
         return pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
     days = pd.date_range(pd.Timestamp(cutoff) + pd.Timedelta(days=1), periods=h, freq="D")
     lv = plan.short_levels.loc[ids].clip(lower=0)
+    by_day = np.ones(h) if weekday_factors is None else np.asarray(weekday_factors, dtype=float)[days.dayofweek.to_numpy()]
     return pd.DataFrame({
         "unique_id": np.repeat(lv.index.to_numpy(), h), "ds": np.tile(days.values, len(lv)),
-        "family": "__short__", "yhat": np.repeat(lv.to_numpy(), h),
+        "family": "__short__", "yhat": np.repeat(lv.to_numpy(), h) * np.tile(by_day, len(lv)),
     })
 
 

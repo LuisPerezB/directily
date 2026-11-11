@@ -132,6 +132,32 @@ final class CalendarEventsTest extends TestCase
         $this->assertSame(1, DB::table('calendar_events')->where('tenant_id', $this->tenant->id)->where('code', 'dia_madre')->count());
     }
 
+    public function test_closures_are_declared_for_the_company_or_a_branch_by_import_and_by_api(): void
+    {
+        $branchId = (int) DB::table('branches')->where('tenant_id', $this->tenant->id)->value('id');
+        // Por importación: toda la empresa (sinónimo «cierre») y una sucursal; sin `known_at` no hay advertencia (un cierre es un hecho de operación).
+        $job = $this->importCsv('calendar_events', self::HEADERS, [
+            $this->row('empresa', null, 'carnaval', ['category' => 'cierre', 'starts_on' => '2027-02-08', 'ends_on' => '2027-02-09', 'known_at' => '']),
+            $this->row('sucursal', '001', 'inventario', ['category' => 'closure', 'starts_on' => '2026-12-30', 'ends_on' => '2026-12-30']),
+        ]);
+        $this->assertSame(2, $job->stats['events_new']);
+        $this->assertNotContains('known_at_unknown', array_column($this->importErrors($job, 'warning'), 'error_code'));
+        $stored = DB::table('calendar_events')->where('tenant_id', $this->tenant->id)->where('category', 'closure')->orderBy('code')->get(['code', 'scope', 'scope_ref', 'starts_on', 'ends_on'])->all();
+        $this->assertSame(['carnaval', 'tenant', null, '2027-02-08', '2027-02-09'], array_values((array) $stored[0]));
+        $this->assertSame(['inventario', 'branch', "branch:{$branchId}", '2026-12-30', '2026-12-30'], array_values((array) $stored[1]));
+
+        // Por la API, y se puede filtrar por la categoría.
+        $this->postJson('/api/v1/calendar-events', ['scope' => 'tenant', 'code' => 'viernes_santo', 'name' => 'Viernes Santo', 'category' => 'closure', 'starts_on' => '2027-03-26'])
+            ->assertCreated()->assertJsonPath('data.category', 'closure')->assertJsonPath('data.ends_on', '2027-03-26');
+        $this->assertEqualsCanonicalizing(['carnaval', 'inventario', 'viernes_santo'], array_column($this->events('?category=closure')['data'], 'code'));
+
+        // Un cierre solo tiene sentido para la empresa o una sucursal: el motor ignoraría cualquier otro alcance, así que se rechaza.
+        $bad = $this->importCsv('calendar_events', self::HEADERS, [$this->row('country', 'EC', 'feriado_pais', ['category' => 'closure'])], confirm: false);
+        $this->assertContains('invalid_value', collect($this->importErrors($bad))->pluck('error_code')->all());
+        $this->assertSame(0, $bad->stats['rows_valid']);
+        $this->postJson('/api/v1/calendar-events', ['scope' => 'product', 'scope_ref' => 'CEM-50', 'code' => 'sin_venta', 'name' => 'x', 'category' => 'closure', 'starts_on' => '2027-01-02'])->assertStatus(422);
+    }
+
     public function test_api_crud_creates_revisions_and_cancels_instead_of_deleting(): void
     {
         $created = $this->postJson('/api/v1/calendar-events', ['scope' => 'country', 'scope_ref' => 'EC', 'code' => 'black_friday', 'name' => 'Black Friday', 'category' => 'international_peak',

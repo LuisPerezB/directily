@@ -163,12 +163,13 @@ export const CASE_LABELS = [
   'branch_closed_declared',
   'branch_opening',
   'exceptional_event',
+  'closed_day',
 ] as const
 
 export function caseTone(label: string | null | undefined): Tone {
   if (!label) return 'neutral'
   if (label === 'discontinued_zero' || label === 'branch_closed_declared') return 'danger'
-  if (label === 'exceptional_event') return 'info'
+  if (label === 'exceptional_event' || label === 'closed_day') return 'info'
   return 'warning'
 }
 

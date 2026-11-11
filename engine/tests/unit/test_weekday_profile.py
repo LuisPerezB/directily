@@ -18,7 +18,7 @@ from predictily_engine.models.registry import (
     WEEKDAY_BASES,
     WEEKDAY_FAMILIES,
 )
-from predictily_engine.models.statistical import forecast_statistical, weekday_profile
+from predictily_engine.models.statistical import common_weekday_profile, forecast_statistical, weekday_profile
 
 START = pd.Timestamp("2026-01-05")   # lunes
 
@@ -122,3 +122,78 @@ def test_off_they_never_compete_and_on_they_compete_in_every_class(small_data, p
     assert on.effective_config["config"]["weekday_profile_models"] is True
     assert any(f in WEEKDAY_FAMILIES for f in on.selection.winners.values()), \
         "en estos datos sintéticos (venta con ritmo semanal) alguna variante gana su clase"
+
+
+# ───────────────────────────── ritmo del negocio para las series sin perfil propio ─────────────────────────────
+
+def test_the_common_profile_is_the_rhythm_of_the_business():
+    f = common_weekday_profile(pd.concat([route_sales(uid="a"), route_sales(uid="b", weekday_units=2.0)]))
+    assert f.shape == (7,) and f[6] == pytest.approx(0.0, abs=1e-9)
+    assert f[:6] == pytest.approx(np.full(6, 7 / 6)) and f.mean() == pytest.approx(1.0)
+    assert common_weekday_profile(route_sales(weekday_units=0.0)) == pytest.approx(np.ones(7)), "sin ventas: plano"
+    assert common_weekday_profile(route_sales().iloc[:0]) == pytest.approx(np.ones(7)), "sin filas: plano"
+
+
+def test_the_common_profile_only_looks_at_the_recent_window():
+    old = route_sales(uid="antes", weeks=8, weekday_units=0.0, sunday_units=50.0)     # antes solo vendía los domingos
+    old["ds"] = old["ds"] - pd.Timedelta(days=7 * 8)
+    f = common_weekday_profile(pd.concat([old, route_sales(uid="ahora", weeks=8)]))
+    assert f[6] == pytest.approx(0.0, abs=1e-9), "los últimos 56 días no tienen domingos: la venta antigua no cuenta"
+
+
+def test_a_series_without_recent_rows_gets_exactly_the_common_profile():
+    old = route_sales(uid="antigua", weeks=2)
+    old["ds"] = old["ds"] - pd.Timedelta(days=200)
+    train = pd.concat([route_sales(uid="viva", weekday_units=4.0, sunday_units=1.0), old])
+    prof = weekday_profile(train).pivot(index="unique_id", columns="dow", values="factor")
+    assert prof.loc["antigua"].to_numpy() == pytest.approx(common_weekday_profile(train))
+
+
+def _short_plan(levels: dict[str, float]):
+    from predictily_engine.demand.lifecycle import LifecyclePlan
+
+    return LifecyclePlan(labels=pd.Series(dtype=object), zero_ids=[], abstain={}, short_levels=pd.Series(levels, dtype=float),
+                         short_family=pd.Series({k: "window_average" for k in levels}, dtype=object))
+
+
+def test_short_series_follow_the_rhythm_of_the_business_and_keep_their_weekly_total():
+    from predictily_engine.demand.lifecycle import short_forecast
+
+    plan, cutoff = _short_plan({"b1-p1": 6.0, "b1-p2": 0.5}), START + pd.Timedelta(days=69)     # corte en domingo
+    factors = common_weekday_profile(route_sales())
+    flat = short_forecast(plan, ["b1-p1", "b1-p2"], cutoff, 14)
+    prof = short_forecast(plan, ["b1-p1", "b1-p2"], cutoff, 14, weekday_factors=factors)
+    assert flat.groupby("unique_id")["yhat"].nunique().eq(1).all(), "sin factores: el nivel plano de siempre"
+    pd.testing.assert_frame_equal(flat, short_forecast(plan, ["b1-p1", "b1-p2"], cutoff, 14, weekday_factors=None))
+    pd.testing.assert_frame_equal(flat.drop(columns="yhat"), prof.drop(columns="yhat"))
+    sunday = pd.to_datetime(prof["ds"]).dt.dayofweek == 6
+    assert (prof.loc[sunday, "yhat"] == 0).all(), "el negocio no vende los domingos: la serie nueva tampoco"
+    assert prof.loc[~sunday & (prof["unique_id"] == "b1-p1"), "yhat"].to_numpy() == pytest.approx(np.full(12, 7.0))
+    assert prof.groupby("unique_id")["yhat"].sum().to_numpy() == pytest.approx(flat.groupby("unique_id")["yhat"].sum().to_numpy())
+
+
+def test_a_flat_fallback_follows_the_rhythm_of_the_business_and_a_seasonal_one_is_untouched():
+    from predictily_engine.pipeline.core import fill_missing_with_fallback
+
+    days = pd.date_range(START + pd.Timedelta(days=70), periods=7, freq="D")           # lunes a domingo
+    wide = pd.DataFrame({"unique_id": ["b1-p1"] * 7 + ["b1-p2"] * 7, "ds": list(days) * 2,
+                         "window_average": 6.0, "seasonal_naive": [5.0] * 6 + [0.0] + [9.0] * 7})
+    factors = common_weekday_profile(route_sales())
+
+    def fill(fallback, weekday):
+        yhat = np.array([np.nan] * 7 + [3.0] * 7)      # la serie 1 se quedó sin pronóstico de su familia
+        fam = np.array(["tsb"] * 14, dtype=object)
+        return fill_missing_with_fallback(wide, yhat, fam, fallback, weekday), yhat, fam
+
+    n, yhat, fam = fill("window_average", factors)
+    assert n == 1 and list(fam[:7]) == ["window_average"] * 7 and list(fam[7:]) == ["tsb"] * 7
+    assert yhat[:6] == pytest.approx(np.full(6, 7.0)) and yhat[6] == 0 and yhat[:7].sum() == pytest.approx(42.0)
+    assert yhat[7:] == pytest.approx(np.full(7, 3.0)), "las filas con pronóstico propio no se tocan"
+    n, yhat, _ = fill("window_average", None)
+    assert n == 0 and yhat[:7] == pytest.approx(np.full(7, 6.0)), "interruptor apagado: el respaldo plano de siempre"
+    n, yhat, fam = fill("seasonal_naive", factors)
+    assert n == 0 and yhat[:7] == pytest.approx([5.0] * 6 + [0.0]) and fam[0] == "seasonal_naive", \
+        "un respaldo que ya ve el día de la semana no se multiplica otra vez"
+    n, yhat, _ = fill("auto_ets", factors)
+    assert n == 0 and np.isnan(yhat[:7]).all(), "sin columna del respaldo no hay con qué rellenar"
+

@@ -7608,7 +7608,7 @@ components:
         code: {type: string}
         name: {type: string}
         category: {type: string, description: 'holiday, local_holiday, commercial_season, campaign, promotion, sector_event, agricultural_season, international_peak,
-            exceptional'}
+            exceptional, closure (cierre; solo con scope tenant o branch)'}
         starts_on: {type: string, format: date}
         ends_on: {type: string, format: date}
         status:

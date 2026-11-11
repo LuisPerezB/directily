@@ -18,7 +18,14 @@ class CalendarEvent extends Model
 {
     public const SCOPES = ['country', 'region', 'tenant', 'branch', 'category', 'product', 'sector'];
 
-    public const CATEGORIES = ['holiday', 'local_holiday', 'commercial_season', 'campaign', 'promotion', 'sector_event', 'agricultural_season', 'international_peak', 'exceptional'];
+    public const CATEGORIES = ['holiday', 'local_holiday', 'commercial_season', 'campaign', 'promotion', 'sector_event', 'agricultural_season', 'international_peak', 'exceptional', 'closure'];
+
+    /**
+     * `closure` = día en que la empresa (alcance `tenant`) o una sucursal (alcance `branch`) NO opera. El motor lo trata como día
+     * cerrado: no es un cero observado, no se entrena ni se evalúa y, si cae en el horizonte, se pronostica en cero. Solo tiene
+     * sentido con esos dos alcances (el motor ignora los demás), por eso el importador rechaza cualquier otro.
+     */
+    public const CLOSURE_SCOPES = ['tenant', 'branch'];
 
     public const STATUSES = ['planned', 'confirmed', 'cancelled'];
 

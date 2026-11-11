@@ -3,6 +3,14 @@
 **Área:** motor (`engine/predictily_engine`) · **Prioridad:** alta · **Esfuerzo:** bajo · **Interruptor:** `weekday_profile_models`
 (ya existe; apagado por defecto).
 
+**Estado: implementado el 10/11/2026** (rama `feat/cambio-01-perfil-semanal-series-cortas`). `common_weekday_profile` en
+`models/statistical.py`; `short_forecast(..., weekday_factors=)` en `demand/lifecycle.py`; `fill_missing_with_fallback` y el supuesto
+en `pipeline/core.py`; `window_average_short` eliminado. Pruebas en `tests/unit/test_weekday_profile.py` y
+`tests/unit/test_special_cases.py`. Diferencias con lo escrito abajo: el perfil común se estima con todas las series activas (no
+solo las que compiten en el backtest) y la prueba del respaldo se hace sobre la función de relleno, no sobre el pipeline completo.
+Pendiente que este cambio no cubre: los días con quiebre de stock se imputan y entran al perfil (cambio `02`), y una empresa sin
+backtest posible (< 70 días) sigue sirviendo el promedio móvil plano a todas sus series.
+
 ## Problema
 
 Las series con historia corta (clase `insufficient`: productos nuevos y esporádicos) se sirven con un promedio **plano** de su

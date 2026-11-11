@@ -16,7 +16,7 @@ import { useTenantStore } from '@/stores/tenant'
 import { formatDate, formatDateTime } from '@/utils/format'
 
 const SCOPES: CalendarScope[] = ['country', 'region', 'tenant', 'branch', 'category', 'product', 'sector']
-const CATEGORIES: CalendarCategory[] = ['holiday', 'local_holiday', 'commercial_season', 'campaign', 'promotion', 'sector_event', 'agricultural_season', 'international_peak', 'exceptional']
+const CATEGORIES: CalendarCategory[] = ['holiday', 'local_holiday', 'commercial_season', 'campaign', 'promotion', 'sector_event', 'agricultural_season', 'international_peak', 'exceptional', 'closure']
 const { t } = useI18n()
 const { can } = useAbility()
 const tenant = useTenantStore()
@@ -32,7 +32,7 @@ const fields = computed<FieldDef[]>(() => [
   { key: 'scope_ref', label: t('calendar.fields.scopeRef'), type: 'text', maxlength: 80, createOnly: true, hint: t('calendar.hints.scopeRef') },
   { key: 'code', label: t('calendar.fields.code'), type: 'text', required: true, maxlength: 80, createOnly: true },
   { key: 'name', label: t('calendar.fields.name'), type: 'text', required: true, maxlength: 200 },
-  { key: 'category', label: t('calendar.fields.category'), type: 'select', required: true, options: CATEGORIES.map((c) => ({ value: c, label: t(`calendar.categories.${c}`) })) },
+  { key: 'category', label: t('calendar.fields.category'), type: 'select', required: true, options: CATEGORIES.map((c) => ({ value: c, label: t(`calendar.categories.${c}`) })), hint: t('calendar.hints.category') },
   { key: 'starts_on', label: t('calendar.fields.startsOn'), type: 'date', required: true, createOnly: true },
   { key: 'ends_on', label: t('calendar.fields.endsOn'), type: 'date' },
   { key: 'status', label: t('calendar.fields.status'), type: 'select', options: ['planned', 'confirmed', 'cancelled'].map((s) => ({ value: s, label: t(`status.calendar.${s}`) })) },

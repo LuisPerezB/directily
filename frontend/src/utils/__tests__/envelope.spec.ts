@@ -129,6 +129,7 @@ describe('casos especiales y reversión', () => {
     expect(caseTone('discontinued_zero')).toBe('danger')
     expect(caseTone('new_product_category_median')).toBe('warning')
     expect(caseTone('exceptional_event')).toBe('info')
+    expect(caseTone('closed_day')).toBe('info')
     expect(caseTone(null)).toBe('neutral')
   })
   it('códigos 409 de reversión conocidos devuelven su clave de texto', () => {

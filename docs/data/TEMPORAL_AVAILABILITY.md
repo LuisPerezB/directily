@@ -248,8 +248,11 @@ como cota inferior en la imputación (`y = max(venta, media móvil)`) pero el d�
 
 **`closed`**: `calendar_events` con `category = 'closure'`, `scope = 'tenant'` (todas las sucursales) o `scope = 'branch'` con `scope_ref = 'branch:<id>'`; se toma la última revisión de cada
 evento y se ignoran los `cancelled` y las referencias de sucursal mal formadas (se cuentan). **`closure` es un valor NUEVO de categoría** (las demás: `holiday`, `local_holiday`, `commercial_season`,
-`campaign`, `promotion`, `sector_event`, `agricultural_season`, `international_peak`, `exceptional`). El motor ya lo lee; el backend (`CalendarEvent::CATEGORIES` y el validador de importación) aún no lo
-acepta: **pendiente fuera de este paquete** (§12).
+`campaign`, `promotion`, `sector_event`, `agricultural_season`, `international_peak`, `exceptional`). El backend lo acepta desde el 10/11/2026 (`CalendarEvent::CATEGORIES`, importador y API de
+`calendar-events`; solo con alcance `tenant` o `branch`, y sin la advertencia de `known_at` desconocido: un cierre es un hecho de operación) y la SPA lo ofrece como «Cierre».
+También son `closed` (base `declared`) los días de la semana que la empresa declara sin operación con `operating_weekdays` (ver la tabla de claves): en todas las sucursales y en
+toda la historia, salvo que en los últimos 56 días más del 1 % de las unidades se haya vendido en esos días (entonces la declaración no se aplica y la ejecución emite
+`operating_weekdays_not_applied`). Un día `closed` que cae en el HORIZONTE se pronostica en cero (valor e intervalos; etiqueta `closed_day`).
 
 **Tratamiento** (IMPLEMENTADO / VERIFICADO):
 
@@ -319,6 +322,7 @@ IMPLEMENTADO / VERIFICADO: `test_asof_visibility.py::test_the_digest_covers_know
 | `day_status_infer_min_median_lines` | `5` | 1 – 100 000 | Mediana mínima de líneas diarias de la sucursal en la ventana previa |
 | `day_status_infer_lookback_days` | `28` | 7 – 90 | Ventana previa (se exigen al menos la mitad de sus días con datos) |
 | `day_status_infer_same_weekday` | `true` | booleano | Exige además que ese mismo día de la semana sea habitual en las `lookback // 7` semanas previas (un día que la sucursal no suele vender es un cero observado) |
+| `operating_weekdays` | `null` (los 7 días) | lista de enteros 0–6 sin repetir, al menos 3 | Días de la semana en que la empresa opera (0 = lunes). Los demás son `closed`/`declared` y se pronostican en cero. Decisión de la empresa: el motor solo lo sugiere (`weekday_without_sales` en la preparación de datos) |
 
 Se configuran por empresa en `tenants.settings.cores.demand` (validación en `validate_overrides`: claves desconocidas, tipos y rangos). `build_panel(data)` sin reglas solo clasifica lo declarado;
 `run_pipeline` aplica `DayRules.from_config(...)` de la configuración efectiva, que queda registrada en el run.
