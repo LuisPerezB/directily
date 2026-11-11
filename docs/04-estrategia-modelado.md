@@ -455,6 +455,7 @@ Detalle y contratos en `docs/architecture/v2/P1-demanda.md`.
 | Sucursal cerrada (declarada) | cero explícito | `branch_closed_declared` |
 | Sucursal abierta hace ≤ 90 días | la serie empieza en su primera venta | `branch_opening` |
 | Evento extraordinario conocido al corte | bandera opcional; no cambia el valor; calidad `degraded` en sus fechas | `exceptional_event` |
+| Día cerrado del horizonte (cierre `closure` del calendario, de la empresa o de la sucursal, o día de la semana fuera de `operating_weekdays`) | cero explícito, con intervalos en cero, en todas las familias; un nodo agregado queda sin intervalo si todas sus series están cerradas ese día | `closed_day` |
 
 **Cobertura de fuentes.** `data_coverage` (ventas): el corte no supera el menor `complete_through`
 declarado; lo posterior (y lo anterior a `complete_from`) es dato **ausente**, no cero. Sin declaración:
@@ -588,6 +589,11 @@ Precedencia: `missing_source` > `closed` > `stockout_censored` > `sale` / `zero_
 mediana ≥ 5 líneas diarias en los 28 días previos y, con `day_status_infer_same_weekday` (por defecto activa), si ese mismo día de la semana también es habitual (mediana de los
 mismos días de las 4 semanas previas ≥ 5): un día que la sucursal no suele vender (los domingos de una distribuidora por rutas) es un cero observado, no una caída de la fuente;
 **debe aprobarse en el piloto**. Sin cobertura declarada se conserva el comportamiento anterior y la limitación `coverage_undeclared`.
+**Días de la semana sin operación** (`operating_weekdays`, sin definir por defecto): la empresa declara qué días opera y los demás son `closed`: no son ceros observados
+(una serie que vende todos los días hábiles deja de medirse como esporádica), no entran a las métricas y se pronostican en cero. Como todo día excluido, para los modelos
+que exigen series contiguas se imputan con el nivel de los días limpios; el cero se aplica al publicar. Salvaguarda: si en los últimos 56 días más del 1 % de las unidades
+se vendió en días declarados sin operación, la declaración no se aplica (`operating_weekdays_not_applied`). El motor nunca la activa solo: la preparación de datos solo la
+sugiere (`weekday_without_sales`). IMPLEMENTADO / VERIFICADO (`test_operating_days.py`).
 IMPLEMENTADO / VERIFICADO (`test_day_status.py`, `test_asof_integration.py`).
 
 **Evaluación posterior y deriva.** La exactitud realizada de pronósticos ya publicados (`evaluation/actuals.py`: `forecast_actuals`, métricas `realized` y alerta `forecast_drift`) **no cuenta como cero observado**

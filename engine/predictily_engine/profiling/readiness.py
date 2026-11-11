@@ -13,7 +13,27 @@ import pandas as pd
 
 from predictily_engine.calendar.ecuador import rest_days
 from predictily_engine.pipeline.data import TenantData
+from predictily_engine.profiling.days import operating_weekdays_applied
 from predictily_engine.profiling.series import Panel
+
+WEEKDAY_NAMES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+QUIET_WEEKDAY_DAYS = 56           # ventana (8 semanas) en que se busca un día de la semana sin ventas
+QUIET_WEEKDAY_MAX_SHARE = 0.01    # un día de la semana «no vende» si suma menos del 1 % de las unidades de un día medio
+
+
+def quiet_weekdays(sales: pd.DataFrame, date_to: pd.Timestamp) -> list[int]:
+    """Días de la semana (0 = lunes) que en las últimas 8 semanas completas casi no registran ventas (< 1 % de un día medio).
+
+    Es una SUGERENCIA para que la empresa declare sus días sin operación (`operating_weekdays`); el motor nunca los declara solo."""
+    start = pd.Timestamp(date_to) - pd.Timedelta(days=QUIET_WEEKDAY_DAYS - 1)
+    if sales.empty or sales["ds"].min() > start:
+        return []
+    recent = sales[(sales["ds"] >= start) & (sales["ds"] <= date_to)]
+    by_dow = recent.groupby(recent["ds"].dt.dayofweek)["units"].sum().reindex(range(7), fill_value=0.0).astype(float)
+    mean_day = float(by_dow.mean())
+    if mean_day <= 0:
+        return []
+    return [int(d) for d in range(7) if by_dow.loc[d] < QUIET_WEEKDAY_MAX_SHARE * mean_day]
 
 
 def compute_readiness(data: TenantData, panel: Panel) -> dict[str, Any]:
@@ -32,12 +52,15 @@ def compute_readiness(data: TenantData, panel: Panel) -> dict[str, Any]:
     date_to = data.sales["ds"].max()
     history_days = int((date_to - date_from).days) + 1
 
-    # días sin ninguna venta (excluye domingos y feriados nacionales, que pueden ser cierres)
+    # días sin ninguna venta (excluye feriados nacionales y los días sin operación: los declarados por la empresa en
+    # `operating_weekdays` si la clasificación los aplicó; si no, los domingos, que pueden ser cierres)
     all_days = pd.date_range(date_from, date_to, freq="D")
     hol = set()
     for y in range(date_from.year, date_to.year + 1):
         hol.update(rest_days(y).keys())
-    expected = [d for d in all_days if d.dayofweek != 6 and d.date() not in hol]
+    operating = operating_weekdays_applied(panel.day_summary)
+    working = set(operating) if operating is not None else {0, 1, 2, 3, 4, 5}
+    expected = [d for d in all_days if d.dayofweek in working and d.date() not in hol]
     sold_days = set(data.sales.loc[data.sales["units"] > 0, "ds"].dt.normalize())
     missing = [d for d in expected if d not in sold_days]
     missing_share = len(missing) / max(len(expected), 1)
@@ -75,6 +98,13 @@ def compute_readiness(data: TenantData, panel: Panel) -> dict[str, Any]:
     if missing_share > 0.05:
         issues.append({"code": "missing_days", "severity": "warning", "count": len(missing),
                        "message": f"{len(missing)} días hábiles sin ninguna venta registrada: verifique si faltan datos."})
+    quiet = [d for d in quiet_weekdays(data.sales, date_to) if operating is None or d in operating]
+    if quiet:
+        names = " y ".join(WEEKDAY_NAMES[d] for d in quiet)
+        issues.append({"code": "weekday_without_sales", "severity": "info", "count": len(quiet),
+                       "message": f"En las últimas 8 semanas casi no hay ventas los días {names} (menos del 1 % de un día medio). "
+                                  "Si la empresa no opera esos días, declare los días de operación en la configuración de Demanda "
+                                  "(`operating_weekdays`): dejan de contarse como días sin venta y se pronostican en cero."})
     if not has_inventory:
         issues.append({"code": "no_inventory", "severity": "warning", "count": 0,
                        "message": "Sin datos de inventario: no se pueden detectar quiebres de stock (ventas censuradas) "

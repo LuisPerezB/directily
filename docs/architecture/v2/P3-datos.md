@@ -115,7 +115,8 @@ cualquier consumidor, p. ej. Customer Core):
   referencia de sucursal/producto/categoría se escribe por código/SKU/nombre y se guarda normalizada.
 - **Calendario público**: `tenant_id` NULL; todas las empresas lo leen; ninguna lo escribe.
 - **Categorías**: `holiday`, `local_holiday`, `commercial_season`, `campaign`, `promotion`, `sector_event`, `agricultural_season`,
-  `international_peak`, `exceptional`. **Estados**: `planned`, `confirmed`, `cancelled`.
+  `international_peak`, `exceptional`, `closure` (día sin operación de la empresa o de una sucursal; solo con alcance `tenant` o
+  `branch`; el motor lo trata como día cerrado y lo pronostica en cero). **Estados**: `planned`, `confirmed`, `cancelled`.
 - **Versiones**: un cambio de nombre/categoría/fin/estado agrega una **revisión** (la anterior se conserva). Un cambio solo de
   `known_at` hacia una fecha anterior (o informar uno antes desconocido) actualiza la revisión sin crear otra. Un evento que se
   reprograma (cambia `starts_on`) es otro evento: cancele el anterior y agregue el nuevo.

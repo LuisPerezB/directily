@@ -17,6 +17,9 @@ identificados. Nada se resuelve en silencio y ningún desconocido se convierte e
 - **Apertura de sucursal**: sucursal cuya primera venta ocurrió ≥ 60 días después de la primera de la
   empresa y hace ≤ 90 días: sus series con < 90 días de historia se etiquetan `branch_opening` (la serie
   empieza en su primera venta; la estacionalidad de la sucursal aún no se conoce).
+- **Día cerrado del horizonte** (`closed_day`): un día futuro con un cierre declarado en el calendario
+  (`calendar_events.category = 'closure'`, de la empresa o de la sucursal) o en un día de la semana que la empresa declaró sin
+  operación (`operating_weekdays`) se pronostica en **cero explícito**, con intervalos en cero (`pipeline/core.py`).
 - **Evento extraordinario** (`calendar_events.category = 'exceptional'`): **bandera opcional**; solo cuentan
   los eventos cuyo `known_at` es ≤ corte (los de `known_at` desconocido no se usan y se informan). No cambia
   el valor pronosticado: marca las filas dentro del evento (`exceptional_event`, calidad `degraded`).
@@ -49,6 +52,7 @@ LABEL_NO_RECENT = "no_recent_sales"
 LABEL_BRANCH_CLOSED = "branch_closed_declared"
 LABEL_BRANCH_OPENING = "branch_opening"
 LABEL_EXCEPTIONAL = "exceptional_event"
+LABEL_CLOSED_DAY = "closed_day"   # día del horizonte declarado cerrado (cierre del calendario o día de la semana sin operación): cero explícito
 ZERO_FAMILY = "declared_zero"
 CATEGORY_FAMILY = "category_benchmark"
 

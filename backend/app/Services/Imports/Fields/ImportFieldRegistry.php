@@ -206,7 +206,7 @@ final class ImportFieldRegistry
             new FieldDefinition('scope_ref', 'Referencia del alcance', false, 'string', 'country: código ISO (EC); region: sierra/costa/...; branch: código de sucursal; product: SKU; category: nombre; sector: identificador. Vacío solo para «tenant».', ['referencia', 'scope_ref', 'ref', 'pais', 'region', 'sucursal', 'sku']),
             new FieldDefinition('code', 'Código del evento', true, 'string', 'Identificador estable del evento (p. ej. carnaval, dia_madre).', ['codigo', 'code', 'id_evento']),
             new FieldDefinition('name', 'Nombre', true, 'string', 'Nombre legible.', ['nombre', 'evento', 'name']),
-            new FieldDefinition('category', 'Categoría', true, 'string', 'holiday, local_holiday, commercial_season, campaign, promotion, sector_event, agricultural_season, international_peak o exceptional.', ['categoria', 'tipo', 'category']),
+            new FieldDefinition('category', 'Categoría', true, 'string', 'holiday, local_holiday, commercial_season, campaign, promotion, sector_event, agricultural_season, international_peak, exceptional o closure (cierre: ese día la empresa o la sucursal no opera; solo con alcance tenant o branch).', ['categoria', 'tipo', 'category']),
             new FieldDefinition('starts_on', 'Desde', true, 'date', 'Primer día del evento.', ['desde', 'inicio', 'fecha_inicio', 'starts_on', 'fecha']),
             new FieldDefinition('ends_on', 'Hasta', false, 'date', 'Último día (incluido). Si falta, es de un solo día.', ['hasta', 'fin', 'fecha_fin', 'ends_on']),
             new FieldDefinition('status', 'Estado', false, 'string', 'planned, confirmed (por defecto) o cancelled.', ['estado', 'status']),

@@ -643,7 +643,7 @@ export interface ExtendedQualityReport {
 export type CalendarScope = 'country' | 'region' | 'tenant' | 'branch' | 'category' | 'product' | 'sector'
 export type CalendarCategory =
   | 'holiday' | 'local_holiday' | 'commercial_season' | 'campaign' | 'promotion' | 'sector_event' | 'agricultural_season'
-  | 'international_peak' | 'exceptional'
+  | 'international_peak' | 'exceptional' | 'closure'
 export type CalendarStatus = 'planned' | 'confirmed' | 'cancelled'
 
 export interface CalendarEvent {

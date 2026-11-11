@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Imports\Processors;
 
+use App\Models\CalendarEvent;
 use App\Services\Catalog\CatalogResolver;
 use App\Services\Imports\Parsing\ValueParser;
 use App\Services\Imports\Support\Issue;
@@ -38,6 +39,7 @@ final class CalendarEventImportProcessor implements ImportProcessor
         'agricultural_season' => ['agricultural_season', 'temporada_agricola', 'ciclo_agricola', 'siembra', 'cosecha'],
         'international_peak' => ['international_peak', 'pico_internacional', 'evento_internacional'],
         'exceptional' => ['exceptional', 'extraordinario', 'excepcional', 'evento_extraordinario'],
+        'closure' => ['closure', 'cierre', 'cerrado', 'dia_cerrado', 'cierre_sucursal', 'cierre_empresa', 'sin_operacion', 'no_laborable'],
     ];
 
     private const STATUSES = [
@@ -81,6 +83,9 @@ final class CalendarEventImportProcessor implements ImportProcessor
                     ? Issue::error('required', 'Falta la categoría del evento.', 'category')
                     : Issue::error('invalid_value', 'Categoría no reconocida.', 'category', $raw['category']);
             }
+            if ($category === 'closure' && $scope !== null && ! in_array($scope, CalendarEvent::CLOSURE_SCOPES, true)) {
+                $issues[] = Issue::error('invalid_value', 'Un cierre solo puede ser de toda la empresa (tenant) o de una sucursal (branch).', 'scope', $raw['scope'] ?? null);
+            }
             $starts = ($parsed = $p->dateTime($raw['starts_on'] ?? null)) !== null ? $parsed[0]->toDateString() : null;
             if ($starts === null) {
                 $issues[] = ValueParser::isBlank($raw['starts_on'] ?? null)
@@ -114,7 +119,7 @@ final class CalendarEventImportProcessor implements ImportProcessor
                         $issues[] = Issue::warning('known_after_start', 'El evento se conoció después de su inicio: no sirve como conocimiento previo.', 'known_at', $raw['known_at']);
                     }
                 }
-            } else {
+            } elseif ($category !== 'closure') {   // un cierre es un hecho de operación: el motor lo aplica sin mirar desde cuándo se conocía
                 $issues[] = Issue::warning('known_at_unknown', 'Sin fecha de conocimiento: el evento no se usará como conocido a futuro en un corte histórico.', 'known_at');
             }
             if ($scope !== null && $code !== null && $starts !== null) {

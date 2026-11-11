@@ -14,7 +14,7 @@ aceptación → riesgos → esfuerzo. Las rutas y líneas se verificaron el 10/1
 | # | Cambio | Área | Prioridad | Esfuerzo | Depende de |
 |---|---|---|---|---|---|
 | [01](01-motor-perfil-semanal-series-cortas.md) ✅ implementado | Perfil semanal del negocio para series de historia corta y respaldo | motor | alta | bajo | — |
-| [04](04-motor-cierres-y-dias-sin-operacion.md) | Cierres declarables (`closure`) y días de la semana sin operación | backend + motor | alta | bajo–medio | — |
+| [04](04-motor-cierres-y-dias-sin-operacion.md) ✅ implementado | Cierres declarables (`closure`) y días de la semana sin operación | backend + motor | alta | bajo–medio | — |
 | [08](08-plataforma-cobertura-fuente-indicadores.md) | Cobertura inferida real, fuente que se reactiva, signo del neto, indicadores anclados al corte, driver SQL Server en Docker | plataforma | alta | bajo | — |
 | [07](07-importacion-unidad-regalo-costo-inventario.md) | Unidad de venta y empaque, bandera de regalo, promociones «N + 1», costo e inventario por el conector SQL | importación | alta | medio | — |
 | [03](03-motor-intervalos-nodos-agregados.md) | Intervalos de los nodos agregados con pocas ventanas | motor | media | medio | — |

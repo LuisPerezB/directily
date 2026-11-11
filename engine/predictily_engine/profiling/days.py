@@ -33,6 +33,13 @@ con al menos la mitad de esas semanas con datos). Sin esta condición, un día d
 (p. ej. los domingos de una distribuidora por rutas) se marcaba sin fuente cada semana y se rellenaba con un día normal: los
 modelos aprendían domingos de venta normal y esos días quedaban fuera de la evaluación. Con ella, ese día es un cero observado.
 Sin historia suficiente del mismo día de la semana se aplica solo la condición general.
+
+Días de la semana sin operación (`operating_weekdays`, sin definir por defecto): una empresa que NUNCA abre ciertos días de la
+semana los declara y esos días son `closed` (base `declared`) en todas sus sucursales, igual que un cierre del calendario: no son
+ceros observados (no inflan la intermitencia de una serie que vende todos los días hábiles ni entran a las métricas) y en el
+horizonte se pronostican en cero (`closed_future_rows`). Salvaguarda: si en los últimos `OPERATING_GUARD_DAYS` días más del
+`OPERATING_GUARD_MAX_SHARE` de las unidades se vendió en días declarados sin operación, la declaración contradice los datos y NO se
+aplica (queda en `summary['notes']['operating_weekdays']` y la ejecución lo informa): se evita pronosticar cero un día que sí vende.
 """
 
 from __future__ import annotations
@@ -54,6 +61,10 @@ DAY_BASES = (BASIS_DECLARED, BASIS_INFERRED)
 # códigos internos (el orden de DAY_STATUSES define las categorías del panel)
 _C_SALE, _C_ZERO, _C_MISSING, _C_STOCKOUT, _C_CLOSED = range(5)
 _EPOCH = np.datetime64("1970-01-01", "D")
+_EPOCH_WEEKDAY = 3   # el 1970-01-01 fue jueves (0 = lunes)
+
+OPERATING_GUARD_DAYS = 56
+OPERATING_GUARD_MAX_SHARE = 0.01
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,7 @@ class DayRules:
     infer_min_median_lines: float = 5.0
     infer_lookback_days: int = 28
     infer_same_weekday: bool = True
+    operating_weekdays: tuple[int, ...] | None = None   # días de la semana en que se opera (0 = lunes); None = los 7
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any] | None) -> "DayRules":
@@ -71,11 +83,28 @@ class DayRules:
         return cls(infer_gaps=bool(cfg.get("day_status_infer_gaps", True)),
                    infer_min_median_lines=float(cfg.get("day_status_infer_min_median_lines", 5)),
                    infer_lookback_days=int(cfg.get("day_status_infer_lookback_days", 28)),
-                   infer_same_weekday=bool(cfg.get("day_status_infer_same_weekday", True)))
+                   infer_same_weekday=bool(cfg.get("day_status_infer_same_weekday", True)),
+                   operating_weekdays=normalize_weekdays(cfg.get("operating_weekdays")))
 
     def as_dict(self) -> dict[str, Any]:
-        return {"infer_gaps": self.infer_gaps, "infer_min_median_lines": self.infer_min_median_lines,
-                "infer_lookback_days": self.infer_lookback_days, "infer_same_weekday": self.infer_same_weekday}
+        out: dict[str, Any] = {"infer_gaps": self.infer_gaps, "infer_min_median_lines": self.infer_min_median_lines,
+                               "infer_lookback_days": self.infer_lookback_days, "infer_same_weekday": self.infer_same_weekday}
+        if self.operating_weekdays is not None:      # sin declarar la regla no existe: el resumen queda como siempre
+            out["operating_weekdays"] = list(self.operating_weekdays)
+        return out
+
+
+def normalize_weekdays(value: Any) -> tuple[int, ...] | None:
+    """Días de operación como tupla ordenada; nulo, vacío o los 7 días = sin restricción (None)."""
+    if not value:
+        return None
+    days = tuple(sorted({int(v) for v in value if 0 <= int(v) <= 6}))
+    return None if len(days) in (0, 7) else days
+
+
+def weekday_of(day_index: np.ndarray) -> np.ndarray:
+    """Día de la semana (0 = lunes) de un índice de días desde 1970-01-01."""
+    return (np.asarray(day_index, dtype=np.int64) + _EPOCH_WEEKDAY) % 7
 
 
 NO_INFERENCE = DayRules(infer_gaps=False)  # solo lo declarado (cobertura, huecos y cierres): comportamiento por defecto de `build_panel`
@@ -275,6 +304,21 @@ def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayR
     d_idx = day - day0
 
     missing, closed, notes = _declared_matrices(data, branches, day0, n_days)
+    if rules.operating_weekdays is not None:
+        # Días de la semana sin operación declarados por la empresa: cierres de todas las sucursales, salvo que los datos recientes lo
+        # contradigan (ventas en esos días): entonces no se aplica y se informa, nunca se pronostica cero un día que sí vende.
+        off_day = ~np.isin(weekday_of(np.arange(n_days) + day0), rules.operating_weekdays)
+        row_off = off_day[d_idx]
+        recent = d_idx > int(d_idx.max()) - OPERATING_GUARD_DAYS
+        recent_units = float(units[recent].sum())
+        share = float(units[recent & row_off].sum()) / recent_units if recent_units > 0 else 0.0
+        applied = share <= OPERATING_GUARD_MAX_SHARE
+        if applied:
+            closed[off_day, :] = True
+        notes["operating_weekdays"] = {
+            "weekdays": list(rules.operating_weekdays), "applied": bool(applied), "recent_units_share_on_closed_weekdays": round(share, 6),
+            "guard_days": OPERATING_GUARD_DAYS, "guard_max_share": OPERATING_GUARD_MAX_SHARE,
+            "series_days": int(row_off.sum()) if applied else 0}
     summary["notes"] = notes
     declared_skip = (missing > 0) | closed
     inferred = infer_missing_days(data, branches, day0, n_days, declared_skip, rules) if rules.infer_gaps \
@@ -302,6 +346,32 @@ def classify_days(df: pd.DataFrame, data: Any, cutoff: pd.Timestamp, rules: DayR
     status = pd.Categorical.from_codes(code, DAY_STATUSES)
     basis_cat = pd.Categorical.from_codes(np.where(basis == 0, -1, basis - 1), DAY_BASES)
     return DayClassification(status, basis_cat, summary)
+
+
+def operating_weekdays_applied(day_summary: dict[str, Any] | None) -> tuple[int, ...] | None:
+    """Días de operación que la clasificación del panel REALMENTE aplicó (None si no se declararon o la salvaguarda los rechazó)."""
+    note = ((day_summary or {}).get("notes") or {}).get("operating_weekdays") or {}
+    return tuple(note["weekdays"]) if note.get("applied") else None
+
+
+def closed_future_rows(branch_id: np.ndarray, ds: np.ndarray, closures: pd.DataFrame | None,
+                       operating_weekdays: tuple[int, ...] | None) -> tuple[np.ndarray, np.ndarray]:
+    """Filas (sucursal, día) del HORIZONTE declaradas cerradas: (por cierre del calendario, por día de la semana sin operación).
+
+    `closures`: branch_id (nulo = toda la empresa), starts_on, ends_on (`TenantData.closures`). Un día cerrado se pronostica en
+    cero: ese día no hay venta posible. Las dos máscaras pueden coincidir en una misma fila."""
+    branch_id = np.asarray(branch_id, dtype=np.int64)
+    days = np.asarray(ds, dtype="datetime64[D]")
+    by_calendar = np.zeros(len(days), dtype=bool)
+    if closures is not None and len(closures):
+        for r in closures.itertuples(index=False):
+            inside = (days >= np.datetime64(pd.Timestamp(r.starts_on), "D")) & (days <= np.datetime64(pd.Timestamp(r.ends_on), "D"))
+            if inside.any():
+                by_calendar |= inside if pd.isna(r.branch_id) else inside & (branch_id == int(r.branch_id))
+    by_weekday = np.zeros(len(days), dtype=bool)
+    if operating_weekdays is not None:
+        by_weekday = ~np.isin(weekday_of(_day_index(days)), operating_weekdays)
+    return by_calendar, by_weekday
 
 
 def summarize_days(df: pd.DataFrame, classification_summary: dict[str, Any] | None = None, imputed: int | None = None,
