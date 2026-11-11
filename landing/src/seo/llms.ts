@@ -110,7 +110,7 @@ export function llmsTxt({ lang, copy, siteUrl, contactEmail }: LlmsInfo, full: b
   lines.push('')
 
   lines.push(`## ${t.hosting}`, '', copy.hosting.lead, '')
-  for (const option of copy.hosting.items) lines.push(`- **${option.tag}** — ${option.title}. ${option.text}`)
+  for (const option of copy.hosting.items) lines.push(`- **${option.tag}** — ${option.title}. ${option.text} ${option.points.join('; ')}.`)
   lines.push('', copy.hosting.note, '')
 
   lines.push(`## ${t.isNot}`, '')

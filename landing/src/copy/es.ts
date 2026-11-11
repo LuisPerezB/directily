@@ -228,13 +228,29 @@ export const es: LandingCopy = {
   hosting: {
     kicker: 'Dónde se instala',
     title: ['Usted elige dónde corre', 'y dónde viven sus datos.'],
-    lead: 'El mismo producto en tres modalidades. La que conviene depende de su equipo de sistemas y de sus políticas de datos.',
+    lead: 'El mismo producto en tres modalidades. Elija la que mejor encaja con su empresa.',
     items: [
-      { tag: 'Autohospedado', title: 'En su propia infraestructura', text: 'Predictily se instala con Docker en un servidor de su empresa o en su propia nube. Sus datos no salen de su red y su equipo controla accesos, respaldos y actualizaciones.' },
-      { tag: 'VPS', title: 'En un servidor dedicado a su empresa', text: 'Una instancia solo para usted en un servidor privado virtual, con certificado TLS automático y respaldos. Recomendado: 4 vCPU y de 8 a 16 GB de RAM; no requiere GPU.' },
-      { tag: 'Servidor compartido', title: 'En la plataforma multiempresa', text: 'Su empresa en una instancia compartida, con sus datos aislados de los de las demás en todas las capas. La forma más rápida de empezar, sin administrar servidores.' },
+      {
+        tag: 'Autohospedado',
+        title: 'En su propia infraestructura',
+        text: 'Predictily corre dentro de su empresa: en sus servidores o en su propia nube.',
+        points: ['Sus datos no salen de su red', 'Su equipo controla accesos y respaldos', 'Usted decide cuándo actualizar'],
+      },
+      {
+        tag: 'VPS',
+        title: 'En un servidor dedicado a su empresa',
+        text: 'Una instancia solo para usted, separada de cualquier otra empresa.',
+        points: ['Recursos dedicados a su operación', 'Conexión cifrada y respaldos', 'Crece con su volumen de datos'],
+      },
+      {
+        tag: 'Servidor compartido',
+        title: 'En la plataforma multiempresa',
+        text: 'La forma más rápida de empezar: su empresa en la plataforma compartida.',
+        points: ['Sin servidores que administrar', 'Sus datos aislados de las demás empresas', 'El mismo motor y los mismos modelos'],
+      },
     ],
     note: 'En las tres modalidades el motor, los modelos y los controles de seguridad son los mismos.',
+    controls: { list: 'Modalidades de instalación', prev: 'Modalidad anterior', next: 'Modalidad siguiente' },
   },
   security: {
     kicker: 'Seguridad y control',
@@ -341,7 +357,7 @@ export const es: LandingCopy = {
       },
       {
         q: '¿Dónde se instala Predictily?',
-        a: 'Hay tres modalidades: autohospedado en la infraestructura de su empresa (con Docker), en un servidor privado virtual (VPS) dedicado a su empresa, o en la plataforma compartida multiempresa con sus datos aislados. El producto es el mismo en las tres.',
+        a: 'Hay tres modalidades: autohospedado en la infraestructura de su empresa, en un servidor privado virtual (VPS) dedicado a su empresa, o en la plataforma compartida multiempresa con sus datos aislados. El producto es el mismo en las tres.',
       },
       {
         q: '¿Se puede usar con un agente de IA?',

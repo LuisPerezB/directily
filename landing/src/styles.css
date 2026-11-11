@@ -1820,3 +1820,306 @@ svg {
   font-size: 0.78rem;
   font-weight: 650;
 }
+
+/* ── Carrusel de modalidades de instalación ── */
+.lp-carousel {
+  margin-top: 0.5rem;
+}
+.lp-carousel__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.lp-carousel__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0 1.1rem;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 600;
+  transition:
+    background-color 0.25s,
+    color 0.25s,
+    border-color 0.25s;
+}
+.lp-carousel__tab:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+.lp-carousel__tab[aria-selected="true"] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-fg);
+}
+.lp-carousel__timer {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: color-mix(in srgb, var(--brand-fg) 55%, transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.lp-carousel.is-playing .lp-carousel__timer {
+  animation: lp-timer 6s linear forwards;
+}
+@keyframes lp-timer {
+  to {
+    transform: scaleX(1);
+  }
+}
+.lp-carousel__stage {
+  display: grid;
+  margin-top: 1.25rem;
+  touch-action: pan-y;
+}
+.lp-carousel__slide {
+  display: grid;
+  gap: 1.5rem;
+  align-items: center;
+  padding: clamp(1.5rem, 4vw, 2.75rem);
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background:
+    radial-gradient(60rem 22rem at 100% 0%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 60%),
+    var(--card);
+  box-shadow: var(--shadow-md);
+}
+@media (min-width: 860px) {
+  .lp-carousel__slide {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+}
+/* Con scripts, las tres ocupan la misma celda y solo se ve la activa; sin scripts quedan apiladas y todas visibles. */
+.js .lp-carousel__slide {
+  grid-area: 1 / 1;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(2.5rem);
+  transition:
+    opacity 0.5s var(--ease),
+    transform 0.5s var(--ease),
+    visibility 0s linear 0.5s;
+}
+.js .lp-carousel__slide.is-before {
+  transform: translateX(-2.5rem);
+}
+.js .lp-carousel__slide.is-active {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.5s var(--ease),
+    transform 0.5s var(--ease);
+}
+html:not(.js) .lp-carousel__slide + .lp-carousel__slide {
+  margin-top: 1rem;
+}
+html:not(.js) .lp-carousel__tabs,
+html:not(.js) .lp-carousel__nav {
+  display: none;
+}
+.lp-carousel__title {
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  font-weight: 650;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+}
+.lp-carousel__text {
+  max-width: 34rem;
+  margin-top: 0.75rem;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.lp-carousel__points {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+  font-weight: 550;
+}
+.lp-carousel__points li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.lp-carousel__points svg {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0.25rem;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+.js .lp-carousel__slide.is-active .lp-carousel__points li {
+  animation: lp-up 0.5s var(--ease) both;
+}
+.js .lp-carousel__slide.is-active .lp-carousel__points li:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.js .lp-carousel__slide.is-active .lp-carousel__points li:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.lp-carousel__art {
+  position: relative;
+  display: none;
+  place-items: center;
+  min-height: 15rem;
+}
+@media (min-width: 860px) {
+  .lp-carousel__art {
+    display: grid;
+  }
+}
+.lp-carousel__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 8rem;
+  height: 8rem;
+  border-radius: 28px;
+  background: var(--brand);
+  color: var(--brand-fg);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--brand) 38%, transparent);
+}
+.lp-carousel__ring {
+  position: absolute;
+  width: 11rem;
+  height: 11rem;
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  border-radius: 40px;
+  animation: lp-ring 3.2s var(--ease) infinite;
+}
+.lp-carousel__ring--2 {
+  animation-delay: 1.6s;
+}
+@keyframes lp-ring {
+  from {
+    opacity: 0.9;
+    transform: scale(0.75);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+.lp-carousel__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+.lp-carousel__dots {
+  display: flex;
+  gap: 0.4rem;
+}
+.lp-carousel__dots span {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition:
+    width 0.3s var(--ease),
+    background-color 0.3s;
+}
+.lp-carousel__dots span.is-active {
+  width: 1.75rem;
+  background: var(--brand);
+}
+
+/* ── Pasos como recorrido ── */
+.lp-step {
+  position: relative;
+  border-radius: 14px;
+  outline-offset: 6px;
+  transition: opacity 0.4s var(--ease);
+}
+.lp-steps.is-live .lp-step {
+  opacity: 0.55;
+  cursor: default;
+}
+.lp-steps.is-live .lp-step.is-done,
+.lp-steps.is-live .lp-step.is-active {
+  opacity: 1;
+}
+.lp-step__n {
+  position: relative;
+  z-index: 1;
+}
+.lp-step.is-done .lp-step__n {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand-strong);
+}
+.lp-step.is-active .lp-step__n {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-fg);
+  transform: scale(1.12);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 22%, transparent);
+}
+.lp-step.is-active .lp-h4 {
+  color: var(--brand-strong);
+}
+/* La línea que une un paso con el siguiente: vertical en una columna, horizontal en cinco. Se llena al recorrerlo. */
+.lp-steps.is-live .lp-step:not(:last-child)::before,
+.lp-steps.is-live .lp-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 2.25rem;
+  left: 1.125rem;
+  width: 2px;
+  height: calc(100% - 2.25rem + 1.75rem);
+  margin-left: -1px;
+  background: var(--line-strong);
+}
+.lp-steps.is-live .lp-step:not(:last-child)::after {
+  background: var(--brand);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.7s var(--ease);
+}
+.lp-steps.is-live .lp-step.is-done::after {
+  transform: scaleY(1);
+}
+@media (min-width: 720px) and (max-width: 1099.98px) {
+  .lp-steps.is-live .lp-step::before,
+  .lp-steps.is-live .lp-step::after {
+    display: none;
+  }
+}
+@media (min-width: 1100px) {
+  .lp-steps.is-live .lp-step:not(:last-child)::before,
+  .lp-steps.is-live .lp-step:not(:last-child)::after {
+    top: 1.125rem;
+    left: 2.25rem;
+    width: calc(100% - 2.25rem + 1.25rem);
+    height: 2px;
+    margin: -1px 0 0;
+  }
+  .lp-steps.is-live .lp-step:not(:last-child)::after {
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .lp-steps.is-live .lp-step.is-done::after {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-carousel__ring,
+  .lp-carousel__timer {
+    animation: none;
+  }
+  .js .lp-carousel__slide {
+    transition: none;
+  }
+}

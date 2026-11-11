@@ -5,10 +5,12 @@ import { CountUp } from './components/CountUp'
 import { Faq } from './components/Faq'
 import { FloatingCta } from './components/FloatingCta'
 import { Heading } from './components/Heading'
+import { HostingCarousel } from './components/HostingCarousel'
 import { Icon, type IconName } from './components/Icon'
 import { Logo } from './components/Logo'
 import { ProductPreview } from './components/ProductPreview'
 import { Reveal } from './components/Reveal'
+import { StepFlow } from './components/StepFlow'
 import type { LandingLang } from './copy/types'
 import { contactConfig } from './lib/contact'
 import { buildContactUrl } from './lib/contactLink'
@@ -239,16 +241,9 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         <section id="plan" className="lp-section lp-section--soft">
           <div className="lp-wrap">
             <Heading kicker={copy.plan.kicker} title={copy.plan.title} lead={copy.plan.lead} />
-            <ol className="lp-steps">
-              {copy.plan.steps.map((step, i) => (
-                <Reveal as="li" key={step.title} delay={i * 90} className="lp-step">
-                  <span className="lp-step__n">{i + 1}</span>
-                  <p className="lp-tag">{step.tag}</p>
-                  <h3 className="lp-h4">{step.title}</h3>
-                  <p className="lp-text">{step.text}</p>
-                </Reveal>
-              ))}
-            </ol>
+            <Reveal>
+              <StepFlow steps={copy.plan.steps} />
+            </Reveal>
             <Reveal className="lp-inline-cta">
               <a href="#contacto" className="btn btn-primary btn-lg">{copy.hero.cta}<Icon name="arrow-right" size={18} /></a>
             </Reveal>
@@ -302,15 +297,9 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         <section id="instalacion" className="lp-section">
           <div className="lp-wrap">
             <Heading kicker={copy.hosting.kicker} title={copy.hosting.title} lead={copy.hosting.lead} />
-            <ul className="lp-grid lp-grid--3">
-              {copy.hosting.items.map((option, i) => (
-                <Reveal as="li" key={option.tag} delay={i * 80} className="lp-card lp-card--hover lp-option">
-                  <p className="lp-option__tag">{option.tag}</p>
-                  <h3 className="lp-h4">{option.title}</h3>
-                  <p className="lp-text">{option.text}</p>
-                </Reveal>
-              ))}
-            </ul>
+            <Reveal>
+              <HostingCarousel items={copy.hosting.items} labels={copy.hosting.controls} />
+            </Reveal>
             <Reveal><p className="lp-note">{copy.hosting.note}</p></Reveal>
           </div>
         </section>

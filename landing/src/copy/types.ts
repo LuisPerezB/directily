@@ -144,8 +144,10 @@ export interface LandingCopy {
     kicker: string
     title: SplitTitle
     lead: string
-    items: readonly (TitledText & { tag: string })[]
+    items: readonly (TitledText & { tag: string; points: readonly string[] })[]
     note: string
+    /** Etiquetas del carrusel para lectores de pantalla. */
+    controls: { list: string; prev: string; next: string }
   }
   security: {
     kicker: string
