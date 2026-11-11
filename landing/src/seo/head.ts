@@ -17,7 +17,18 @@ export interface PageInfo {
   siteUrl: string
   /** Código de Google Search Console, o ''. */
   googleVerification?: string
+  /** Correo de contacto público (el mismo que muestra la página), o ''. */
+  contactEmail?: string
 }
+
+/**
+ * Agentes y buscadores de IA a los que se da la bienvenida por nombre. `User-agent: *` ya lo permite todo; nombrarlos
+ * deja explícito que la página QUIERE ser leída y citada por asistentes que comparan opciones para una empresa.
+ */
+export const AI_AGENTS: readonly string[] = [
+  'GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User',
+  'Google-Extended', 'Applebot-Extended', 'Amazonbot', 'Meta-ExternalAgent', 'MistralAI-User', 'DuckAssistBot', 'CCBot',
+]
 
 /** Ruta de la página de un idioma dentro del sitio: `/` (español) o `/en/`. */
 export function pagePath(lang: LandingLang): string {
@@ -37,11 +48,18 @@ export function jsonForScript(value: unknown): string {
  * Datos estructurados (schema.org). Solo lo que es cierto y está escrito en la página: la organización, el sitio,
  * la aplicación y las preguntas frecuentes. Sin valoraciones, precios ni reseñas (no existen).
  */
-export function structuredData({ lang, copy, siteUrl }: PageInfo): Record<string, unknown> {
+export function structuredData({ lang, copy, siteUrl, contactEmail }: PageInfo): Record<string, unknown> {
   const url = siteUrl ? `${siteUrl}${pagePath(lang)}` : undefined
   const org = siteUrl ? { '@id': `${siteUrl}/#organization` } : undefined
   const graph: Record<string, unknown>[] = [
-    { '@type': 'Organization', ...org, name: 'Predictily', ...(siteUrl && { url: `${siteUrl}/`, logo: `${siteUrl}/media/icono.svg` }) },
+    {
+      '@type': 'Organization',
+      ...org,
+      name: 'Predictily',
+      description: copy.footer.note,
+      ...(siteUrl && { url: `${siteUrl}/`, logo: `${siteUrl}/media/icono.svg` }),
+      ...(contactEmail && { email: contactEmail, contactPoint: { '@type': 'ContactPoint', contactType: 'sales', email: contactEmail, availableLanguage: ['es', 'en'] } }),
+    },
     { '@type': 'WebSite', ...(siteUrl && { '@id': `${siteUrl}/#website`, url: `${siteUrl}/`, publisher: org }), name: 'Predictily', inLanguage: [...LANGS] },
     {
       '@type': 'SoftwareApplication',
@@ -50,6 +68,11 @@ export function structuredData({ lang, copy, siteUrl }: PageInfo): Record<string
       operatingSystem: 'Web',
       description: copy.meta.description,
       inLanguage: lang,
+      // Lo que un agente compara entre opciones: qué hace, para quién, dónde corre y dónde se vende.
+      featureList: copy.platform.modules.map((module) => module.title),
+      audience: { '@type': 'BusinessAudience', audienceType: copy.sectors.items.map((sector) => sector.title).join(', ') },
+      areaServed: { '@type': 'Country', name: 'Ecuador' },
+      softwareRequirements: copy.hosting.items.map((option) => option.tag).join(' · '),
       ...(url && { url, publisher: org }),
     },
     {
@@ -93,6 +116,8 @@ export function seoHead(page: PageInfo): string {
       `<meta name="twitter:title" content="${title}" />`,
       `<meta name="twitter:description" content="${description}" />`,
       `<meta name="twitter:image" content="${siteUrl}/media/og-${lang}.png" />`,
+      // Resumen en texto plano para agentes de IA (convención llms.txt).
+      `<link rel="alternate" type="text/markdown" title="Predictily (llms.txt)" href="${siteUrl}/llms${lang === 'es' ? '-es' : ''}.txt" />`,
     )
   }
   tags.push(`<script type="application/ld+json">${jsonForScript(structuredData(page))}</script>`)
@@ -118,7 +143,16 @@ export function pageHtml(base: string, page: PageInfo, body: string): string {
 }
 
 export function robotsTxt(siteUrl: string): string {
-  return ['User-agent: *', 'Allow: /', ...(siteUrl ? ['', `Sitemap: ${siteUrl}/sitemap.xml`] : []), ''].join('\n')
+  return [
+    'User-agent: *',
+    'Allow: /',
+    '',
+    '# Agentes y buscadores de IA: bienvenidos. Resumen en texto plano en /llms.txt (español: /llms-es.txt).',
+    ...AI_AGENTS.map((agent) => `User-agent: ${agent}`),
+    'Allow: /',
+    ...(siteUrl ? ['', `Sitemap: ${siteUrl}/sitemap.xml`] : []),
+    '',
+  ].join('\n')
 }
 
 /** Sitemap con las dos páginas y sus equivalentes por idioma. `lastmod` en AAAA-MM-DD. */

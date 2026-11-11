@@ -190,7 +190,7 @@ export function ContactForm({ copy, lang }: { copy: FormCopy; lang: LandingLang 
 
       <div className="lp-form__actions">
         {usesApi ? (
-          <button type="submit" className="btn btn-primary btn-lg" disabled={state === 'sending'}>
+          <button type="submit" className="btn btn-primary btn-lg" disabled={state === 'sending'} aria-busy={state === 'sending'}>
             {state === 'sending' ? copy.sending : copy.submit}
           </button>
         ) : (

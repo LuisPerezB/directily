@@ -51,6 +51,10 @@ Los cambios en `.env` se aplican al reiniciar `npm run dev` o al volver a compil
 - **Datos estructurados** (schema.org): organización, sitio, aplicación y las preguntas frecuentes. Sin valoraciones
   ni precios, porque no existen.
 - **`robots.txt` y `sitemap.xml`** en la raíz de `dist/`.
+- **Agentes de IA.** El build publica `llms.txt` y `llms-full.txt` (inglés) y `llms-es.txt` y `llms-full-es.txt`
+  (español): un resumen en texto plano de qué es el producto, para quién, dónde se instala, cómo se conecta y cómo
+  contactar. Sale del mismo copy que la página. `robots.txt` da la bienvenida por nombre a los agentes de IA y los
+  datos estructurados declaran funciones, público, modalidades de instalación y correo de contacto.
 
 Para que la página aparezca en Google hace falta, además (no lo hace el build):
 
