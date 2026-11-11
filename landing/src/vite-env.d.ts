@@ -14,6 +14,8 @@ interface ImportMetaEnv {
   readonly VITE_SITE_URL?: string
   /** Carpeta o URL del video y su portada (por defecto `./media`). */
   readonly VITE_MEDIA_BASE_URL?: string
+  /** Código de verificación de Google Search Console (solo el valor de `content`). */
+  readonly VITE_GOOGLE_SITE_VERIFICATION?: string
   /** Puerto del servidor de desarrollo (por defecto 5174). */
   readonly VITE_DEV_PORT?: string
 }

@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
 import type { LandingLang } from '../copy/types'
 import { prefersReducedMotion } from '../lib/motion'
+import { pageRoot } from '../lib/page'
 
-/** Carpeta (o URL) donde están el video y su portada; por defecto `media/`, junto a index.html. */
-const MEDIA = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '') || './media'
+/** Carpeta (o URL) donde están el video y su portada; por defecto `media/`, en la raíz del sitio. */
+const MEDIA_URL = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
 
 /**
  * Video corto del producto (sin sonido, en bucle). Empieza a reproducirse al entrar en pantalla y
@@ -13,6 +14,7 @@ const MEDIA = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/,
 export function DemoVideo({ lang, label }: { lang: LandingLang; label: string }) {
   const ref = useRef<HTMLVideoElement>(null)
   const still = prefersReducedMotion()
+  const MEDIA = MEDIA_URL || `${pageRoot()}media`
 
   useEffect(() => {
     const video = ref.current
