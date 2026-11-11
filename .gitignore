@@ -40,3 +40,7 @@ infra/aws/cdk.out/
 infra/aws/cdk.context.json
 infra/aws/owner-inputs.*.json
 !infra/aws/owner-inputs.example.json
+
+# landing (React, página pública independiente)
+landing/node_modules/
+landing/dist/
