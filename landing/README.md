@@ -100,6 +100,10 @@ La página es estática y no guarda nada: sin cookies, sin analítica y sin recu
   faltante en un idioma rompe la compilación. Regla editorial: solo se afirma lo que el producto
   hace hoy.
 - `src/App.tsx` — las secciones de la página.
+- `public/media/tech/` — logotipos de AWS, Cloudflare, Microsoft y Anthropic (SVG tomados de Wikimedia Commons el
+  11-nov-2026, sin modificar). Son marcas de sus titulares: se muestran sin recolorear, sobre fondo claro y con la
+  aclaración «no es socio ni está avalado» que está en `src/copy/`. Si alguna empresa pide retirarlo, se borra su
+  archivo y su entrada en `tech.items`.
 - `src/components/ProductPreview.tsx` — la vista previa interactiva del producto (pronóstico por
   horizonte, inventario y decisiones). Usa **datos ficticios** y lo dice en pantalla: no es una
   captura con datos de un cliente.

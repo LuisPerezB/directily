@@ -22,6 +22,13 @@ export function pageLang(): LandingLang | undefined {
   return value === 'es' || value === 'en' ? value : undefined
 }
 
+const MEDIA_URL = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/[/]+$/, '')
+
+/** Dirección de un archivo de `media/` (video, portadas, logotipos): `VITE_MEDIA_BASE_URL` o la carpeta junto al sitio. */
+export function mediaUrl(file: string): string {
+  return `${MEDIA_URL || `${root}media`}/${file}`
+}
+
 /** Dirección, relativa a esta página, de la misma página en otro idioma. */
 export function pageUrlFor(lang: LandingLang): string {
   return lang === 'en' ? `${root}en/` : root
