@@ -57,6 +57,9 @@ from predictily_engine.models.registry import BASELINE_FAMILY, CANDIDATES_BY_CLA
 from predictily_engine.platform.config import HORIZONS
 from predictily_engine.selection.selector import (
     LEGACY_RULE_VERSION,
+    DEFAULT_BIAS_TOLERANCE,
+    DEFAULT_SERIES_TOLERANCE,
+    METRIC_SERIES_DAY,
     MIN_CLASS_ACTUAL,
     MIN_CLASS_SERIES,
     POOLED,
@@ -153,7 +156,10 @@ class PromotionConfig:
         return cls(
             governing_policy=str(cfg.get("governing_policy", POLICY_LEGACY)),
             legacy=LegacyPolicy(min_improvement=float(min_improvement),
-                                windows_won_fraction=float(cfg.get("legacy_windows_won_fraction", 2 / 3))),
+                                windows_won_fraction=float(cfg.get("legacy_windows_won_fraction", 2 / 3)),
+                                selection_metric=str(cfg.get("legacy_selection_metric", METRIC_SERIES_DAY)),
+                                bias_tolerance=float(cfg.get("legacy_bias_tolerance", DEFAULT_BIAS_TOLERANCE)),
+                                series_tolerance=float(cfg.get("legacy_series_tolerance", DEFAULT_SERIES_TOLERANCE))),
             v25=V25Policy(
                 min_selection_windows=int(cfg.get("v25_min_selection_windows", 2)),
                 max_consecutive_losing_windows=int(cfg.get("v25_max_consecutive_losing_windows", 1)),
@@ -253,7 +259,9 @@ class PromotionOutcome:
         """Texto del criterio de selección de la ejecución, generado de la política que gobernó (con la regla exacta de ventanas)."""
         leg = self.config.legacy
         total = (self.legacy.evidence.get(POOLED) or {}).get("windows_total") or 0
-        rule = (f"menor WAPE por clase de demanda; LightGBM solo si mejora ≥ {leg.min_improvement:.0%} y gana en al menos ⌈n × {leg.windows_won_fraction:.4g}⌉ "
+        metric = (f"menor WAPE del total diario por clase de demanda (sesgo máximo ±{leg.bias_tolerance:.0%}; error serie-día a lo sumo "
+                  f"{leg.series_tolerance:.0%} peor que el mejor)" if leg.by_total else "menor WAPE por clase de demanda")
+        rule = (f"{metric}; LightGBM solo si mejora ≥ {leg.min_improvement:.0%} y gana en al menos ⌈n × {leg.windows_won_fraction:.4g}⌉ "
                 "ventanas" + (f" (con {total} ventanas: {leg.needed_windows(total)})" if total else ""))
         if self.governing == POLICY_V25:
             return ("política de promoción V2.5 (gates calculados con las ventanas de selección; el período final no decide); la regla heredada se "
@@ -778,7 +786,8 @@ def _legacy_gates(evidence: dict[str, Any]) -> dict[str, Any]:
     if lg is None:
         return {"legacy_rule": _gate(NOT_APPLICABLE, "LightGBM no se evaluó en el alcance: gana el mejor estadístico (menor WAPE).",
                                      blocking=False, **{k: v for k, v in evidence.items() if k != "scope"})}
-    return {
+    metric = "WAPE del total diario" if evidence.get("metric") == "total_day" else "WAPE"
+    gates = {
         "min_improvement": _gate(PASS if evidence.get("passes_improvement") else FAIL,
                                  f"Mejora relativa de LightGBM frente al mejor estadístico: {evidence.get('relative_improvement') or 0:.1%} "
                                  f"(mínimo {evidence['required_relative_improvement']:.0%}).", blocking=False,
@@ -791,6 +800,15 @@ def _legacy_gates(evidence: dict[str, Any]) -> dict[str, Any]:
                              windows_better=evidence["windows_better"], windows_total=evidence["windows_total"],
                              windows_needed=evidence["windows_needed"], fraction=evidence["windows_won_fraction"]),
     }
+    if evidence.get("passes_guards") is not None:      # regla v2 (total diario): salvaguardas de sesgo y de error por serie
+        gates["guards"] = _gate(PASS if evidence["passes_guards"] else FAIL,
+                                f"Salvaguardas de LightGBM con la métrica {metric}: error serie-día {evidence.get('lightgbm_series_wape'):.3f} "
+                                f"(límite {evidence.get('series_wape_limit'):.3f}) y sesgo {evidence.get('lightgbm_bias'):+.1%} "
+                                f"(máximo ±{evidence.get('bias_tolerance'):.0%}).", blocking=False,
+                                passes_series_guard=evidence.get("passes_series_guard"), passes_bias_guard=evidence.get("passes_bias_guard"),
+                                series_wape=evidence.get("lightgbm_series_wape"), series_wape_limit=evidence.get("series_wape_limit"),
+                                bias=evidence.get("lightgbm_bias"), bias_tolerance=evidence.get("bias_tolerance"))
+    return gates
 
 
 def _legacy_decision(scope_key: str, winner: str, reason: str, evidence: dict[str, Any], table: pd.DataFrame | None,

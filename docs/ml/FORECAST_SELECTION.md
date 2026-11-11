@@ -66,6 +66,40 @@ la V2.5 compara con tolerancia de 1e-9.
 
 `policy_version` = SHA-256 de `{política, parámetros, constantes de la regla, versión}`. Cambiar cualquier parámetro cambia la huella.
 
+### 2.1 Regla v2: selección con el WAPE del total diario (`legacy-selection-v2`, apagada por defecto)
+
+**Por qué.** El WAPE serie-día está cerca del piso de ruido de los conteos: dos modelos buenos difieren ahí en 1–2 % (por debajo del margen
+exigido) aunque en el total del negocio difieran 15–30 %, un modelo plano que no reparte la semana puede ganar por décimas a uno que sí la
+reparte, y en series intermitentes premia pronosticar de menos. En la demo Ferretería Andina, en las ventanas de selección, LightGBM era
+1,4 % mejor por serie-día (0,495 frente a 0,502: rechazado por el margen del 3 %) y 29 % mejor en el total diario (0,084 frente a 0,118).
+
+**Regla** (`promotion.legacy_selection_metric = total_day`; `selector._decide_by_total`). La estructura es la de la v1; cambia la métrica
+que ordena a los candidatos y se agregan dos salvaguardas:
+
+1. Métrica: WAPE del **total diario del alcance** (`selector.total_day_wape`): las series del alcance (todas, o las de una clase) se suman
+   por ventana y día y se mide Σ|total real − total pronosticado| / Σ total real.
+2. Estadísticos elegibles: WAPE serie-día ≤ el mejor estadístico × (1 + `series_tolerance`) **y** |sesgo| ≤ `bias_tolerance`. Entre ellos
+   gana el de menor WAPE del total diario. Si ninguno cumple el sesgo se elige sin esa salvaguarda y queda registrado
+   (`evidence.bias_guard_relaxed`); los excluidos se listan en `evidence.statistical_outside_guards`.
+3. LightGBM reemplaza al ganador si mejora su WAPE del total diario ≥ `min_improvement`, gana en ⌈n × `windows_won_fraction`⌉ ventanas con
+   esa misma métrica **y** cumple las dos salvaguardas (compuerta `guards` de `model_promotion_decisions`).
+4. El respaldo simple (Seasonal Naive o promedio móvil) también se ordena con el total diario.
+
+| Parámetro | Valor por defecto | Rango validado | Dónde |
+|---|---|---|---|
+| `selection_metric` | `series_day` (v1) | `series_day` / `total_day` | `promotion.legacy_selection_metric` |
+| `bias_tolerance` | 0,15 | [0; 5] | `promotion.legacy_bias_tolerance` (solo v2) |
+| `series_tolerance` | 0,05 | [0; 1] | `promotion.legacy_series_tolerance` (solo v2) |
+
+**Compatibilidad.** Con `series_day` las salvaguardas no intervienen ni forman parte de los parámetros: la huella (`policy_version`) y la
+selección son exactamente las de la v1 (`test_default_policy_keeps_the_v1_parameters_and_fingerprint` y la paridad de
+`test_selection_legacy_parity.py`). Con `total_day` la política tiene su propia `rule_version` y su propia huella, y las tablas de la
+selección llevan además la columna `wape_total`. Las métricas publicadas de la ejecución no cambian de definición.
+
+**Medido en la demo ficticia** (período final reservado, horizonte 90; mismo backtest, solo cambia la regla): Ferretería Andina, total diario
+0,094 → 0,079 y serie-día 0,491 → 0,489; Distribuidora Costa, total diario 0,096 → 0,077 y serie-día 0,449 → 0,443. Son datos sintéticos:
+prueban el mecanismo, no la precisión de un cliente. Valores iniciales de diseño, a aprobar en el piloto.
+
 ## 3. Política de promoción V2.5 (`promotion-v25-1`)
 
 Se calcula siempre, **solo con las ventanas de selección**: el período final reservado se filtra antes de decidir. El gate `no_leakage` lo
@@ -210,6 +244,8 @@ mensaje explícito y la ejecución sigue con los hiperparámetros por defecto (`
 |---|---|---|---|
 | `governing_policy` | `legacy` | `legacy`/`v25` | por empresa |
 | `legacy_windows_won_fraction` | 2/3 | [0,5; 1] | `demand.min_improvement` fija el margen de la heredada |
+| `legacy_selection_metric` | `series_day` | `series_day`/`total_day` | `total_day` = regla v2 (§2.1), por empresa |
+| `legacy_bias_tolerance` / `legacy_series_tolerance` | 0,15 / 0,05 | [0; 5] / [0; 1] | salvaguardas de la regla v2 |
 | `v25_min_selection_windows` / `v25_max_consecutive_losing_windows` | 2 / 1 | [1; 20] / [0; 10] | estabilidad |
 | `v25_min_relative_improvement` / `v25_operational_min_money_improvement` | 0,03 / 0,05 | [0; 0,5] | mejora |
 | `v25_segment_max_regression` / `v25_segment_min_actual` | 0,10 / 30 | [0; 1] / ≥ 0 | segmentos |

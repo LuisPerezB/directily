@@ -3,6 +3,13 @@
 **Área:** motor (`selection/selector.py`, `models/registry.py`, `models/statistical.py`) · **Prioridad:** media · **Esfuerzo:** medio ·
 **Depende de:** `05` (más ventanas hacen fiable cualquier regla de selección).
 
+**Estado (11/11/2026, rama `claude/optimistic-ritchie-snsv8i`): parte A implementada con otro diseño; parte B pendiente.**
+- **Parte A.** En lugar del margen entre estadísticos frente a la referencia, la regla v2 (`promotion.legacy_selection_metric = total_day`,
+  apagada por defecto) ordena a TODOS los candidatos por el WAPE del total diario del alcance, con salvaguarda de sesgo
+  (`legacy_bias_tolerance`, 0,15) y de error por serie (`legacy_series_tolerance`, 0,05); LightGBM conserva su margen y su regla de ventanas,
+  medidos con esa métrica. Detalle y medición en `docs/ml/FORECAST_SELECTION.md` §2.1; pruebas en `tests/unit/test_selection_total_day.py`.
+  Sigue pendiente de lo escrito abajo: el margen mínimo de un estadístico frente a la referencia (paso 1) y validar en los dos pilotos.
+
 ## Problema
 
 1. Entre los modelos estadísticos **gana el de menor WAPE serie-día sin margen ni estabilidad**: en el piloto A el modelo servido ganó a

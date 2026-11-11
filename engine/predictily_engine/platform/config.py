@@ -338,6 +338,12 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "governing_policy": "legacy",         # legacy | v25
         # ── política heredada (legacy-selection-v1): fracción de ventanas que debe ganar LightGBM (2/3 ⇒ ⌈2n/3⌉; 3 de 4 en producción)
         "legacy_windows_won_fraction": 2 / 3,
+        # Métrica que ordena a los candidatos de la política heredada. `series_day` (por defecto) = WAPE serie-día: la regla de siempre
+        # (legacy-selection-v1), sin ningún cambio. `total_day` = regla v2: WAPE del total diario del alcance, con las dos salvaguardas
+        # siguientes. Se activa por empresa al aprobarlo en el piloto: cambia qué modelo gana (docs/roadmap/cambios-2026-11/06).
+        "legacy_selection_metric": "series_day",   # series_day | total_day
+        "legacy_bias_tolerance": 0.15,             # solo v2: |sesgo| máximo de un candidato (Σ(pronóstico − real) / Σ real)
+        "legacy_series_tolerance": 0.05,           # solo v2: su WAPE serie-día puede superar al del mejor estadístico a lo sumo en esta fracción
         # ── política V2.5 (promotion-v25-1): gates calculados SOLO con las ventanas de selección (el holdout nunca decide) ──
         "v25_min_selection_windows": 2,       # ventanas de selección mínimas para certificar estabilidad y calibración
         "v25_max_consecutive_losing_windows": 1,   # el candidato no puede perder en más de x ventanas consecutivas frente a la referencia
@@ -484,6 +490,9 @@ CONFIG_CONSTRAINTS.update({
     # dimensión inventada haría pasar el gate «sin regresión por segmento» sin evaluar nada.
     ("promotion", "v25_critical_segments"): {"list_choices": ["demand_class", "category", "branch", "volume_tier", "series_age", "series_life"], "list_max_len": 6},
     ("promotion", "legacy_windows_won_fraction"): {"min": 0.5, "max": 1.0},
+    ("promotion", "legacy_selection_metric"): {"choices": ["series_day", "total_day"]},
+    ("promotion", "legacy_bias_tolerance"): {"min": 0.0, "max": 5.0},
+    ("promotion", "legacy_series_tolerance"): {"min": 0.0, "max": 1.0},
     ("promotion", "v25_min_selection_windows"): {"min": 1, "max": 20},
     ("promotion", "v25_max_consecutive_losing_windows"): {"min": 0, "max": 10},
     ("promotion", "v25_min_relative_improvement"): {"min": 0.0, "max": 0.5},
