@@ -212,13 +212,14 @@ export const en: LandingCopy = {
     title: ['Built for companies', 'that buy, stock and sell.'],
     lead: 'The engine is the same. The forecast is trained on your products, your branches and your calendar.',
     items: [
-      { title: 'Distributors', text: 'Wholesale and retail with many products and repeat customers: demand by product and repurchase by customer.' },
-      { title: 'Hardware stores', text: 'Wide catalogs with occasionally sold products: models designed for intermittent demand.' },
-      { title: 'Auto and farm parts', text: 'Thousands of slow-moving items, where running out costs the sale and overstock ties up capital.' },
-      { title: 'Multi-branch retail', text: 'Forecasts by branch and by category, with totals that always match the detail.' },
-      { title: 'Importers', text: 'Long supplier lead times: reorder point and suggested quantity calculated with your delivery times.' },
-      { title: 'Recurring consumption', text: 'Customers who come back: who is about to buy, who has stopped and which product to offer.' },
+      { title: 'Distributors', question: 'What will each customer order from me next week?', text: 'Wholesale and retail with many products and repeat customers: demand by product and repurchase by customer.' },
+      { title: 'Hardware stores', question: 'How much do I order of what only sells now and then?', text: 'Wide catalogs with occasionally sold products: models designed for intermittent demand.' },
+      { title: 'Auto and farm parts', question: 'Which part can I not be out of when someone asks for it?', text: 'Thousands of slow-moving items, where running out costs the sale and overstock ties up capital.' },
+      { title: 'Multi-branch retail', question: 'How much do I send to each branch this month?', text: 'Forecasts by branch and by category, with totals that always match the detail.' },
+      { title: 'Importers', question: 'When do I place the order so it arrives on time?', text: 'Long supplier lead times: reorder point and suggested quantity calculated with your delivery times.' },
+      { title: 'Recurring consumption', question: 'Who should have bought again by now?', text: 'Customers who come back: who is about to buy, who has stopped and which product to offer.' },
     ],
+    hint: 'Hover over or tap a card to see it in its day-to-day. Illustrative images.',
     other: {
       title: 'Your sector is not on the list?',
       text: 'If your company records sales by product and date, let’s talk. We will tell you frankly whether Predictily is useful for you today.',
@@ -228,13 +229,29 @@ export const en: LandingCopy = {
   hosting: {
     kicker: 'Where it runs',
     title: ['You choose where it runs', 'and where your data lives.'],
-    lead: 'The same product in three deployment options. The right one depends on your IT team and your data policies.',
+    lead: 'The same product in three deployment options. Pick the one that fits your company.',
     items: [
-      { tag: 'Self-hosted', title: 'On your own infrastructure', text: 'Predictily is installed with Docker on a server your company owns or in your own cloud. Your data never leaves your network and your team controls access, backups and updates.' },
-      { tag: 'VPS', title: 'On a server dedicated to your company', text: 'An instance just for you on a virtual private server, with automatic TLS certificates and backups. Recommended: 4 vCPU and 8 to 16 GB of RAM; no GPU required.' },
-      { tag: 'Shared server', title: 'On the multi-company platform', text: 'Your company on a shared instance, with your data isolated from everyone else’s at every layer. The fastest way to start, with no servers to manage.' },
+      {
+        tag: 'Self-hosted',
+        title: 'On your own infrastructure',
+        text: 'Predictily runs inside your company: on your servers or in your own cloud.',
+        points: ['Your data never leaves your network', 'Your team controls access and backups', 'You decide when to update'],
+      },
+      {
+        tag: 'VPS',
+        title: 'On a server dedicated to your company',
+        text: 'An instance just for you, separate from any other company.',
+        points: ['Resources dedicated to your operation', 'Encrypted connection and backups', 'Grows with your data volume'],
+      },
+      {
+        tag: 'Shared server',
+        title: 'On the multi-company platform',
+        text: 'The fastest way to start: your company on the shared platform.',
+        points: ['No servers to manage', 'Your data isolated from other companies', 'The same engine and the same models'],
+      },
     ],
     note: 'In all three options the engine, the models and the security controls are the same.',
+    controls: { list: 'Deployment options', prev: 'Previous option', next: 'Next option' },
   },
   security: {
     kicker: 'Security and control',
@@ -341,7 +358,7 @@ export const en: LandingCopy = {
       },
       {
         q: 'Where is Predictily deployed?',
-        a: 'There are three options: self-hosted on your company’s infrastructure (with Docker), on a virtual private server (VPS) dedicated to your company, or on the shared multi-company platform with your data isolated. The product is the same in all three.',
+        a: 'There are three options: self-hosted on your company’s infrastructure, on a virtual private server (VPS) dedicated to your company, or on the shared multi-company platform with your data isolated. The product is the same in all three.',
       },
       {
         q: 'Can it be used with an AI agent?',

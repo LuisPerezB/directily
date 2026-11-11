@@ -136,7 +136,10 @@ export interface LandingCopy {
     kicker: string
     title: SplitTitle
     lead: string
-    items: readonly TitledText[]
+    /** `question`: la pregunta que esa empresa se hace a diario, en primera persona, para que se reconozca en la tarjeta. */
+    items: readonly (TitledText & { question: string })[]
+    /** Cómo ver la fotografía de cada tarjeta, y aviso de que las imágenes son ilustrativas. */
+    hint: string
     other: TitledText & { cta: string }
   }
   /** Dónde corre el producto: autohospedado, servidor dedicado (VPS) o plataforma compartida. */
@@ -144,8 +147,10 @@ export interface LandingCopy {
     kicker: string
     title: SplitTitle
     lead: string
-    items: readonly (TitledText & { tag: string })[]
+    items: readonly (TitledText & { tag: string; points: readonly string[] })[]
     note: string
+    /** Etiquetas del carrusel para lectores de pantalla. */
+    controls: { list: string; prev: string; next: string }
   }
   security: {
     kicker: string

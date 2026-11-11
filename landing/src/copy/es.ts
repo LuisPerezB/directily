@@ -212,13 +212,14 @@ export const es: LandingCopy = {
     title: ['Hecho para empresas', 'que compran, almacenan y venden.'],
     lead: 'El motor es el mismo. El pronóstico se entrena con sus productos, sus sucursales y su calendario.',
     items: [
-      { title: 'Distribuidoras', text: 'Mayoristas y minoristas con muchos productos y clientes recurrentes: demanda por producto y recompra por cliente.' },
-      { title: 'Ferreterías', text: 'Catálogos amplios con productos de venta ocasional: modelos pensados para demanda intermitente.' },
-      { title: 'Repuestos automotrices y agrícolas', text: 'Miles de referencias de baja rotación, donde agotarse cuesta la venta y sobrar inmoviliza capital.' },
-      { title: 'Comercio con varias sucursales', text: 'Pronóstico por sucursal y por categoría, con totales que siempre cuadran con el detalle.' },
-      { title: 'Importadoras', text: 'Plazos de proveedor largos: punto de reorden y cantidad sugerida calculados con sus tiempos de entrega.' },
-      { title: 'Consumo recurrente', text: 'Clientes que vuelven a comprar: quién está por comprar, quién dejó de hacerlo y qué producto ofrecer.' },
+      { title: 'Distribuidoras', question: '¿Qué me va a pedir cada cliente la próxima semana?', text: 'Mayoristas y minoristas con muchos productos y clientes recurrentes: demanda por producto y recompra por cliente.' },
+      { title: 'Ferreterías', question: '¿Cuánto pido de lo que se vende solo de vez en cuando?', text: 'Catálogos amplios con productos de venta ocasional: modelos pensados para demanda intermitente.' },
+      { title: 'Repuestos automotrices y agrícolas', question: '¿Qué referencia no me puede faltar cuando la pidan?', text: 'Miles de referencias de baja rotación, donde agotarse cuesta la venta y sobrar inmoviliza capital.' },
+      { title: 'Comercio con varias sucursales', question: '¿Cuánto envío a cada sucursal este mes?', text: 'Pronóstico por sucursal y por categoría, con totales que siempre cuadran con el detalle.' },
+      { title: 'Importadoras', question: '¿Cuándo hago el pedido para que llegue a tiempo?', text: 'Plazos de proveedor largos: punto de reorden y cantidad sugerida calculados con sus tiempos de entrega.' },
+      { title: 'Consumo recurrente', question: '¿Quién ya debería haber vuelto a comprar?', text: 'Clientes que vuelven a comprar: quién está por comprar, quién dejó de hacerlo y qué producto ofrecer.' },
     ],
+    hint: 'Pase el puntero o toque una tarjeta para verla en su día a día. Imágenes ilustrativas.',
     other: {
       title: '¿Su sector no está en la lista?',
       text: 'Si su empresa registra ventas por producto y fecha, conversemos. Le diremos con franqueza si Predictily le sirve hoy.',
@@ -228,13 +229,29 @@ export const es: LandingCopy = {
   hosting: {
     kicker: 'Dónde se instala',
     title: ['Usted elige dónde corre', 'y dónde viven sus datos.'],
-    lead: 'El mismo producto en tres modalidades. La que conviene depende de su equipo de sistemas y de sus políticas de datos.',
+    lead: 'El mismo producto en tres modalidades. Elija la que mejor encaja con su empresa.',
     items: [
-      { tag: 'Autohospedado', title: 'En su propia infraestructura', text: 'Predictily se instala con Docker en un servidor de su empresa o en su propia nube. Sus datos no salen de su red y su equipo controla accesos, respaldos y actualizaciones.' },
-      { tag: 'VPS', title: 'En un servidor dedicado a su empresa', text: 'Una instancia solo para usted en un servidor privado virtual, con certificado TLS automático y respaldos. Recomendado: 4 vCPU y de 8 a 16 GB de RAM; no requiere GPU.' },
-      { tag: 'Servidor compartido', title: 'En la plataforma multiempresa', text: 'Su empresa en una instancia compartida, con sus datos aislados de los de las demás en todas las capas. La forma más rápida de empezar, sin administrar servidores.' },
+      {
+        tag: 'Autohospedado',
+        title: 'En su propia infraestructura',
+        text: 'Predictily corre dentro de su empresa: en sus servidores o en su propia nube.',
+        points: ['Sus datos no salen de su red', 'Su equipo controla accesos y respaldos', 'Usted decide cuándo actualizar'],
+      },
+      {
+        tag: 'VPS',
+        title: 'En un servidor dedicado a su empresa',
+        text: 'Una instancia solo para usted, separada de cualquier otra empresa.',
+        points: ['Recursos dedicados a su operación', 'Conexión cifrada y respaldos', 'Crece con su volumen de datos'],
+      },
+      {
+        tag: 'Servidor compartido',
+        title: 'En la plataforma multiempresa',
+        text: 'La forma más rápida de empezar: su empresa en la plataforma compartida.',
+        points: ['Sin servidores que administrar', 'Sus datos aislados de las demás empresas', 'El mismo motor y los mismos modelos'],
+      },
     ],
     note: 'En las tres modalidades el motor, los modelos y los controles de seguridad son los mismos.',
+    controls: { list: 'Modalidades de instalación', prev: 'Modalidad anterior', next: 'Modalidad siguiente' },
   },
   security: {
     kicker: 'Seguridad y control',
@@ -341,7 +358,7 @@ export const es: LandingCopy = {
       },
       {
         q: '¿Dónde se instala Predictily?',
-        a: 'Hay tres modalidades: autohospedado en la infraestructura de su empresa (con Docker), en un servidor privado virtual (VPS) dedicado a su empresa, o en la plataforma compartida multiempresa con sus datos aislados. El producto es el mismo en las tres.',
+        a: 'Hay tres modalidades: autohospedado en la infraestructura de su empresa, en un servidor privado virtual (VPS) dedicado a su empresa, o en la plataforma compartida multiempresa con sus datos aislados. El producto es el mismo en las tres.',
       },
       {
         q: '¿Se puede usar con un agente de IA?',
