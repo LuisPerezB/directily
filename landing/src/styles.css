@@ -1777,17 +1777,29 @@ svg {
   flex-direction: column;
   gap: 0.15rem;
   min-width: 11rem;
-  padding: 0.7rem 1.1rem;
+  padding: 0.7rem 0.8rem 0.8rem;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   background: var(--card);
   color: var(--muted);
 }
-.lp-tech__list strong {
-  font-size: 1.02rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: var(--fg);
+/* Los logotipos de terceros no se recolorean: están hechos para fondo claro, así que van sobre una placa blanca en los dos temas. */
+.lp-tech__logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 3.25rem;
+  margin-bottom: 0.35rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: #ffffff;
+}
+.lp-tech__logo img {
+  display: block;
+  width: auto;
+  max-width: 8.5rem;
+  height: auto;
+  max-height: 100%;
 }
 .lp-tech__note {
   max-width: 46rem;

@@ -1,10 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { LandingLang } from '../copy/types'
 import { prefersReducedMotion } from '../lib/motion'
-import { pageRoot } from '../lib/page'
-
-/** Carpeta (o URL) donde están el video y su portada; por defecto `media/`, en la raíz del sitio. */
-const MEDIA_URL = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
+import { mediaUrl } from '../lib/page'
 
 /**
  * Video corto del producto (sin sonido, en bucle). Empieza a reproducirse al entrar en pantalla y
@@ -14,7 +11,6 @@ const MEDIA_URL = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/
 export function DemoVideo({ lang, label }: { lang: LandingLang; label: string }) {
   const ref = useRef<HTMLVideoElement>(null)
   const still = prefersReducedMotion()
-  const MEDIA = MEDIA_URL || `${pageRoot()}media`
 
   useEffect(() => {
     const video = ref.current
@@ -35,8 +31,8 @@ export function DemoVideo({ lang, label }: { lang: LandingLang; label: string })
       ref={ref}
       key={lang}
       className="lp-video__player"
-      src={`${MEDIA}/predictily-demo-${lang}.mp4`}
-      poster={`${MEDIA}/predictily-demo-poster-${lang}.jpg`}
+      src={mediaUrl(`predictily-demo-${lang}.mp4`)}
+      poster={mediaUrl(`predictily-demo-poster-${lang}.jpg`)}
       width={1280}
       height={720}
       muted

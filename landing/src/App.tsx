@@ -13,6 +13,7 @@ import type { LandingLang } from './copy/types'
 import { contactConfig } from './lib/contact'
 import { buildContactUrl } from './lib/contactLink'
 import { useLandingLocale } from './lib/locale'
+import { mediaUrl } from './lib/page'
 import { useTheme } from './lib/theme'
 import { safeHttpUrl } from './lib/url'
 
@@ -130,13 +131,15 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
               ))}
             </ul>
           </Reveal>
-          {/* Tecnología de terceros: nombres en texto (uso nominativo), con la aclaración de que no son socios. */}
+          {/* Tecnología de terceros: logotipo oficial de cada empresa, sin modificar y sobre fondo claro, con la aclaración de que no son socios. */}
           <Reveal className="lp-wrap lp-tech">
             <p className="lp-tech__label">{copy.tech.label}</p>
             <ul className="lp-tech__list">
               {copy.tech.items.map((item) => (
                 <li key={item.name}>
-                  <strong>{item.name}</strong>
+                  <span className="lp-tech__logo">
+                    <img src={mediaUrl(`tech/${item.name.toLowerCase()}.svg`)} alt={item.name} loading="lazy" decoding="async" />
+                  </span>
                   <span>{item.role}</span>
                 </li>
               ))}
