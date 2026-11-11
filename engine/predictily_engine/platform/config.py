@@ -52,7 +52,9 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "day_status_infer_same_weekday": True,
         # Variantes con perfil semanal de los modelos planos (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la
         # semana; ver `models/registry.py`). Apagadas por defecto: cambian qué modelo gana, así que se activan por empresa al aprobarlo en
-        # el piloto (p. ej. un negocio que casi no vende un día de la semana).
+        # el piloto (p. ej. un negocio que casi no vende un día de la semana). Encendidas, además, lo que se sirve PLANO sin haber
+        # competido en el backtest (series nuevas o de historia escasa y filas servidas con el respaldo plano) se reparte con el ritmo
+        # semanal del negocio (`statistical.common_weekday_profile`): mismo total semanal, otro reparto por día.
         "weekday_profile_models": False,
         # ── W3-A · métricas por horizonte y segmento (docs/ml/FORECAST_VALIDATION.md §3). TODOS son valores INICIALES de diseño, «a aprobar
         # en el piloto» con datos reales; ninguno es universal y ninguno cambia lo servido (solo qué métricas se persisten y cómo se marcan). ──

@@ -263,3 +263,56 @@ def test_values_of_regular_series_are_unaffected_and_the_hierarchy_stays_coheren
     assert set(res.forecast_values["case_label"].dropna()) >= {
         "discontinued_zero", "branch_closed_declared", "new_product_category_median", "new_product_own_average",
         "branch_opening", "exceptional_event"}
+
+
+# ───────────────────────── series nuevas con el ritmo semanal del negocio (`weekday_profile_models`) ─────────────────────────
+
+def test_off_new_series_stay_flat_and_no_weekday_assumption_is_recorded(special):
+    res, _ = special
+    assert _series(res, "b1-p14")["yhat"].nunique() == 1, "interruptor apagado: el nivel plano de siempre"
+    assert not any("ritmo semanal del negocio" in a for a in res.assumptions)
+
+
+@pytest.fixture(scope="module")
+def no_sundays(small_data):
+    """Negocio que no vende los domingos, con un producto nuevo (21 días de historia) y el interruptor activo."""
+    cutoff = pd.Timestamp(small_data.cutoff)
+    sales = small_data.sales[pd.to_datetime(small_data.sales["ds"]).dt.dayofweek != 6]
+    ds = pd.date_range(cutoff - pd.Timedelta(days=20), cutoff)
+    ds = ds[ds.dayofweek != 6]
+    new = pd.DataFrame({"branch_id": 1, "product_id": 14, "ds": ds, "units": 4.0, "net_amount": 40.0, "gross_amount": 40.0,
+                        "discount_amount": 0.0, "cost_amount": 20.0, "cost_units": 4.0, "lines": 1})
+    sales = pd.concat([sales, new], ignore_index=True).sort_values(["branch_id", "product_id", "ds"]).reset_index(drop=True)
+    extra = small_data.products[small_data.products["product_id"] == 1].copy()
+    extra["product_id"], extra["sku"] = 14, "NUEVO-14"
+    settings = {**(small_data.settings or {}), "cores": {"demand": {"weekday_profile_models": True}}}
+    data = replace(small_data, sales=sales, products=pd.concat([small_data.products, extra], ignore_index=True), settings=settings)
+    return run_pipeline(data, horizon=90, seed=42, n_jobs=1), cutoff
+
+
+def test_on_new_series_follow_the_rhythm_of_the_business_and_keep_their_weekly_total(no_sundays):
+    from predictily_engine.models.statistical import common_weekday_profile
+
+    res, cutoff = no_sundays
+    uid = "b1-p14"
+    rows = _series(res, uid)
+    assert len(rows) == 90 and (rows["model_family"] == "window_average").all()
+    assert (rows["case_label"] == "new_product_own_average").all(), "la etiqueta y el método no cambian: solo el reparto por día"
+    level = float(res.lifecycle.short_levels[uid])
+    active = res.panel.df[(res.panel.df["ds"] <= cutoff) & res.panel.df["unique_id"].isin(set(res.panel.profile.query("is_active")["unique_id"]))]
+    factors = common_weekday_profile(active[["unique_id", "ds", "y"]])
+    dow = pd.to_datetime(rows["target_date"]).dt.dayofweek.to_numpy()
+    # El domingo del negocio no es exactamente 0: los domingos con quiebre de stock de otras series se imputan como demanda
+    # (`stockout_censored`) y entran al perfil; estimarlo solo con días limpios es otro cambio (roadmap cambios-2026-11, 02).
+    assert factors[6] < 0.1 and factors.mean() == pytest.approx(1.0), "los domingos sin venta son ceros observados, no caídas de la fuente"
+    assert rows["yhat"].to_numpy() == pytest.approx(level * factors[dow], abs=1e-3)      # los valores publicados van a 4 decimales
+    assert (rows["yhat"].to_numpy()[dow == 6] < 0.1 * level).all(), "el negocio casi no vende los domingos: el producto nuevo tampoco"
+    assert (rows["yhat"].to_numpy()[dow != 6] > level).all(), "y lo que no se vende el domingo se reparte entre los otros seis días"
+    assert rows["yhat"].to_numpy()[:84].sum() == pytest.approx(84 * level, rel=1e-4), "12 semanas completas: mismo total que el nivel plano"
+    assert any("ritmo semanal del negocio" in a for a in res.assumptions), "el supuesto queda en la ficha de la ejecución"
+    # La jerarquía sigue siendo coherente con el reparto nuevo.
+    day = res.forecast_values.query("granularity == 'day'")
+    total = day[day["level"] == "total"].groupby("target_date")["yhat"].sum()
+    series = day[day["level"] == "series"].groupby("target_date")["yhat"].sum()
+    np.testing.assert_allclose(series.loc[total.index], total, rtol=1e-6, atol=1e-3)
+

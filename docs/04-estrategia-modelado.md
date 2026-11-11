@@ -45,7 +45,7 @@ Cada fila del backtest guarda la clase de su serie en el corte de su ventana (`d
 
 | Nivel | Estado en el MVP | Modelos |
 |---|---|---|
-| **A** Estadístico | ✅ Activo | Naive, Seasonal Naive (7), Promedio móvil 28 días, AutoETS estacional semanal (modelo `ZNZ`, sin tendencia: 7× más rápido que la búsqueda completa con el mismo error en los datos demo), Croston SBA, ADIDA, TSB (intermitentes) y sus variantes con perfil semanal (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la semana de cada serie, últimos 56 días encogidos hacia el perfil común; compiten en todas las clases cuando la empresa activa `weekday_profile_models`, apagado por defecto porque cambian qué modelo gana) |
+| **A** Estadístico | ✅ Activo | Naive, Seasonal Naive (7), Promedio móvil 28 días, AutoETS estacional semanal (modelo `ZNZ`, sin tendencia: 7× más rápido que la búsqueda completa con el mismo error en los datos demo), Croston SBA, ADIDA, TSB (intermitentes) y sus variantes con perfil semanal (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la semana de cada serie, últimos 56 días encogidos hacia el perfil común; compiten en todas las clases cuando la empresa activa `weekday_profile_models`, apagado por defecto porque cambian qué modelo gana). Con ese mismo interruptor, lo que se sirve plano sin competir en el backtest (series nuevas o de historia escasa y filas servidas con el respaldo `window_average`) se reparte con el ritmo semanal del negocio (`common_weekday_profile`: unidades por día de la semana de las series activas en los últimos 56 días); conserva el total semanal, no tiene perfil propio ni por sucursal y queda anotado en los supuestos de la ejecución |
 | **B** Global reutilizable | ✅ Activo por empresa | LightGBM global (MLForecast) entrenado con TODAS las series de la empresa: lags 1/7/14/28, medias y desviaciones móviles, media del mismo día de semana, calendario de Ecuador, promoción, precio relativo, sucursal, categoría, región y nivel de la serie; objetivo Tweedie (conteos con ceros); recursivo |
 | **B** entre empresas | ⏳ Diseñado, no activo | Requiere `tenants.allow_shared_training = true`, base jurídica (LOPDP) y evaluación; anonimizar IDs no vuelve anónimos los datos |
 | **C** Sectorial | ⏳ Diseñado | `model_registry.scope = 'sector'`, `tenant_id NULL`; se activará con datos suficientes y autorizados del sector |
@@ -420,7 +420,8 @@ cifras no tienen intervalo de confianza y no certifican exactitud comercial.
   congelado, §9): incluyen el efecto de cambios de precio posteriores al origen.
 - Las series nuevas o de historia escasa se pronostican con un nivel plano (mediana de categoría o promedio
   propio): no aprenden estacionalidad hasta tener ≥ 28 días; quedan marcadas `insufficient_data` en los
-  horizontes que su historia no respalda.
+  horizontes que su historia no respalda. Con `weekday_profile_models` activo ese nivel se reparte entre los días
+  con el ritmo semanal del negocio (no el de la serie ni el de su sucursal); el nivel semanal sigue siendo el mismo.
 - El cierre de sucursal solo se reconoce si está declarado (`branches.is_active = false`; no hay fecha de cierre):
   una sucursal que deja de vender sin declaración se trata como series sin ventas recientes (abstención).
 - La cobertura de ventas (`data_coverage`) limita el corte de **toda** la empresa al menor `complete_through`

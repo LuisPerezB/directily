@@ -58,8 +58,15 @@ from predictily_engine.inventory.recommendations import (
     required_coverage_days,
 )
 from predictily_engine.models.ml import LightGBMGlobal
-from predictily_engine.models.registry import BASELINE_FAMILY, FAMILIES, STATISTICAL, WEEKDAY_FAMILIES
-from predictily_engine.models.statistical import forecast_statistical
+from predictily_engine.models.registry import (
+    BASELINE_FAMILY,
+    FAMILIES,
+    STATISTICAL,
+    WEEKDAY_BASES,
+    WEEKDAY_FAMILIES,
+    WEEKDAY_PROFILE_DAYS,
+)
+from predictily_engine.models.statistical import common_weekday_profile, forecast_statistical
 from predictily_engine.pipeline.data import TenantData
 from predictily_engine.platform.config import config_hash, effective_config_record
 from predictily_engine.platform.snapshot import DataSnapshot
@@ -371,8 +378,18 @@ def run_pipeline(
                                         "intervalos y las etiquetas corresponden al modelo servido.")})
     active_ids = set(active["unique_id"])
     short_ids = [u for u in active["unique_id"] if u not in set(full_ids)]
+    # Ritmo semanal del negocio para lo que se sirve PLANO sin haber competido en el backtest (series nuevas o de historia escasa y
+    # filas servidas con el respaldo plano): mismo interruptor que las variantes `*_dow`. Sin él, en un negocio que no vende un día
+    # de la semana esas series reparten su nivel por igual entre los 7 días y son casi toda la venta pronosticada de ese día.
+    # El perfil es el común de las series activas (no hay historia para uno propio ni perfil por sucursal); apagado ⇒ None y nada cambia.
+    business_weekday: np.ndarray | None = None
+    weekday_applied = {"short_series": 0, "fallback_series": 0}
+    if core_config.get("weekday_profile_models", False):
+        business_weekday = common_weekday_profile(
+            panel.df.loc[(panel.df["ds"] <= cutoff) & panel.df["unique_id"].isin(active_ids), ["unique_id", "ds", "y"]])
     if short_ids:
-        preds.append(short_forecast(lifecycle, short_ids, cutoff, fc_horizon))
+        preds.append(short_forecast(lifecycle, short_ids, cutoff, fc_horizon, weekday_factors=business_weekday))
+        weekday_applied["short_series"] = len(short_ids) if business_weekday is not None else 0
         n_cat = int((lifecycle.short_family.reindex(short_ids) == "category_benchmark").sum())
         warnings.append(f"{len(short_ids)} series con historia escasa o menos de 28 días usan respaldo etiquetado "
                         f"({n_cat} con la mediana de su categoría, el resto con el promedio de su historia).")
@@ -390,10 +407,7 @@ def run_pipeline(
         m = chosen == fam
         if fam in wide:
             yhat[m] = wide.loc[m, fam].to_numpy()
-    miss = np.isnan(yhat)
-    if miss.any() and selection.fallback in wide:
-        yhat[miss] = wide.loc[miss, selection.fallback].to_numpy()
-        fam_used[miss] = selection.fallback
+    weekday_applied["fallback_series"] = fill_missing_with_fallback(wide, yhat, fam_used, selection.fallback, business_weekday)
     short_family = wide["unique_id"].map(lifecycle.short_family).fillna("window_average").to_numpy(dtype=object)
     fam_used = np.where(fam_used == "__short__", short_family, fam_used)
     series_fc = wide[["unique_id", "ds", "demand_class"]].copy()
@@ -619,6 +633,12 @@ def run_pipeline(
         "Cada ventana del backtest entrena con los datos tal como se conocían en su corte; los reales con que se evalúa son la "
         "verdad disponible al corte final (versión vigente de cada documento a esa fecha).",
     ]
+    if weekday_applied["short_series"] or weekday_applied["fallback_series"]:
+        assumptions.append(
+            f"Las series nuevas o de historia escasa ({weekday_applied['short_series']}) y las servidas con el respaldo plano "
+            f"({weekday_applied['fallback_series']}) reparten su nivel diario con el ritmo semanal del negocio (unidades por día de "
+            f"la semana de las series activas en los últimos {WEEKDAY_PROFILE_DAYS} días): el total de una semana completa no "
+            "cambia, solo su reparto entre días. No tienen perfil propio ni por sucursal.")
     snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage,
                               factors=factor_outcome.snapshot_block() if factor_outcome is not None else None)
     families_info = _families_info(served, selection, series_fc, bt, active, failed)
@@ -702,6 +722,25 @@ def run_pipeline(
 
 
 # ───────────────────────────── auxiliares ─────────────────────────────
+
+def fill_missing_with_fallback(wide: pd.DataFrame, yhat: np.ndarray, fam_used: np.ndarray, fallback: str,
+                               business_weekday: np.ndarray | None) -> int:
+    """Rellena EN SITIO las filas sin pronóstico de su familia (`yhat` NaN) con el respaldo y las etiqueta con él.
+
+    `wide`: una fila por (unique_id, ds) con una columna por familia. Con `business_weekday` (ritmo semanal del negocio: 7 factores
+    de media 1, índice 0 = lunes; solo con `weekday_profile_models`) un respaldo PLANO (`WEEKDAY_BASES`: no ve el día de la semana)
+    se reparte con ese ritmo; un respaldo que ya tiene día de la semana (`seasonal_naive`) no se toca.
+    Devuelve cuántas series recibieron el respaldo con el ritmo del negocio (0 si no se aplicó)."""
+    miss = np.isnan(yhat)
+    if not miss.any() or fallback not in wide:
+        return 0
+    yhat[miss] = wide.loc[miss, fallback].to_numpy()
+    fam_used[miss] = fallback
+    if business_weekday is None or fallback not in WEEKDAY_BASES:
+        return 0
+    yhat[miss] = yhat[miss] * np.asarray(business_weekday, dtype=float)[pd.to_datetime(wide.loc[miss, "ds"]).dt.dayofweek.to_numpy()]
+    return int(wide.loc[miss, "unique_id"].nunique())
+
 
 def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
     """Limitaciones de la semántica de días (ADR-V25-03) con sus conteos: nada se excluye o imputa en silencio."""

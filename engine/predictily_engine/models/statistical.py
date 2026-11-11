@@ -20,6 +20,31 @@ from predictily_engine.models.registry import (  # noqa: E402
 )
 
 
+def _recent_by_weekday(train: pd.DataFrame, days: int) -> pd.DataFrame:
+    """Filas de los últimos `days` días de `train` (unique_id, ds, y) con su día de la semana (`dow`, 0 = lunes)."""
+    t = train[["unique_id", "ds", "y"]].copy()
+    t["ds"] = pd.to_datetime(t["ds"])
+    recent = t[t["ds"] > t["ds"].max() - pd.Timedelta(days=days)].copy()
+    recent["dow"] = recent["ds"].dt.dayofweek
+    return recent
+
+
+def _common_factors(recent: pd.DataFrame) -> np.ndarray:
+    total = recent.groupby("dow")["y"].sum().reindex(range(7), fill_value=0.0).astype(float)
+    return (total / total.mean()).to_numpy() if total.mean() > 0 else np.ones(7)
+
+
+def common_weekday_profile(train: pd.DataFrame, days: int = WEEKDAY_PROFILE_DAYS) -> np.ndarray:
+    """Ritmo semanal del negocio: 7 factores (índice 0 = lunes) con media 1.
+
+    Unidades de todas las series de `train` (unique_id, ds, y) por día de la semana en los últimos `days` días, entre su media.
+    Es el perfil común hacia el que `weekday_profile` encoge el de cada serie, y el que usan las series sin perfil propio (nuevas,
+    de historia escasa y las servidas con el respaldo plano; ver `pipeline/core.py`). Sin ventas en la ventana, factores 1."""
+    if train.empty:
+        return np.ones(7)
+    return _common_factors(_recent_by_weekday(train, days))
+
+
 def weekday_profile(train: pd.DataFrame, days: int = WEEKDAY_PROFILE_DAYS,
                     shrink: float = WEEKDAY_PROFILE_SHRINK) -> pd.DataFrame:
     """Factores por día de la semana (0 = lunes) de cada serie, con media 1 en la semana.
@@ -29,14 +54,10 @@ def weekday_profile(train: pd.DataFrame, days: int = WEEKDAY_PROFILE_DAYS,
     con venta de la serie en la ventana. Así una serie con poca venta toma el ritmo del negocio y una regular, el suyo. Una serie
     sin datos en la ventana usa el perfil común; sin ventas en absoluto, factores 1.
     Devuelve unique_id, dow, factor."""
-    t = train[["unique_id", "ds", "y"]].copy()
-    if t.empty:
+    if train.empty:
         return pd.DataFrame(columns=["unique_id", "dow", "factor"])
-    t["ds"] = pd.to_datetime(t["ds"])
-    recent = t[t["ds"] > t["ds"].max() - pd.Timedelta(days=days)].copy()
-    recent["dow"] = recent["ds"].dt.dayofweek
-    total = recent.groupby("dow")["y"].sum().reindex(range(7), fill_value=0.0).astype(float)
-    common = (total / total.mean()).to_numpy() if total.mean() > 0 else np.ones(7)
+    recent = _recent_by_weekday(train, days)
+    common = _common_factors(recent)
     by_dow = recent.groupby(["unique_id", "dow"])["y"].mean().unstack().reindex(columns=range(7))
     level = by_dow.mean(axis=1)
     own = by_dow.div(level.where(level > 0), axis=0).to_numpy(dtype=float)
@@ -48,7 +69,7 @@ def weekday_profile(train: pd.DataFrame, days: int = WEEKDAY_PROFILE_DAYS,
     factors = np.where(mean > 0, factors / np.where(mean > 0, mean, 1.0), 1.0)
     out = pd.DataFrame(factors, index=by_dow.index, columns=range(7)).stack().rename("factor").reset_index()
     out.columns = ["unique_id", "dow", "factor"]
-    absent = sorted(set(t["unique_id"]) - set(out["unique_id"]))
+    absent = sorted(set(train["unique_id"]) - set(out["unique_id"]))
     if absent:
         out = pd.concat([out, pd.DataFrame({"unique_id": np.repeat(absent, 7), "dow": np.tile(np.arange(7), len(absent)),
                                             "factor": np.tile(common, len(absent))})], ignore_index=True)
@@ -97,19 +118,3 @@ def forecast_statistical(train: pd.DataFrame, h: int, families: list[str] | None
         long = pd.concat([long, extra[long.columns]], ignore_index=True)
     return long[long["family"].isin(families)].reset_index(drop=True)
 
-
-def window_average_short(train: pd.DataFrame, cutoff: pd.Timestamp, h: int) -> pd.DataFrame:
-    """Promedio simple para series con historia insuficiente (< 28 días).
-
-    Sin evaluación posible: se informa como limitación.
-    """
-    if train.empty:
-        return pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
-    means = train.groupby("unique_id")["y"].mean().clip(lower=0)
-    days = pd.date_range(cutoff + pd.Timedelta(days=1), periods=h, freq="D")
-    return pd.DataFrame({
-        "unique_id": np.repeat(means.index.to_numpy(), h),
-        "ds": np.tile(days.values, len(means)),
-        "family": "window_average",
-        "yhat": np.repeat(means.to_numpy(), h),
-    })

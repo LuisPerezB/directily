@@ -192,16 +192,22 @@ def plan_lifecycle(profile: pd.DataFrame, panel_df: pd.DataFrame, cutoff: pd.Tim
                          summary=summary)
 
 
-def short_forecast(plan: LifecyclePlan, ids: list[str], cutoff: pd.Timestamp, h: int) -> pd.DataFrame:
-    """Pronóstico plano (unique_id, ds, family, yhat) de las series nuevas o de historia escasa."""
+def short_forecast(plan: LifecyclePlan, ids: list[str], cutoff: pd.Timestamp, h: int,
+                   weekday_factors: np.ndarray | None = None) -> pd.DataFrame:
+    """Pronóstico (unique_id, ds, family, yhat) de las series nuevas o de historia escasa: su nivel diario, plano.
+
+    Con `weekday_factors` (7 factores de media 1, índice 0 = lunes: el ritmo semanal del negocio,
+    `statistical.common_weekday_profile`), el nivel de cada día se multiplica por el factor de su día de la semana: una semana
+    completa conserva su total y solo cambia el reparto entre días. Estas series no tienen historia para un perfil propio."""
     ids = [i for i in ids if i in plan.short_levels.index]
     if not ids:
         return pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
     days = pd.date_range(pd.Timestamp(cutoff) + pd.Timedelta(days=1), periods=h, freq="D")
     lv = plan.short_levels.loc[ids].clip(lower=0)
+    by_day = np.ones(h) if weekday_factors is None else np.asarray(weekday_factors, dtype=float)[days.dayofweek.to_numpy()]
     return pd.DataFrame({
         "unique_id": np.repeat(lv.index.to_numpy(), h), "ds": np.tile(days.values, len(lv)),
-        "family": "__short__", "yhat": np.repeat(lv.to_numpy(), h),
+        "family": "__short__", "yhat": np.repeat(lv.to_numpy(), h) * np.tile(by_day, len(lv)),
     })
 
 
