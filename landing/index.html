@@ -8,13 +8,12 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Predictily — Anticipa tus ventas. Optimiza tus decisiones." />
     <meta property="og:description" content="Pronósticos de demanda e ingresos, alertas de inventario y sugerencias de compra verificables, sobre los sistemas que su empresa ya usa." />
-    <meta property="og:image" content="%VITE_SITE_URL%/media/og-es.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#0b7a83" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%230B7A83'/%3E%3Cg transform='translate(9.5 9.3) scale(0.94)'%3E%3Cpath fill='%23FFFFFF' fill-rule='evenodd' d='M11.2 8.5H24.1A12.3 12.3 0 0 1 24.1 33.1H19.2V43.3A1.2 1.2 0 0 1 18 44.5H11.2A1.2 1.2 0 0 1 10 43.3V9.7A1.2 1.2 0 0 1 11.2 8.5ZM23.3 16.3L28.1 24.5H18.5Z'/%3E%3Ccircle fill='%23F0A04B' cx='35.7' cy='6.5' r='3.1'/%3E%3C/g%3E%3C/svg%3E" />
     <script>
+      // Con scripts, las secciones entran con animación; sin ellos (o antes de cargar) el contenido ya escrito se ve entero.
+      document.documentElement.classList.add('js')
       // Aplica el tema guardado antes de pintar, para que la página no parpadee.
       try {
         var t = localStorage.getItem('predictily.theme')

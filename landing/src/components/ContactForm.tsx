@@ -42,6 +42,8 @@ function composeMessage(copy: FormCopy, form: typeof EMPTY): string {
 export function ContactForm({ copy, lang }: { copy: FormCopy; lang: LandingLang }) {
   const { apiUrl, email: contactEmail, whatsapp } = contactConfig
   const usesApi = apiUrl !== ''
+  // Sin ningún destino configurado el formulario NO simula un envío (antes abría un correo sin destinatario).
+  const unavailable = !usesApi && !contactEmail && !whatsapp
   const [form, setForm] = useState(EMPTY)
   const [invalid, setInvalid] = useState(NONE_INVALID)
   const [state, setState] = useState<SendState>('idle')
@@ -70,7 +72,7 @@ export function ContactForm({ copy, lang }: { copy: FormCopy; lang: LandingLang 
       setState('idle')
       return
     }
-    if (channel === 'whatsapp') window.open(linkTo('whatsapp'), '_blank', 'noopener')
+    if (channel === 'whatsapp') window.open(linkTo('whatsapp'), '_blank', 'noopener,noreferrer')
     else window.location.href = linkTo('email')
     setState('opened')
   }
@@ -112,6 +114,7 @@ export function ContactForm({ copy, lang }: { copy: FormCopy; lang: LandingLang 
 
   function onSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
+    if (unavailable) return
     if (usesApi) void sendToApi()
     else openLink(primaryLink)
   }
@@ -192,7 +195,7 @@ export function ContactForm({ copy, lang }: { copy: FormCopy; lang: LandingLang 
           </button>
         ) : (
           <>
-            <button type="submit" className="btn btn-primary btn-lg">{primaryLink === 'email' ? copy.submitEmail : copy.submitWhatsapp}</button>
+            <button type="submit" className="btn btn-primary btn-lg" disabled={unavailable}>{primaryLink === 'email' ? copy.submitEmail : copy.submitWhatsapp}</button>
             {primaryLink === 'email' && whatsapp && (
               <button type="button" className="btn btn-secondary btn-lg" onClick={() => openLink('whatsapp')}>{copy.submitWhatsapp}</button>
             )}
@@ -206,9 +209,13 @@ export function ContactForm({ copy, lang }: { copy: FormCopy; lang: LandingLang 
         </p>
       )}
       {state === 'opened' && <p className="lp-form__status" role="status" data-testid="contact-opened">{copy.opened}</p>}
-      <p className="hint">{usesApi ? copy.privacy : `${copy.linkHint} ${copy.privacy}`}</p>
-      {import.meta.env.DEV && !usesApi && !contactEmail && !whatsapp && (
-        <p className="lp-form__dev" data-testid="contact-unconfigured">Defina VITE_CONTACT_EMAIL o VITE_CONTACT_WHATSAPP en landing/.env (aviso visible solo en desarrollo).</p>
+      {unavailable ? (
+        <p className="lp-form__error" role="status" data-testid="contact-unavailable">
+          {copy.unavailable}
+          {import.meta.env.DEV && ' (Defina VITE_CONTACT_EMAIL o VITE_CONTACT_WHATSAPP en landing/.env.)'}
+        </p>
+      ) : (
+        <p className="hint">{usesApi ? copy.privacy : `${copy.linkHint} ${copy.privacy}`}</p>
       )}
     </form>
   )

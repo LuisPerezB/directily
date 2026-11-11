@@ -186,6 +186,8 @@ export interface LandingCopy {
       submitWhatsapp: string
       linkHint: string
       opened: string
+      /** Sin ningún canal de contacto configurado: el formulario lo dice en vez de simular un envío. */
+      unavailable: string
     }
   }
   faq: {

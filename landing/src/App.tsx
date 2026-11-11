@@ -14,6 +14,7 @@ import { contactConfig } from './lib/contact'
 import { buildContactUrl } from './lib/contactLink'
 import { useLandingLocale } from './lib/locale'
 import { useTheme } from './lib/theme'
+import { safeHttpUrl } from './lib/url'
 
 const LANGS: LandingLang[] = ['es', 'en']
 const MODULE_ICONS: IconName[] = ['chart', 'trend-up', 'warehouse', 'users', 'search', 'layers', 'target', 'sliders', 'bell']
@@ -21,7 +22,7 @@ const SECURITY_ICONS: IconName[] = ['building', 'key', 'database', 'shield', 'fi
 const THEME_ICON = { system: 'monitor', light: 'sun', dark: 'moon' } as const
 const pad = (n: number): string => String(n + 1).padStart(2, '0')
 
-const appUrl = (import.meta.env.VITE_APP_URL ?? '').trim().replace(/\/+$/, '')
+const appUrl = safeHttpUrl(import.meta.env.VITE_APP_URL).replace(/\/+$/, '')
 const whatsappUrl = contactConfig.whatsapp ? buildContactUrl('whatsapp', { email: '', whatsapp: contactConfig.whatsapp }) : ''
 
 /** La cabecera gana fondo y borde en cuanto la página deja de estar arriba del todo. */
@@ -36,8 +37,9 @@ function useScrolled(): boolean {
   return scrolled
 }
 
-export function App() {
-  const { lang, copy, setLang } = useLandingLocale()
+/** `initialLang` fija el idioma al generar la página en el build (prerender); en el navegador se detecta. */
+export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
+  const { lang, copy, setLang } = useLandingLocale(initialLang)
   const { theme, cycleTheme } = useTheme()
   const [menuOpen, setMenuOpen] = useState(false)
   const scrolled = useScrolled()
@@ -97,7 +99,7 @@ export function App() {
             <div className="lp-hero__text">
               <p className="lp-badge lp-enter" style={{ animationDelay: '0ms' }}><i aria-hidden="true" />{copy.hero.badge}</p>
               <h1 className="lp-h1 lp-enter" style={{ animationDelay: '80ms' }}>
-                <span>{copy.hero.title[0]}</span>
+                <span>{copy.hero.title[0]}</span>{' '}
                 <span className="lp-soft">{copy.hero.title[1]}</span>
               </h1>
               <p className="lp-hero__lead lp-enter" style={{ animationDelay: '160ms' }}>{copy.hero.lead}</p>
@@ -324,7 +326,7 @@ export function App() {
                     <h3 className="lp-subhead">{copy.contact.directTitle}</h3>
                     <p className="lp-direct">
                       {contactConfig.email && <a href={`mailto:${contactConfig.email}`}>{contactConfig.email}</a>}
-                      {whatsappUrl && <a href={whatsappUrl} target="_blank" rel="noopener">WhatsApp</a>}
+                      {whatsappUrl && <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">WhatsApp</a>}
                     </p>
                   </>
                 )}

@@ -1,9 +1,13 @@
 import type { LandingLang } from '../copy/types'
+import { safeEmail, safeHttpUrl } from './url'
 
-/** Destinos del contacto; se leen al compilar (ver .env.example). */
+/**
+ * Destinos del contacto; se leen al compilar (ver .env.example). Un valor mal formado se descarta: la API solo por
+ * `https:` (los datos de quien escribe no viajan en claro) y el correo solo si tiene forma de correo.
+ */
 export const contactConfig = {
-  apiUrl: (import.meta.env.VITE_CONTACT_API_URL ?? '').trim(),
-  email: (import.meta.env.VITE_CONTACT_EMAIL ?? '').trim(),
+  apiUrl: safeHttpUrl(import.meta.env.VITE_CONTACT_API_URL),
+  email: safeEmail(import.meta.env.VITE_CONTACT_EMAIL),
   whatsapp: (import.meta.env.VITE_CONTACT_WHATSAPP ?? '').replace(/\D/g, ''),
 }
 
@@ -43,6 +47,8 @@ export async function sendContactRequest(apiUrl: string, payload: ContactPayload
     response = await fetch(apiUrl, {
       method: 'POST',
       credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      redirect: 'error',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(payload),
     })

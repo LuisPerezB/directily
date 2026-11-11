@@ -222,7 +222,7 @@ export const en: LandingCopy = {
       { title: 'Isolation per company', text: 'Each company’s data is separated at every layer, with automated tests that verify it.' },
       { title: 'Roles and second factor', text: 'Role-based permissions (owner, admin, analyst, viewer) and two-step verification with an authenticator app.' },
       { title: 'Read-only connection', text: 'Predictily reads your sales; it does not modify your ERP, place orders or message your customers.' },
-      { title: 'Encryption', text: 'Connection credentials and your customers’ names are encrypted with AES-256. Daily encrypted backups.' },
+      { title: 'Encryption', text: 'Connection credentials and your customers’ names are encrypted with AES-256. Backups with rotation and restore tests.' },
       { title: 'Audit trail', text: 'A record of access and sensitive actions: who approved what, and when.' },
       { title: 'No lock-in on exit', text: 'Export all your data whenever you want. If you request deletion, it is erased after a 30-day grace period.' },
     ],
@@ -282,6 +282,7 @@ export const en: LandingCopy = {
       submitWhatsapp: 'Send by WhatsApp',
       linkHint: 'Your app will open with the message ready: you only need to send it.',
       opened: 'We opened your app with the message ready. Send it from there to complete the request.',
+      unavailable: 'The form is not available right now. Please try again later.',
     },
   },
   faq: {

@@ -222,7 +222,7 @@ export const es: LandingCopy = {
       { title: 'Aislamiento por empresa', text: 'Los datos de cada empresa están separados en todas las capas, con pruebas automatizadas que lo verifican.' },
       { title: 'Roles y segundo factor', text: 'Permisos por rol (propietario, administrador, analista, consulta) y verificación en dos pasos con aplicación de autenticación.' },
       { title: 'Conexión de solo lectura', text: 'Predictily lee sus ventas; no modifica su ERP, no emite pedidos y no envía mensajes a sus clientes.' },
-      { title: 'Cifrado', text: 'Credenciales de conexión y nombres de sus clientes cifrados con AES-256. Respaldos diarios cifrados.' },
+      { title: 'Cifrado', text: 'Credenciales de conexión y nombres de sus clientes cifrados con AES-256. Respaldos con rotación y prueba de restauración.' },
       { title: 'Auditoría', text: 'Registro de accesos y de acciones sensibles: quién aprobó qué y cuándo.' },
       { title: 'Salida sin candados', text: 'Exporte todos sus datos cuando quiera. Si solicita la eliminación, se borran tras un período de gracia de 30 días.' },
     ],
@@ -282,6 +282,7 @@ export const es: LandingCopy = {
       submitWhatsapp: 'Enviar por WhatsApp',
       linkHint: 'Se abrirá su aplicación con el mensaje listo: solo falta enviarlo.',
       opened: 'Abrimos su aplicación con el mensaje listo. Envíelo desde ahí para completar la solicitud.',
+      unavailable: 'El formulario no está disponible en este momento. Vuelva a intentarlo más tarde.',
     },
   },
   faq: {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { en } from '../copy/en'
 import { es } from '../copy/es'
 import type { LandingCopy, LandingLang } from '../copy/types'
+import { pageLang, pageUrlFor } from './page'
 import { storageGet, storageSet } from './storage'
 
 const STORAGE_KEY = 'predictily.landing.lang'
@@ -12,10 +13,13 @@ function isLang(value: unknown): value is LandingLang {
 }
 
 /**
- * Idioma inicial: `?lang=` (enlace compartido) → preferencia guardada → idioma fijado en
- * `VITE_DEFAULT_LANG` → idioma del navegador. Fuera del inglés se cae al español.
+ * Idioma inicial. En una página publicada manda la URL (`page`: `/` español, `/en/` inglés): es lo que Google
+ * indexa y no debe cambiar según el navegador de quien llega. Sin página declarada (desarrollo): `?lang=` (enlace
+ * compartido) → preferencia guardada → idioma fijado en `VITE_DEFAULT_LANG` → idioma del navegador. Fuera del
+ * inglés se cae al español.
  */
-export function detectLandingLang(search: string, stored: string | null, browser: string | undefined, fallback?: string): LandingLang {
+export function detectLandingLang(search: string, stored: string | null, browser: string | undefined, fallback?: string, page?: LandingLang): LandingLang {
+  if (isLang(page)) return page
   const fromQuery = new URLSearchParams(search).get('lang')
   if (isLang(fromQuery)) return fromQuery
   if (isLang(stored)) return stored
@@ -24,15 +28,20 @@ export function detectLandingLang(search: string, stored: string | null, browser
 }
 
 /** Idioma de la página; mantiene sincronizados `<html lang>`, el título y la descripción. */
-export function useLandingLocale(): { lang: LandingLang; copy: LandingCopy; setLang: (value: LandingLang) => void } {
-  const [lang, setLangState] = useState<LandingLang>(() =>
-    detectLandingLang(globalThis.location?.search ?? '', storageGet(STORAGE_KEY), globalThis.navigator?.language, import.meta.env.VITE_DEFAULT_LANG),
+export function useLandingLocale(initial?: LandingLang): { lang: LandingLang; copy: LandingCopy; setLang: (value: LandingLang) => void } {
+  const [lang, setLangState] = useState<LandingLang>(
+    () => initial ?? detectLandingLang(globalThis.location?.search ?? '', storageGet(STORAGE_KEY), globalThis.navigator?.language, import.meta.env.VITE_DEFAULT_LANG, pageLang()),
   )
   const copy = COPY[lang]
 
   const setLang = useCallback((value: LandingLang) => {
-    setLangState(value)
     storageSet(STORAGE_KEY, value)
+    // Página publicada: cada idioma tiene su dirección; cambiar de idioma es ir a ella.
+    if (pageLang() !== undefined) {
+      if (value !== pageLang()) globalThis.location.assign(pageUrlFor(value))
+      return
+    }
+    setLangState(value)
   }, [])
 
   useEffect(() => {

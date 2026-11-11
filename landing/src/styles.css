@@ -218,14 +218,14 @@ svg {
 .lp-enter {
   animation: lp-up 0.8s var(--ease) both;
 }
-.lp-reveal {
+.js .lp-reveal {
   opacity: 0;
   transform: translateY(20px);
   transition:
     opacity 0.7s var(--ease) var(--d, 0ms),
     transform 0.7s var(--ease) var(--d, 0ms);
 }
-.lp-reveal.is-in {
+.js .lp-reveal.is-in {
   opacity: 1;
   transform: none;
 }
@@ -1715,4 +1715,27 @@ svg {
 .lp-float.is-in:hover {
   background: var(--brand-strong);
   transform: translateY(-2px);
+}
+
+/* ── Objetivos táctiles ──
+   En pantallas táctiles todo control mide al menos 44 px (WCAG 2.5.5): los botones pequeños de la cabecera,
+   el selector de idioma y los enlaces del menú y del pie crecen sin cambiar su aspecto en escritorio. */
+@media (pointer: coarse) {
+  .btn,
+  .btn-sm,
+  .lp-iconbtn,
+  .lp-lang__btn {
+    min-height: 2.75rem;
+  }
+  .lp-iconbtn,
+  .lp-lang__btn {
+    min-width: 2.75rem;
+  }
+  .lp-menu__link,
+  .lp-footer a,
+  .lp-direct a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
 }
