@@ -96,6 +96,11 @@ selección son exactamente las de la v1 (`test_default_policy_keeps_the_v1_param
 `test_selection_legacy_parity.py`). Con `total_day` la política tiene su propia `rule_version` y su propia huella, y las tablas de la
 selección llevan además la columna `wape_total`. Las métricas publicadas de la ejecución no cambian de definición.
 
+**Combinación como segundo modelo complejo.** Con `demand.ensemble_models` el backtest lleva además las filas de `ets_lightgbm_mean` (promedio de
+AutoETS y LightGBM, recalculadas después del ajuste de hiperparámetros). En las dos reglas (v1 y v2) se sirve si cumple lo mismo que LightGBM
+frente al mejor estadístico y, cuando LightGBM también lo cumple, solo si su métrica es estrictamente menor (`selector._challenge_with_ensemble`;
+evidencia en `evidence.ensemble` y compuerta `ensemble`). Sin esas filas la regla no cambia.
+
 **Medido en la demo ficticia** (período final reservado, horizonte 90; mismo backtest, solo cambia la regla): Ferretería Andina, total diario
 0,094 → 0,079 y serie-día 0,491 → 0,489; Distribuidora Costa, total diario 0,096 → 0,077 y serie-día 0,449 → 0,443. Son datos sintéticos:
 prueban el mecanismo, no la precisión de un cliente. Valores iniciales de diseño, a aprobar en el piloto.

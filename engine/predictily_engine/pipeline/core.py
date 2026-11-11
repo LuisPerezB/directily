@@ -59,7 +59,10 @@ from predictily_engine.inventory.recommendations import (
     required_coverage_days,
 )
 from predictily_engine.models.ml import LightGBMGlobal
+from predictily_engine.models.ensemble import FORECAST_KEYS, ensemble_rows
 from predictily_engine.models.registry import (
+    ENSEMBLE_FAMILY,
+    ENSEMBLE_MEMBERS,
     BASELINE_FAMILY,
     FAMILIES,
     STATISTICAL,
@@ -329,7 +332,8 @@ def run_pipeline(
         promotion = run_selection_stage(panel=panel, features=features, plan=plan, windows=windows, bt=bt, profile=prof, cfg=promo_cfg,
                                         seed=seed, n_jobs=n_jobs, use_lgbm=use_lgbm, champions=champions, quality=dq,
                                         cutoff=cutoff.date(), data_from=panel.df["ds"].min().date(), segment_provider=segment_provider,
-                                        segment_source=segment_source, champions_source=champions_source)
+                                        segment_source=segment_source, champions_source=champions_source,
+                                        ensemble=bool(core_config.get("ensemble_models", False)))
         bt, selection, eval_selection = promotion.backtest, promotion.selection, promotion.eval_selection
         limitations.extend(promotion.limitations)
         if factor_outcome is not None:     # W6-E: ¿la política que gobierna la selección posterior usa el período final? (la heredada sí; la V2.5 no)
@@ -346,6 +350,10 @@ def run_pipeline(
     needed = {selection.family_for(c) for c in active["demand_class"].unique()} | {selection.fallback, BASELINE_FAMILY}
     train = panel.df[(panel.df["ds"] <= cutoff) & panel.df["unique_id"].isin(full_ids)]
     preds = []
+    # La combinación (`ets_lightgbm_mean`) no se entrena: necesita a sus dos miembros (AutoETS y LightGBM) y se promedia después.
+    ensemble_needed = ENSEMBLE_FAMILY in needed
+    if ensemble_needed:
+        needed = needed | set(ENSEMBLE_MEMBERS)
     stat_needed = [f for f in needed if f in STATISTICAL]
     final_holidays = features.holiday_days(cutoff, full_ids) if holiday_adjustment and full_ids else None
     holiday_info: dict[str, Any] = {}
@@ -367,6 +375,8 @@ def run_pipeline(
         except Exception as exc:  # respaldo: el pipeline sigue con el modelo de respaldo
             log.exception("LightGBM final falló")
             failed["lightgbm_global"] = f"{type(exc).__name__}: {exc}"[:300]
+            if ensemble_needed:      # sin LightGBM no hay combinación: sus clases pasan al respaldo, igual que las de LightGBM
+                failed[ENSEMBLE_FAMILY] = "Falló el entrenamiento final de su miembro LightGBM global: " + failed["lightgbm_global"]
             warnings.append(f"LightGBM falló en el entrenamiento final ({type(exc).__name__}); "
                             f"se usó el modelo de respaldo ({selection.fallback}).")
             lgbm = None
@@ -374,7 +384,10 @@ def run_pipeline(
     # en lugar de cualquier familia que falló; el ganador del backtest queda como `planned`.
     served = selection.served(set(failed))
     if factor_outcome is not None:     # W6-E: ¿el modelo con factores es realmente el que se sirve?
-        factor_outcome.finalize(set(served.winners.values()) | {served.fallback}, set(failed))
+        served_families = set(served.winners.values()) | {served.fallback}
+        if ENSEMBLE_FAMILY in served_families:      # servir la combinación ES servir su miembro LightGBM (con o sin factores)
+            served_families.add("lightgbm_global")
+        factor_outcome.finalize(served_families, set(failed))
     if promotion is not None and failed:    # W3-B: las filas efectivas del registro de decisiones dicen lo REALMENTE servido, no la familia planeada
         promotion.reconcile_served(failed, selection.fallback)
     eval_served = eval_selection.served(set(failed)) if eval_selection is not None else None
@@ -401,6 +414,8 @@ def run_pipeline(
         warnings.append(f"{len(short_ids)} series con historia escasa o menos de 28 días usan respaldo etiquetado "
                         f"({n_cat} con la mediana de su categoría, el resto con el promedio de su historia).")
     allp = pd.concat(preds, ignore_index=True) if preds else pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
+    if ensemble_needed and ENSEMBLE_FAMILY not in failed:
+        allp = pd.concat([allp, ensemble_rows(allp, FORECAST_KEYS)], ignore_index=True)
     timings["training"] = time.perf_counter() - t2
 
     progress("predicting", 76)

@@ -40,6 +40,7 @@ from predictily_engine.backtest.metrics import summarize
 from predictily_engine.models.registry import (
     BASELINE_FAMILY,
     CANDIDATES_BY_CLASS,
+    ENSEMBLE_FAMILY,
     FAMILIES,
     SIMPLE_FALLBACKS,
     STATISTICAL,
@@ -232,7 +233,50 @@ def _decide_full(sub: pd.DataFrame, candidates: list[str], policy: LegacyPolicy,
         else:
             reason += (f" LightGBM ({lg_wape:.3f}) no superó el margen mínimo de {min_improvement:.0%} "
                        f"de forma estable ({better}/{n_windows} ventanas).")
+    if (table["family"] == ENSEMBLE_FAMILY).any():      # solo con `ensemble_models`: sin esas filas la regla es exactamente la de siempre
+        winner, reason = _challenge_with_ensemble(table, per_window.pivot(index="window", columns="family", values="wape"), "wape",
+                                                  best_stat, best_wape, policy, winner, reason, evidence, "WAPE")
     return winner, reason, table, evidence
+
+
+def _challenge_with_ensemble(table: pd.DataFrame, per_window: pd.DataFrame, metric: str, best_stat: str, best_value: float,
+                             policy: LegacyPolicy, winner: str, reason: str, evidence: dict, metric_name: str,
+                             guards=None) -> tuple[str, str]:
+    """La combinación (`ets_lightgbm_mean`) como segundo modelo complejo del alcance. Se sirve si cumple la MISMA regla que LightGBM frente
+    al mejor estadístico (mejora ≥ `min_improvement` y ⌈n × fracción⌉ ventanas ganadas con la métrica de la política; en la regla v2,
+    además las salvaguardas) y, si LightGBM también la cumplió, solo si su métrica es estrictamente menor que la de LightGBM.
+    `per_window`: métrica por ventana (filas) y familia (columnas). Deja su evidencia en `evidence["ensemble"]`."""
+    row = table[table["family"] == ENSEMBLE_FAMILY]
+    if row.empty or pd.isna(row.iloc[0][metric]):
+        return winner, reason
+    value = float(row.iloc[0][metric])
+    n_windows = len(per_window)
+    better = int((per_window[ENSEMBLE_FAMILY] < per_window[best_stat]).sum()) if ENSEMBLE_FAMILY in per_window else 0
+    table.loc[table["family"] == ENSEMBLE_FAMILY, "windows_better"] = better
+    needed = policy.needed_windows(n_windows)
+    passes_improvement = value <= best_value * (1 - policy.min_improvement)
+    passes_windows = better >= needed
+    ok_series, ok_bias = guards(row.iloc[0]) if guards is not None else (True, True)
+    lightgbm_value = evidence.get("lightgbm_wape") if evidence.get("outcome") == "lightgbm_global" else None
+    beats_lightgbm = lightgbm_value is None or value < lightgbm_value
+    label = FAMILIES[ENSEMBLE_FAMILY].label
+    evidence["ensemble"] = {"family": ENSEMBLE_FAMILY, "wape": value, "windows_total": n_windows, "windows_better": better,
+                            "windows_needed": needed, "relative_improvement": (best_value - value) / best_value if best_value > 0 else None,
+                            "passes_improvement": bool(passes_improvement), "passes_windows": bool(passes_windows),
+                            "passes_guards": None if guards is None else bool(ok_series and ok_bias),
+                            "beats_lightgbm": None if lightgbm_value is None else bool(beats_lightgbm)}
+    if passes_improvement and passes_windows and ok_series and ok_bias and beats_lightgbm:
+        evidence["outcome"] = ENSEMBLE_FAMILY
+        extra = f" También supera a LightGBM global ({lightgbm_value:.3f})." if lightgbm_value is not None else ""
+        return ENSEMBLE_FAMILY, (f"{label} mejora el {metric_name} de {best_value:.3f} ({FAMILIES[best_stat].label}) a {value:.3f} "
+                                 f"y gana en {better}/{n_windows} ventanas.{extra}")
+    if not (passes_improvement and passes_windows):
+        why = f"no superó el margen mínimo de {policy.min_improvement:.0%} de forma estable ({better}/{n_windows} ventanas)"
+    elif not (ok_series and ok_bias):
+        why = "no cumple las salvaguardas de sesgo y de error por serie"
+    else:
+        why = f"no mejora a LightGBM global ({lightgbm_value:.3f})"
+    return winner, reason + f" {label} ({value:.3f}) {why}."
 
 
 def total_day_wape(rows: pd.DataFrame, by: list[str]) -> pd.DataFrame:
@@ -321,6 +365,10 @@ def _decide_by_total(sub: pd.DataFrame, candidates: list[str], policy: LegacyPol
         else:
             reason += (f" LightGBM ({lg_total:.3f}) no superó el margen mínimo de {min_improvement:.0%} "
                        f"de forma estable ({better}/{n_windows} ventanas).")
+    if (table["family"] == ENSEMBLE_FAMILY).any():
+        pw = total_day_wape(sub, ["family", "window"]).pivot(index="window", columns="family", values="wape_total")
+        winner, reason = _challenge_with_ensemble(table, pw, "wape_total", best_stat, best_total, policy, winner, reason, evidence,
+                                                  "WAPE del total diario", guards)
     return winner, reason, table, evidence
 
 

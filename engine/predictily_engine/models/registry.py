@@ -58,14 +58,23 @@ FAMILIES[WEEKDAY_AVERAGE] = FamilyInfo(WEEKDAY_AVERAGE, "A", "statistical", "Pro
 # Todo lo que `weekday_profile_models` enciende (y lo que el pipeline retira cuando está apagado).
 WEEKDAY_SWITCH_FAMILIES = [*WEEKDAY_FAMILIES, WEEKDAY_AVERAGE]
 
+# Combinación (`models/ensemble.py`): promedio simple de AutoETS y LightGBM global. Es una familia compleja más: compite con la regla de
+# LightGBM (margen y ventanas frente al mejor estadístico) cuando la empresa activa `ensemble_models` (apagado por defecto).
+ENSEMBLE_FAMILY = "ets_lightgbm_mean"
+ENSEMBLE_MEMBERS = ("auto_ets", "lightgbm_global")
+FAMILIES[ENSEMBLE_FAMILY] = FamilyInfo(ENSEMBLE_FAMILY, "B", "ml", "Combinación AutoETS + LightGBM (promedio)",
+                                       {"members": list(ENSEMBLE_MEMBERS), "weights": "equal"})
+# Familias que solo reemplazan al mejor estadístico con margen y estabilidad (regla de `selection/selector.py`).
+COMPLEX_FAMILIES = ("lightgbm_global", ENSEMBLE_FAMILY)
+
 STATISTICAL = [f for f, i in FAMILIES.items() if i.kind == "statistical"]
 BASELINE_FAMILY = "seasonal_naive"
 SIMPLE_FALLBACKS = ("seasonal_naive", "window_average")
 
 # Candidatos por clase de demanda (el baseline siempre se evalúa y se reporta).
 CANDIDATES_BY_CLASS = {
-    "smooth": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
-    "erratic": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
-    "intermittent": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
-    "lumpy": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_SWITCH_FAMILIES, "lightgbm_global"],
+    "smooth": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_SWITCH_FAMILIES, ENSEMBLE_FAMILY, "lightgbm_global"],
+    "erratic": ["naive", "seasonal_naive", "window_average", "auto_ets", *WEEKDAY_SWITCH_FAMILIES, ENSEMBLE_FAMILY, "lightgbm_global"],
+    "intermittent": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_SWITCH_FAMILIES, ENSEMBLE_FAMILY, "lightgbm_global"],
+    "lumpy": ["seasonal_naive", "window_average", "croston_sba", "adida", "tsb", *WEEKDAY_SWITCH_FAMILIES, ENSEMBLE_FAMILY, "lightgbm_global"],
 }

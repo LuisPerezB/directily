@@ -61,6 +61,9 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         # familias que no son referencia se limpia de feriados pasados y los feriados del horizonte se multiplican por el factor estimado de
         # cada feriado (venta real / esperable del negocio). Apagado por defecto: cambia qué modelo gana, así que se activa por empresa.
         "holiday_adjustment_models": False,
+        # Combinación AutoETS + LightGBM (`models/ensemble.py`, familia `ets_lightgbm_mean`): el promedio de los dos compite como un modelo
+        # complejo más (margen mínimo y ventanas ganadas frente al mejor estadístico). Apagado por defecto: cambia qué modelo gana.
+        "ensemble_models": False,
         # Días de la semana en que la empresa OPERA (0 = lunes … 6 = domingo). `None` (por defecto) = los 7 días: nada cambia. Declarada,
         # los demás días de la semana son cierres (`closed`, base `declared`) en toda la historia y en el horizonte: no son ceros observados
         # (no inflan la intermitencia ni entran a las métricas) y se pronostican en cero. Es una decisión de la empresa, nunca automática:
