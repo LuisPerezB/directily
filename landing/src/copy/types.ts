@@ -28,6 +28,7 @@ export interface LandingCopy {
     product: string
     plan: string
     security: string
+    hosting: string
     faq: string
     signIn: string
     goToApp: string
@@ -47,6 +48,8 @@ export interface LandingCopy {
   }
   /** Franja «se conecta con lo que ya usa». */
   sources: { label: string; items: readonly string[] }
+  /** Tecnología de terceros que Predictily usa. No son socios: `note` lo dice en pantalla. */
+  tech: { label: string; items: readonly { name: string; role: string }[]; note: string }
   /** Video corto del producto para el sitio. */
   video: { kicker: string; title: SplitTitle; lead: string }
   /** Vista previa interactiva del producto (datos ficticios, rotulada como ilustrativa). */
@@ -135,6 +138,14 @@ export interface LandingCopy {
     lead: string
     items: readonly TitledText[]
     other: TitledText & { cta: string }
+  }
+  /** Dónde corre el producto: autohospedado, servidor dedicado (VPS) o plataforma compartida. */
+  hosting: {
+    kicker: string
+    title: SplitTitle
+    lead: string
+    items: readonly (TitledText & { tag: string })[]
+    note: string
   }
   security: {
     kicker: string

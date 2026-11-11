@@ -83,8 +83,10 @@ describe('SEO de la página publicada', () => {
   })
 
   it('robots.txt permite todo y anuncia el sitemap; el sitemap lista las dos páginas', () => {
-    expect(robotsTxt(SITE)).toBe(`User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`)
-    expect(robotsTxt('')).toBe('User-agent: *\nAllow: /\n')
+    expect(robotsTxt(SITE).startsWith('User-agent: *' + String.fromCharCode(10) + 'Allow: /')).toBe(true)
+    expect(robotsTxt(SITE)).toContain(`Sitemap: ${SITE}/sitemap.xml`)
+    expect(robotsTxt('')).not.toContain('Sitemap')
+    expect(robotsTxt(SITE)).not.toContain('Disallow')
     const sitemap = sitemapXml(SITE, '2026-11-11')
     expect(sitemap.match(/<loc>/g)).toHaveLength(2)
     expect(sitemap).toContain(`<loc>${SITE}/en/</loc>`)

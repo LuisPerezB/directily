@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import type { LandingCopy, LandingLang } from './src/copy/types'
 import { LANGS, pageHtml, robotsTxt, sitemapXml, withContentSecurityPolicy } from './src/seo/head.ts'
+import { llmsFiles, llmsTxt } from './src/seo/llms.ts'
 
 // La landing se publica como páginas autónomas: el script y los estilos quedan dentro de cada index.html
 // (vite-plugin-singlefile), así se puede subir a cualquier alojamiento estático.
@@ -32,6 +33,8 @@ function originOf(name: string, value: string | undefined): string {
 interface PublishOptions {
   siteUrl: string
   googleVerification: string
+  /** Correo de contacto público (el de la página); se declara en los datos estructurados y en llms.txt. */
+  contactEmail: string
   origins: { media: string; api: string }
 }
 
@@ -73,13 +76,19 @@ function publishPages(options: PublishOptions): Plugin {
         prerender = (await server.ssrLoadModule('/src/prerender.tsx')) as typeof prerender
         for (const lang of LANGS) {
           const body = prerender.render(lang, lang === 'en' ? '../' : './')
-          const page = pageHtml(base, { lang, copy: prerender.copies[lang], siteUrl: options.siteUrl, googleVerification: options.googleVerification }, body)
+          const info = { lang, copy: prerender.copies[lang], siteUrl: options.siteUrl, googleVerification: options.googleVerification, contactEmail: options.contactEmail }
+          const page = pageHtml(base, info, body)
           const secured = withContentSecurityPolicy(page, options.origins)
           const dir = lang === 'en' ? resolve(outDir, 'en') : outDir
           mkdirSync(dir, { recursive: true })
           writeFileSync(resolve(dir, 'index.html'), secured.html)
           this.info(`${lang === 'en' ? 'en/index.html' : 'index.html'}: ${Math.round(body.length / 1024)} kB de contenido en HTML, ${secured.scripts} script(s) autorizados por huella.`)
         }
+        // Resumen para agentes de IA (llms.txt), generado del mismo copy que la página.
+        for (const file of llmsFiles()) {
+          writeFileSync(resolve(outDir, file.name), llmsTxt({ lang: file.lang, copy: prerender.copies[file.lang], siteUrl: options.siteUrl, contactEmail: options.contactEmail }, file.full))
+        }
+        this.info(`${llmsFiles().map((file) => file.name).join(', ')}: resumen para agentes de IA.`)
       } finally {
         await server.close()
       }
@@ -113,7 +122,7 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react(), viteSingleFile(), publishPages({ siteUrl, googleVerification, origins: { media, api } })],
+    plugins: [react(), viteSingleFile(), publishPages({ siteUrl, googleVerification, contactEmail: /^[^\s@<>,;:?&"']+@[^\s@<>,;:?&"']+\.[^\s@<>,;:?&"']+$/.test((env.VITE_CONTACT_EMAIL ?? '').trim()) ? (env.VITE_CONTACT_EMAIL ?? '').trim() : '', origins: { media, api } })],
     server: { port, strictPort: true },
     preview: { port, strictPort: true },
     build: { target: 'es2022' },

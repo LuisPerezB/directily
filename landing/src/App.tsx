@@ -47,6 +47,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
   const navLinks = [
     { href: '#producto', label: copy.nav.product },
     { href: '#plan', label: copy.nav.plan },
+    { href: '#instalacion', label: copy.nav.hosting },
     { href: '#seguridad', label: copy.nav.security },
     { href: '#faq', label: copy.nav.faq },
   ]
@@ -128,6 +129,19 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
                 <li key={item}>{item}</li>
               ))}
             </ul>
+          </Reveal>
+          {/* Tecnología de terceros: nombres en texto (uso nominativo), con la aclaración de que no son socios. */}
+          <Reveal className="lp-wrap lp-tech">
+            <p className="lp-tech__label">{copy.tech.label}</p>
+            <ul className="lp-tech__list">
+              {copy.tech.items.map((item) => (
+                <li key={item.name}>
+                  <strong>{item.name}</strong>
+                  <span>{item.role}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="lp-tech__note">{copy.tech.note}</p>
           </Reveal>
         </section>
 
@@ -281,8 +295,25 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
           </div>
         </section>
 
+        {/* Dónde se instala: autohospedado, VPS o plataforma compartida */}
+        <section id="instalacion" className="lp-section">
+          <div className="lp-wrap">
+            <Heading kicker={copy.hosting.kicker} title={copy.hosting.title} lead={copy.hosting.lead} />
+            <ul className="lp-grid lp-grid--3">
+              {copy.hosting.items.map((option, i) => (
+                <Reveal as="li" key={option.tag} delay={i * 80} className="lp-card lp-card--hover lp-option">
+                  <p className="lp-option__tag">{option.tag}</p>
+                  <h3 className="lp-h4">{option.title}</h3>
+                  <p className="lp-text">{option.text}</p>
+                </Reveal>
+              ))}
+            </ul>
+            <Reveal><p className="lp-note">{copy.hosting.note}</p></Reveal>
+          </div>
+        </section>
+
         {/* Seguridad */}
-        <section id="seguridad" className="lp-section">
+        <section id="seguridad" className="lp-section lp-section--soft">
           <div className="lp-wrap">
             <Heading kicker={copy.security.kicker} title={copy.security.title} lead={copy.security.lead} />
             <ul className="lp-grid lp-grid--3">
@@ -299,7 +330,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Preguntas frecuentes */}
-        <section id="faq" className="lp-section lp-section--soft">
+        <section id="faq" className="lp-section">
           <div className="lp-wrap lp-faq">
             <Heading kicker={copy.faq.kicker} title={copy.faq.title} />
             <Reveal delay={100}><Faq items={copy.faq.items} /></Reveal>

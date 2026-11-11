@@ -11,6 +11,7 @@ export const en: LandingCopy = {
     product: 'Product',
     plan: 'How we work',
     security: 'Security',
+    hosting: 'Deployment',
     faq: 'FAQ',
     signIn: 'Sign in',
     goToApp: 'Go to my dashboard',
@@ -32,6 +33,16 @@ export const en: LandingCopy = {
   sources: {
     label: 'It connects to what your company already uses',
     items: ['ERP', 'POS', 'Excel · CSV', 'SQL', 'API'],
+  },
+  tech: {
+    label: 'Built with technology from',
+    items: [
+      { name: 'AWS', role: 'Cloud and infrastructure' },
+      { name: 'Cloudflare', role: 'DNS, network and email' },
+      { name: 'Microsoft', role: 'SQL Server connectivity' },
+      { name: 'Anthropic', role: 'AI agents with Claude and MCP' },
+    ],
+    note: 'AWS, Cloudflare, Microsoft and Anthropic are trademarks of their respective owners. Predictily uses their technology; it is not a partner of these companies and is not endorsed by them.',
   },
   video: {
     kicker: 'In 25 seconds',
@@ -214,6 +225,17 @@ export const en: LandingCopy = {
       cta: 'Ask about my case',
     },
   },
+  hosting: {
+    kicker: 'Where it runs',
+    title: ['You choose where it runs', 'and where your data lives.'],
+    lead: 'The same product in three deployment options. The right one depends on your IT team and your data policies.',
+    items: [
+      { tag: 'Self-hosted', title: 'On your own infrastructure', text: 'Predictily is installed with Docker on a server your company owns or in your own cloud. Your data never leaves your network and your team controls access, backups and updates.' },
+      { tag: 'VPS', title: 'On a server dedicated to your company', text: 'An instance just for you on a virtual private server, with automatic TLS certificates and backups. Recommended: 4 vCPU and 8 to 16 GB of RAM; no GPU required.' },
+      { tag: 'Shared server', title: 'On the multi-company platform', text: 'Your company on a shared instance, with your data isolated from everyone else’s at every layer. The fastest way to start, with no servers to manage.' },
+    ],
+    note: 'In all three options the engine, the models and the security controls are the same.',
+  },
   security: {
     kicker: 'Security and control',
     title: ['Your data belongs to your company.', 'This is how we treat it.'],
@@ -316,6 +338,14 @@ export const en: LandingCopy = {
       {
         q: 'Does Predictily place orders for me?',
         a: 'No. It suggests quantities and priorities; people on your team review, approve and execute. Predictily does not place orders, write to your ERP or message your customers.',
+      },
+      {
+        q: 'Where is Predictily deployed?',
+        a: 'There are three options: self-hosted on your company’s infrastructure (with Docker), on a virtual private server (VPS) dedicated to your company, or on the shared multi-company platform with your data isolated. The product is the same in all three.',
+      },
+      {
+        q: 'Can it be used with an AI agent?',
+        a: 'Yes. Predictily includes MCP servers so an agent (for example Claude) can load data and query the analyses with each person’s permissions. The agent queries and explains; the figures are still calculated by the statistical and machine learning models.',
       },
       {
         q: 'How much does it cost?',

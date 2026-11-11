@@ -23,6 +23,8 @@
   --soft: #7b8593;
   --line: #e8eaed;
   --line-strong: #d5d9de;
+  /* Borde de un control que debe distinguirse del fondo (≥ 3:1). */
+  --edge: #7b8593;
   --brand: #0b7a83;
   --brand-strong: #075f66;
   --brand-soft: #e6f3f4;
@@ -56,6 +58,8 @@
     --soft: #6f7a8a;
     --line: #1d232c;
     --line-strong: #2b333e;
+  --edge: #76828f;
+    --edge: #76828f;
     --brand: #3fc4cd;
     --brand-strong: #7adbe1;
     --brand-soft: #0e2a2e;
@@ -279,7 +283,13 @@ svg {
   transform: translateY(1px);
 }
 .btn:disabled {
-  opacity: 0.6;
+  background: var(--bg-soft);
+  color: var(--muted);
+  border-color: var(--edge);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.btn[aria-busy="true"]:disabled {
   cursor: progress;
 }
 .btn-primary {
@@ -294,11 +304,11 @@ svg {
 .btn-secondary {
   background: var(--card);
   color: var(--fg);
-  border-color: var(--line-strong);
+  border-color: var(--edge);
 }
 .btn-secondary:hover:not(:disabled) {
   background: var(--bg-soft);
-  border-color: var(--soft);
+  border-color: var(--fg);
 }
 .btn-ghost {
   background: transparent;
@@ -329,7 +339,7 @@ svg {
   width: 100%;
   min-height: 2.75rem;
   padding: 0.6rem 0.85rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--edge);
   border-radius: 12px;
   background: var(--form);
   color: var(--fg);
@@ -608,7 +618,7 @@ svg {
 .lp-lang {
   display: inline-flex;
   padding: 2px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 999px;
 }
 .lp-lang__btn {
@@ -635,7 +645,7 @@ svg {
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border: 0;
+  border: 1px solid var(--edge);
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
@@ -1738,4 +1748,63 @@ svg {
     align-items: center;
     min-height: 2.75rem;
   }
+}
+
+/* ── Tecnología de terceros ── */
+.lp-tech {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+.lp-tech__label {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.lp-sources .lp-tech__list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.lp-sources .lp-tech__list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 11rem;
+  padding: 0.7rem 1.1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--muted);
+}
+.lp-tech__list strong {
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.lp-tech__note {
+  max-width: 46rem;
+  margin: 1rem auto 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* ── Modalidades de instalación ── */
+.lp-option__tag {
+  display: inline-block;
+  margin-bottom: 0.9rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 0.78rem;
+  font-weight: 650;
 }
