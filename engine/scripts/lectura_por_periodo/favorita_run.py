@@ -50,9 +50,11 @@ d = pd.read_parquet(sub)
 d["ds"] = pd.to_datetime(d["date"])
 days = d["ds"].nunique()
 # productos presentes al inicio y al final del período, estratificados por volumen total
-span = d.groupby("item_nbr")["ds"].agg(["min", "max"])
+# la muestra se elige siempre con el período 2016-06-01 → fin, aunque el archivo traiga más historia: así es la misma en toda corrida
+recent = d[d["ds"] >= "2016-06-01"]
+span = recent.groupby("item_nbr")["ds"].agg(["min", "max"])
 alive = span[(span["min"] <= "2016-07-01") & (span["max"] >= "2017-07-15")].index
-vol = d[d["item_nbr"].isin(alive)].groupby("item_nbr")["unit_sales"].sum().sort_values()
+vol = recent[recent["item_nbr"].isin(alive)].groupby("item_nbr")["unit_sales"].sum().sort_values()
 rng = np.random.default_rng(42)
 top = list(vol.index[-20:])
 rest = vol.iloc[:-20]
