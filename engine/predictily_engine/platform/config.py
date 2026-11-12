@@ -64,6 +64,13 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         # Combinación AutoETS + LightGBM (`models/ensemble.py`, familia `ets_lightgbm_mean`): el promedio de los dos compite como un modelo
         # complejo más (margen mínimo y ventanas ganadas frente al mejor estadístico). Apagado por defecto: cambia qué modelo gana.
         "ensemble_models": False,
+        # Modo de precisión (`pipeline/precision.py`). `manual` (por defecto): cada interruptor anterior vale lo que diga la empresa. `auto`: el
+        # motor los ajusta en cada ejecución con el backtest de la empresa: enciende los que solo agregan candidatos (familias del mismo día de
+        # la semana y combinación), elige con la regla del total diario y adopta el ajuste de feriados solo si baja el error del total diario
+        # en las ventanas de selección al menos `precision_auto_margin` (relativo) sin empeorar el error por serie. Las empresas nuevas se
+        # crean en `auto` (backend); las existentes siguen en `manual` hasta que se decida lo contrario.
+        "precision_mode": "manual",
+        "precision_auto_margin": 0.01,
         # Días de la semana en que la empresa OPERA (0 = lunes … 6 = domingo). `None` (por defecto) = los 7 días: nada cambia. Declarada,
         # los demás días de la semana son cierres (`closed`, base `declared`) en toda la historia y en el horizonte: no son ceros observados
         # (no inflan la intermitencia ni entran a las métricas) y se pronostican en cero. Es una decisión de la empresa, nunca automática:
@@ -499,6 +506,8 @@ CONFIG_CONSTRAINTS.update({
     ("promotion", "v25_critical_segments"): {"list_choices": ["demand_class", "category", "branch", "volume_tier", "series_age", "series_life"], "list_max_len": 6},
     ("promotion", "legacy_windows_won_fraction"): {"min": 0.5, "max": 1.0},
     ("promotion", "legacy_selection_metric"): {"choices": ["series_day", "total_day"]},
+    ("demand", "precision_mode"): {"choices": ["manual", "auto"]},
+    ("demand", "precision_auto_margin"): {"min": 0.0, "max": 0.2},
     ("promotion", "legacy_bias_tolerance"): {"min": 0.0, "max": 5.0},
     ("promotion", "legacy_series_tolerance"): {"min": 0.0, "max": 1.0},
     ("promotion", "v25_min_selection_windows"): {"min": 1, "max": 20},

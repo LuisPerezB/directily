@@ -23,6 +23,7 @@ aceptación → riesgos → esfuerzo. Las rutas y líneas se verificaron el 10/1
 | [06](06-motor-seleccion-con-margen-y-weekday-average.md) ✅ implementado en parte | Selección por el total diario con salvaguardas de sesgo y de error por serie (regla v2); familia «mismo día de la semana» como candidata | motor | media | medio | 05 |
 | [09](09-motor-ajuste-de-feriados-estadisticos.md) ✅ implementado | Ajuste de feriados de los modelos estadísticos | motor | alta | medio | — |
 | [10](10-motor-combinacion-ets-lightgbm.md) ✅ implementado | Combinación AutoETS + LightGBM como familia candidata | motor | media | bajo | — |
+| [11](11-motor-modo-de-precision-automatico.md) ✅ implementado | Modo de precisión automático: el motor ajusta los interruptores con el backtest de cada empresa | motor | alta | medio | 06, 09, 10 |
 
 ## Reglas para quien implemente
 

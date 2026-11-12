@@ -71,6 +71,7 @@ from predictily_engine.models.registry import (
     WEEKDAY_PROFILE_DAYS,
 )
 from predictily_engine.models.statistical import common_weekday_profile, forecast_statistical
+from predictily_engine.pipeline import precision
 from predictily_engine.pipeline.data import TenantData
 from predictily_engine.platform.config import config_hash, effective_config_record
 from predictily_engine.platform.snapshot import DataSnapshot
@@ -200,10 +201,18 @@ def run_pipeline(
     # y su hash); la ejecución lo conserva: cambiar después la configuración de la empresa no reescribe este registro.
     record = config_record or effective_config_record("demand", data.settings, data.sector)
     core_config = record["effective_config"]
+    # Modo de precisión automático (`pipeline/precision.py`; por defecto `manual`: nada cambia): enciende los interruptores que solo agregan
+    # candidatos y la regla del total diario; el ajuste de feriados se decide más abajo comparando el backtest con y sin él.
+    precision_auto = precision.is_auto(core_config)
+    if precision_auto:
+        core_config = precision.auto_demand_config(core_config)
     # W3-B (ADR-V25-21): política heredada parametrizada, política V2.5, shadow y Optuna (bloque `promotion`; por defecto gobierna `legacy`).
     # `champions` = familia servida por alcance en la ejecución vigente anterior (la carga `forecast_run.load_champions`; vacío en corridas históricas).
     promotion_record = promotion_record or effective_config_record("promotion", data.settings, data.sector)
-    promo_cfg = PromotionConfig.from_config(promotion_record["effective_config"], min_improvement)
+    promotion_config = promotion_record["effective_config"]
+    if precision_auto:
+        promotion_config = precision.auto_promotion_config(promotion_config)
+    promo_cfg = PromotionConfig.from_config(promotion_config, min_improvement)
     effective_config = {
         "core": "demand", "config": core_config, "provenance": record["provenance"], "profile": record["profile"],
         "core_config_version": record["config_version"],
@@ -288,6 +297,7 @@ def run_pipeline(
         families = [f for f in families if f in force_families] or families
     # Ajuste de feriados de los modelos estadísticos (`models/holidays.py`): por empresa, apagado por defecto (cambia qué modelo gana).
     holiday_adjustment = bool(core_config.get("holiday_adjustment_models", False))
+    precision_decision: precision.HolidayDecision | None = None
 
     # ── Backtesting rolling-origin: ventanas de selección + período final reservado (holdout) ──
     # Cada ventana se perfila con datos ≤ su corte (elegibilidad y clase sin fuga, F4).
@@ -297,6 +307,15 @@ def run_pipeline(
         bt = run_backtest(panel, features, plan, families, seed, n_jobs, use_lgbm,
                           progress=lambda frac: progress("backtesting", 20 + int(35 * frac)), windows=windows,
                           holiday_adjustment=holiday_adjustment)
+        holiday_trial = precision.trial_families(families) if precision_auto and not holiday_adjustment and not bt.empty else []
+        if holiday_trial:
+            # Modo automático: mismo backtest de las familias estadísticas ajustables CON el ajuste de feriados; se adopta solo si gana en
+            # las ventanas de selección (el período final no decide). LightGBM y las referencias no cambian con el ajuste: no se repiten.
+            adjusted = run_backtest(panel, features, plan, holiday_trial, seed, n_jobs, False, windows=windows, holiday_adjustment=True)
+            precision_decision = precision.decide_holiday_adjustment(bt, adjusted, float(core_config.get("precision_auto_margin",
+                                                                                                          precision.DEFAULT_MARGIN)))
+            if precision_decision.adopted:
+                bt, holiday_adjustment = precision.replace_family_rows(bt, adjusted), True
     else:
         bt = pd.DataFrame()
         warnings.append("Historia insuficiente para backtesting (< 70 días): se usa el promedio de la historia "
@@ -760,6 +779,8 @@ def run_pipeline(
         manifest["promotion"] = promotion.manifest_block()
         summary["limitations"], summary["limitation_codes"] = limitations, [x["code"] for x in limitations]
         timings["shadow"] = time.perf_counter() - t_shadow
+    if precision_auto:      # solo en modo automático: en `manual` el resumen es exactamente el de siempre
+        summary["precision"] = precision.summary_block(precision_decision, holiday_adjustment)
     timings["total"] = time.perf_counter() - t0
     summary["timings_seconds"] = {k: round(v, 1) for k, v in timings.items()}
     return PipelineResult(
