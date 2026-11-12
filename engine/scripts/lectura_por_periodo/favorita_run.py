@@ -1,10 +1,13 @@
 """Pasa por el motor de Predictily un subconjunto real de Corporación Favorita (4 tiendas, ~160 productos estratificados por volumen,
 2016-06-01 → 2017-08-15) y guarda el backtest. Sin precios (no los trae la base): precio 1. Sin inventario.
 
-Uso: python favorita_run.py <subset.parquet> <dir_datos> <salida.pkl> [variante] [promociones]
+Uso: python favorita_run.py <subset.parquet> <dir_datos> <salida.pkl> [variante] [promociones] [semilla de quiebres simulados]
   variante:     todo (los cuatro interruptores de precisión, por defecto) | base (configuración por defecto del motor)
+                con el sufijo +quiebres enciende además la inferencia de quiebres de stock (`stockout_inference`)
   promociones:  none (por defecto) | known (el negocio conoce cada promoción con un año de anticipación: techo del beneficio)
                 | <n> (la conoce n días antes de que empiece, p. ej. 14)
+  semilla:      si se da, se SIMULAN quiebres de stock conocidos borrando ventas reales antes del período final (ver `inject_stockouts`);
+                sirve para medir, con verdad conocida, cuánto daña un quiebre al pronóstico y cuánto recupera la inferencia
 La base solo marca si el producto estuvo en promoción ese día (sin porcentaje): cada racha de días seguidos en promoción de un producto
 en una tienda se entrega como una promoción con descuento nominal de 10 %."""
 
@@ -22,11 +25,14 @@ from predictily_engine.selection.selector import selected_rows
 sub, src, out = sys.argv[1:4]
 variant = sys.argv[4] if len(sys.argv) > 4 else "todo"
 promo_mode = sys.argv[5] if len(sys.argv) > 5 else "none"
+inject_seed = int(sys.argv[6]) if len(sys.argv) > 6 else None
 TODO = {
     "promotion": {"legacy_selection_metric": "total_day"},
     "demand": {"weekday_profile_models": True, "holiday_adjustment_models": True, "ensemble_models": True},
 }
-CORES = TODO if variant == "todo" else {}
+CORES = TODO if variant.startswith("todo") else {}
+if variant.endswith("+quiebres"):
+    CORES = {**CORES, "demand": {**CORES.get("demand", {}), "stockout_inference": True}}
 PROMO_COLUMNS = ["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id", "known_at"]
 
 
@@ -44,6 +50,26 @@ def promotion_runs(flags: pd.DataFrame, mode: str) -> pd.DataFrame:
     runs["category_id"] = np.nan
     runs.insert(0, "promotion_id", np.arange(1, len(runs) + 1))
     return runs[PROMO_COLUMNS]
+
+
+def inject_stockouts(sales: pd.DataFrame, origin: pd.Timestamp, seed: int) -> pd.DataFrame:
+    """Celdas (sucursal, producto, día) de quiebres simulados: en 40 % de las series de venta regular (≥ 150 días con venta en los 240
+    previos al origen del período final), dos rachas de 4 a 21 días en esos 240 días; una de cada cuatro tiene además una racha que
+    termina justo en el origen (el producto sigue sin stock cuando se pronostica)."""
+    rng = np.random.default_rng(seed)
+    recent = sales[(sales["ds"] > origin - pd.Timedelta(days=240)) & (sales["ds"] <= origin)]
+    n = recent.groupby(["branch_id", "product_id"]).size()
+    regular = n[n >= 150].index.to_list()
+    chosen = [regular[i] for i in rng.choice(len(regular), int(0.4 * len(regular)), replace=False)]
+    cells = []
+    for b, p in chosen:
+        spans = [(int(rng.integers(30, 240)), int(rng.integers(4, 22))) for _ in range(2)]
+        if rng.random() < 0.25:
+            spans.append((0, int(rng.integers(4, 22))))
+        for back, length in spans:
+            end = origin - pd.Timedelta(days=back)
+            cells += [(b, p, end - pd.Timedelta(days=k)) for k in range(length)]
+    return pd.DataFrame(cells, columns=["branch_id", "product_id", "ds"]).drop_duplicates()
 
 
 d = pd.read_parquet(sub)
@@ -96,6 +122,13 @@ d["branch_id"] = d["store_nbr"].map(b_map)
 d["product_id"] = d["item_nbr"].map(p_map)
 pos = d[d["unit_sales"] > 0]
 sales = pos.groupby(["branch_id", "product_id", "ds"], as_index=False).agg(units=("unit_sales", "sum"), lines=("unit_sales", "size"))
+injected = pd.DataFrame(columns=["branch_id", "product_id", "ds"])
+if inject_seed is not None:
+    injected = inject_stockouts(sales, d["ds"].max() - pd.Timedelta(days=90), inject_seed)
+    gone = sales.merge(injected.assign(_x=1), on=["branch_id", "product_id", "ds"], how="left")["_x"].notna().to_numpy()
+    print("quiebres simulados:", len(injected), "días-serie en", injected.groupby(["branch_id", "product_id"]).ngroups, "series;",
+          f"unidades borradas {sales.loc[gone, 'units'].sum():,.0f} de {sales['units'].sum():,.0f}", flush=True)  # fmt: skip
+    sales = sales[~gone].reset_index(drop=True)
 sales["net_amount"] = sales["units"]
 sales["gross_amount"] = sales["units"]
 sales["discount_amount"] = 0.0
@@ -137,7 +170,8 @@ bt = res.backtest
 hold = bt[bt["is_holdout"] & ~bt["stockout"].astype(bool)]
 sel = selected_rows(hold, res.panel.profile, res.evaluation_selection or res.selection)
 promo = d[d["onpromotion"] == "True"].groupby(["branch_id", "product_id", "ds"]).size().rename("promo").reset_index()
-payload = {"bt": bt, "panel": res.panel.df, "profile": res.panel.profile, "served": sel, "summary": res.summary, "promo": promo}
+served_all = selected_rows(bt[bt["is_holdout"]], res.panel.profile, res.evaluation_selection or res.selection)  # con los días no evaluables
+payload = {"bt": bt, "panel": res.panel.df, "profile": res.panel.profile, "served": sel, "served_all": served_all, "summary": res.summary, "promo": promo, "injected": injected}
 pd.to_pickle(payload, out)
 m = res.summary["metrics"]
 print("bt", bt.shape, "familias", sorted(bt["family"].unique()), "ventanas", bt["window"].nunique())

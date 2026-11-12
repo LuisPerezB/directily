@@ -37,7 +37,7 @@ error relativo²:  r(T)² = φ/(μT) + c²/T + δ²        WAPE(T) ≈ √(2/π)
 python demo_run.py <dir_salida> ferreteria_andina distribuidora_costa
 # real: 4 tiendas (Quito, Guayaquil, Cuenca, Puyo), 160 productos estratificados por volumen
 python -I favorita_extract.py <dir_favorita> <subset.parquet> [desde AAAA-MM-DD]      # por defecto 2016-06-01
-python favorita_run.py <subset.parquet> <dir_favorita> <salida.pkl> [todo|base] [none|known|<días>]
+python favorita_run.py <subset.parquet> <dir_favorita> <salida.pkl> [todo|base][+quiebres] [none|known|<días>] [semilla de quiebres simulados]
 # análisis (cualquiera de los .pkl)
 python curve.py <archivo.pkl>          # curva de error por período, ley ajustada y regla automática
 python extra.py <archivo.pkl>          # horizonte operativo, distancia del pronóstico, promociones, regla encogida por tramo

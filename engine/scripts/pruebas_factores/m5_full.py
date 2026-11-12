@@ -3,8 +3,10 @@
 Mide WAPE (Σ|error| / Σ real) por serie y día, por serie y semana y del total diario para: naive estacional (control: debe reproducir el
 valor publicado si la ventana es la misma), LightGBM global con la configuración del motor (con precio, eventos y días de subsidio),
 AutoETS con estación semanal y el promedio de ambos (lo que el motor sirve como `ets_lightgbm_mean`).
-Uso: python m5_full.py <dir_m5> [días de historia, por defecto 500]"""
+Uso: python m5_full.py <dir_m5> [días de historia, por defecto 500] [dir_salida]
+Con `dir_salida` deja `frame.parquet`, `base.parquet` y `meta.json` para probar un modelo fundacional con `fundacional.py`."""
 
+import json
 import sys
 import time
 import warnings
@@ -22,6 +24,7 @@ from harness import PARAMS, wape
 warnings.filterwarnings("ignore")
 directory = sys.argv[1]
 history = int(sys.argv[2]) if len(sys.argv) > 2 else 500
+out = sys.argv[3] if len(sys.argv) > 3 else None
 H = 28
 t0 = time.time()
 head = pd.read_csv(f"{directory}/sales_train_evaluation.csv", nrows=0).columns
@@ -99,3 +102,21 @@ for m in ("seasonal_naive", "auto_ets", "lightgbm", "promedio"):
     print(
         f"   {m:15s} WAPE serie-día {wape(r['y'], r[m]):.4f}  serie-semana {wape(wk['y'], wk[m]):.4f}  total-día {wape(tot['y'], tot[m]):.4f}  sesgo {float((r[m] - r['y']).sum() / r['y'].sum()):+.3f}"
     )
+if out:
+    base = r[["unique_id", "ds", "y", "auto_ets"]].assign(
+        cutoff=cutoff, step=(r["ds"] - cutoff).dt.days, evaluable=True, lgbm_todo=r["lightgbm"]
+    )
+    base["unique_id"] = base["unique_id"].astype(str)
+    base.to_parquet(f"{out}/base.parquet")
+    frame = pd.concat([train, test])[["unique_id", "ds", "y", *feats]]
+    frame["unique_id"] = frame["unique_id"].astype(str)
+    frame.to_parquet(f"{out}/frame.parquet")
+    meta = {
+        "dataset": "M5 completo (Walmart, 30 490 series producto × tienda)",
+        "h": H,
+        "features_base": [],
+        "features_todo": feats,
+        "notas": "",
+    }
+    with open(f"{out}/meta.json", "w") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=1)

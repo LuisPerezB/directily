@@ -853,6 +853,18 @@ def _day_limitations(day_summary: dict[str, Any]) -> list[dict[str, str]]:
         out.append({"code": "days_closed", "message": (
             f"{closed} días-serie corresponden a cierres declarados (cierres del calendario `closure` o días de la semana sin "
             "operación): no son ceros observados y se excluyen de las métricas." + tail)})
+    inferred_stockouts = day_summary.get("stockout_inference") or {}
+    if int(inferred_stockouts.get("series_days", 0)):
+        r = inferred_stockouts.get("rules") or {}
+        out.append({"code": "stockouts_inferred", "message": (
+            f"{inferred_stockouts['series_days']} días-serie de {inferred_stockouts.get('series', 0)} series "
+            f"({float(inferred_stockouts.get('units_share_of_affected_series') or 0):.1%} de las unidades vendidas) se marcaron quiebre de "
+            "stock INFERIDO de las ventas, sin dato de inventario: una racha de días en cero que la demanda habitual del producto no explica "
+            f"(probabilidad ≤ {r.get('alpha')}, entre {r.get('min_days')} y {r.get('max_days')} días). Esos días se imputan para entrenar y "
+            f"se excluyen de las métricas, como cualquier quiebre. {inferred_stockouts.get('open_at_cutoff_series', 0)} series siguen en "
+            "quiebre inferido al corte: su pronóstico supone que el producto vuelve a venderse. La regla es configurable "
+            "(`stockout_inference`) y debe aprobarse con los datos de la empresa: no distingue un quiebre de un producto descontinuado "
+            "hasta que pasa el máximo de días.")})
     weekdays = (day_summary.get("notes") or {}).get("operating_weekdays") or {}
     if weekdays and not weekdays.get("applied"):
         out.append({"code": "operating_weekdays_not_applied", "message": (

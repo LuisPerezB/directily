@@ -50,6 +50,21 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         # Además exige que ESE día de la semana sea habitual (mediana de los mismos días de las semanas previas): un día que la sucursal
         # no suele vender (p. ej. domingos de una distribuidora por rutas) es un cero observado, no una caída de la fuente.
         "day_status_infer_same_weekday": True,
+        # Quiebres de stock inferidos de las ventas (`profiling/stockouts.py`), para empresas SIN historia de inventario: una racha de días
+        # en cero que la demanda habitual del producto no explica (probabilidad ≤ `stockout_inference_alpha` según la frecuencia de ceros de
+        # cada día de la semana en los `stockout_inference_lookback_days` previos) se marca quiebre (`stockout_censored`, base `inferred`)
+        # desde que es improbable y lleva al menos `stockout_inference_min_days` días, y hasta `stockout_inference_max_days` (después se
+        # asume que el producto dejó de venderse). No se marca si la sucursal entera vende menos de `stockout_inference_min_branch_activity`
+        # veces su nivel previo, ni en productos de venta esporádica. Apagado por defecto: cambia con qué datos se entrena y qué días se evalúan; se activa por empresa.
+        "stockout_inference": False,
+        "stockout_inference_alpha": 0.001,
+        "stockout_inference_min_days": 3,
+        "stockout_inference_max_days": 42,
+        "stockout_inference_lookback_days": 84,
+        "stockout_inference_min_branch_activity": 0.5,
+        # Solo productos de venta regular: a lo sumo esta fracción de días en cero en la historia previa a la racha (en un producto de
+        # venta esporádica las rachas de ceros son parte de su demanda).
+        "stockout_inference_max_zero_share": 0.5,
         # Variantes con perfil semanal de los modelos planos (`*_dow`: promedio móvil, Croston SBA, ADIDA y TSB × factores de día de la
         # semana; ver `models/registry.py`). Apagadas por defecto: cambian qué modelo gana, así que se activan por empresa al aprobarlo en
         # el piloto (p. ej. un negocio que casi no vende un día de la semana). Encendidas, además, lo que se sirve PLANO sin haber
@@ -414,6 +429,12 @@ CONFIG_CONSTRAINTS: dict[tuple[str, str], dict[str, Any]] = {
     ("demand", "day_status_infer_min_median_lines"): {"min": 1, "max": 100000},
     ("demand", "day_status_infer_lookback_days"): {"min": 7, "max": 90},
     ("demand", "operating_weekdays"): {"weekdays": True, "min_weekdays": 3},
+    ("demand", "stockout_inference_alpha"): {"min": 0.000001, "max": 0.05},
+    ("demand", "stockout_inference_min_days"): {"min": 2, "max": 30},
+    ("demand", "stockout_inference_max_days"): {"min": 7, "max": 365},
+    ("demand", "stockout_inference_lookback_days"): {"min": 28, "max": 364},
+    ("demand", "stockout_inference_min_branch_activity"): {"min": 0.0, "max": 1.0},
+    ("demand", "stockout_inference_max_zero_share"): {"min": 0.0, "max": 0.9},
     # W3-A · métricas por segmento
     ("demand", "wape_min_denominator"): {"min": 0.0, "max": 1_000_000_000},
     ("demand", "segment_min_series"): {"min": 1, "max": 100000},
