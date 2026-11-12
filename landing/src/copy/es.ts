@@ -151,6 +151,23 @@ export const es: LandingCopy = {
       { title: 'Simulador de escenarios', text: 'Cambie precio, costo o presupuesto con supuestos explícitos y vea el efecto en ingresos y margen.' },
       { title: 'Alertas', text: 'Avisos de quiebre, deterioro de la precisión y problemas en la calidad de los datos.' },
     ],
+    graphics: {
+      note: 'Ilustración con datos ficticios.',
+      connect: {
+        file: 'ventas_2026.xlsx',
+        fromLabel: 'Columna de su archivo',
+        toLabel: 'Campo en Predictily',
+        rows: [
+          { from: 'Fecha', to: 'Fecha de venta' },
+          { from: 'Cod_Prod', to: 'Producto' },
+          { from: 'Cant', to: 'Unidades' },
+          { from: 'Bodega', to: 'Sucursal' },
+        ],
+        quality: 'Calidad de los datos',
+        qualityValue: '96 %',
+        dedupe: 'Reimportación: 0 filas duplicadas',
+      },
+    },
   },
   trust: {
     kicker: 'Por qué confiar',
@@ -179,6 +196,19 @@ export const es: LandingCopy = {
       'Ningún modelo de IA generativa calcula las cifras.',
       'Cada pronóstico guarda su versión, su fecha y sus supuestos.',
     ],
+    models: {
+      title: 'Error de cada modelo sobre su historial',
+      rows: [
+        { name: 'Método de referencia', error: 31 },
+        { name: 'Promedio móvil', error: 27 },
+        { name: 'Suavizamiento exponencial', error: 24 },
+        { name: 'Machine learning', error: 23 },
+      ],
+      suffix: ' %',
+      inUse: 'En uso',
+      reference: 'Referencia',
+      note: 'Ejemplo ilustrativo con datos ficticios. Menos error es mejor.',
+    },
   },
   plan: {
     kicker: 'Cómo trabajamos',

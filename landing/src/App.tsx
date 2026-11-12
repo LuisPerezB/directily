@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ContactForm } from './components/ContactForm'
 import { DemoVideo } from './components/DemoVideo'
+import { ConnectGraphic, DecideGraphic, ModelsGraphic, PredictGraphic } from './components/FeatureGraphics'
 import { CountUp } from './components/CountUp'
 import { Faq } from './components/Faq'
 import { FloatingCta } from './components/FloatingCta'
@@ -61,7 +62,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
     <div className="lp">
       <a href="#main" className="sr-only-focusable btn btn-primary btn-sm lp-skip">{copy.nav.skip}</a>
 
-      <header className={`lp-header ${scrolled || menuOpen ? 'is-solid' : ''}`}>
+      <header className={`lp-header lp-night ${scrolled || menuOpen ? 'is-solid' : ''}`}>
         <div className="lp-wrap lp-header__bar">
           <a href="#main" className="lp-header__logo" aria-label="Predictily"><Logo size={30} /></a>
           <nav className="lp-nav" aria-label={copy.nav.label}>
@@ -97,10 +98,10 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
       </header>
 
       <main id="main">
-        {/* Inicio */}
-        <section className="lp-hero">
+        {/* Inicio: texto a la izquierda, el producto a la derecha y, debajo, la evidencia medida */}
+        <section className="lp-hero lp-night">
           <div className="lp-hero__glow" aria-hidden="true" />
-          <div className="lp-wrap">
+          <div className="lp-wrap lp-hero__grid">
             <div className="lp-hero__text">
               <p className="lp-badge lp-enter" style={{ animationDelay: '0ms' }}><i aria-hidden="true" />{copy.hero.badge}</p>
               <h1 className="lp-h1 lp-enter" style={{ animationDelay: '80ms' }}>
@@ -122,10 +123,22 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
               <ProductPreview copy={copy.preview} lang={lang} />
             </div>
           </div>
+          <Reveal className="lp-wrap lp-stats">
+            <p className="lp-stats__title"><span className="lp-eyebrow">{copy.trust.proofTag}</span>{copy.trust.proofTitle}</p>
+            <dl className="lp-stats__list">
+              {copy.trust.stats.map((stat) => (
+                <div key={stat.label}>
+                  <dt>{stat.label}</dt>
+                  <dd><CountUp text={stat.value} /></dd>
+                </div>
+              ))}
+            </dl>
+            <p className="lp-stats__note">{copy.trust.footnote}</p>
+          </Reveal>
         </section>
 
         {/* Se conecta con lo que ya usa */}
-        <section className="lp-sources" aria-label={copy.sources.label}>
+        <section className="lp-sources lp-night" aria-label={copy.sources.label}>
           <Reveal className="lp-wrap lp-sources__row">
             <p>{copy.sources.label}</p>
             <ul>
@@ -168,7 +181,8 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
             <Heading kicker={copy.problem.kicker} title={copy.problem.title} lead={copy.problem.lead} />
             <div className="lp-grid lp-grid--3">
               {copy.problem.cards.map((card, i) => (
-                <Reveal as="article" key={card.tag} delay={i * 90} className="lp-card lp-card--plain">
+                <Reveal as="article" key={card.tag} delay={i * 90} className="lp-card lp-card--step">
+                  <span className="lp-num" aria-hidden="true">{i + 1}</span>
                   <p className="lp-tag">{card.tag}</p>
                   <h3 className="lp-h3">{card.title}</h3>
                   <p className="lp-text">{card.text}</p>
@@ -181,20 +195,31 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         {/* Plataforma */}
         <section id="producto" className="lp-section lp-section--soft">
           <div className="lp-wrap">
-            <Heading kicker={copy.platform.kicker} title={copy.platform.title} lead={copy.platform.lead} />
-            <ol className="lp-flow">
+            <Heading kicker={copy.platform.kicker} title={copy.platform.title} lead={copy.platform.lead} center />
+            <ol className="lp-rows">
               {copy.platform.layers.map((layer, i) => (
-                <Reveal as="li" key={layer.tag} delay={i * 120} className="lp-flow__step">
-                  <span className="lp-flow__n">{pad(i)}</span>
-                  <p className="lp-flow__name">{layer.name}</p>
-                  <h3 className="lp-h3">{layer.title}</h3>
-                  <p className="lp-text">{layer.text}</p>
-                </Reveal>
+                <li key={layer.tag} className="lp-row">
+                  <Reveal className="lp-row__text">
+                    <p className="lp-eyebrow">{pad(i)} · {layer.name}</p>
+                    <h3 className="lp-row__title">{layer.title}</h3>
+                    <p className="lp-lead">{layer.text}</p>
+                  </Reveal>
+                  <Reveal delay={120} className="lp-row__media">
+                    {i === 0 && <ConnectGraphic copy={copy.platform.graphics} />}
+                    {i === 1 && <PredictGraphic copy={copy.preview.forecast} note={copy.platform.graphics.note} product={copy.preview.forecast.product} />}
+                    {i === 2 && <DecideGraphic copy={copy.preview.decisions} note={copy.platform.graphics.note} label={copy.preview.tabs.decisions} />}
+                  </Reveal>
+                </li>
               ))}
             </ol>
+          </div>
+        </section>
 
-            <Reveal><h3 className="lp-subhead">{copy.platform.modulesTitle}</h3></Reveal>
-            <ul className="lp-grid lp-grid--3">
+        {/* Lo que el equipo ve en pantalla */}
+        <section className="lp-section">
+          <div className="lp-wrap">
+            <Reveal className="lp-head"><h2 className="lp-h2 lp-h2--sm">{copy.platform.modulesTitle}</h2></Reveal>
+            <ul className="lp-grid lp-grid--3 lp-tints">
               {copy.platform.modules.map((mod, i) => (
                 <Reveal as="li" key={mod.title} delay={(i % 3) * 80} className="lp-card lp-card--hover">
                   <span className="lp-icon"><Icon name={MODULE_ICONS[i] ?? 'chart'} /></span>
@@ -207,10 +232,10 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Confianza */}
-        <section id="confianza" className="lp-section">
-          <div className="lp-wrap lp-trust">
+        <section id="confianza" className="lp-section lp-section--soft">
+          <div className="lp-wrap lp-split">
             <Reveal>
-              <p className="lp-eyebrow">{copy.trust.kicker}</p>
+              <p className="lp-eyebrow lp-eyebrow--dash">{copy.trust.kicker}</p>
               <h2 className="lp-h2">{copy.trust.empathyTitle}</h2>
               {copy.trust.empathyText.map((paragraph) => (
                 <p key={paragraph} className="lp-lead">{paragraph}</p>
@@ -222,24 +247,14 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
                 ))}
               </ul>
             </Reveal>
-            <Reveal as="article" delay={120} className="lp-proof">
-              <p className="lp-tag">{copy.trust.proofTag}</p>
-              <h3 className="lp-proof__title">{copy.trust.proofTitle}</h3>
-              <dl className="lp-proof__stats">
-                {copy.trust.stats.map((stat) => (
-                  <div key={stat.label}>
-                    <dt>{stat.label}</dt>
-                    <dd><CountUp text={stat.value} /></dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="lp-proof__note">{copy.trust.footnote}</p>
+            <Reveal delay={120} className="lp-split__media">
+              <ModelsGraphic copy={copy.trust.models} />
             </Reveal>
           </div>
         </section>
 
         {/* Cómo trabajamos */}
-        <section id="plan" className="lp-section lp-section--soft">
+        <section id="plan" className="lp-section">
           <div className="lp-wrap">
             <Heading kicker={copy.plan.kicker} title={copy.plan.title} lead={copy.plan.lead} />
             <Reveal>
@@ -252,7 +267,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Es / No es */}
-        <section id="diferencias" className="lp-section">
+        <section id="diferencias" className="lp-section lp-section--soft">
           <div className="lp-wrap">
             <Heading kicker={copy.compare.kicker} title={copy.compare.title} lead={copy.compare.lead} />
             <Reveal className="lp-compare">
@@ -273,7 +288,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Sectores */}
-        <section id="sectores" className="lp-section lp-section--soft">
+        <section id="sectores" className="lp-section">
           <div className="lp-wrap">
             <Heading kicker={copy.sectors.kicker} title={copy.sectors.title} lead={copy.sectors.lead} />
             <SectorCards items={copy.sectors.items} />
@@ -289,7 +304,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Dónde se instala: autohospedado, VPS o plataforma compartida */}
-        <section id="instalacion" className="lp-section">
+        <section id="instalacion" className="lp-section lp-section--soft">
           <div className="lp-wrap">
             <Heading kicker={copy.hosting.kicker} title={copy.hosting.title} lead={copy.hosting.lead} />
             <Reveal>
@@ -300,12 +315,12 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Seguridad */}
-        <section id="seguridad" className="lp-section lp-section--soft">
+        <section id="seguridad" className="lp-section">
           <div className="lp-wrap">
             <Heading kicker={copy.security.kicker} title={copy.security.title} lead={copy.security.lead} />
-            <ul className="lp-grid lp-grid--3">
+            <ul className="lp-grid lp-grid--3 lp-tints">
               {copy.security.items.map((item, i) => (
-                <Reveal as="li" key={item.title} delay={(i % 3) * 80} className="lp-feature">
+                <Reveal as="li" key={item.title} delay={(i % 3) * 80} className="lp-card lp-card--hover lp-feature">
                   <span className="lp-icon"><Icon name={SECURITY_ICONS[i] ?? 'shield'} /></span>
                   <h3 className="lp-h4">{item.title}</h3>
                   <p className="lp-text">{item.text}</p>
@@ -317,7 +332,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Preguntas frecuentes */}
-        <section id="faq" className="lp-section">
+        <section id="faq" className="lp-section lp-section--soft">
           <div className="lp-wrap lp-faq">
             <Heading kicker={copy.faq.kicker} title={copy.faq.title} />
             <Reveal delay={100}><Faq items={copy.faq.items} /></Reveal>
@@ -325,7 +340,7 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
 
         {/* Hablemos */}
-        <section id="contacto" className="lp-section lp-talk">
+        <section id="contacto" className="lp-section lp-talk lp-night">
           <div className="lp-wrap">
             <Reveal className="lp-talk__panel">
               <div className="lp-talk__glow" aria-hidden="true" />
@@ -355,9 +370,9 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
         </section>
       </main>
 
-      <footer className="lp-footer">
+      <footer className="lp-footer lp-night">
         <div className="lp-wrap lp-footer__grid">
-          <div>
+          <div className="lp-footer__brand">
             <Logo size={28} />
             <p className="lp-footer__note">{copy.footer.note}</p>
           </div>
@@ -365,8 +380,11 @@ export function App({ initialLang }: { initialLang?: LandingLang } = {}) {
             {navLinks.map((link) => (
               <a key={link.href} href={link.href}>{link.label}</a>
             ))}
-            <a href="#contacto">{copy.nav.cta}</a>
           </nav>
+          <div className="lp-footer__cta">
+            <p>{copy.footer.tagline}</p>
+            <a href="#contacto" className="btn btn-primary">{copy.nav.cta}<Icon name="arrow-right" size={16} /></a>
+          </div>
         </div>
         <p className="lp-wrap lp-footer__rights">© {new Date().getFullYear()} {copy.footer.rights}</p>
       </footer>

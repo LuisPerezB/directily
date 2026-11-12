@@ -151,6 +151,23 @@ export const en: LandingCopy = {
       { title: 'Scenario simulator', text: 'Change price, cost or budget with explicit assumptions and see the effect on revenue and margin.' },
       { title: 'Alerts', text: 'Warnings for stockouts, accuracy decline and data quality problems.' },
     ],
+    graphics: {
+      note: 'Illustration with fictitious data.',
+      connect: {
+        file: 'sales_2026.xlsx',
+        fromLabel: 'Column in your file',
+        toLabel: 'Field in Predictily',
+        rows: [
+          { from: 'Date', to: 'Sale date' },
+          { from: 'Prod_Code', to: 'Product' },
+          { from: 'Qty', to: 'Units' },
+          { from: 'Warehouse', to: 'Branch' },
+        ],
+        quality: 'Data quality',
+        qualityValue: '96%',
+        dedupe: 'Re-import: 0 duplicated rows',
+      },
+    },
   },
   trust: {
     kicker: 'Why trust it',
@@ -179,6 +196,19 @@ export const en: LandingCopy = {
       'No generative AI model calculates the figures.',
       'Every forecast keeps its version, its date and its assumptions.',
     ],
+    models: {
+      title: 'Each model’s error on your history',
+      rows: [
+        { name: 'Reference method', error: 31 },
+        { name: 'Moving average', error: 27 },
+        { name: 'Exponential smoothing', error: 24 },
+        { name: 'Machine learning', error: 23 },
+      ],
+      suffix: '%',
+      inUse: 'In use',
+      reference: 'Reference',
+      note: 'Illustrative example with fictitious data. Lower error is better.',
+    },
   },
   plan: {
     kicker: 'How we work',

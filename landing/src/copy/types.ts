@@ -105,6 +105,19 @@ export interface LandingCopy {
     layers: readonly (TitledText & { tag: string; name: string })[]
     modulesTitle: string
     modules: readonly TitledText[]
+    /** Textos de las ilustraciones de las tres capas (datos ficticios; lo dice `note`). */
+    graphics: {
+      note: string
+      connect: {
+        file: string
+        fromLabel: string
+        toLabel: string
+        rows: readonly { from: string; to: string }[]
+        quality: string
+        qualityValue: string
+        dedupe: string
+      }
+    }
   }
   trust: {
     kicker: string
@@ -117,6 +130,15 @@ export interface LandingCopy {
     footnote: string
     methodTitle: string
     method: readonly string[]
+    /** Ilustración «los modelos compiten»: error ficticio de cada modelo frente al método de referencia. */
+    models: {
+      title: string
+      rows: readonly { name: string; error: number }[]
+      suffix: string
+      inUse: string
+      reference: string
+      note: string
+    }
   }
   plan: {
     kicker: string

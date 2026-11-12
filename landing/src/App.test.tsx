@@ -110,6 +110,33 @@ describe('Landing bilingüe (React)', () => {
     expect(screen.getAllByText(es.preview.note)).toHaveLength(2)
   })
 
+  it('las cifras medidas van al pie del inicio, junto a la aclaración de que son datos de demostración', () => {
+    const { container } = render(<App />)
+    const hero = container.querySelector('.lp-hero')!
+    expect(hero.querySelectorAll('.lp-stats__list > div')).toHaveLength(es.trust.stats.length)
+    expect(hero.querySelector('.lp-stats__note')?.textContent).toBe(es.trust.footnote)
+    expect(hero.textContent).toContain(es.trust.proofTitle)
+  })
+
+  it('cada capa de la plataforma lleva su ilustración, decorativa y con el aviso de datos ficticios', () => {
+    const { container } = render(<App />)
+    const rows = [...container.querySelectorAll('.lp-rows > .lp-row')]
+    expect(rows).toHaveLength(es.platform.layers.length)
+    rows.forEach((row, i) => {
+      expect(row.querySelector('.lp-row__title')?.textContent).toBe(es.platform.layers[i]!.title)
+      const graphic = row.querySelector('.lp-gfx')!
+      expect(graphic.getAttribute('aria-hidden')).toBe('true')
+      expect(graphic.querySelector('.lp-gfx__note')?.textContent).toBe(es.platform.graphics.note)
+      // Decorativa de verdad: nada dentro recibe el foco del teclado.
+      expect(graphic.querySelectorAll('a, button, input, [tabindex]')).toHaveLength(0)
+    })
+    // «Por qué confiar» muestra el error de cada modelo; el de menor error es el que queda en uso.
+    const bars = [...container.querySelectorAll('#confianza .lp-bars > li')]
+    expect(bars.map((li) => li.querySelector('span')?.textContent)).toEqual(es.trust.models.rows.map((row) => row.name))
+    expect(container.querySelectorAll('#confianza .lp-bars > li.is-best')).toHaveLength(1)
+    expect(container.querySelector('#confianza .lp-bars > li.is-best')?.textContent).toContain(es.trust.models.inUse)
+  })
+
   it('el video del producto usa el archivo del idioma elegido y no suena', () => {
     render(<App />)
     const video = screen.getByTestId('demo-video') as HTMLVideoElement
