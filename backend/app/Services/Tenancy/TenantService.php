@@ -30,6 +30,9 @@ final class TenantService
 
         return DB::transaction(function () use ($owner, $data): Tenant {
             $plan = Plan::query()->where('code', config('predictily.default_plan', 'trial'))->first();
+            $settings = array_merge(Tenant::DEFAULT_SETTINGS, $data['settings'] ?? []);
+            // Empresa nueva: modo de precisión automático del motor, salvo que la solicitud traiga otro valor para esa clave.
+            $settings['cores']['demand'] = array_merge(Tenant::NEW_TENANT_DEMAND_CORE, (array) ($settings['cores']['demand'] ?? []));
             $tenant = new Tenant;
             $tenant->fill([
                 'name' => $data['name'],
@@ -41,7 +44,7 @@ final class TenantService
                 'country' => 'EC',
                 'locale' => 'es-EC',
                 'plan_id' => $plan?->id,
-                'settings' => array_merge(Tenant::DEFAULT_SETTINGS, $data['settings'] ?? []),
+                'settings' => $settings,
             ]);
             $tenant->save();
             $tenant->users()->attach($owner->id, ['role' => TenantRole::Owner->value]);

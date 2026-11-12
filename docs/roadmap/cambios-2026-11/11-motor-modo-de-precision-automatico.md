@@ -3,8 +3,8 @@
 **Área:** motor (`pipeline/precision.py`, `pipeline/core.py`, `platform/config.py`) ·
 **Prioridad:** alta · **Esfuerzo:** medio · **Interruptor:** `demand.precision_mode` (`manual` por defecto; `auto`).
 
-**Estado: implementado el 12/11/2026** (rama `claude/optimistic-ritchie-snsv8i`). Pendiente: que el backend cree las empresas nuevas en
-`auto` y medirlo en los pilotos.
+**Estado: implementado el 12/11/2026** (rama `claude/optimistic-ritchie-snsv8i`). Las empresas nuevas nacen en `auto`
+(`TenantService::create`, `Tenant::NEW_TENANT_DEMAND_CORE`); las existentes siguen en `manual`. Pendiente: medirlo en los pilotos.
 
 ## Problema
 
@@ -37,6 +37,7 @@ En `auto` el backtest de las familias estadísticas ajustables se calcula dos ve
 evidencia, el período final no decide, rechazo si empeora el error por serie); en el pipeline, `manual` no cambia nada, `auto` enciende
 candidatos y la regla v2, la nota de feriados aparece solo si se adoptó, una ejecución `auto` con el ajuste adoptado es idéntica a la de
 una empresa con los cuatro interruptores encendidos a mano, y un interruptor de feriados ya encendido se respeta.
+`backend/tests/Feature/Core/TenantManagementTest.php`: una empresa nueva nace en `auto` y una existente no cambia.
 
 ## Limitaciones y riesgos
 
