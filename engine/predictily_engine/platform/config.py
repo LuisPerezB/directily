@@ -56,6 +56,14 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         # competido en el backtest (series nuevas o de historia escasa y filas servidas con el respaldo plano) se reparte con el ritmo
         # semanal del negocio (`statistical.common_weekday_profile`): mismo total semanal, otro reparto por día.
         "weekday_profile_models": False,
+        # Ajuste de feriados de los modelos estadísticos (`models/holidays.py`): sin él solo LightGBM conoce el calendario; los estadísticos
+        # pronostican un feriado como un día normal y aprenden la caída de un feriado pasado como demanda. Encendido: el entrenamiento de las
+        # familias que no son referencia se limpia de feriados pasados y los feriados del horizonte se multiplican por el factor estimado de
+        # cada feriado (venta real / esperable del negocio). Apagado por defecto: cambia qué modelo gana, así que se activa por empresa.
+        "holiday_adjustment_models": False,
+        # Combinación AutoETS + LightGBM (`models/ensemble.py`, familia `ets_lightgbm_mean`): el promedio de los dos compite como un modelo
+        # complejo más (margen mínimo y ventanas ganadas frente al mejor estadístico). Apagado por defecto: cambia qué modelo gana.
+        "ensemble_models": False,
         # Días de la semana en que la empresa OPERA (0 = lunes … 6 = domingo). `None` (por defecto) = los 7 días: nada cambia. Declarada,
         # los demás días de la semana son cierres (`closed`, base `declared`) en toda la historia y en el horizonte: no son ceros observados
         # (no inflan la intermitencia ni entran a las métricas) y se pronostican en cero. Es una decisión de la empresa, nunca automática:
@@ -338,6 +346,12 @@ CORE_DEFAULTS: dict[str, dict[str, Any]] = {
         "governing_policy": "legacy",         # legacy | v25
         # ── política heredada (legacy-selection-v1): fracción de ventanas que debe ganar LightGBM (2/3 ⇒ ⌈2n/3⌉; 3 de 4 en producción)
         "legacy_windows_won_fraction": 2 / 3,
+        # Métrica que ordena a los candidatos de la política heredada. `series_day` (por defecto) = WAPE serie-día: la regla de siempre
+        # (legacy-selection-v1), sin ningún cambio. `total_day` = regla v2: WAPE del total diario del alcance, con las dos salvaguardas
+        # siguientes. Se activa por empresa al aprobarlo en el piloto: cambia qué modelo gana (docs/roadmap/cambios-2026-11/06).
+        "legacy_selection_metric": "series_day",   # series_day | total_day
+        "legacy_bias_tolerance": 0.15,             # solo v2: |sesgo| máximo de un candidato (Σ(pronóstico − real) / Σ real)
+        "legacy_series_tolerance": 0.05,           # solo v2: su WAPE serie-día puede superar al del mejor estadístico a lo sumo en esta fracción
         # ── política V2.5 (promotion-v25-1): gates calculados SOLO con las ventanas de selección (el holdout nunca decide) ──
         "v25_min_selection_windows": 2,       # ventanas de selección mínimas para certificar estabilidad y calibración
         "v25_max_consecutive_losing_windows": 1,   # el candidato no puede perder en más de x ventanas consecutivas frente a la referencia
@@ -484,6 +498,9 @@ CONFIG_CONSTRAINTS.update({
     # dimensión inventada haría pasar el gate «sin regresión por segmento» sin evaluar nada.
     ("promotion", "v25_critical_segments"): {"list_choices": ["demand_class", "category", "branch", "volume_tier", "series_age", "series_life"], "list_max_len": 6},
     ("promotion", "legacy_windows_won_fraction"): {"min": 0.5, "max": 1.0},
+    ("promotion", "legacy_selection_metric"): {"choices": ["series_day", "total_day"]},
+    ("promotion", "legacy_bias_tolerance"): {"min": 0.0, "max": 5.0},
+    ("promotion", "legacy_series_tolerance"): {"min": 0.0, "max": 1.0},
     ("promotion", "v25_min_selection_windows"): {"min": 1, "max": 20},
     ("promotion", "v25_max_consecutive_losing_windows"): {"min": 0, "max": 10},
     ("promotion", "v25_min_relative_improvement"): {"min": 0.0, "max": 0.5},

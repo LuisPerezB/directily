@@ -12,8 +12,11 @@ os.environ.setdefault("NIXTLA_ID_AS_COL", "1")
 from statsforecast import StatsForecast  # noqa: E402
 from statsforecast.models import ADIDA, TSB, AutoETS, CrostonSBA, Naive, SeasonalNaive, WindowAverage  # noqa: E402
 
+from predictily_engine.models.holidays import HOLIDAY_UNADJUSTED, apply_factors, clean_training  # noqa: E402
 from predictily_engine.models.registry import (  # noqa: E402
     STATISTICAL,
+    WEEKDAY_AVERAGE,
+    WEEKDAY_AVERAGE_K,
     WEEKDAY_PROFILE_DAYS,
     WEEKDAY_PROFILE_SHRINK,
     WEEKDAY_SUFFIX,
@@ -89,26 +92,43 @@ def _build(families: list[str]):
     return [makers[f]() for f in families if f in makers]
 
 
-def forecast_statistical(train: pd.DataFrame, h: int, families: list[str] | None = None) -> pd.DataFrame:
-    """Pronostica h días para cada serie de `train` (unique_id, ds, y).
+def weekday_average(train: pd.DataFrame, h: int, k: int = WEEKDAY_AVERAGE_K) -> pd.DataFrame:
+    """Familia `weekday_average`: para cada serie y día del horizonte, la media de sus últimas `k` observaciones del mismo día de la semana.
 
-    Devuelve formato largo: unique_id, ds, family, yhat (≥ 0). Si un modelo falla en una
-    serie, StatsForecast usa SeasonalNaive como respaldo.
+    Con menos de `k` observaciones de ese día usa las que haya; sin ninguna (serie de menos de una semana), 0. Devuelve unique_id, ds,
+    family, yhat. Las series de `train` son diarias y contiguas hasta el corte (el panel las construye así)."""
+    cols = ["unique_id", "ds", "family", "yhat"]
+    if train.empty or h <= 0:
+        return pd.DataFrame(columns=cols)
+    t = train[["unique_id", "ds", "y"]].copy()
+    t["ds"] = pd.to_datetime(t["ds"])
+    cutoff = t["ds"].max()
+    recent = t[t["ds"] > cutoff - pd.Timedelta(days=7 * k)]
+    level = recent.assign(dow=recent["ds"].dt.dayofweek).groupby(["unique_id", "dow"])["y"].mean()
+    ids = t["unique_id"].drop_duplicates().to_numpy()
+    days = pd.date_range(cutoff + pd.Timedelta(days=1), periods=h, freq="D")
+    out = pd.DataFrame({"unique_id": np.repeat(ids, h), "ds": np.tile(days.values, len(ids))})
+    key = pd.MultiIndex.from_arrays([out["unique_id"], out["ds"].dt.dayofweek])
+    out["family"] = WEEKDAY_AVERAGE
+    out["yhat"] = np.clip(level.reindex(key).fillna(0.0).to_numpy(dtype=float), 0, None)
+    return out[cols]
 
-    Las familias `<base>_dow` son la familia base (plana: no ve el día de la semana) multiplicada por el perfil semanal de cada
-    serie (`weekday_profile`); conservan el total semanal de la base y solo lo reparten como vende el negocio.
-    """
-    families = [f for f in (families or STATISTICAL) if f in STATISTICAL]
-    if train.empty or not families:
-        return pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
+
+def _forecast(train: pd.DataFrame, h: int, families: list[str]) -> pd.DataFrame:
+    """Pronóstico de `families` (ya filtradas a estadísticas) sobre `train` tal cual llega."""
+    custom = [f for f in families if f == WEEKDAY_AVERAGE]
     profiled = [f for f in families if f.endswith(WEEKDAY_SUFFIX)]
-    base = list(dict.fromkeys([f for f in families if f not in profiled] + [f.removesuffix(WEEKDAY_SUFFIX) for f in profiled]))
-    sf = StatsForecast(models=_build(base), freq="D", n_jobs=1,
-                       fallback_model=SeasonalNaive(season_length=7))
-    fc = sf.forecast(h=h, df=train[["unique_id", "ds", "y"]])
-    long = fc.melt(id_vars=["unique_id", "ds"], value_vars=[f for f in base if f in fc.columns],
-                   var_name="family", value_name="yhat")
-    long["yhat"] = np.clip(long["yhat"].astype(float).fillna(0.0), 0, None)
+    base = list(dict.fromkeys([f for f in families if f not in profiled and f not in custom]
+                              + [f.removesuffix(WEEKDAY_SUFFIX) for f in profiled]))
+    if base:
+        sf = StatsForecast(models=_build(base), freq="D", n_jobs=1,
+                           fallback_model=SeasonalNaive(season_length=7))
+        fc = sf.forecast(h=h, df=train[["unique_id", "ds", "y"]])
+        long = fc.melt(id_vars=["unique_id", "ds"], value_vars=[f for f in base if f in fc.columns],
+                       var_name="family", value_name="yhat")
+        long["yhat"] = np.clip(long["yhat"].astype(float).fillna(0.0), 0, None)
+    else:
+        long = pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
     if profiled:
         extra = long[long["family"].isin([f.removesuffix(WEEKDAY_SUFFIX) for f in profiled])].copy()
         extra["dow"] = pd.to_datetime(extra["ds"]).dt.dayofweek
@@ -116,5 +136,40 @@ def forecast_statistical(train: pd.DataFrame, h: int, families: list[str] | None
         extra["yhat"] = extra["yhat"] * extra["factor"].fillna(1.0)
         extra["family"] = extra["family"] + WEEKDAY_SUFFIX
         long = pd.concat([long, extra[long.columns]], ignore_index=True)
+    if custom:
+        long = pd.concat([long, weekday_average(train, h)], ignore_index=True)
     return long[long["family"].isin(families)].reset_index(drop=True)
 
+
+def forecast_statistical(train: pd.DataFrame, h: int, families: list[str] | None = None,
+                         holidays: pd.DataFrame | None = None, info: dict | None = None) -> pd.DataFrame:
+    """Pronostica h días para cada serie de `train` (unique_id, ds, y).
+
+    Devuelve formato largo: unique_id, ds, family, yhat (≥ 0). Si un modelo falla en una
+    serie, StatsForecast usa SeasonalNaive como respaldo.
+
+    Las familias `<base>_dow` son la familia base (plana: no ve el día de la semana) multiplicada por el perfil semanal de cada
+    serie (`weekday_profile`); conservan el total semanal de la base y solo lo reparten como vende el negocio. `weekday_average` es la
+    media de los últimos mismos días de la semana de cada serie.
+
+    `holidays` (unique_id, ds, holiday; ver `models/holidays.py`): ajuste de feriados. Las familias que no son referencia se ajustan con
+    el entrenamiento limpio de feriados pasados y sus días feriados del horizonte se multiplican por el factor estimado de cada feriado;
+    `naive` y `seasonal_naive` quedan intactas. Sin `holidays` (por defecto) el resultado es exactamente el de siempre. `info`, si se
+    entrega, recibe los factores usados (`holiday_factors`).
+    """
+    families = [f for f in (families or STATISTICAL) if f in STATISTICAL]
+    if train.empty or not families:
+        return pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
+    if holidays is None or holidays.empty:
+        return _forecast(train, h, families)
+    plain = [f for f in families if f in HOLIDAY_UNADJUSTED]
+    adjusted = [f for f in families if f not in HOLIDAY_UNADJUSTED]
+    parts = []
+    if plain:
+        parts.append(_forecast(train, h, plain))
+    if adjusted:
+        cleaned, factors = clean_training(train[["unique_id", "ds", "y"]], holidays)
+        if info is not None:
+            info["holiday_factors"] = factors
+        parts.append(apply_factors(_forecast(cleaned, h, adjusted), holidays, factors))
+    return pd.concat(parts, ignore_index=True)

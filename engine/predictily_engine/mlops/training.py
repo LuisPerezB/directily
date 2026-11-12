@@ -27,6 +27,7 @@ from sqlalchemy import Engine
 
 from predictily_engine.config import FEATURE_SET_VERSION, get_settings
 from predictily_engine.mlops.errors import EXIT_CONFIG, EXIT_NOT_FOUND, CliError
+from predictily_engine.models.registry import ENSEMBLE_FAMILY
 
 log = logging.getLogger(__name__)
 Progress = Callable[[str, int], None]
@@ -295,10 +296,15 @@ def demand_entries(run: DemandRun) -> list[ModelEntry]:
     if result.lgbm is None or not info or info.get("status") == "failed":
         return []
     classes = info.get("demand_classes") or []
+    # Si lo servido es la combinación (`ets_lightgbm_mean`), este LightGBM se sirve como su miembro: el artefacto es el mismo.
+    ensemble = result.families.get(ENSEMBLE_FAMILY) or {}
+    as_member = ensemble.get("status") == "production"
     return [ModelEntry(
         name="lightgbm_global", obj=result.lgbm.mlf, model_family="lightgbm_global", role=info.get("role", "primary"),
-        strategy_level=str(info["level"]), hyperparameters=dict(result.lgbm.params), served=info.get("status") == "production",
-        series_count=int(info["series_count"]), demand_class=classes[0] if len(classes) == 1 else None, slot=None,
+        strategy_level=str(info["level"]), hyperparameters=dict(result.lgbm.params),
+        served=info.get("status") == "production" or as_member,
+        series_count=max(int(info["series_count"]), int(ensemble.get("series_count") or 0) if as_member else 0),
+        demand_class=classes[0] if len(classes) == 1 else None, slot=None,
         purpose="Pronóstico de demanda diaria por serie (sucursal × producto)", granularity="series_day")]
 
 

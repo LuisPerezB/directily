@@ -31,14 +31,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 from predictily_engine.backtest.metrics import summarize
 from predictily_engine.models.registry import (
     BASELINE_FAMILY,
     CANDIDATES_BY_CLASS,
+    ENSEMBLE_FAMILY,
     FAMILIES,
     SIMPLE_FALLBACKS,
     STATISTICAL,
@@ -47,6 +49,19 @@ from predictily_engine.models.registry import (
 POOLED = "pooled"
 
 LEGACY_RULE_VERSION = "legacy-selection-v1"
+# Regla v2 (`selection_metric = "total_day"`, apagada por defecto): misma estructura que la v1, pero la métrica que ORDENA a los candidatos es el
+# WAPE del total diario del alcance (se suman las series por ventana y día y se mide el error del total), con dos salvaguardas: sesgo acotado
+# y error por serie-día no peor que el mejor candidato más una tolerancia. Motivo: el WAPE serie-día está cerca del piso de ruido de los
+# conteos, así que las diferencias entre modelos buenos son de 1–2 % (por debajo del margen exigido) aunque en el total difieran 15–30 %,
+# y además premia pronosticar de menos en series intermitentes. Ver docs/roadmap/cambios-2026-11/06.
+LEGACY_RULE_VERSION_V2 = "legacy-selection-v2"
+METRIC_SERIES_DAY = "series_day"
+METRIC_TOTAL_DAY = "total_day"
+SELECTION_METRICS = (METRIC_SERIES_DAY, METRIC_TOTAL_DAY)
+DEFAULT_BIAS_TOLERANCE = 0.15
+DEFAULT_SERIES_TOLERANCE = 0.05
+BIAS_TOLERANCE_RANGE = (0.0, 5.0)
+SERIES_TOLERANCE_RANGE = (0.0, 1.0)
 DEFAULT_MIN_IMPROVEMENT = 0.03
 DEFAULT_WINDOWS_WON_FRACTION = 2 / 3
 # Rangos validados de los parámetros de la política heredada (también en `platform.config.CONFIG_CONSTRAINTS`). La fracción de
@@ -63,10 +78,17 @@ class LegacyPolicy:
     """Parámetros de la política heredada de selección (`legacy`), con rango validado y huella (`version`).
 
     `min_improvement`: LightGBM solo reemplaza al mejor estadístico si su WAPE es ≤ WAPE_estadístico × (1 − min_improvement).
-    `windows_won_fraction`: y si gana en al menos ⌈n_ventanas × fracción⌉ ventanas (2/3 por defecto: 3 de 4 en producción)."""
+    `windows_won_fraction`: y si gana en al menos ⌈n_ventanas × fracción⌉ ventanas (2/3 por defecto: 3 de 4 en producción).
+    `selection_metric`: `series_day` (v1, por defecto: WAPE serie-día) o `total_day` (v2: WAPE del total diario del alcance). Solo con
+    `total_day` rigen `bias_tolerance` (|sesgo| máximo de un candidato) y `series_tolerance` (cuánto puede superar su WAPE serie-día al
+    del mejor candidato del alcance). Con `series_day` esos dos parámetros no intervienen ni forman parte de la huella: la política es
+    exactamente la `legacy-selection-v1`."""
 
     min_improvement: float = DEFAULT_MIN_IMPROVEMENT
     windows_won_fraction: float = DEFAULT_WINDOWS_WON_FRACTION
+    selection_metric: str = METRIC_SERIES_DAY
+    bias_tolerance: float = DEFAULT_BIAS_TOLERANCE
+    series_tolerance: float = DEFAULT_SERIES_TOLERANCE
 
     def __post_init__(self) -> None:
         lo, hi = MIN_IMPROVEMENT_RANGE
@@ -75,6 +97,21 @@ class LegacyPolicy:
         lo, hi = WINDOWS_WON_FRACTION_RANGE
         if isinstance(self.windows_won_fraction, bool) or not lo <= self.windows_won_fraction <= hi:
             raise ValueError(f"windows_won_fraction debe estar entre {lo} y {hi} (recibido {self.windows_won_fraction!r}).")
+        if self.selection_metric not in SELECTION_METRICS:
+            raise ValueError(f"selection_metric debe ser uno de {SELECTION_METRICS} (recibido {self.selection_metric!r}).")
+        for name, (lo, hi) in (("bias_tolerance", BIAS_TOLERANCE_RANGE), ("series_tolerance", SERIES_TOLERANCE_RANGE)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not lo <= value <= hi:
+                raise ValueError(f"{name} debe estar entre {lo} y {hi} (recibido {value!r}).")
+
+    @property
+    def by_total(self) -> bool:
+        """¿Rige la regla v2 (candidatos ordenados por el WAPE del total diario, con salvaguardas de sesgo y de error por serie)?"""
+        return self.selection_metric == METRIC_TOTAL_DAY
+
+    @property
+    def rule_version(self) -> str:
+        return LEGACY_RULE_VERSION_V2 if self.by_total else LEGACY_RULE_VERSION
 
     def needed_windows(self, n_windows: int) -> int:
         """Ventanas que debe ganar LightGBM: ⌈n × fracción⌉. El redondeo a 9 decimales elimina el ruido de coma flotante
@@ -82,8 +119,12 @@ class LegacyPolicy:
         return math.ceil(round(n_windows * self.windows_won_fraction, 9))
 
     def params(self) -> dict:
-        return {"min_improvement": self.min_improvement, "windows_won_fraction": self.windows_won_fraction,
-                "min_class_series": MIN_CLASS_SERIES, "min_class_actual": MIN_CLASS_ACTUAL, "rule_version": LEGACY_RULE_VERSION}
+        out = {"min_improvement": self.min_improvement, "windows_won_fraction": self.windows_won_fraction,
+               "min_class_series": MIN_CLASS_SERIES, "min_class_actual": MIN_CLASS_ACTUAL, "rule_version": self.rule_version}
+        if self.by_total:   # la v1 conserva EXACTAMENTE sus parámetros (y por tanto su huella)
+            out.update({"selection_metric": self.selection_metric, "bias_tolerance": self.bias_tolerance,
+                        "series_tolerance": self.series_tolerance})
+        return out
 
     @property
     def version(self) -> str:
@@ -91,7 +132,11 @@ class LegacyPolicy:
         return hashlib.sha256(json.dumps({"policy": "legacy", **self.params()}, sort_keys=True).encode()).hexdigest()
 
     def describe(self) -> dict:
-        return {**asdict(self), "rule_version": LEGACY_RULE_VERSION, "policy_version": self.version}
+        out = {"min_improvement": self.min_improvement, "windows_won_fraction": self.windows_won_fraction}
+        if self.by_total:
+            out.update({"selection_metric": self.selection_metric, "bias_tolerance": self.bias_tolerance,
+                        "series_tolerance": self.series_tolerance})
+        return {**out, "rule_version": self.rule_version, "policy_version": self.version}
 
 
 @dataclass
@@ -148,6 +193,8 @@ class Selection:
 def _decide_full(sub: pd.DataFrame, candidates: list[str], policy: LegacyPolicy, label: str
                  ) -> tuple[str, str, pd.DataFrame, dict]:
     """Decisión de un alcance con su evidencia numérica (lo que `model_promotion_decisions.gates` registra)."""
+    if policy.by_total:
+        return _decide_by_total(sub, candidates, policy, label)
     min_improvement = policy.min_improvement
     sub = sub[sub["family"].isin(candidates)]
     table = summarize(sub, ["family"])
@@ -186,6 +233,142 @@ def _decide_full(sub: pd.DataFrame, candidates: list[str], policy: LegacyPolicy,
         else:
             reason += (f" LightGBM ({lg_wape:.3f}) no superó el margen mínimo de {min_improvement:.0%} "
                        f"de forma estable ({better}/{n_windows} ventanas).")
+    if (table["family"] == ENSEMBLE_FAMILY).any():      # solo con `ensemble_models`: sin esas filas la regla es exactamente la de siempre
+        winner, reason = _challenge_with_ensemble(table, per_window.pivot(index="window", columns="family", values="wape"), "wape",
+                                                  best_stat, best_wape, policy, winner, reason, evidence, "WAPE")
+    return winner, reason, table, evidence
+
+
+def _challenge_with_ensemble(table: pd.DataFrame, per_window: pd.DataFrame, metric: str, best_stat: str, best_value: float,
+                             policy: LegacyPolicy, winner: str, reason: str, evidence: dict, metric_name: str,
+                             guards=None) -> tuple[str, str]:
+    """La combinación (`ets_lightgbm_mean`) como segundo modelo complejo del alcance. Se sirve si cumple la MISMA regla que LightGBM frente
+    al mejor estadístico (mejora ≥ `min_improvement` y ⌈n × fracción⌉ ventanas ganadas con la métrica de la política; en la regla v2,
+    además las salvaguardas) y, si LightGBM también la cumplió, solo si su métrica es estrictamente menor que la de LightGBM.
+    `per_window`: métrica por ventana (filas) y familia (columnas). Deja su evidencia en `evidence["ensemble"]`."""
+    row = table[table["family"] == ENSEMBLE_FAMILY]
+    if row.empty or pd.isna(row.iloc[0][metric]):
+        return winner, reason
+    value = float(row.iloc[0][metric])
+    n_windows = len(per_window)
+    better = int((per_window[ENSEMBLE_FAMILY] < per_window[best_stat]).sum()) if ENSEMBLE_FAMILY in per_window else 0
+    table.loc[table["family"] == ENSEMBLE_FAMILY, "windows_better"] = better
+    needed = policy.needed_windows(n_windows)
+    passes_improvement = value <= best_value * (1 - policy.min_improvement)
+    passes_windows = better >= needed
+    ok_series, ok_bias = guards(row.iloc[0]) if guards is not None else (True, True)
+    lightgbm_value = evidence.get("lightgbm_wape") if evidence.get("outcome") == "lightgbm_global" else None
+    beats_lightgbm = lightgbm_value is None or value < lightgbm_value
+    label = FAMILIES[ENSEMBLE_FAMILY].label
+    evidence["ensemble"] = {"family": ENSEMBLE_FAMILY, "wape": value, "windows_total": n_windows, "windows_better": better,
+                            "windows_needed": needed, "relative_improvement": (best_value - value) / best_value if best_value > 0 else None,
+                            "passes_improvement": bool(passes_improvement), "passes_windows": bool(passes_windows),
+                            "passes_guards": None if guards is None else bool(ok_series and ok_bias),
+                            "beats_lightgbm": None if lightgbm_value is None else bool(beats_lightgbm)}
+    if passes_improvement and passes_windows and ok_series and ok_bias and beats_lightgbm:
+        evidence["outcome"] = ENSEMBLE_FAMILY
+        extra = f" También supera a LightGBM global ({lightgbm_value:.3f})." if lightgbm_value is not None else ""
+        return ENSEMBLE_FAMILY, (f"{label} mejora el {metric_name} de {best_value:.3f} ({FAMILIES[best_stat].label}) a {value:.3f} "
+                                 f"y gana en {better}/{n_windows} ventanas.{extra}")
+    if not (passes_improvement and passes_windows):
+        why = f"no superó el margen mínimo de {policy.min_improvement:.0%} de forma estable ({better}/{n_windows} ventanas)"
+    elif not (ok_series and ok_bias):
+        why = "no cumple las salvaguardas de sesgo y de error por serie"
+    else:
+        why = f"no mejora a LightGBM global ({lightgbm_value:.3f})"
+    return winner, reason + f" {label} ({value:.3f}) {why}."
+
+
+def total_day_wape(rows: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+    """WAPE del TOTAL diario por grupo `by` (familia, o familia y ventana): las series del alcance se suman por ventana y día y se mide
+    Σ|total real − total pronosticado| / Σ total real. Es el error que ve quien mira el total del negocio (o de la clase), no el de cada serie.
+    Devuelve `by` + `wape_total` (NaN si el total real es 0)."""
+    keys = [*by, *(["window"] if "window" not in by else []), "ds"]
+    tot = rows.groupby(keys, as_index=False, dropna=False)[["actual", "yhat"]].sum()
+    tot["_ae"] = (tot["yhat"] - tot["actual"]).abs()
+    out = tot.groupby(by, as_index=False, dropna=False).agg(_sum_actual=("actual", "sum"), _sum_ae=("_ae", "sum"))
+    ok = out["_sum_actual"] > 0
+    out["wape_total"] = np.where(ok, out["_sum_ae"] / out["_sum_actual"].where(ok, 1), np.nan)
+    return out[[*by, "wape_total"]]
+
+
+def _decide_by_total(sub: pd.DataFrame, candidates: list[str], policy: LegacyPolicy, label: str
+                     ) -> tuple[str, str, pd.DataFrame, dict]:
+    """Regla v2 (`legacy-selection-v2`): la misma estructura que la v1 con el WAPE del total diario como métrica y dos salvaguardas.
+
+    1. Estadísticos elegibles: WAPE serie-día ≤ el mejor estadístico × (1 + `series_tolerance`) Y |sesgo| ≤ `bias_tolerance`. Entre ellos
+       gana el de menor WAPE del total diario. Si ninguno cumple el sesgo se elige sin esa salvaguarda y se registra (`bias_guard_relaxed`).
+    2. LightGBM global reemplaza al ganador si mejora su WAPE del total diario ≥ `min_improvement`, gana en ⌈n × fracción⌉ ventanas con
+       esa misma métrica y cumple las dos salvaguardas (frente al mejor estadístico por serie)."""
+    min_improvement = policy.min_improvement
+    sub = sub[sub["family"].isin(candidates)]
+    table = summarize(sub, ["family"]).merge(total_day_wape(sub, ["family"]), on="family", how="left")
+    table["windows_better"] = 0
+    evidence: dict = {"scope": label, "metric": METRIC_TOTAL_DAY, "required_relative_improvement": min_improvement,
+                      "windows_won_fraction": policy.windows_won_fraction, "bias_tolerance": policy.bias_tolerance,
+                      "series_tolerance": policy.series_tolerance}
+    stats = table[table["family"].isin(STATISTICAL) & table["wape"].notna() & table["wape_total"].notna()]
+    if stats.empty:
+        evidence.update({"best_statistical": None, "outcome": "baseline_no_evidence"})
+        return BASELINE_FAMILY, "Sin evidencia suficiente: se usa el baseline.", table, evidence
+    series_limit = float(stats["wape"].min()) * (1 + policy.series_tolerance)
+
+    def guards(row) -> tuple[bool, bool]:
+        return bool(row["wape"] <= series_limit + 1e-12), bool(abs(row["bias"]) <= policy.bias_tolerance + 1e-12)
+
+    flags = stats.apply(guards, axis=1, result_type="expand")
+    in_series, in_bias = flags[0].astype(bool), flags[1].astype(bool)
+    eligible = stats[in_series & in_bias]
+    relaxed = eligible.empty
+    if relaxed:      # todos sesgados: se elige igual (el de mejor serie-día siempre cumple su propia tolerancia) y se deja constancia
+        eligible = stats[in_series]
+    best = eligible.sort_values(["wape_total", "wape", "family"]).iloc[0]
+    best_stat, best_total = str(best["family"]), float(best["wape_total"])
+    winner = best_stat
+    reason = (f"{FAMILIES[best_stat].label}: menor WAPE del total diario entre los estadísticos ({best_total:.3f}; "
+              f"serie-día {float(best['wape']):.3f}, sesgo {float(best['bias']):+.1%}).")
+    if relaxed:
+        reason += f" Ningún estadístico cumple el sesgo máximo de {policy.bias_tolerance:.0%}: se eligió sin esa salvaguarda."
+    excluded = sorted(set(stats["family"]) - set(stats.loc[in_series & in_bias, "family"]))
+    evidence.update({"best_statistical": best_stat, "best_statistical_wape": best_total,
+                     "best_statistical_series_wape": float(best["wape"]), "best_statistical_bias": float(best["bias"]),
+                     "series_wape_limit": series_limit, "bias_guard_relaxed": bool(relaxed), "statistical_outside_guards": excluded,
+                     "lightgbm_wape": None, "windows_total": 0, "windows_better": 0, "windows_needed": None,
+                     "relative_improvement": None, "passes_improvement": None, "passes_windows": None, "passes_guards": None,
+                     "outcome": "best_statistical"})
+    lg = table[table["family"] == "lightgbm_global"]
+    if not lg.empty and pd.notna(lg.iloc[0]["wape_total"]) and pd.notna(lg.iloc[0]["wape"]):
+        lg_total = float(lg.iloc[0]["wape_total"])
+        pw = total_day_wape(sub, ["family", "window"]).pivot(index="window", columns="family", values="wape_total")
+        n_windows = len(pw)
+        better = int((pw["lightgbm_global"] < pw[best_stat]).sum()) if "lightgbm_global" in pw else 0
+        table.loc[table["family"] == "lightgbm_global", "windows_better"] = better
+        needed = policy.needed_windows(n_windows)
+        passes_improvement = lg_total <= best_total * (1 - min_improvement)
+        passes_windows = better >= needed
+        ok_series, ok_bias = guards(lg.iloc[0])
+        evidence.update({"lightgbm_wape": lg_total, "lightgbm_series_wape": float(lg.iloc[0]["wape"]),
+                         "lightgbm_bias": float(lg.iloc[0]["bias"]), "windows_total": n_windows, "windows_better": better,
+                         "windows_needed": needed,
+                         "relative_improvement": (best_total - lg_total) / best_total if best_total > 0 else None,
+                         "passes_improvement": bool(passes_improvement), "passes_windows": bool(passes_windows),
+                         "passes_guards": bool(ok_series and ok_bias), "passes_series_guard": ok_series, "passes_bias_guard": ok_bias})
+        if passes_improvement and passes_windows and ok_series and ok_bias:
+            winner = "lightgbm_global"
+            evidence["outcome"] = "lightgbm_global"
+            reason = (f"LightGBM global mejora el WAPE del total diario de {best_total:.3f} ({FAMILIES[best_stat].label}) a "
+                      f"{lg_total:.3f} y gana en {better}/{n_windows} ventanas.")
+        elif passes_improvement and passes_windows:
+            failed = " y ".join(n for n, ok in (("el error por serie", ok_series), ("el sesgo", ok_bias)) if not ok)
+            reason += (f" LightGBM ({lg_total:.3f}) mejora el total, pero no cumple la salvaguarda de {failed} "
+                       f"(serie-día {float(lg.iloc[0]['wape']):.3f}, sesgo {float(lg.iloc[0]['bias']):+.1%}).")
+        else:
+            reason += (f" LightGBM ({lg_total:.3f}) no superó el margen mínimo de {min_improvement:.0%} "
+                       f"de forma estable ({better}/{n_windows} ventanas).")
+    if (table["family"] == ENSEMBLE_FAMILY).any():
+        pw = total_day_wape(sub, ["family", "window"]).pivot(index="window", columns="family", values="wape_total")
+        winner, reason = _challenge_with_ensemble(table, pw, "wape_total", best_stat, best_total, policy, winner, reason, evidence,
+                                                  "WAPE del total diario", guards)
     return winner, reason, table, evidence
 
 
@@ -238,7 +421,9 @@ def select_models(backtest: pd.DataFrame, profile: pd.DataFrame, min_improvement
         evidence[cls] = class_evidence
         tables.append(table.assign(demand_class=cls))
 
-    fb = pooled_table[pooled_table["family"].isin(SIMPLE_FALLBACKS)].sort_values("wape")
+    # El respaldo simple se ordena con la métrica de la política (v2: total diario; un promedio plano reparte mal la semana).
+    fb_metric = "wape_total" if policy.by_total and "wape_total" in pooled_table else "wape"
+    fb = pooled_table[pooled_table["family"].isin(SIMPLE_FALLBACKS)].sort_values(fb_metric)
     fallback = str(fb.iloc[0]["family"]) if not fb.empty else BASELINE_FAMILY
     class_table = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
     return Selection(winners, fallback, reasons, class_table, pooled_table, used_pooled, evidence, policy.version)

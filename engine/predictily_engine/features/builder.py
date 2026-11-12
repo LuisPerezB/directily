@@ -37,7 +37,7 @@ from predictily_engine.availability.contracts import (  # noqa: F401  (PRICE_ASS
 )
 from predictily_engine.availability.pipeline import FactorResolution
 from predictily_engine.availability.visibility import resolve_timezone, to_utc_naive, visible_mask
-from predictily_engine.calendar.ecuador import EcuadorCalendar
+from predictily_engine.calendar.ecuador import EcuadorCalendar, rest_days
 from predictily_engine.config import FEATURE_SET_VERSION
 from predictily_engine.profiling.days import censored_days
 
@@ -73,6 +73,25 @@ def calendar_by_branch(branches: pd.DataFrame, start: date, end: date) -> pd.Dat
     if not frames:
         return pd.DataFrame(columns=["ds", "branch_id", *CALENDAR_FEATURES])
     return pd.concat(frames, ignore_index=True)
+
+
+def holidays_by_branch(branches: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    """Días de descanso obligatorio de cada sucursal entre `start` y `end`, con su nombre: branch_id, ds, holiday.
+
+    Es el mismo calendario que marca `is_holiday` (nacionales trasladados + locales del cantón), conocido de antemano."""
+    frames = []
+    cache: dict[str | None, pd.DataFrame] = {}
+    for row in branches.itertuples(index=False):
+        canton = (row.canton or "").lower() if isinstance(getattr(row, "canton", None), str) else None
+        if canton not in cache:
+            days: dict[date, str] = {}
+            for year in range(start.year, end.year + 1):
+                days.update({d: n for d, n in rest_days(year, canton).items() if start <= d <= end})
+            cache[canton] = pd.DataFrame({"ds": pd.to_datetime(list(days.keys())), "holiday": list(days.values())})
+        frames.append(cache[canton].assign(branch_id=int(row.branch_id)))
+    if not frames:
+        return pd.DataFrame(columns=["branch_id", "ds", "holiday"])
+    return pd.concat(frames, ignore_index=True)[["branch_id", "ds", "holiday"]]
 
 
 PROMO_COLUMNS = ["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id"]
@@ -216,6 +235,8 @@ class FeatureBuilder:
         self.data_end = panel_df["ds"].max()
         self.series = panel_df.drop_duplicates("unique_id")[["unique_id", "branch_id", "product_id", "category_id"]]
         self.calendar = calendar_by_branch(branches, start, horizon_end)
+        self._branches, self._start = branches, start
+        self._holidays: pd.DataFrame | None = None      # feriados con nombre por sucursal (perezoso: solo con `holiday_adjustment_models`)
         self.promotions = promotions if promotions is not None else pd.DataFrame(columns=PROMO_COLUMNS)
         self.promotion_revisions = promotion_revisions if promotion_revisions is not None else pd.DataFrame()
         self.promotions_known_on = pd.Timestamp(promotions_known_on) if promotions_known_on is not None else None
@@ -224,6 +245,26 @@ class FeatureBuilder:
         self._future_promos: dict[tuple[pd.Timestamp, pd.Timestamp], pd.DataFrame] = {}
         regions = branches.set_index("branch_id")["region"].map({"costa": 1, "sierra": 2}).fillna(0)
         self.region_map = regions.to_dict()
+
+    def holiday_days(self, cutoff: pd.Timestamp, ids: list[str] | None = None) -> pd.DataFrame:
+        """Feriados por serie para el ajuste de los modelos estadísticos (`models/holidays.py`): unique_id, ds, holiday.
+
+        Incluye los feriados del calendario de la sucursal de cada serie, pasados y del horizonte (el calendario se conoce de antemano).
+        De los PASADOS (ds ≤ `cutoff`) se quitan los días que el panel excluye (quiebre, fuente ausente o cierre): su venta está imputada
+        con un día normal y no informa del efecto del feriado. El estado de los días posteriores al corte no se consulta."""
+        if self._holidays is None:
+            self._holidays = holidays_by_branch(self._branches, self._start, self.horizon_end)
+        series = self.series if ids is None else self.series[self.series["unique_id"].isin(ids)]
+        out = series[["unique_id", "branch_id"]].merge(self._holidays, on="branch_id", how="inner")[["unique_id", "ds", "holiday"]]
+        if out.empty:
+            return out
+        cutoff = pd.Timestamp(cutoff)
+        past = self.panel_df[self.panel_df["ds"] <= cutoff]
+        excluded = past.loc[censored_days(past).to_numpy(), ["unique_id", "ds"]]
+        if not excluded.empty:
+            drop = pd.MultiIndex.from_frame(excluded)
+            out = out[~pd.MultiIndex.from_frame(out[["unique_id", "ds"]]).isin(drop)]
+        return out.reset_index(drop=True)
 
     def knowledge_date(self, cutoff: pd.Timestamp) -> pd.Timestamp:
         """Día hasta el que se conocen las promociones al pronosticar desde `cutoff`."""

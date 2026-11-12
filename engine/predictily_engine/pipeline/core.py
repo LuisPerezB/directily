@@ -59,12 +59,15 @@ from predictily_engine.inventory.recommendations import (
     required_coverage_days,
 )
 from predictily_engine.models.ml import LightGBMGlobal
+from predictily_engine.models.ensemble import FORECAST_KEYS, ensemble_rows
 from predictily_engine.models.registry import (
+    ENSEMBLE_FAMILY,
+    ENSEMBLE_MEMBERS,
     BASELINE_FAMILY,
     FAMILIES,
     STATISTICAL,
     WEEKDAY_BASES,
-    WEEKDAY_FAMILIES,
+    WEEKDAY_SWITCH_FAMILIES,
     WEEKDAY_PROFILE_DAYS,
 )
 from predictily_engine.models.statistical import common_weekday_profile, forecast_statistical
@@ -280,9 +283,11 @@ def run_pipeline(
     if not core_config.get("weekday_profile_models", False):
         # Variantes con perfil semanal: se activan por empresa (`weekday_profile_models`). Cambian qué modelo gana (en los datos
         # sintéticos dejan sin clase a LightGBM), así que entran por decisión expresa en el piloto, no para todas las empresas.
-        families = [f for f in families if f not in WEEKDAY_FAMILIES]
+        families = [f for f in families if f not in WEEKDAY_SWITCH_FAMILIES]
     if force_families:
         families = [f for f in families if f in force_families] or families
+    # Ajuste de feriados de los modelos estadísticos (`models/holidays.py`): por empresa, apagado por defecto (cambia qué modelo gana).
+    holiday_adjustment = bool(core_config.get("holiday_adjustment_models", False))
 
     # ── Backtesting rolling-origin: ventanas de selección + período final reservado (holdout) ──
     # Cada ventana se perfila con datos ≤ su corte (elegibilidad y clase sin fuga, F4).
@@ -290,7 +295,8 @@ def run_pipeline(
     if plan is not None:
         progress("backtesting", 20)
         bt = run_backtest(panel, features, plan, families, seed, n_jobs, use_lgbm,
-                          progress=lambda frac: progress("backtesting", 20 + int(35 * frac)), windows=windows)
+                          progress=lambda frac: progress("backtesting", 20 + int(35 * frac)), windows=windows,
+                          holiday_adjustment=holiday_adjustment)
     else:
         bt = pd.DataFrame()
         warnings.append("Historia insuficiente para backtesting (< 70 días): se usa el promedio de la historia "
@@ -326,7 +332,8 @@ def run_pipeline(
         promotion = run_selection_stage(panel=panel, features=features, plan=plan, windows=windows, bt=bt, profile=prof, cfg=promo_cfg,
                                         seed=seed, n_jobs=n_jobs, use_lgbm=use_lgbm, champions=champions, quality=dq,
                                         cutoff=cutoff.date(), data_from=panel.df["ds"].min().date(), segment_provider=segment_provider,
-                                        segment_source=segment_source, champions_source=champions_source)
+                                        segment_source=segment_source, champions_source=champions_source,
+                                        ensemble=bool(core_config.get("ensemble_models", False)))
         bt, selection, eval_selection = promotion.backtest, promotion.selection, promotion.eval_selection
         limitations.extend(promotion.limitations)
         if factor_outcome is not None:     # W6-E: ¿la política que gobierna la selección posterior usa el período final? (la heredada sí; la V2.5 no)
@@ -343,9 +350,16 @@ def run_pipeline(
     needed = {selection.family_for(c) for c in active["demand_class"].unique()} | {selection.fallback, BASELINE_FAMILY}
     train = panel.df[(panel.df["ds"] <= cutoff) & panel.df["unique_id"].isin(full_ids)]
     preds = []
+    # La combinación (`ets_lightgbm_mean`) no se entrena: necesita a sus dos miembros (AutoETS y LightGBM) y se promedia después.
+    ensemble_needed = ENSEMBLE_FAMILY in needed
+    if ensemble_needed:
+        needed = needed | set(ENSEMBLE_MEMBERS)
     stat_needed = [f for f in needed if f in STATISTICAL]
+    final_holidays = features.holiday_days(cutoff, full_ids) if holiday_adjustment and full_ids else None
+    holiday_info: dict[str, Any] = {}
     if full_ids:
-        preds.append(forecast_statistical(train[["unique_id", "ds", "y"]], fc_horizon, stat_needed))
+        preds.append(forecast_statistical(train[["unique_id", "ds", "y"]], fc_horizon, stat_needed, holidays=final_holidays,
+                                          info=holiday_info))
     lgbm: LightGBMGlobal | None = None
     failed: dict[str, str] = {}
     if "lightgbm_global" in needed and full_ids:
@@ -361,6 +375,8 @@ def run_pipeline(
         except Exception as exc:  # respaldo: el pipeline sigue con el modelo de respaldo
             log.exception("LightGBM final falló")
             failed["lightgbm_global"] = f"{type(exc).__name__}: {exc}"[:300]
+            if ensemble_needed:      # sin LightGBM no hay combinación: sus clases pasan al respaldo, igual que las de LightGBM
+                failed[ENSEMBLE_FAMILY] = "Falló el entrenamiento final de su miembro LightGBM global: " + failed["lightgbm_global"]
             warnings.append(f"LightGBM falló en el entrenamiento final ({type(exc).__name__}); "
                             f"se usó el modelo de respaldo ({selection.fallback}).")
             lgbm = None
@@ -368,7 +384,10 @@ def run_pipeline(
     # en lugar de cualquier familia que falló; el ganador del backtest queda como `planned`.
     served = selection.served(set(failed))
     if factor_outcome is not None:     # W6-E: ¿el modelo con factores es realmente el que se sirve?
-        factor_outcome.finalize(set(served.winners.values()) | {served.fallback}, set(failed))
+        served_families = set(served.winners.values()) | {served.fallback}
+        if ENSEMBLE_FAMILY in served_families:      # servir la combinación ES servir su miembro LightGBM (con o sin factores)
+            served_families.add("lightgbm_global")
+        factor_outcome.finalize(served_families, set(failed))
     if promotion is not None and failed:    # W3-B: las filas efectivas del registro de decisiones dicen lo REALMENTE servido, no la familia planeada
         promotion.reconcile_served(failed, selection.fallback)
     eval_served = eval_selection.served(set(failed)) if eval_selection is not None else None
@@ -395,6 +414,8 @@ def run_pipeline(
         warnings.append(f"{len(short_ids)} series con historia escasa o menos de 28 días usan respaldo etiquetado "
                         f"({n_cat} con la mediana de su categoría, el resto con el promedio de su historia).")
     allp = pd.concat(preds, ignore_index=True) if preds else pd.DataFrame(columns=["unique_id", "ds", "family", "yhat"])
+    if ensemble_needed and ENSEMBLE_FAMILY not in failed:
+        allp = pd.concat([allp, ensemble_rows(allp, FORECAST_KEYS)], ignore_index=True)
     timings["training"] = time.perf_counter() - t2
 
     progress("predicting", 76)
@@ -664,6 +685,15 @@ def run_pipeline(
             f"({weekday_applied['fallback_series']}) reparten su nivel diario con el ritmo semanal del negocio (unidades por día de "
             f"la semana de las series activas en los últimos {WEEKDAY_PROFILE_DAYS} días): el total de una semana completa no "
             "cambia, solo su reparto entre días. No tienen perfil propio ni por sucursal.")
+    if holiday_adjustment:
+        hf = holiday_info.get("holiday_factors") or {}
+        in_horizon_days = 0 if final_holidays is None or final_holidays.empty else int(final_holidays.loc[
+            (final_holidays["ds"] > cutoff) & (final_holidays["ds"] <= cutoff + pd.Timedelta(days=horizon)), "ds"].nunique())
+        assumptions.append(
+            f"Los modelos estadísticos (salvo las referencias naive) se ajustan por feriados: su entrenamiento se limpia de los feriados "
+            f"pasados y los {in_horizon_days} feriados del horizonte se multiplican por un factor por feriado estimado con la venta real "
+            f"frente a la esperable del negocio (factor común {float(hf.get('common', 1.0)):.2f}; {len(hf.get('by_name', {}))} feriados con "
+            "factor propio). Un solo factor por feriado para todo el negocio; no ajusta la víspera ni el día siguiente.")
     snapshot = build_snapshot(data, panel, effective_config, features.knowledge_date(cutoff), ex_events, data.coverage,
                               factors=factor_outcome.snapshot_block() if factor_outcome is not None else None)
     families_info = _families_info(served, selection, series_fc, bt, active, failed)
@@ -722,7 +752,7 @@ def run_pipeline(
             shadow_df, shadow_notes = shadow_stage.forecast_challengers(
                 challengers, bt=bt, profile=prof, train=train, features=features, lgbm=lgbm, lgbm_ref=ref if lgbm is not None else None,
                 full_ids=full_ids, cutoff=cutoff, fc_horizon=fc_horizon, horizon=horizon, scales=scales, seed=seed, n_jobs=n_jobs,
-                train_ml=promo_cfg.shadow.train_ml_challenger, lgbm_params=promotion.lgbm_params)
+                train_ml=promo_cfg.shadow.train_ml_challenger, lgbm_params=promotion.lgbm_params, holidays=final_holidays)
             limitations.extend(n for n in shadow_notes if n not in limitations)
         promotion.shadow = shadow_stage.shadow_summary(challengers, shadow_df, shadow_notes, promo_cfg.shadow.enabled, promo_cfg.shadow.max_series)
         promotion.shadow_elapsed_seconds = round(time.perf_counter() - t_shadow, 2)      # costo del shadow de esta ejecución (V25-SEL-045; solo en el resumen)

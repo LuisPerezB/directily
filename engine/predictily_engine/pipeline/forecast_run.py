@@ -36,7 +36,7 @@ from predictily_engine.db.writer import (
     upsert_series_profile,
 )
 from predictily_engine.features.builder import feature_registry
-from predictily_engine.models.registry import FAMILIES
+from predictily_engine.models.registry import ENSEMBLE_FAMILY, FAMILIES
 from predictily_engine.pipeline.core import InsufficientDataError, PipelineResult, run_pipeline
 from predictily_engine.pipeline.data import load_tenant_data
 from predictily_engine.pipeline.errors import ConflictError, InvalidConfigurationError, NotFoundError
@@ -338,12 +338,16 @@ def persist_results(conn: Connection, tenant_id: int, run_id: int, job_id: int |
             artifact_path, artifact_sha, artifact_signature = saved.stored_path, saved.sha256, saved.signature.as_compat()
         elif FAMILIES[fam].kind == "statistical":
             notes = (notes + " " if notes else "") + "Modelo estadístico determinista: se reentrena con la configuración registrada."
+        elif fam == ENSEMBLE_FAMILY:
+            notes = (notes + " " if notes else "") + ("Combinación sin artefacto propio: promedio de AutoETS (reajuste determinista) y del "
+                                                      "LightGBM global de esta ejecución (su artefacto firmado está en su propia fila).")
         hp = dict(info["hyperparameters"])
         if fam == "lightgbm_global" and result.lgbm is not None:
             hp = {k: v for k, v in result.lgbm.params.items()}
         classes = info.get("demand_classes") or []
         compat = {"input_schema": "demand-panel-v1", "feature_set_version": FEATURE_SET_VERSION, "libraries": versions,
-                  "artifact_kind": "mlforecast_joblib" if artifact_path else "statistical_refit",
+                  "artifact_kind": ("mlforecast_joblib" if artifact_path else
+                                    "ensemble_of_members" if fam == ENSEMBLE_FAMILY else "statistical_refit"),
                   "frequency": "D", "season_length": 7}
         row_fsv, factor_compat = factor_registry_fields(result, fam)
         if factor_compat is not None:      # W6-E (H2): el modelo SERVIDO usa factores externos: su linaje (claves, versiones de definición, huella) viaja con el registro

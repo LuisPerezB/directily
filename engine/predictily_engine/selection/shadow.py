@@ -28,7 +28,8 @@ from predictily_engine.availability.contracts import FeatureContractError
 from predictily_engine.backtest.metrics import summarize
 from predictily_engine.intervals.conformal import ConformalCalibrator, day_bucket
 from predictily_engine.models.ml import LightGBMGlobal
-from predictily_engine.models.registry import CANDIDATES_BY_CLASS, FAMILIES, STATISTICAL
+from predictily_engine.models.ensemble import FORECAST_KEYS, ensemble_rows
+from predictily_engine.models.registry import CANDIDATES_BY_CLASS, ENSEMBLE_FAMILY, ENSEMBLE_MEMBERS, FAMILIES, STATISTICAL
 from predictily_engine.models.statistical import forecast_statistical
 from predictily_engine.selection.selector import Selection, row_classes
 
@@ -104,7 +105,8 @@ def _calibrate(bt: pd.DataFrame, profile: pd.DataFrame, family: str, cls: str) -
 def forecast_challengers(challengers: list[Challenger], *, bt: pd.DataFrame, profile: pd.DataFrame, train: pd.DataFrame,
                          features: Any, lgbm: LightGBMGlobal | None, lgbm_ref: pd.Series | None, full_ids: list[str],
                          cutoff: pd.Timestamp, fc_horizon: int, horizon: int, scales: pd.Series, seed: int, n_jobs: int,
-                         train_ml: bool = True, lgbm_params: dict[str, Any] | None = None) -> tuple[pd.DataFrame, list[dict[str, str]]]:
+                         train_ml: bool = True, lgbm_params: dict[str, Any] | None = None,
+                         holidays: pd.DataFrame | None = None) -> tuple[pd.DataFrame, list[dict[str, str]]]:
     """Predicciones de los challengers para los pasos 1..`horizon` y sus intervalos 80 %. Devuelve (filas, notas): una nota por challenger
     que no se pudo producir (modelo no entrenable, etc.); nunca se rellena un pronóstico."""
     frames: list[pd.DataFrame] = []
@@ -118,12 +120,19 @@ def forecast_challengers(challengers: list[Challenger], *, bt: pd.DataFrame, pro
         ids = sorted({u for ch in chs for u in ch.series})
         if family in STATISTICAL:
             sub = train[train["unique_id"].isin(ids)][["unique_id", "ds", "y"]]
-            pred = forecast_statistical(sub, fc_horizon, [family])
+            pred = forecast_statistical(sub, fc_horizon, [family], holidays=holidays)   # mismo ajuste de feriados que lo servido
         elif family == "lightgbm_global":
             pred = _predict_lgbm(lgbm, lgbm_ref, features, full_ids, ids, cutoff, fc_horizon, seed, n_jobs, train_ml, lgbm_params, notes)
             if pred is None:
                 continue
             pred = pred[pred["unique_id"].isin(ids)]
+        elif family == ENSEMBLE_FAMILY:      # combinación: promedio de sus miembros (el estadístico reajustado y el LightGBM del shadow)
+            ml = _predict_lgbm(lgbm, lgbm_ref, features, full_ids, ids, cutoff, fc_horizon, seed, n_jobs, train_ml, lgbm_params, notes)
+            if ml is None:
+                continue
+            sub = train[train["unique_id"].isin(ids)][["unique_id", "ds", "y"]]
+            stat = forecast_statistical(sub, fc_horizon, [m for m in ENSEMBLE_MEMBERS if m in STATISTICAL], holidays=holidays)
+            pred = ensemble_rows(pd.concat([stat, ml[ml["unique_id"].isin(ids)]], ignore_index=True), FORECAST_KEYS)
         else:
             notes.append({"code": "shadow_family_unsupported", "message": f"La familia {family} no se puede producir en shadow."})
             continue

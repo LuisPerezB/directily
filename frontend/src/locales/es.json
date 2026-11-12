@@ -228,7 +228,9 @@
     "croston_sba_dow": "Croston SBA con perfil semanal",
     "adida_dow": "ADIDA con perfil semanal",
     "tsb_dow": "TSB con perfil semanal",
+    "weekday_average": "Promedio de los últimos mismos días de la semana",
     "lightgbm_global": "Machine learning global (LightGBM)",
+    "ets_lightgbm_mean": "Combinación ETS + machine learning (promedio)",
     "selection": "Selección por patrón de demanda",
     "timesfm": "Modelo fundacional (experimental)"
   },

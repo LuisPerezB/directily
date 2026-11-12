@@ -53,10 +53,14 @@ import pandas as pd
 from predictily_engine.backtest.metrics import summarize
 from predictily_engine.demand.manifest import build_manifest, verify
 from predictily_engine.intervals.conformal import day_bucket, loo_coverage
+from predictily_engine.models.ensemble import with_ensemble_rows
 from predictily_engine.models.registry import BASELINE_FAMILY, CANDIDATES_BY_CLASS, FAMILIES
 from predictily_engine.platform.config import HORIZONS
 from predictily_engine.selection.selector import (
     LEGACY_RULE_VERSION,
+    DEFAULT_BIAS_TOLERANCE,
+    DEFAULT_SERIES_TOLERANCE,
+    METRIC_SERIES_DAY,
     MIN_CLASS_ACTUAL,
     MIN_CLASS_SERIES,
     POOLED,
@@ -153,7 +157,10 @@ class PromotionConfig:
         return cls(
             governing_policy=str(cfg.get("governing_policy", POLICY_LEGACY)),
             legacy=LegacyPolicy(min_improvement=float(min_improvement),
-                                windows_won_fraction=float(cfg.get("legacy_windows_won_fraction", 2 / 3))),
+                                windows_won_fraction=float(cfg.get("legacy_windows_won_fraction", 2 / 3)),
+                                selection_metric=str(cfg.get("legacy_selection_metric", METRIC_SERIES_DAY)),
+                                bias_tolerance=float(cfg.get("legacy_bias_tolerance", DEFAULT_BIAS_TOLERANCE)),
+                                series_tolerance=float(cfg.get("legacy_series_tolerance", DEFAULT_SERIES_TOLERANCE))),
             v25=V25Policy(
                 min_selection_windows=int(cfg.get("v25_min_selection_windows", 2)),
                 max_consecutive_losing_windows=int(cfg.get("v25_max_consecutive_losing_windows", 1)),
@@ -253,7 +260,9 @@ class PromotionOutcome:
         """Texto del criterio de selección de la ejecución, generado de la política que gobernó (con la regla exacta de ventanas)."""
         leg = self.config.legacy
         total = (self.legacy.evidence.get(POOLED) or {}).get("windows_total") or 0
-        rule = (f"menor WAPE por clase de demanda; LightGBM solo si mejora ≥ {leg.min_improvement:.0%} y gana en al menos ⌈n × {leg.windows_won_fraction:.4g}⌉ "
+        metric = (f"menor WAPE del total diario por clase de demanda (sesgo máximo ±{leg.bias_tolerance:.0%}; error serie-día a lo sumo "
+                  f"{leg.series_tolerance:.0%} peor que el mejor)" if leg.by_total else "menor WAPE por clase de demanda")
+        rule = (f"{metric}; LightGBM solo si mejora ≥ {leg.min_improvement:.0%} y gana en al menos ⌈n × {leg.windows_won_fraction:.4g}⌉ "
                 "ventanas" + (f" (con {total} ventanas: {leg.needed_windows(total)})" if total else ""))
         if self.governing == POLICY_V25:
             return ("política de promoción V2.5 (gates calculados con las ventanas de selección; el período final no decide); la regla heredada se "
@@ -776,9 +785,11 @@ def decide_v25_scope(scope_key: str, rows: pd.DataFrame, candidates: list[str], 
 def _legacy_gates(evidence: dict[str, Any]) -> dict[str, Any]:
     lg = evidence.get("lightgbm_wape")
     if lg is None:
-        return {"legacy_rule": _gate(NOT_APPLICABLE, "LightGBM no se evaluó en el alcance: gana el mejor estadístico (menor WAPE).",
-                                     blocking=False, **{k: v for k, v in evidence.items() if k != "scope"})}
-    return {
+        return _with_ensemble_gate(
+            {"legacy_rule": _gate(NOT_APPLICABLE, "LightGBM no se evaluó en el alcance: gana el mejor estadístico (menor WAPE).",
+                                  blocking=False, **{k: v for k, v in evidence.items() if k not in ("scope", "ensemble")})}, evidence)
+    metric = "WAPE del total diario" if evidence.get("metric") == "total_day" else "WAPE"
+    gates = {
         "min_improvement": _gate(PASS if evidence.get("passes_improvement") else FAIL,
                                  f"Mejora relativa de LightGBM frente al mejor estadístico: {evidence.get('relative_improvement') or 0:.1%} "
                                  f"(mínimo {evidence['required_relative_improvement']:.0%}).", blocking=False,
@@ -791,6 +802,27 @@ def _legacy_gates(evidence: dict[str, Any]) -> dict[str, Any]:
                              windows_better=evidence["windows_better"], windows_total=evidence["windows_total"],
                              windows_needed=evidence["windows_needed"], fraction=evidence["windows_won_fraction"]),
     }
+    if evidence.get("passes_guards") is not None:      # regla v2 (total diario): salvaguardas de sesgo y de error por serie
+        gates["guards"] = _gate(PASS if evidence["passes_guards"] else FAIL,
+                                f"Salvaguardas de LightGBM con la métrica {metric}: error serie-día {evidence.get('lightgbm_series_wape'):.3f} "
+                                f"(límite {evidence.get('series_wape_limit'):.3f}) y sesgo {evidence.get('lightgbm_bias'):+.1%} "
+                                f"(máximo ±{evidence.get('bias_tolerance'):.0%}).", blocking=False,
+                                passes_series_guard=evidence.get("passes_series_guard"), passes_bias_guard=evidence.get("passes_bias_guard"),
+                                series_wape=evidence.get("lightgbm_series_wape"), series_wape_limit=evidence.get("series_wape_limit"),
+                                bias=evidence.get("lightgbm_bias"), bias_tolerance=evidence.get("bias_tolerance"))
+    return _with_ensemble_gate(gates, evidence)
+
+
+def _with_ensemble_gate(gates: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    """Compuerta de la combinación (`ets_lightgbm_mean`): solo existe cuando compitió en el alcance (`ensemble_models`)."""
+    ens = evidence.get("ensemble")
+    if ens:
+        won = evidence.get("outcome") == ens["family"]
+        gates["ensemble"] = _gate(PASS if won else FAIL,
+                                  f"Combinación AutoETS + LightGBM: {ens['wape']:.3f} frente a {evidence.get('best_statistical_wape'):.3f} del mejor "
+                                  f"estadístico; gana en {ens['windows_better']}/{ens['windows_total']} ventanas (necesita {ens['windows_needed']}).",
+                                  blocking=False, **{k: v for k, v in ens.items() if k != "family"})
+    return gates
 
 
 def _legacy_decision(scope_key: str, winner: str, reason: str, evidence: dict[str, Any], table: pd.DataFrame | None,
@@ -1023,8 +1055,11 @@ def run_selection_stage(*, panel: Any, features: Any, plan: Any, windows: Any, b
                         seed: int, n_jobs: int, use_lgbm: bool, champions: dict[str, str] | None = None, quality: Any = None,
                         cutoff: date | None = None, data_from: date | None = None,
                         segment_provider: SegmentProvider | None = None, segment_source: str | None = None,
-                        champions_source: str | None = None) -> PromotionOutcome:
+                        champions_source: str | None = None, ensemble: bool = False) -> PromotionOutcome:
     """Etapa de selección de la ejecución: ajuste opcional de LightGBM con Optuna (solo ventanas de selección) y selección con ambas políticas.
+
+    `ensemble` (interruptor `demand.ensemble_models`): agrega al backtest las filas de la combinación AutoETS + LightGBM, calculadas con las
+    filas vigentes de sus miembros (después del ajuste de hiperparámetros), para que compita como una familia más.
 
     Es el único punto que `pipeline/core.py` llama. `outcome.backtest` es el backtest a usar en adelante (con las filas de LightGBM rehechas si el
     ajuste mejoró) y `outcome.lgbm_params` los hiperparámetros del entrenamiento final."""
@@ -1043,6 +1078,8 @@ def run_selection_stage(*, panel: Any, features: Any, plan: Any, windows: Any, b
             if result.params and result.backtest_rows is not None and not result.backtest_rows.empty:
                 bt = pd.concat([bt[bt["family"] != "lightgbm_global"], result.backtest_rows], ignore_index=True)
                 params = dict(result.params)
+    if ensemble and use_lgbm and not bt.empty:
+        bt = with_ensemble_rows(bt)
     return select_with_policies(bt, profile, cfg, champions=champions, quality=quality, plan=plan, cutoff=cutoff, data_from=data_from,
                                 seed=seed, segment_provider=segment_provider, segment_source=segment_source, tuning_experiment=experiment,
                                 lgbm_params=params, champions_source=champions_source,

@@ -20,7 +20,9 @@ aceptación → riesgos → esfuerzo. Las rutas y líneas se verificaron el 10/1
 | [03](03-motor-intervalos-nodos-agregados.md) | Intervalos de los nodos agregados con pocas ventanas | motor | media | medio | — |
 | [02](02-motor-perfil-semanal-dias-limpios.md) | Perfil semanal estimado solo con días limpios | motor | media | medio | 04 |
 | [05](05-motor-plan-de-ventanas-y-horizonte.md) | Plan de ventanas: tope de 3, periodo final «ligero», presentación de horizontes no sostenidos, readiness sin sábados | motor + SPA | media | medio | — |
-| [06](06-motor-seleccion-con-margen-y-weekday-average.md) | Selección entre estadísticos con margen y sesgo; familia «mismo día de la semana» como candidata | motor | media | medio | 05 |
+| [06](06-motor-seleccion-con-margen-y-weekday-average.md) ✅ implementado en parte | Selección por el total diario con salvaguardas de sesgo y de error por serie (regla v2); familia «mismo día de la semana» como candidata | motor | media | medio | 05 |
+| [09](09-motor-ajuste-de-feriados-estadisticos.md) ✅ implementado | Ajuste de feriados de los modelos estadísticos | motor | alta | medio | — |
+| [10](10-motor-combinacion-ets-lightgbm.md) ✅ implementado | Combinación AutoETS + LightGBM como familia candidata | motor | media | bajo | — |
 
 ## Reglas para quien implemente
 
