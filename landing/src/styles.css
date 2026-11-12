@@ -384,8 +384,8 @@ svg {
 .select,
 .textarea {
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0.6rem 0.85rem;
+  min-height: 3rem;
+  padding: 0.7rem 0.95rem;
   border: 1px solid var(--edge);
   border-radius: 12px;
   background: var(--form);
@@ -395,7 +395,22 @@ svg {
     border-color 0.2s,
     box-shadow 0.2s;
 }
+/* Una línea: misma altura exacta en la caja de texto y en la lista, para que las filas del formulario queden parejas. */
+.input,
+.select {
+  height: 3rem;
+}
+/* La lista se dibuja como las demás cajas (sin el aspecto del sistema) y con su propia flecha. */
+.select {
+  appearance: none;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237f8ca3' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  text-overflow: ellipsis;
+}
 .textarea {
+  min-height: 7.5rem;
   resize: vertical;
 }
 .input:hover,
@@ -415,8 +430,8 @@ svg {
 }
 .label {
   display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.86rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.88rem;
   font-weight: 600;
 }
 .hint {
@@ -1640,8 +1655,8 @@ svg {
 }
 @media (min-width: 1024px) {
   .lp-talk__panel {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-    gap: clamp(3rem, 6vw, 5rem);
+    grid-template-columns: minmax(0, 0.74fr) minmax(0, 1.26fr);
+    gap: clamp(2.5rem, 5vw, 4rem);
   }
 }
 .lp-talk__glow {
@@ -1715,8 +1730,8 @@ svg {
 }
 .lp-form {
   display: grid;
-  gap: 1.1rem;
-  padding: clamp(1.25rem, 4vw, 2.25rem);
+  gap: 1.35rem;
+  padding: clamp(1.25rem, 4vw, 2.5rem);
   border: 1px solid var(--line-strong);
   border-radius: 20px;
   background: var(--card);
@@ -1728,7 +1743,8 @@ svg {
 }
 .lp-form__row {
   display: grid;
-  gap: 1.1rem;
+  gap: 1.35rem 1.25rem;
+  align-items: start;
 }
 @media (min-width: 560px) {
   .lp-form__row {
