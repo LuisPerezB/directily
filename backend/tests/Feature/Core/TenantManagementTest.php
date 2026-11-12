@@ -40,6 +40,22 @@ final class TenantManagementTest extends TestCase
         $this->assertSame(TenantRole::Owner, $user->roleIn(Tenant::query()->where('uuid', $response->json('data.uuid'))->firstOrFail()));
     }
 
+    public function test_new_tenant_starts_in_automatic_precision_mode_and_existing_ones_are_untouched(): void
+    {
+        [$existing] = $this->createTenantWithUser();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user->refresh());
+
+        $response = $this->postJson('/api/v1/tenants', ['name' => 'Distribuidora Nueva', 'sector' => 'distribuidora', 'tax_id' => '1790012345001']);
+
+        $response->assertCreated();
+        $created = Tenant::query()->where('uuid', $response->json('data.uuid'))->firstOrFail();
+        $this->assertSame('auto', $created->settings['cores']['demand']['precision_mode']);
+        $this->assertSame(0.95, $created->settings['service_level']);
+        $this->assertArrayNotHasKey('cores', (array) $existing->refresh()->settings, 'una empresa existente sigue en el modo manual del motor');
+        $this->assertArrayNotHasKey('cores', Tenant::DEFAULT_SETTINGS);
+    }
+
     public function test_tenant_creation_validates_ruc_and_sector(): void
     {
         Sanctum::actingAs(User::factory()->create()->refresh());

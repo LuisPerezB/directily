@@ -40,6 +40,13 @@ class Tenant extends Model
         'stockout_risk_threshold' => 0.3,
     ];
 
+    /**
+     * Parámetros del motor con que nace una empresa NUEVA (`settings.cores.demand`): modo de precisión automático, el motor ajusta sus
+     * interruptores de precisión con el backtest de la empresa. No forma parte de DEFAULT_SETTINGS a propósito: las empresas existentes
+     * siguen en el modo manual del motor hasta que se decida lo contrario (docs/roadmap/cambios-2026-11/11).
+     */
+    public const NEW_TENANT_DEMAND_CORE = ['precision_mode' => 'auto'];
+
     protected function casts(): array
     {
         return [
