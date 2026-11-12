@@ -40,6 +40,10 @@ ceros observados (no inflan la intermitencia de una serie que vende todos los d�
 horizonte se pronostican en cero (`closed_future_rows`). Salvaguarda: si en los últimos `OPERATING_GUARD_DAYS` días más del
 `OPERATING_GUARD_MAX_SHARE` de las unidades se vendió en días declarados sin operación, la declaración contradice los datos y NO se
 aplica (queda en `summary['notes']['operating_weekdays']` y la ejecución lo informa): se evita pronosticar cero un día que sí vende.
+
+Quiebres inferidos de las ventas (`stockout_inference`, apagado por defecto): sin historia de inventario, una racha de días en cero que
+la demanda habitual del producto no explica se marca `stockout_censored` con base `inferred` (ver `profiling/stockouts.py`). `day_basis`
+queda nulo en los quiebres que vienen del inventario.
 """
 
 from __future__ import annotations
@@ -50,6 +54,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from predictily_engine.profiling.stockouts import StockoutRules
 
 SALE, ZERO_CONFIRMED, MISSING_SOURCE, STOCKOUT_CENSORED, CLOSED = (
     "sale", "zero_confirmed", "missing_source", "stockout_censored", "closed")
@@ -76,6 +82,7 @@ class DayRules:
     infer_lookback_days: int = 28
     infer_same_weekday: bool = True
     operating_weekdays: tuple[int, ...] | None = None   # días de la semana en que se opera (0 = lunes); None = los 7
+    stockouts: StockoutRules | None = None   # quiebres inferidos de las ventas (`stockout_inference`); None = apagado
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any] | None) -> "DayRules":
@@ -84,7 +91,8 @@ class DayRules:
                    infer_min_median_lines=float(cfg.get("day_status_infer_min_median_lines", 5)),
                    infer_lookback_days=int(cfg.get("day_status_infer_lookback_days", 28)),
                    infer_same_weekday=bool(cfg.get("day_status_infer_same_weekday", True)),
-                   operating_weekdays=normalize_weekdays(cfg.get("operating_weekdays")))
+                   operating_weekdays=normalize_weekdays(cfg.get("operating_weekdays")),
+                   stockouts=StockoutRules.from_config(cfg))
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"infer_gaps": self.infer_gaps, "infer_min_median_lines": self.infer_min_median_lines,

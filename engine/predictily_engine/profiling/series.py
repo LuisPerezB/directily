@@ -28,12 +28,15 @@ import pandas as pd
 
 from predictily_engine.pipeline.data import TenantData
 from predictily_engine.profiling.days import (
+    BASIS_INFERRED,
     EXCLUDED_STATUSES,
+    STOCKOUT_CENSORED,
     DayRules,
     censored_days,
     classify_days,
     summarize_days,
 )
+from predictily_engine.profiling.stockouts import infer_stockouts
 
 ADI_THRESHOLD = 1.32
 CV2_THRESHOLD = 0.49
@@ -117,10 +120,14 @@ def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog
         df = df.merge(inv[["branch_id", "product_id", "ds", "oos"]], on=["branch_id", "product_id", "ds"], how="left")
         df = df.merge(nxt, on=["branch_id", "product_id", "ds"], how="left")
         df["stockout"] = df["oos"].eq(True) | df["oos_prev"].eq(True)
+        in_stock = (df["oos"].eq(False) & ~df["oos_prev"].eq(True)).to_numpy()   # existencias confirmadas ese día
         df = df.drop(columns=["oos", "oos_prev"])
     else:
         df["stockout"] = False
+        in_stock = np.zeros(len(df), dtype=bool)
 
+    order = np.lexsort((df["ds"].to_numpy(), df["product_id"].to_numpy(), df["branch_id"].to_numpy()))
+    in_stock = in_stock[order]
     df = df.sort_values(["branch_id", "product_id", "ds"]).reset_index(drop=True)
     df["unique_id"] = "b" + df["branch_id"].astype(str) + "-p" + df["product_id"].astype(str)
     g = df.groupby("unique_id", sort=False)
@@ -129,6 +136,16 @@ def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog
     classification = classify_days(df, data, cutoff, rules)
     df["day_status"], df["day_basis"] = classification.status, classification.basis
     excluded = df["day_status"].isin(EXCLUDED_STATUSES).to_numpy()
+    # Quiebres inferidos de las ventas (interruptor `stockout_inference`): se suman a los del inventario y reciben el mismo trato.
+    inferred_stockout = np.zeros(len(df), dtype=bool)
+    inference = None
+    if rules is not None and rules.stockouts is not None:
+        inference = infer_stockouts(df, excluded, in_stock, rules.stockouts)
+        inferred_stockout = inference.inferred
+        if inferred_stockout.any():
+            df.loc[inferred_stockout, "stockout"] = True
+            df.loc[inferred_stockout, "day_status"] = STOCKOUT_CENSORED
+            df.loc[inferred_stockout, "day_basis"] = BASIS_INFERRED
     censored = df["stockout"].to_numpy(bool) | excluded
 
     # Imputación conservadora de días censurados / excluidos (misma regla para quiebres, fuente ausente y cierres)
@@ -137,9 +154,9 @@ def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog
     # Un hueco de más de 21 días agota la ventana de 28 días (menos de 7 días limpios) y la media móvil queda nula: sin más, el día
     # excluido quedaba con su valor observado (0) y los modelos estadísticos veían ceros. Los días de fuente ausente o cierre propagan
     # el último nivel disponible (ffill dentro de la serie); los quiebres conservan la regla de siempre. Solo queda sin imputar lo que no
-    # tiene ningún nivel previo (el hueco abre la serie).
+    # tiene ningún nivel previo (el hueco abre la serie). Un quiebre inferido puede durar más de 21 días: también propaga su último nivel.
     level = roll.groupby(df["unique_id"], sort=False).ffill()
-    fill = roll.where(~excluded, level)
+    fill = roll.where(~(excluded | inferred_stockout), level)
     df["y"] = np.where(censored, np.maximum(df["units"], fill.fillna(df["units"])), df["units"])
     imputed_excluded = int((excluded & fill.notna().to_numpy()).sum())
     carried_forward = int((excluded & roll.isna().to_numpy() & fill.notna().to_numpy()).sum())
@@ -157,6 +174,8 @@ def build_panel(data: TenantData, rules: DayRules | None = None, current_catalog
         if not data.products.empty else set()
     profile = profile_at(df, cutoff, active_products if current_catalog else None)
     day_summary = summarize_days(df, classification.summary, imputed_excluded, not_imputable, carried_forward)
+    if inference is not None:      # apagado, el resumen queda como siempre
+        day_summary["stockout_inference"] = inference.summary
     return Panel(df.drop(columns=["net_amount"]), profile, cutoff, day_summary)
 
 

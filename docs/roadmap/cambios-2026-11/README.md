@@ -24,6 +24,7 @@ aceptación → riesgos → esfuerzo. Las rutas y líneas se verificaron el 10/1
 | [09](09-motor-ajuste-de-feriados-estadisticos.md) ✅ implementado | Ajuste de feriados de los modelos estadísticos | motor | alta | medio | — |
 | [10](10-motor-combinacion-ets-lightgbm.md) ✅ implementado | Combinación AutoETS + LightGBM como familia candidata | motor | media | bajo | — |
 | [11](11-motor-modo-de-precision-automatico.md) ✅ implementado | Modo de precisión automático: el motor ajusta los interruptores con el backtest de cada empresa | motor | alta | medio | 06, 09, 10 |
+| [12](12-motor-quiebres-inferidos-de-las-ventas.md) ✅ implementado | Quiebres de stock inferidos de las ventas, para empresas sin historia de inventario | motor | alta | medio | — |
 
 ## Reglas para quien implemente
 
