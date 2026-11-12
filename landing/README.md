@@ -111,10 +111,17 @@ La página es estática y no guarda nada: sin cookies, sin analítica y sin recu
 - `src/components/ProductPreview.tsx` — la vista previa interactiva del producto (pronóstico por
   horizonte, inventario y decisiones). Usa **datos ficticios** y lo dice en pantalla: no es una
   captura con datos de un cliente.
+- `src/components/FeatureGraphics.tsx` — las ilustraciones de «La plataforma» (mapeo de columnas, pronóstico con
+  su rango, cola de decisiones) y de «Por qué confiar» (error de cada modelo). Son maquetas en HTML y SVG, no
+  capturas: siguen el tema, pesan casi nada y son decorativas (`aria-hidden`). Usan **datos ficticios** y lo dicen;
+  sus textos están en `platform.graphics` y `trust.models` del copy.
 - `src/components/` — formulario de contacto, «Hablemos» flotante, preguntas frecuentes, iconos.
-- `src/styles.css` — tokens (claro y oscuro), estilos `lp-*` y animaciones. Casi todo es neutro;
-  el color de la marca se reserva para la acción («Hablemos») y para los datos del gráfico. Las
-  animaciones se apagan solas si la persona pidió menos movimiento en su sistema.
+- `src/styles.css` — tokens (claro y oscuro), estilos `lp-*` y animaciones. Criterio visual (rediseño de
+  noviembre de 2026): bandas a todo el ancho que alternan fondo; inicio, franja de fuentes, contacto y pie en azul
+  noche (`.lp-night` redefine los tokens, así que lo que contienen toma solo los colores para fondo oscuro); títulos
+  con una parte en el degradado de marca; y en cada sección el texto a un lado y una ilustración al otro. El
+  contenido ocupa 1.120 px y no se anidan cajas: la banda es el contenedor. Las animaciones se apagan solas si la
+  persona pidió menos movimiento en su sistema.
 
 El idioma inicial sale de `?lang=es|en`, luego de la preferencia guardada y luego del navegador.
 El contenido se pinta en el navegador (no hay HTML prerenderizado).
