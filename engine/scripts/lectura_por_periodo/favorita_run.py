@@ -1,6 +1,12 @@
 """Pasa por el motor de Predictily un subconjunto real de Corporación Favorita (4 tiendas, ~160 productos estratificados por volumen,
-2016-06-01 → 2017-08-15) y guarda el backtest. Sin precios (no los trae la base): precio 1. Sin inventario ni promociones.
-Uso: python fav_run.py <subset.parquet> <dir_datos> <salida.pkl>"""
+2016-06-01 → 2017-08-15) y guarda el backtest. Sin precios (no los trae la base): precio 1. Sin inventario.
+
+Uso: python favorita_run.py <subset.parquet> <dir_datos> <salida.pkl> [variante] [promociones]
+  variante:     todo (los cuatro interruptores de precisión, por defecto) | base (configuración por defecto del motor)
+  promociones:  none (por defecto) | known (el negocio conoce cada promoción con un año de anticipación: techo del beneficio)
+                | <n> (la conoce n días antes de que empiece, p. ej. 14)
+La base solo marca si el producto estuvo en promoción ese día (sin porcentaje): cada racha de días seguidos en promoción de un producto
+en una tienda se entrega como una promoción con descuento nominal de 10 %."""
 
 import sys
 import warnings
@@ -14,10 +20,32 @@ from predictily_engine.pipeline.data import DEFAULT_SETTINGS, TenantData, _norma
 from predictily_engine.selection.selector import selected_rows
 
 sub, src, out = sys.argv[1:4]
-CORES = {
+variant = sys.argv[4] if len(sys.argv) > 4 else "todo"
+promo_mode = sys.argv[5] if len(sys.argv) > 5 else "none"
+TODO = {
     "promotion": {"legacy_selection_metric": "total_day"},
     "demand": {"weekday_profile_models": True, "holiday_adjustment_models": True, "ensemble_models": True},
 }
+CORES = TODO if variant == "todo" else {}
+PROMO_COLUMNS = ["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id", "known_at"]
+
+
+def promotion_runs(flags: pd.DataFrame, mode: str) -> pd.DataFrame:
+    """Rachas de días seguidos en promoción por tienda y producto → filas de promoción con la fecha desde la que se conocen."""
+    if mode == "none" or flags.empty:
+        return pd.DataFrame(columns=PROMO_COLUMNS)
+    f = flags.sort_values(["branch_id", "product_id", "ds"]).copy()
+    gap = f.groupby(["branch_id", "product_id"])["ds"].diff().dt.days.ne(1)
+    f["run"] = gap.cumsum()
+    runs = f.groupby(["branch_id", "product_id", "run"], as_index=False).agg(starts_on=("ds", "min"), ends_on=("ds", "max"))
+    lead = 365 if mode == "known" else int(mode)
+    runs["known_at"] = runs["starts_on"] - pd.Timedelta(days=lead)
+    runs["discount_pct"] = 10.0
+    runs["category_id"] = np.nan
+    runs.insert(0, "promotion_id", np.arange(1, len(runs) + 1))
+    return runs[PROMO_COLUMNS]
+
+
 d = pd.read_parquet(sub)
 d["ds"] = pd.to_datetime(d["date"])
 days = d["ds"].nunique()
@@ -74,6 +102,9 @@ sales["cost_units"] = 0.0
 neg = d[d["unit_sales"] < 0]
 returns = neg.groupby(["branch_id", "product_id", "ds"], as_index=False).agg(units=("unit_sales", lambda s: float(-s.sum())))
 cutoff = d["ds"].max().date()
+promo_flags = d.loc[d["onpromotion"] == "True", ["branch_id", "product_id", "ds"]].drop_duplicates()
+promotions = promotion_runs(promo_flags, promo_mode)
+print("variante", variant, "| promociones", promo_mode, "| rachas", len(promotions), "| días en promoción", len(promo_flags), flush=True)
 data = _normalize(
     TenantData(
         tenant_id=1,
@@ -86,9 +117,7 @@ data = _normalize(
         returns=returns,
         inventory=pd.DataFrame(columns=["branch_id", "product_id", "ds", "on_hand", "reserved", "in_transit", "unit_cost"]),
         latest_inventory=pd.DataFrame(columns=["branch_id", "product_id", "ds", "on_hand", "reserved", "in_transit", "unit_cost"]),
-        promotions=pd.DataFrame(
-            columns=["promotion_id", "discount_pct", "starts_on", "ends_on", "branch_id", "product_id", "category_id", "known_at"]
-        ),
+        promotions=promotions,
         lead_times=pd.DataFrame(columns=["supplier_id", "product_id", "branch_id", "lead_time_days", "lead_time_std_days", "valid_from"]),
         suppliers=pd.DataFrame(columns=["supplier_id", "code", "default_lead_time_days"]),
         open_purchase_orders=pd.DataFrame(columns=["branch_id", "product_id", "supplier_id", "qty_open", "expected_at"]),
